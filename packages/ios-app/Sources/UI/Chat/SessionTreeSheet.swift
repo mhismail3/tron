@@ -465,14 +465,19 @@ struct HistoryEntryDetailsSheet: View {
 
     var body: some View {
         NavigationStack {
-            // The entry's facts and actions stay put; its content is the one scrolling reader below.
-            VStack(alignment: .leading, spacing: 16) {
-                if !readable { TronSettingsNotice(message: "Session changed. Reopen this entry from current history.") }
-                header.fixedSize(horizontal: false, vertical: true)
-                actionGroup.fixedSize(horizontal: false, vertical: true)
-                content.frame(maxHeight: .infinity, alignment: .top)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if !readable { TronSettingsNotice(message: "Session changed. Reopen this entry from current history.") }
+                    header
+                    actionGroup
+                    content
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal, 16).padding(.top, 8)
+            .defaultScrollAnchor(.top)
+            .tronScrollEdgeChrome()
+            .accessibilityIdentifier("history-entry-scroll")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "History Entry", accent: .tronPrimary) }
@@ -572,10 +577,12 @@ struct HistoryEntryDetailsSheet: View {
             }
             .padding(.horizontal, 4)
             if let page = store.page, readable {
-                TronReadOnlyTextView(text: page.text, style: node.role == .user || node.role == .assistant ? .body : .code)
+                ComposerResourceContentBody(preview: .init(text: page.text, isTruncated: false),
+                                            source: node.role == .user || node.role == .assistant ? .skill : .extension)
                     .id(page.offset)
-                    .frame(maxHeight: .infinity)
-                    .tronGlassSurface(accent: .tronPrimary, cornerRadius: TronListMetrics.cornerRadius, tintOpacity: 0.06)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronScrollSurface(accent: .tronPrimary, cornerRadius: 16, tintOpacity: 0.06)
                 // Paging remains available only for bounded multipart entries.
                 if page.previousOffset != nil || page.nextOffset != nil {
                     HStack {

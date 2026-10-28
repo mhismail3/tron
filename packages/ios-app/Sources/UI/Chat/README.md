@@ -168,7 +168,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   multiline check-ins and live-run times. Values wrap without a line cap; titles keep their existing typography.
   Memory summary counts live in their shared tag (“Summary of N messages”, singular for one),
   not a duplicate subtext line; message attribution tags are unchanged. History Entry metadata
-  labels share the title’s leading edge past its icon; values stay trailing-aligned.
+  labels share the title’s leading edge past its icon; values stay trailing-aligned. Its metadata,
+  Actions and Content flow together in one sheet scroll view. Content uses the Skill detail body and
+  natural-height surface, never an independently scrolling reader or a detent-sized frame.
   Memory tool rows use canonical-derived safe labels, not arguments or output. Detail sheets put
   Summary before the message, show tool JSON/output in the shared code block, and expose canonical
   transcript plus shared technical metadata. Captions use `settingsRowSubtext` across surfaces.

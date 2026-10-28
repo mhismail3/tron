@@ -17,6 +17,8 @@ struct SettingsRendererView: View {
     let presentation: SettingsRendererPresentation
     /// Inside a caller's scroll view (a hand-built sheet that shows a section's keys).
     var embedded = false
+    /// A section embedded among other sections keeps its logical heading.
+    var hidesLoneHeading = true
     var detailedKeys = false
     /// Manage's model controls and override inspection reuse this renderer's admission and receipts.
     var modelConfiguration = false
@@ -173,7 +175,7 @@ struct SettingsRendererView: View {
             $0.group == id && selection.includes($0) && !(ownsDefaultTools && $0.key == "tools.codemode.mode")
         })
         let groups = Self.detailGroups(section, keys: keys)
-        if !ownsDefaultTools, groups.count == 1, let only = groups.first, only.manyInstances == nil,
+        if hidesLoneHeading, !ownsDefaultTools, groups.count == 1, let only = groups.first, only.manyInstances == nil,
            Self.rowsNameGroup(only), (only.detail ?? section.note) == nil {
             // The section is one group whose rows already name it: no repeated
             // heading, and no wrapper that would take over a lone row's own
@@ -182,7 +184,7 @@ struct SettingsRendererView: View {
                 VStack(spacing: 0) { rows(only.keys, resolution: resolution, options: options, detailed: true, instanced: only.instanced) }
             }
         } else {
-            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
+            TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: hidesLoneHeading) {
                 if ownsDefaultTools {
                     DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
                 }

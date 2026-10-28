@@ -86,6 +86,7 @@ struct ProjectSettingsSections: View {
     var sessionSettings: AnyView? = nil
     /// More Settings follows Project Trust in the same Session settings card.
     var sessionSettingsAfterTrust: AnyView? = nil
+    var sessionSettingsFooter: String? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var trust: ProjectTrustSummary?
@@ -123,7 +124,7 @@ struct ProjectSettingsSections: View {
             } else {
                 // The rows are fixed once the overrides arrive (the sheet's pulse
                 // hides them until then); trust and Git fill values in place.
-                TronSettingsGroup(sessionSettings == nil ? "Project" : "Settings",
+                TronSettingsGroup(sessionSettings == nil ? "Project" : nil,
                                   detail: sessionSettings == nil ? cwd : nil, accent: .tronPrimary) {
                     if let sessionSettings {
                         sessionSettings
@@ -153,6 +154,9 @@ struct ProjectSettingsSections: View {
                             TronDynamicValue(text: git.map { $0.isRepository ? ($0.branch ?? "Detached HEAD") : "—" } ?? "")
                         }
                     }
+                }
+                if let sessionSettingsFooter {
+                    TronSettingsCaption(sessionSettingsFooter).containerValue(\.tronSettingsSection, false)
                 }
                 if let error {
                     TronSettingsNotice(message: error, retry: { reload &+= 1 })

@@ -82,10 +82,12 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   catalog header/Switch Model, Effort and an explicit model-qualified Context Window for inspection/Revert. They use the
   same writes, approvals and Revert path; changing the card changes no scope semantics. The model
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
-  Home Settings has one untitled Settings container (Models: workers/delegation only, Tools, More Settings).
-  Worker settings render independently of delegation permission reads; an uninitialized task namespace
-  must not hide the saved Home profile editors.
-  Session Settings has one Settings container (Compaction, Tools, Project Trust, More Settings),
+  Home Settings embeds the former Models, Tools and More Settings sections directly under logical
+  headers, keeping its introductory caption. Only that first level is flattened: shared row editors,
+  pickers, source inspection and Revert stay unchanged. Worker settings render independently of
+  delegation permission reads; an uninitialized task namespace must not hide saved profile editors.
+  Session Settings has one untitled container (Compaction, Tools, Project Trust, More Settings),
+  with its Global-inheritance caption immediately below as a footer;
   no Models subsheet. Overridable keys only; Project-owned controls are read-only with “Set by Project settings”;
   explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied
   Repository Overrides last; `ProjectSettingsSections` owns the unchanged trust editor and ignored

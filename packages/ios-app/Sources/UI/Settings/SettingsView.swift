@@ -223,7 +223,7 @@ enum SettingsGroupKind {
     }
 }
 
-/// Global-only consolidation. Scoped Home and Session links keep their own routes.
+/// Global-only consolidation. Scoped Home and Session keep their own presentations.
 struct GlobalAgentBehaviorView: View {
     private let target = SettingsTarget.global.gatewayTarget
 
@@ -271,7 +271,6 @@ struct SettingsSectionLinks: View {
     var projectCWD: String?
     var showsSummary = false
     var selection: SettingsKeySelection = .all
-    var homeProfileID: String?
     @Environment(AppModel.self) private var model
 
     // Presentation grouping only: schema keys, layers and mutation owners stay unchanged.
@@ -295,7 +294,6 @@ struct SettingsSectionLinks: View {
     private func sectionDescription(_ id: String) -> String? {
         let members = members(id)
         if id == "advanced" { return chatScope ? "Workers, connection, and approvals" : "Connection and approvals" }
-        if id == "model", homeProfileID != nil { return "Workers and delegation" }
         if members.count > 1, id == "model" { return "Models, thinking, and workers" }
         let text = members.compactMap(\.description).joined(separator: " · ")
         return text.isEmpty ? nil : text
@@ -309,17 +307,8 @@ struct SettingsSectionLinks: View {
                 ScrollView {
                     TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                         ForEach(members(id)) { section in
-                            if section.id == "workers", let homeProfileID,
-                               let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == "workers" }) {
-                                TronSettingsGroup(section.title) {
-                                    SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                        projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true, selection: selection)
-                                }
-                                HomeTaskSheet(permissionsFor: homeProfileID)
-                            } else {
-                                SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                    projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
-                            }
+                            SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
                         }
                     }.padding(20)
                 }
@@ -367,6 +356,7 @@ struct SessionSettingsView: View {
     private var selection: SettingsKeySelection {
         .sessionOverridesExcept(ManageModelConfigurationCard.keys)
     }
+    static let sessionCaption = "Choices for this session. Revert an override to use Global settings."
 
     var body: some View {
         let sections = model.settingsSnapshot(for: target).map { SettingsRendererView.sections($0.resolution) } ?? []
@@ -383,21 +373,22 @@ struct SessionSettingsView: View {
         }.flatMap { $0.cwd.isEmpty ? nil : $0 } : nil
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
-                // Global Settings' layout: titled group cards of drill-in rows (#1651).
-                TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
-                    TronSettingsCaption(homeProfileID == nil
-                        ? "Choices for this session. Revert an override to use Global settings."
-                        : "Home's overrides of Global settings. Worker launch choices apply to new workers.").containerValue(\.tronSettingsSection, false)
+                TronSettingsSections(alignment: .leading, spacing: 18) {
+                    if homeProfileID != nil {
+                        TronSettingsCaption("Home's overrides of Global settings. Worker launch choices apply to new workers.")
+                            .containerValue(\.tronSettingsSection, false)
+                    }
                     if project == nil, let notice = model.settingsSnapshot(for: target)?.resolution.projectNotice {
                         SettingsProjectNoticeGroup(notice: notice)
                     }
                     if sections.isEmpty {
                         TronSheetLoadingState(label: "Loading settings…")
-                    } else {
-                        if project == nil {
-                            TronSettingsGroup("Settings", accent: .tronPrimary) { links(rows, sections) }
-                                .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
-                        }
+                    } else if let homeProfileID {
+                        homeSections(rows, sections, profileID: homeProfileID)
+                    } else if project == nil {
+                        TronSettingsGroup(nil, accent: .tronPrimary) { links(rows, sections) }
+                            .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
+                        TronSettingsCaption(Self.sessionCaption).containerValue(\.tronSettingsSection, false)
                     }
                 }
                 .accessibilityElement(children: .contain)
@@ -405,7 +396,8 @@ struct SessionSettingsView: View {
                 if let project {
                     ProjectSettingsSections(cwd: project.cwd, profileID: project.profileID, showsWorkspace: false,
                                             sessionSettings: AnyView(links(rows.filter { !moreRows.contains($0) }, sections)),
-                                            sessionSettingsAfterTrust: moreRows.isEmpty ? nil : AnyView(links(moreRows, sections)))
+                                            sessionSettingsAfterTrust: moreRows.isEmpty ? nil : AnyView(links(moreRows, sections)),
+                                            sessionSettingsFooter: Self.sessionCaption)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("session-project-settings")
                 }
@@ -422,7 +414,26 @@ struct SessionSettingsView: View {
 
     private func links(_ ids: [String], _ sections: [SettingsRendererSection]) -> some View {
         SettingsSectionLinks(ids: ids, sections: sections, target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                             showsSummary: true, selection: selection, homeProfileID: homeProfileID)
+                             showsSummary: true, selection: selection)
+    }
+
+    /// Move only the first-level sections here. Each shared row keeps its
+    /// existing editor, source inspection and Revert; delegation keeps its owner.
+    private func homeSections(_ ids: [String], _ sections: [SettingsRendererSection], profileID: String) -> some View {
+        ForEach(ids, id: \.self) { id in
+            if id == "workers", let section = sections.first(where: { $0.id == id }),
+               let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == id }) {
+                TronSettingsGroup(section.title) {
+                    SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
+                        projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true, selection: selection)
+                }
+                HomeTaskSheet(permissionsFor: profileID)
+            } else {
+                SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
+                    projectCWD: projectCWD, presentation: .section(id), embedded: true,
+                    hidesLoneHeading: false, selection: selection)
+            }
+        }
     }
 }
 
