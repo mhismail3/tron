@@ -222,10 +222,22 @@ struct SwiftAppDisplayRunner: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var launch: SwiftAppLaunch?
     @PresentationState private var problem: String?
+    @PresentationState private var review: Review?
+    @PresentationState private var openRequest = UUID()
+
+    private struct Review {
+        let installation: SwiftAppInstallation
+        let source: String
+        let profileID: String
+    }
 
     var body: some View {
         if let launch {
             SwiftAppRunnerSheet(launch: launch)
+        } else if let review {
+            SwiftAppInstallReviewSheet(installation: review.installation, source: review.source,
+                artifactName: route.display.artifact?.name ?? "App.swift", profileID: review.profileID, openProblem: problem) { app in open(app, review: review) }
+                .onDisappear { openRequest = UUID() }
         } else {
             TronDocumentSheet(title: route.display.title) {
                 if let problem {
@@ -262,9 +274,20 @@ struct SwiftAppDisplayRunner: View {
                   mediaIdentity == identity else { return }
             switch SwiftAppDisplay.readiness(of: preview) {
             case .runnable(let source):
-                // The link host is the paired Gateway selected now, exactly as
-                // the source sheet's Run control resolves it (#1160).
-                launch = SwiftAppLaunch(name: artifact.name, source: source, linkHost: model.profiles.selected?.host)
+                guard route.installsSwiftApp else {
+                    launch = SwiftAppLaunch(name: artifact.name, source: source, linkHost: model.profiles.selected?.host)
+                    return
+                }
+                do {
+                    let reference = SwiftAppDisplayReference(sessionId: route.sessionID, artifactId: artifact.id)
+                    let offered = try await model.installedApps.review(reference: reference, source: source, profileID: identity.profileID)
+                    guard !Task.isCancelled, presentationActivity.allowsPresentationPublication, mediaIdentity == identity else { return }
+                    let installation = try model.installedApps.installation(review: offered, profileID: identity.profileID)
+                    review = Review(installation: installation, source: source, profileID: identity.profileID)
+                } catch let failure as GatewayFailure where failure.code == "not_found" {
+                    guard !Task.isCancelled, presentationActivity.allowsPresentationPublication, mediaIdentity == identity else { return }
+                    problem = "This exact app offer is no longer available. Ask Tron to prepare a fresh Install App review."
+                }
             case .tooLarge:
                 problem = SwiftAppDisplay.tooLargeMessage
             case .notSource:
@@ -275,7 +298,25 @@ struct SwiftAppDisplayRunner: View {
         } catch {
             guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
                   mediaIdentity == identity else { return }
-            problem = route.display.fallbackText
+            problem = "This app could not be prepared. \(error.localizedDescription)"
+        }
+    }
+
+    private func open(_ app: InstalledSwiftAppManifest, review: Review) {
+        let request = UUID()
+        openRequest = request
+        Task {
+            do {
+                let session = try await model.installedApps.open(appID: app.id, profileID: review.profileID)
+                guard openRequest == request, presentationActivity.allowsPresentationPublication,
+                      model.selectedGatewayProfileID() == review.profileID else { return }
+                launch = SwiftAppLaunch(name: session.snapshot.app.name, source: session.snapshot.source,
+                    linkHost: model.profiles.selected?.host, installed: session)
+            } catch is CancellationError {
+            } catch {
+                guard openRequest == request, presentationActivity.allowsPresentationPublication else { return }
+                problem = error.localizedDescription
+            }
         }
     }
 }

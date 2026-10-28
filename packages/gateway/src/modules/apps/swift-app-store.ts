@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { constants, lstatSync } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
@@ -10,6 +10,9 @@ import { AsyncMutex } from "../../util/async-mutex.js";
 import { durableAtomicWriteJson, durableAtomicWriteText, syncDurably } from "../../util/durable-json.js";
 import { readSecureJson, readSecureText } from "../../util/secure-json.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
+import { admitDigest, admitFeeds, digest, MANIFEST_BYTES, offerIdentity, referenceKey, readSwiftAppManifest, readSwiftAppOffer,
+  type SwiftAppActor, type SwiftAppDisplayReference, type SwiftAppManifest, type SwiftAppOffer, type SwiftAppRevision } from "./swift-app-format.js";
+export type { SwiftAppManifest } from "./swift-app-format.js";
 
 /** Installed single-file Swift apps (#1156). One owner for
  * `<workspace>/state/apps/<appId>/`: `app.json` (manifest), `App.swift` (source)
@@ -33,21 +36,7 @@ const SWIFT_APP_LIMITS = {
 } as const;
 
 const APP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const MANIFEST_BYTES = 4_096;
-const MANIFEST_KEYS = ["version", "id", "name", "icon", "revision", "sourceSha256", "sourceBytes", "updatedAt"];
 const SCHEMA_VERSION = 1;
-
-export interface SwiftAppManifest {
-  version: 1;
-  id: string;
-  name: string;
-  icon?: string;
-  /** Source revision: 1 at install, +1 for each reinstall. State has its own revision. */
-  revision: number;
-  sourceSha256: string;
-  sourceBytes: number;
-  updatedAt: string;
-}
 
 export interface SwiftAppStateSnapshot {
   appId: string;
@@ -61,6 +50,7 @@ export interface SwiftAppCommit {
   /** Interpreter writes must still belong to the source that produced them.
    * Agent data seeding does not execute source and does not supply this fence. */
   expectedSourceRevision?: number;
+  expectedInstanceId?: string;
   set: Array<{ key: string; value: JsonValue }>;
   remove: string[];
 }
@@ -100,21 +90,6 @@ function admitValue(value: unknown, depth = 0): void {
     return;
   }
   throw new GatewayError("invalid_request", "State values must be JSON");
-}
-
-function validManifest(value: unknown, id: string): SwiftAppManifest {
-  const record = value as Record<string, unknown> | null;
-  if (!record || typeof record !== "object" || Array.isArray(record)
-    || Object.keys(record).some(key => !MANIFEST_KEYS.includes(key))
-    || record.version !== 1 || record.id !== id
-    || typeof record.name !== "string" || (record.icon !== undefined && typeof record.icon !== "string")
-    || !Number.isSafeInteger(record.revision) || (record.revision as number) < 1
-    || typeof record.sourceSha256 !== "string" || !/^[a-f0-9]{64}$/.test(record.sourceSha256)
-    || !Number.isSafeInteger(record.sourceBytes) || (record.sourceBytes as number) < 1 || (record.sourceBytes as number) > SWIFT_APP_LIMITS.sourceBytes
-    || typeof record.updatedAt !== "string") {
-    throw new GatewayError("conflict", `App ${id} has an unreadable or newer manifest; it was left unchanged`);
-  }
-  return record as unknown as SwiftAppManifest;
 }
 
 async function syncDirectory(path: string): Promise<void> {
@@ -178,6 +153,7 @@ export async function readSwiftAppSourceFile(root: string, requestedPath: string
 
 export class SwiftAppStore {
   private readonly mutex = new AsyncMutex();
+  private initialized = false;
 
   constructor(private readonly workspace: TronWorkspace) {}
 
@@ -189,7 +165,7 @@ export class SwiftAppStore {
     const initialized = await this.workspace.featureInitialized("apps")
       .catch(() => { throw new GatewayError("conflict", "The installed-apps initialization record is unreadable; it was left unchanged"); });
     if (!create) {
-      if (await ownerDirectory(apps)) return apps;
+      if (await ownerDirectory(apps)) return this.readyRoot(apps);
       // A recorded container that has gone is lost state, never a fresh start.
       if (initialized) throw new GatewayError("conflict", "Installed apps are missing after they were created; restore state/apps");
       return undefined;
@@ -202,7 +178,49 @@ export class SwiftAppStore {
     if (createdState) await syncDirectory(descriptor.root);
     if (createdApps) await syncDirectory(state);
     if (!initialized) await this.workspace.markFeatureInitialized("apps");
-    return apps;
+    return this.readyRoot(apps);
+  }
+
+  private async readyRoot(root: string): Promise<string> {
+    if (!this.initialized) { await this.cleanupUnpublished(root); this.initialized = true; }
+    return root;
+  }
+
+  /** Called once under the store mutex by a new owner. Only unreachable
+   * publication staging is retired; current heads, history and v1 backups stay. */
+  private async cleanupUnpublished(root: string): Promise<void> {
+    for (const name of await readdir(root)) {
+      const directory = join(root, name);
+      if (/^\.install-[a-f0-9-]{36}$/.test(name) || /^\.removed-[a-z0-9][a-z0-9-]{0,62}-[a-f0-9]{12}$/.test(name)) {
+        if (await ownerDirectory(directory)) await rm(directory, { recursive: true });
+        continue;
+      }
+      if (!APP_ID.test(name) || !await ownerDirectory(directory)) continue;
+      const app = await this.readManifest(directory, name);
+      if (app.version === 2 && (await readSecureText(join(directory, "App.swift"), SWIFT_APP_LIMITS.sourceBytes)).present) {
+        await rm(join(directory, "App.swift"));
+        await syncDirectory(directory);
+      }
+      const sources = join(directory, "sources");
+      if (await ownerDirectory(sources)) {
+        const retained = new Set((app.version === 2 ? app.history : [app]).map(item => `${item.sourceSha256}.swift`));
+        for (const file of await readdir(sources)) {
+          if (/^[a-f0-9]{64}\.swift\.[0-9]+\.[a-f0-9]{12}\.tmp$/.test(file)
+            || /^[a-f0-9]{64}\.swift$/.test(file) && !retained.has(file)) await rm(join(sources, file));
+        }
+        await syncDirectory(sources);
+      }
+      for (const file of await readdir(directory)) {
+        if (/^app\.json\.[0-9]+\.[a-f0-9]{12}\.tmp$/.test(file)) await rm(join(directory, file));
+      }
+      const backups = join(directory, "backups");
+      if (await ownerDirectory(backups)) {
+        for (const file of await readdir(backups)) {
+          if (/^\.backup-[a-f0-9-]{36}$/.test(file) && await ownerDirectory(join(backups, file))) await rm(join(backups, file), { recursive: true });
+        }
+      }
+    }
+    await syncDirectory(root);
   }
 
   private async appDirectory(appId: string): Promise<string> {
@@ -217,7 +235,7 @@ export class SwiftAppStore {
     try { read = await readSecureJson<unknown>(join(directory, "app.json"), MANIFEST_BYTES); }
     catch { throw new GatewayError("conflict", `App ${appId} has an unreadable manifest; it was left unchanged`); }
     if (!read.present) throw new GatewayError("conflict", `App ${appId} has no manifest; it was left unchanged`);
-    return validManifest(read.value, appId);
+    return readSwiftAppManifest(read.value, appId);
   }
 
   async list(): Promise<SwiftAppManifest[]> {
@@ -257,7 +275,7 @@ export class SwiftAppStore {
 
   private async readSource(directory: string, app: SwiftAppManifest): Promise<string> {
     let read;
-    try { read = await readSecureText(join(directory, "App.swift"), SWIFT_APP_LIMITS.sourceBytes); }
+    try { read = await readSecureText(app.version === 1 ? join(directory, "App.swift") : join(directory, "sources", `${app.sourceSha256}.swift`), SWIFT_APP_LIMITS.sourceBytes); }
     catch { read = { present: false as const }; }
     // Source precedes its manifest: a torn reinstall must never execute.
     if (!read.present || createHash("sha256").update(read.value).digest("hex") !== app.sourceSha256) {
@@ -266,7 +284,152 @@ export class SwiftAppStore {
     return read.value;
   }
 
-  /** Install, or replace an installed app's source and name while keeping its data. */
+  private requireInstance(app: SwiftAppManifest, expected: unknown): void {
+    if (app.version === 2 && expected !== app.instanceId) throw new GatewayError("conflict", "This app was removed or replaced; reopen its current identity");
+  }
+
+  /** Explicitly offers immutable source/config to paired devices, without installing.
+   * Replacing an offer invalidates the old config digest, never changes its meaning. */
+  async offer(input: { appId: string; name: string; icon?: string; source: string; feeds: unknown; reference: SwiftAppDisplayReference }, actor: SwiftAppActor): Promise<{ offer: SwiftAppOffer }> {
+    const appId = admitSwiftAppId(input.appId);
+    const name = boundedLabel(input.name, "name", 80);
+    const icon = input.icon === undefined ? undefined : boundedLabel(input.icon, "icon", 80);
+    const sourceBytes = Buffer.byteLength(input.source);
+    if (sourceBytes < 1 || sourceBytes > SWIFT_APP_LIMITS.sourceBytes) throw new GatewayError("invalid_request", "App source exceeds its bounds");
+    const fields = { appId, name, reference: input.reference, ...(icon ? { icon } : {}), sourceSha256: digest(input.source), sourceBytes, feeds: admitFeeds(input.feeds) };
+    const offer: SwiftAppOffer = { version: 1, id: offerIdentity(fields), ...fields, actor };
+    return this.mutex.run(async () => {
+      const root = join((await this.appsRoot(true))!, ".offers");
+      await ensureOwnerDirectory(root);
+      const directory = join(root, referenceKey(offer.reference));
+      if (!(await ownerDirectory(directory))) {
+        if ((await readdir(root)).filter(name => /^[a-f0-9]{64}$/.test(name)).length >= 200) throw new GatewayError("conflict", "At most 200 app offers may be retained; discard an unused offer first");
+        await ensureOwnerDirectory(directory);
+      }
+      await durableAtomicWriteText(join(directory, "App.swift"), input.source);
+      await durableAtomicWriteJson(join(directory, "offer.json"), offer);
+      return { offer };
+    });
+  }
+
+  private async readOffer(reference: SwiftAppDisplayReference): Promise<{ offer: SwiftAppOffer; source: string }> {
+    const root = await this.appsRoot(false);
+    if (!root) throw new GatewayError("not_found", "No app offer matches this source; ask Tron to prepare it");
+    const directory = join(root, ".offers", referenceKey(reference));
+    if (!(await ownerDirectory(directory))) throw new GatewayError("not_found", "No app offer matches this source; ask Tron to prepare it");
+    const raw = await readSecureJson<unknown>(join(directory, "offer.json"), 4_096);
+    const text = await readSecureText(join(directory, "App.swift"), SWIFT_APP_LIMITS.sourceBytes);
+    if (!raw.present || !text.present) throw new GatewayError("conflict", "The app offer is incomplete; ask Tron to prepare it again");
+    const offer = readSwiftAppOffer(raw.value);
+    if (offer.reference.sessionId !== reference.sessionId || offer.reference.artifactId !== reference.artifactId
+      || digest(text.value) !== offer.sourceSha256 || Buffer.byteLength(text.value) !== offer.sourceBytes) {
+      throw new GatewayError("conflict", "The app offer's source changed; ask Tron to prepare it again");
+    }
+    return { offer, source: text.value };
+  }
+
+  async review(reference: SwiftAppDisplayReference, sourceSha256: string): Promise<{ offer: SwiftAppOffer; installed: SwiftAppManifest | null }> {
+    return this.mutex.run(async () => {
+      const { offer } = await this.readOffer(reference);
+      if (offer.sourceSha256 !== sourceSha256) throw new GatewayError("conflict", "The granted artifact does not match this offer's source");
+      const root = (await this.appsRoot(false))!;
+      const directory = join(root, offer.appId);
+      const installed = await ownerDirectory(directory) ? await this.readManifest(directory, offer.appId) : null;
+      return { offer, installed };
+    });
+  }
+
+  async discardOffer(reference: SwiftAppDisplayReference): Promise<void> {
+    return this.mutex.run(async () => {
+      await this.readOffer(reference);
+      const root = (await this.appsRoot(false))!;
+      await rm(join(root, ".offers", referenceKey(reference)), { recursive: true });
+      await syncDirectory(join(root, ".offers"));
+    });
+  }
+
+  /** Source/config publication has one atomic manifest cut. Pending transport
+   * receipts already fence interrupted apply; Apps never owns a second receipt. */
+  async installOffer(input: { offerId: unknown; reference: SwiftAppDisplayReference; sourceSha256: string; expectedRevision: unknown; expectedSourceSha256: unknown; expectedInstanceId: unknown; upgradeToV2: unknown }, actor: SwiftAppActor): Promise<{ app: SwiftAppManifest; created: boolean }> {
+    const offerId = admitDigest(input.offerId);
+    if (typeof input.upgradeToV2 !== "boolean") throw new GatewayError("invalid_request", "upgradeToV2 must explicitly be true or false");
+    return this.mutex.run(async () => {
+      const root = (await this.appsRoot(true))!;
+      const offers = join(root, ".offers");
+      if (!(await ownerDirectory(offers))) throw new GatewayError("not_found", "This app offer is no longer available");
+      const { offer, source } = await this.readOffer(input.reference);
+      if (offer.id !== offerId || offer.sourceSha256 !== input.sourceSha256) {
+        throw new GatewayError("conflict", "The app offer changed after review; review its exact source and access again");
+      }
+      const directory = join(root, offer.appId);
+      const existing = await ownerDirectory(directory) ? await this.readManifest(directory, offer.appId) : null;
+      if ((existing?.revision ?? null) !== input.expectedRevision || (existing?.sourceSha256 ?? null) !== input.expectedSourceSha256
+        || (existing?.version === 2 ? existing.instanceId : null) !== input.expectedInstanceId) {
+        throw new GatewayError("conflict", "The installed app changed after review; reopen the review before updating");
+      }
+      if (existing?.version === 1 && !input.upgradeToV2) throw new GatewayError("conflict", "Updating this v1 app requires explicit opt-in to a backed-up manifest v2 upgrade");
+      if (!existing && (await readdir(root)).filter(name => APP_ID.test(name)).length >= 200) throw new GatewayError("conflict", "At most 200 apps can be installed");
+      const staging = existing ? directory : join(root, `.install-${randomUUID()}`);
+      let published = false;
+      try {
+        if (!existing) await ensureOwnerDirectory(staging);
+        this.withDatabase(staging, () => undefined, !existing);
+        if (existing?.version === 1) await this.backupV1(directory, existing);
+        const sources = join(staging, "sources");
+        await ensureOwnerDirectory(sources);
+        if (existing?.version === 1) await durableAtomicWriteText(join(sources, `${existing.sourceSha256}.swift`), await this.readSource(directory, existing));
+        await durableAtomicWriteText(join(sources, `${offer.sourceSha256}.swift`), source);
+        const fields = { id: offer.appId, name: offer.name, ...(offer.icon ? { icon: offer.icon } : {}), revision: (existing?.revision ?? 0) + 1,
+          sourceSha256: offer.sourceSha256, sourceBytes: offer.sourceBytes, updatedAt: new Date().toISOString() };
+        const previous: SwiftAppRevision[] = existing?.version === 2 ? existing.history : existing ? [{ ...existing, feeds: [], actor: { kind: "unknown" as const } }].map(({ version: _version, ...revision }) => revision) : [];
+        const history = [...previous, { ...fields, feeds: offer.feeds, actor }].slice(-20);
+        const app: SwiftAppManifest = { version: 2, ...fields, instanceId: existing?.version === 2 ? existing.instanceId : randomUUID(), feeds: offer.feeds, history };
+        // Validate the exact same contract readers use before publishing it.
+        readSwiftAppManifest(app, offer.appId);
+        await durableAtomicWriteJson(join(staging, "app.json"), app);
+        if (!existing) { await rename(staging, directory); published = true; await syncDirectory(root); }
+        else published = true;
+        // Only unreachable immutable sources are retired, after the new head is durable.
+        // Publication is committed. Cleanup belongs to the next bounded root
+        // read, never to this already-published command's success receipt.
+        this.initialized = false;
+        return { app, created: !existing };
+      } finally {
+        if (!existing && !published) await rm(staging, { recursive: true, force: true });
+      }
+    });
+  }
+
+  /** The only v1 upgrade step. Snapshot before publication, no SQLite migration. */
+  private async backupV1(directory: string, app: SwiftAppManifest): Promise<void> {
+    const backups = join(directory, "backups");
+    await ensureOwnerDirectory(backups);
+    if ((await readdir(backups)).filter(name => /^v1-[1-9][0-9]*(?:-[a-f0-9-]{36})?$/.test(name)).length >= 20) {
+      throw new GatewayError("conflict", "At most 20 explicit v1 upgrade backups can be retained; existing backups were not changed");
+    }
+    const original = join(backups, `v1-${app.revision}`);
+    // A failed upgrade can leave a valid but now stale backup at this source
+    // revision. Preserve it, and snapshot this attempt's current SQLite bytes.
+    const destination = await ownerDirectory(original) ? `${original}-${randomUUID()}` : original;
+    const temporary = join(backups, `.backup-${randomUUID()}`);
+    await ensureOwnerDirectory(temporary);
+    try {
+      await durableAtomicWriteJson(join(temporary, "app.json"), app);
+      await durableAtomicWriteText(join(temporary, "App.swift"), await this.readSource(directory, app));
+      const input = await open(join(directory, "data.sqlite"), constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const info = await input.stat();
+        if (!info.isFile() || info.size > 4 * 1_024 * 1_024) throw new GatewayError("conflict", "App state cannot be safely backed up");
+        const output = await open(join(temporary, "data.sqlite"), "wx", 0o600);
+        try { await output.writeFile(await input.readFile()); await syncDurably(output); } finally { await output.close(); }
+      } finally { await input.close(); }
+      await syncDirectory(temporary);
+      await rename(temporary, destination);
+      await syncDirectory(backups);
+    } finally { await rm(temporary, { recursive: true, force: true }); }
+  }
+
+  /** Named v1 tool contract. New installs through review use installOffer. */
   async install(input: { appId: string; name: string; icon?: string; source: string }): Promise<{ app: SwiftAppManifest; created: boolean }> {
     const appId = admitSwiftAppId(input.appId);
     const name = boundedLabel(input.name, "name", SWIFT_APP_LIMITS.nameBytes);
@@ -279,6 +442,7 @@ export class SwiftAppStore {
       const apps = (await this.appsRoot(true))!;
       const directory = join(apps, appId);
       const existing = await ownerDirectory(directory) ? await this.readManifest(directory, appId) : undefined;
+      if (existing?.version === 2) throw new GatewayError("conflict", "Update this v2 app through an explicit Install App review; it cannot be downgraded to v1");
       if (!existing) {
         const count = (await readdir(apps)).filter(entry => APP_ID.test(entry)).length;
         if (count >= SWIFT_APP_LIMITS.apps) throw new GatewayError("conflict", `At most ${SWIFT_APP_LIMITS.apps} apps can be installed`);
@@ -300,10 +464,11 @@ export class SwiftAppStore {
 
   /** Delete the app folder (manifest, source and data). The folder is first
    * renamed aside so a crash can never leave a half-removed app listed. */
-  async remove(appId: string): Promise<{ appId: string; removed: true }> {
+  async remove(appId: string, expectedInstanceId?: unknown): Promise<{ appId: string; removed: true }> {
     admitSwiftAppId(appId);
     return this.mutex.run(async () => {
       const directory = await this.appDirectory(appId);
+      this.requireInstance(await this.readManifest(directory, appId), expectedInstanceId);
       const apps = join(directory, "..");
       const retired = join(apps, `.removed-${appId}-${randomBytes(6).toString("hex")}`);
       await rename(directory, retired);
@@ -396,6 +561,7 @@ export class SwiftAppStore {
       const directory = await this.appDirectory(appId);
       if (input.expectedSourceRevision !== undefined) {
         const app = await this.readManifest(directory, appId);
+        this.requireInstance(app, input.expectedInstanceId);
         if (app.revision !== input.expectedSourceRevision) {
           throw new GatewayError("conflict", `App ${appId}'s source is at revision ${app.revision}, not ${input.expectedSourceRevision}; reopen it`);
         }

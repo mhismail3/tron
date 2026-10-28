@@ -121,7 +121,14 @@ const reinstallTurn = async (context) => {
   while (!existsSync(goFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
   return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof 2", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
 };
+let buildsOfferNumber = 0;
 const scripted = (context, options, state, model) => {
+  if (latestUserText(context).includes("BUILDS-APP-JOURNEY")) {
+    if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Builds app ready for review.");
+    return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "builds",
+      name: latestUserText(context).includes("UPDATE") ? "Builds updated" : "Builds", icon: "shippingbox",
+      feeds: ["ios-builds"], source: { kind: "path", path: "Builds.swift" } }, { id: "e2e-builds-offer-" + (++buildsOfferNumber) })], { stopReason: "toolUse" });
+  }
   if (latestUserText(context).includes(REINSTALL_MARKER)) return reinstallTurn(context);
   if (latestUserText(context).includes("INSTALLED-SWIFT-APP-PERSISTENCE")) {
     if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Installed persistence proof app.");

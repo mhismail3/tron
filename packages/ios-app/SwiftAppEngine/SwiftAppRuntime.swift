@@ -51,6 +51,7 @@ package final class SwiftAppRuntime {
     @ObservationIgnored private var persistentKeys: Set<String> = []
     @ObservationIgnored let persistence: SwiftAppPersistence?
     @ObservationIgnored private var committedEffects: [() -> Void] = []
+    @ObservationIgnored private var userInitiatedAction = false
     @ObservationIgnored private var timers: [UUID: (connection: AnyCancellable, failures: Int)] = [:]
 #if HOSTED_TEST
     package var hostedTimerCallbackCount = 0
@@ -59,10 +60,13 @@ package final class SwiftAppRuntime {
     /// The latest action failure, shown over the running app.
     package var actionError: String?
     @ObservationIgnored package let linkPolicy: SwiftAppLinkPolicy
+    @ObservationIgnored let feeds: [String: SwiftAppIOSBuildsFeed]?
     /// A committed link request the runner sheet opens (#1160).
     package var pendingLink: SwiftAppLinkPolicy.Link?
 
-    package init(source: String, linkPolicy: SwiftAppLinkPolicy, persistence: SwiftAppPersistence? = nil) throws {
+    package init(source: String, linkPolicy: SwiftAppLinkPolicy, persistence: SwiftAppPersistence? = nil, feeds: [String: SwiftAppIOSBuildsFeed]? = nil) throws {
+        if let feeds, !Set(feeds.keys).isSubset(of: ["ios-builds"]) { throw SwiftAppRuntimeError("This app declares an unsupported feed") }
+        self.feeds = try feeds?.mapValues { try $0.admitted() }
         self.linkPolicy = linkPolicy
         self.persistence = persistence
         program = try SwiftAppParser.parse(source)
@@ -154,10 +158,12 @@ package final class SwiftAppRuntime {
     /// Runs a user action (button, toggle side effect, gesture) and reports
     /// failures over the app instead of terminating it.
     @discardableResult
-    package func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) -> Bool {
+    package func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = [], userInitiated: Bool = false) -> Bool {
         // SwiftUI actions are synchronous. Nested interpreted calls share this
         // journal and budget; only the outer action commits or rolls back.
         precondition(actionJournal == nil)
+        userInitiatedAction = userInitiated
+        defer { userInitiatedAction = false }
         do {
             _ = try transaction { try entered { try apply(callable, arguments.map { SwiftAppLabeledValue(label: nil, value: $0) }) } }
             actionError = nil
@@ -314,6 +320,9 @@ package final class SwiftAppRuntime {
             throw SwiftAppRuntimeError("openURL needs a URL")
         }
         let link = try linkPolicy.admit(text)
+        if linkPolicy.manifestURLs != nil, !link.needsConfirmation, !userInitiatedAction {
+            throw SwiftAppRuntimeError("Install Build requires an explicit user action; lifecycle, change and timer callbacks cannot request installation")
+        }
         if actionJournal != nil { committedEffects.append { [weak self] in self?.pendingLink = link } }
         else { pendingLink = link }
     }

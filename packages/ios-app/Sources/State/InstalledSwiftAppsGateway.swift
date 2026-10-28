@@ -34,11 +34,13 @@ extension InstalledSwiftApps {
         struct Empty: Encodable {}
         struct Rename: Encodable { let commandId: String; let appId: String; let name: String }
         struct Reset: Encodable { let commandId: String; let appId: String; let expectedRevision: Int }
-        struct Remove: Encodable { let commandId: String; let appId: String }
+        struct Remove: Encodable { let commandId: String; let appId: String; let expectedInstanceId: String? }
         struct Removed: Codable { let appId: String; let removed: Bool }
         struct Reverted: Codable { let appId: String; let revision: Int }
         func command() -> String { UUID().uuidString.lowercased() }
         return InstalledSwiftApps(ports: Ports(
+            review: { profileID, reference in try await read(profileID, "apps.review", reference) },
+            install: { profileID, command in try await mutate(profileID, "apps.install", command.commandId, command) },
             list: { profileID in (try await read(profileID, "apps.list", Empty(), as: InstalledSwiftAppList.self)).apps },
             open: { profileID, appID in try await read(profileID, "apps.open", Id(appId: appID)) },
             commit: { profileID, commit in try await mutate(profileID, "apps.commit", commit.commandId, commit) },
@@ -50,9 +52,9 @@ extension InstalledSwiftApps {
                 let id = command()
                 let _: Reverted = try await mutate(profileID, "apps.reset", id, Reset(commandId: id, appId: appID, expectedRevision: revision))
             },
-            remove: { profileID, appID in
+            remove: { profileID, appID, instanceID in
                 let id = command()
-                let result: Removed = try await mutate(profileID, "apps.remove", id, Remove(commandId: id, appId: appID))
+                let result: Removed = try await mutate(profileID, "apps.remove", id, Remove(commandId: id, appId: appID, expectedInstanceId: instanceID))
                 guard result.removed, result.appId == appID else { throw InstalledSwiftAppFailure("The removal could not be verified.") }
             },
             state: { profileID, appID in

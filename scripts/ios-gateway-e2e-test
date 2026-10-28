@@ -72,6 +72,10 @@ die() { echo "error: $*" >&2; exit 1; }
 # so the parse admits only these. Each gets a fresh fixture and pairing code: an
 # invitation is one-use.
 ui_owned_journeys=(
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDark'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDarkXXXL'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageLight'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded'
@@ -125,7 +129,7 @@ ui_journey_is_owned() {
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
-    *testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageLight|*testCaptureAppsAndManageDark) echo "1 no" ;;
+    *testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageLight|*testCaptureAppsAndManageDark|*testBuildsInstallLight|*testBuildsInstallDark|*testBuildsInstallLightXXXL|*testBuildsInstallDarkXXXL) echo "1 no" ;;
     *testForegroundAndReconnectKeepSheetsAndTheirContent|*testProviderLoginSurvivesSafariAndReconnect) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac
@@ -547,6 +551,7 @@ start_fresh_fixture() {
   # Project instructions the Agent Instructions projection must attribute.
   printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
   cp "$repo_root/packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift" "$workspace/InstalledPersistence.swift"
+  cp "$repo_root/tools/web/apps/builds/Builds.swift" "$workspace/Builds.swift"
   python3 - "$tron_home/gateway/gateway.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]

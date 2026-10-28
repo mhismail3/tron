@@ -232,7 +232,7 @@ enum ToolRunSegment: Identifiable, Equatable {
 
     static func segments(of run: ChatToolRunPresentation, approval: (ChatToolDescriptor) -> ChatToolApproval? = { _ in nil }) -> [ToolRunSegment] {
         let approvals = Dictionary(uniqueKeysWithValues: run.tools.compactMap { tool in approval(tool).map { (tool.id, $0) } })
-        guard approvals.isEmpty == false || run.tools.contains(where: { $0.toolName == "display" }) else { return [.tools(run)] }
+        guard approvals.isEmpty == false || run.tools.contains(where: \.isDisplayTool) else { return [.tools(run)] }
         var segments: [ToolRunSegment] = []
         var generic: [ChatToolDescriptor] = []
         var displays: [ChatToolDescriptor] = []
@@ -254,7 +254,7 @@ enum ToolRunSegment: Identifiable, Equatable {
             if let request = approvals[tool.id] {
                 flushGeneric(); flushDisplays()
                 segments.append(.approval(tool, request))
-            } else if tool.toolName != "display" {
+            } else if !tool.isDisplayTool {
                 flushDisplays()
                 generic.append(tool)
             } else if DisplayToolView.rendersFullWidth(tool) {
@@ -280,7 +280,7 @@ struct ToolRunView: View {
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     var body: some View {
-        if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
+        if run.tools.count == 1, let tool = run.tools.first, tool.isDisplayTool {
             displayView(tool)
         } else {
             let segments = ToolRunSegment.segments(of: run, approval: approval)

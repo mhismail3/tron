@@ -1102,10 +1102,10 @@ enum ChatTranscriptProjectionKernel {
             _ tool: PreparedTool,
             allowsLegacyContinuation: Bool
         ) {
-            // The reserved display tool owns a rich physical row. Isolate it
+            // Explicit display producers own a rich physical row. Isolate it
             // from generic tool grouping so its pill may morph inline without
             // changing or expanding neighboring tool calls.
-            if tool.presentation.toolName == "display" {
+            if tool.presentation.isDisplayTool {
                 flushTools()
                 appendTools([tool])
                 flushTools()

@@ -276,6 +276,11 @@ enum SwiftAppBuiltins {
             return try runtime.binary(String(name.dropFirst("operator".count)), values[0], values[1])
         }
         switch name {
+        case "AppFeed.iosBuilds":
+            guard arguments.isEmpty else { throw SwiftAppRuntimeError("AppFeed.iosBuilds takes no arguments") }
+            guard let feeds = runtime.feeds else { throw SwiftAppRuntimeError("Feeds require an installed app. Install this artifact before running it.") }
+            guard let feed = feeds["ios-builds"] else { throw SwiftAppRuntimeError("This app does not declare the ios-builds feed") }
+            return feed.value
         case "Timer.publish":
             let interval = try argument(arguments, "every").asDouble()
             guard interval.isFinite, interval > 0 else { throw SwiftAppRuntimeError("Timer interval must be positive and finite") }

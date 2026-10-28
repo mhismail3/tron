@@ -118,6 +118,7 @@ extension SwiftAppRuntime {
             throw SwiftAppRuntimeError("\(geometry.name) has no member '\(name)'")
         case .typeReference(let typeName):
             if typeName == "Timer", name == "publish" { return .builtin("Timer.publish", nil) }
+            if typeName == "AppFeed", name == "iosBuilds" { return .builtin("AppFeed.iosBuilds", nil) }
             if let declaration = program.types[typeName] {
                 if declaration.kind == .enumeration, name == "allCases" {
                     guard declaration.payloads.values.allSatisfy(\.isEmpty) else { throw SwiftAppRuntimeError("Payload enums have no synthesized allCases") }
@@ -720,7 +721,7 @@ extension SwiftAppRuntime {
 
     private static let builtinTypes: Set<String> = [
         "String", "Int", "Double", "Float", "CGFloat", "Bool", "Array", "UUID", "Color", "Font", "Date", "Set",
-        "Animation", "Angle", "Edge", "Alignment", "IndexSet", "Timer", "Dictionary", "URL",
+        "Animation", "Angle", "Edge", "Alignment", "IndexSet", "Timer", "Dictionary", "URL", "AppFeed",
     ]
     private static let builtinFunctions: Set<String> = [
         "min", "max", "abs", "print", "withAnimation", "round", "floor", "ceil", "sqrt", "pow", "stride", "zip",

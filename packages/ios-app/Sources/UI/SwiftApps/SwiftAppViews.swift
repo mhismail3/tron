@@ -57,7 +57,7 @@ private struct SwiftAppConfirmationSheet: View {
         }
         return TronConfirmationSheet(
             title: title, message: "", confirmTitle: "", secondaryTitle: cancelLabel,
-            onConfirm: {}, onSecondary: { if let cancelAction { runtime.perform(cancelAction) } },
+            onConfirm: {}, onSecondary: { if let cancelAction { runtime.perform(cancelAction, userInitiated: true) } },
             messageContent: AnyView(SwiftAppLazyContent(runtime: runtime, value: message)),
             actionsContent: AnyView(SwiftAppNodesView(runtime: runtime, nodes: choices)
                 .buttonStyle(TronConfirmationButtonStyle { isPresented.wrappedValue = false })),
@@ -296,7 +296,7 @@ struct SwiftAppModifiedView: View {
             let systemImage = node.argument("systemImage").map(text)
             let title = title ?? ""
             return AnyView(Button(role: role) {
-                if let action { runtime.perform(action) }
+                if let action { runtime.perform(action, userInitiated: true) }
             } label: {
                 if let label {
                     SwiftAppLazyContent(runtime: runtime, value: label)
@@ -439,7 +439,7 @@ struct SwiftAppModifiedView: View {
             let label = closure("label") ?? closure(nil)
             let title = title ?? ""
             return AnyView(Button {
-                runtime.perform(.builtin("openURL", nil), [destination])
+                runtime.perform(.builtin("openURL", nil), [destination], userInitiated: true)
             } label: {
                 if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
             })
@@ -641,7 +641,7 @@ struct SwiftAppModifiedView: View {
         case "onTapGesture":
             guard let action = arguments.last?.value else { return view }
             let count = min(max(1, ((try? argument(arguments, "count")?.asInt()) ?? nil) ?? 1), 10)
-            return AnyView(view.onTapGesture(count: count) { runtime.perform(action) })
+            return AnyView(view.onTapGesture(count: count) { runtime.perform(action, userInitiated: true) })
         case "onChange":
             guard let action = arguments.last?.value else { return view }
             let value = argument(arguments, "of")?.resolved.debugDisplay ?? ""

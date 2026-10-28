@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import TronMobileCore
+import TronSwiftAppEngine
 
 struct InstalledSwiftAppManifest: Codable, Sendable {
     let version: Int
@@ -11,6 +12,8 @@ struct InstalledSwiftAppManifest: Codable, Sendable {
     let sourceSha256: String
     let sourceBytes: Int
     let updatedAt: String
+    let instanceId: String?
+    let feeds: [String]?
 }
 
 struct InstalledSwiftAppEntry: Codable, Sendable {
@@ -27,9 +30,10 @@ struct InstalledSwiftAppSnapshot: Codable, Sendable {
     let app: InstalledSwiftAppManifest
     let source: String
     let state: State
+    let feeds: [String: SwiftAppIOSBuildsFeed]?
 
     func admitted(appID: String) throws -> Self {
-        guard app.version == 1, app.id == appID, state.appId == appID,
+        guard [1, 2].contains(app.version), app.id == appID, state.appId == appID,
               app.revision > 0, app.revision < 9_007_199_254_740_991,
               state.revision >= 0, state.revision < 9_007_199_254_740_991,
               !app.name.isEmpty, app.name.utf8.count <= 80,
@@ -38,6 +42,18 @@ struct InstalledSwiftAppSnapshot: Codable, Sendable {
               state.entries.count <= 1_000,
               Set(state.entries.map(\.key)).count == state.entries.count else {
             throw InstalledSwiftAppFailure("The installed app snapshot is invalid. Reopen it from its Gateway.")
+        }
+        if app.version == 1 {
+            guard app.instanceId == nil, app.feeds == nil, feeds == nil else {
+                throw InstalledSwiftAppFailure("The v1 app snapshot has undeclared capabilities.")
+            }
+        } else {
+            guard let instance = app.instanceId, UUID(uuidString: instance) != nil,
+                  let declared = app.feeds, Set(declared).isSubset(of: ["ios-builds"]), Set(declared).count == declared.count,
+                  let feeds, Set(feeds.keys) == Set(declared) else {
+                throw InstalledSwiftAppFailure("The app's declared feed snapshot is invalid.")
+            }
+            for feed in feeds.values { _ = try feed.admitted() }
         }
         var bytes = 0
         for entry in state.entries {
@@ -57,6 +73,7 @@ struct InstalledSwiftAppCommit: Codable, Sendable {
     let appId: String
     let expectedRevision: Int
     let expectedSourceRevision: Int
+    let expectedInstanceId: String?
     let set: [InstalledSwiftAppEntry]
 }
 

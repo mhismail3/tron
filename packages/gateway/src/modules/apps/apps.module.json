@@ -4,6 +4,8 @@
     "**"
   ],
   "dependsOn": [
+    "gateway/display",
+    "gateway/display-contract",
     "gateway/foundation",
     "gateway/host",
     "gateway/pi",

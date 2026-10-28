@@ -8,7 +8,14 @@ package struct SwiftAppLinkPolicy {
     /// The selected Gateway profile's host, or nil when no Gateway is paired.
     let host: String?
 
-    package init(host: String?) { self.host = host }
+    /// nil is the existing source-only/v1 profile policy; an installed v2 app
+    /// receives only the exact manifests in its current declared feed snapshot.
+    let manifestURLs: Set<String>?
+
+    package init(host: String?, manifestURLs: [String]? = nil) {
+        self.host = host
+        self.manifestURLs = manifestURLs.map(Set.init)
+    }
 
     /// An admitted link. An install opens directly, because iOS asks before
     /// installing; a page asks first in the runner (`needsConfirmation`).
@@ -36,6 +43,12 @@ package struct SwiftAppLinkPolicy {
                 throw SwiftAppRuntimeError("Only itms-services download-manifest links with an https manifest can open: '\(text)'")
             }
             try requireGatewayHost(manifestComponents, text)
+            if let manifestURLs {
+                guard manifestComponents.query == nil, manifestComponents.fragment == nil,
+                      let exact = manifestComponents.url?.absoluteString, manifestURLs.contains(exact) else {
+                    throw SwiftAppRuntimeError("This install manifest is not in the app's declared ios-builds snapshot")
+                }
+            }
             return Link(url: url, needsConfirmation: false)
         default:
             throw SwiftAppRuntimeError("Only https and itms-services install links can open: '\(text)'")

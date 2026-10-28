@@ -931,6 +931,7 @@ struct ChatToolApproval: Hashable, Sendable {
 
 struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let id: String
+    let isDisplayTool: Bool
     /// Raw protocol tool name. `title` may be an extension-authored display label.
     let toolName: String?
     let title: String
@@ -961,6 +962,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
 
     init(_ tool: ChatToolPresentation) {
         id = tool.id
+        isDisplayTool = tool.isDisplayTool
         toolName = tool.toolName
         title = tool.title
         subtitle = tool.subtitle
@@ -1043,6 +1045,12 @@ struct ChatToolPayloadIndex: Hashable, Sendable {
 }
 
 struct ChatToolPresentation: Hashable, Identifiable, Sendable {
+    /// The display owner admits completed source offers; the invocation's
+    /// explicit action reserves the same row before its artifact is available.
+    var isDisplayTool: Bool {
+        toolName == "display" || (toolName == "swift_app" && (display != nil
+            || DisplayPresentationPolicy.invocationSurface(toolName: toolName, request: request) != nil))
+    }
     let id: String
     /// Raw protocol tool name. The title remains the user-facing label.
     let toolName: String?

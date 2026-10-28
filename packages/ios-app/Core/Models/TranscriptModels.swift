@@ -457,11 +457,12 @@ package struct MessageTranscriptItem: TranscriptPayload {
             // Gateway admits provider-bound browser results before projection;
             // raw extension details are never native display authority.
             guard role == .toolResult,
-                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive) else {
+                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive)
+                    || (toolName == "swift_app" && display.kind == .code && display.artifact?.name.lowercased().hasSuffix(".swift") == true) else {
                 throw DecodingError.dataCorruptedError(
                     forKey: .display,
                     in: values,
-                    debugDescription: "Display metadata requires a display result or a live-browser agent_browser result"
+                    debugDescription: "Display metadata requires a display result, a Swift app source offer or a live-browser result"
                 )
             }
         }

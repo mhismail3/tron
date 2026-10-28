@@ -12,8 +12,10 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     /// Runs a displayed `.swift` file as a mini-app instead of showing its
     /// source (#1339). A distinct sheet identity from the same file's source.
     var runsSwiftApp = false
+    /// Native producer intent, not source text or a model-authored caption.
+    var installsSwiftApp = false
 
-    var id: String { "\(sessionID):\(display.presentationIdentity)\(runsSwiftApp ? ":app" : "")" }
+    var id: String { "\(sessionID):\(display.presentationIdentity)\(runsSwiftApp ? ":app" : "")\(installsSwiftApp ? ":install" : "")" }
     var sheetPresentationID: String { "chat.display.\(id)" }
 }
 
@@ -157,7 +159,7 @@ struct DisplayToolView: View {
 
     private func sheetAction(for display: DisplayProjection, runsSwiftApp: Bool) -> (() -> Void)? {
         guard let sessionID else { return nil }
-        return { present?(.showSheet(DisplayRoute(sessionID: sessionID, display: display, runsSwiftApp: runsSwiftApp))) }
+        return { present?(.showSheet(DisplayRoute(sessionID: sessionID, display: display, runsSwiftApp: runsSwiftApp, installsSwiftApp: tool.toolName == "swift_app"))) }
     }
 
     private var completedInlineDisplay: Bool {

@@ -180,6 +180,6 @@ struct SwiftAppNodeView: View {
 
     private func action(_ value: SwiftAppValue?) -> (([SwiftAppValue]) -> Void)? {
         guard let value else { return nil }
-        return { [runtime] arguments in runtime.perform(value, arguments) }
+        return { [runtime] arguments in runtime.perform(value, arguments, userInitiated: true) }
     }
 }
