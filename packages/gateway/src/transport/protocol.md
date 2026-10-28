@@ -82,8 +82,8 @@ diagnostic only.
 Requests are `{type,id,method,params}`, answers `{type,id,ok,result|error}`.
 `{type:"cancel",id}` (no answer) abandons only `session.open`, `session.list`,
 `session.transcript`, `session.history.list`, `session.history.entry`,
-`home.memory.view`, `home.memory.evidence`, `model.list`, `provider.list` and
-`provider.usage`, recording `rpc.cancelled`; mutations, admitted prompts and
+`home.memory.view`, `home.memory.evidence`, `projects.list`, `projects.inspect`,
+`model.list`, `provider.list` and `provider.usage`, recording `rpc.cancelled`; mutations, admitted prompts and
 `session.sync` are never cancelled. `DISPOSABLE_READ_DEADLINES_MS` (`server.ts`):
 `session.open` 10 s; `session.list`, the transcript/history pages and the Home memory
 browser 5 s. An expired read is aborted and answered `busy` with
