@@ -10,6 +10,7 @@ import { AsyncMutex } from "../../util/async-mutex.js";
 import { durableAtomicWriteJson, durableAtomicWriteText, syncDurably } from "../../util/durable-json.js";
 import { readSecureJson, readSecureText } from "../../util/secure-json.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
+import type { DisplayOwner } from "../../display/display-modules.js";
 import { admitDigest, admitFeeds, digest, MANIFEST_BYTES, offerIdentity, referenceKey, readSwiftAppManifest, readSwiftAppOffer,
   type SwiftAppActor, type SwiftAppDisplayReference, type SwiftAppManifest, type SwiftAppOffer, type SwiftAppRevision } from "./swift-app-format.js";
 export type { SwiftAppManifest } from "./swift-app-format.js";
@@ -155,7 +156,7 @@ export class SwiftAppStore {
   private readonly mutex = new AsyncMutex();
   private initialized = false;
 
-  constructor(private readonly workspace: TronWorkspace) {}
+  constructor(private readonly workspace: TronWorkspace, private readonly display: () => DisplayOwner) {}
 
   private async appsRoot(create: boolean): Promise<string | undefined> {
     const descriptor = await this.workspace.describe();
@@ -182,8 +183,39 @@ export class SwiftAppStore {
   }
 
   private async readyRoot(root: string): Promise<string> {
-    if (!this.initialized) { await this.cleanupUnpublished(root); this.initialized = true; }
+    if (!this.initialized) {
+      await this.cleanupUnpublished(root);
+      await this.cleanupOffers(root);
+      this.initialized = true;
+    }
     return root;
+  }
+
+  /** Reconcile against canonical session retention through its existing display
+   * owner. No second session catalog, expiry clock or background sweeper. */
+  private async cleanupOffers(root: string): Promise<void> {
+    const offers = join(root, ".offers");
+    if (!await ownerDirectory(offers)) return;
+    const display = this.display();
+    // Failure to prove canonical membership must not authorize deletion.
+    await display.maintainArtifacts();
+    for (const name of await readdir(offers)) {
+      if (!/^[a-f0-9]{64}$/.test(name)) continue;
+      const directory = join(offers, name);
+      if (!await ownerDirectory(directory)) continue;
+      let offer: SwiftAppOffer;
+      try {
+        const raw = await readSecureJson<unknown>(join(directory, "offer.json"), 4_096);
+        if (!raw.present) continue;
+        offer = readSwiftAppOffer(raw.value);
+      } catch {
+        // Unreadable or corrupt metadata is not proof of an unowned offer.
+        continue;
+      }
+      if (referenceKey(offer.reference) !== name || display.artifacts.hasOwner(offer.reference.artifactId, offer.reference.sessionId)) continue;
+      await rm(directory, { recursive: true });
+    }
+    await syncDirectory(offers);
   }
 
   /** Called once under the store mutex by a new owner. Only unreachable
@@ -242,6 +274,7 @@ export class SwiftAppStore {
     return this.mutex.run(async () => {
       const apps = await this.appsRoot(false);
       if (!apps) return [];
+      await this.cleanupOffers(apps);
       const manifests: SwiftAppManifest[] = [];
       for (const name of (await readdir(apps)).sort()) {
         if (!APP_ID.test(name)) continue;
@@ -299,11 +332,14 @@ export class SwiftAppStore {
     const fields = { appId, name, reference: input.reference, ...(icon ? { icon } : {}), sourceSha256: digest(input.source), sourceBytes, feeds: admitFeeds(input.feeds) };
     const offer: SwiftAppOffer = { version: 1, id: offerIdentity(fields), ...fields, actor };
     return this.mutex.run(async () => {
-      const root = join((await this.appsRoot(true))!, ".offers");
+      const apps = (await this.appsRoot(true))!;
+      const root = join(apps, ".offers");
       await ensureOwnerDirectory(root);
       const directory = join(root, referenceKey(offer.reference));
       if (!(await ownerDirectory(directory))) {
-        if ((await readdir(root)).filter(name => /^[a-f0-9]{64}$/.test(name)).length >= 200) throw new GatewayError("conflict", "At most 200 app offers may be retained; discard an unused offer first");
+        const count = async () => (await readdir(root)).filter(name => /^[a-f0-9]{64}$/.test(name)).length;
+        if (await count() >= 200) await this.cleanupOffers(apps);
+        if (await count() >= 200) throw new GatewayError("conflict", "At most 200 app offers may be retained; discard an unused offer first");
         await ensureOwnerDirectory(directory);
       }
       await durableAtomicWriteText(join(directory, "App.swift"), input.source);

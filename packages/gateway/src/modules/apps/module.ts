@@ -21,7 +21,7 @@ export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor 
   start: (host) => {
     const workspace = host.contract(workspaceModule);
     // The only writer of `state/apps/`, shared by the tool and the RPCs.
-    const store = new SwiftAppStore(workspace);
+    const store = new SwiftAppStore(workspace, display);
     return {
       extension: (session) => createTronSwiftAppExtension({ store, artifacts: display().artifacts, cwd: () => session.cwd(), sessionId: () => session.sessionId(), internalFilesRoot: () => workspace.filesRoot() }),
       capabilities: [SWIFT_APPS_CAPABILITY],

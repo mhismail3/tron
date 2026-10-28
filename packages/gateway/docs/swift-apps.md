@@ -22,6 +22,14 @@ over the workspace contract. Directories are owner-only; app ids match
 | `backups/v1-<revision>[-<uuid>]/` | Explicit upgrade snapshots of v1 manifest, source and byte-identical SQLite |
 | `.offers/<reference-key>/` | Bounded pending source/configuration bound to its producing session/artifact |
 
+Pending offers are reconciled under the Apps mutex on first root access, catalog
+reads and before refusing a full offer store. DisplayOwner first proves canonical
+session membership, including live-only runtimes; offers without their exact
+producing artifact owner are then erased with their source/configuration. This
+reclaims deleted-session capacity without a second session catalog or timer.
+Unreadable metadata is not authority to delete it; installed apps and live offers
+are unaffected.
+
 `swift-app-format.ts` owns the manifest/offer values and their admission.
 `readSwiftAppManifestV1` is the named existing reader. V1 has
 `version,id,name,icon?,revision,sourceSha256,sourceBytes,updatedAt`.

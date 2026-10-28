@@ -27,6 +27,11 @@ not its sheet Task. A repeated presentation reuses unresolved work; a settled
 success cannot present Open after an authoritative review observes removal.
 Confirmed removal invalidates completed installation projections.
 
+Feed wire payloads remain bounded JSON in this L2 state owner; it does not import
+interpreter types. The L3 runner decodes them into engine feed values, whose
+admission runs before execution and runtime publication. Link ceilings use that
+same decoded snapshot, not a separate feed projection.
+
 The runner injects persistence/feed ports only for an installed session.
 Its committed JSON enters one session-owned drain task. Closing stops timers,
 not writes. Clean opens read the Gateway again; dirty/failed sessions stay owned.

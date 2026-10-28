@@ -92,6 +92,46 @@ function publish(f: Fixture, title: string): void {
 }
 
 describe("reviewed Swift app lifecycle through the Gateway", () => {
+  it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", async () => {
+    const f = await fixture();
+    await tool(f, { ...offerArgs(), appId: "kept-app", name: "Kept app" });
+    const keptReference = { ...f.displayReference! };
+    const keptReview = await rpc(f, "apps.review", keptReference);
+    await rpc(f, "apps.install", installParams(keptReview, "retirement-kept-install"));
+    const producer = await f.registry.create(join(f.root, "project"));
+    const model = f.faux.getModel(); await producer.setModel(model.provider, model.id);
+    let context: TranscriptContext | undefined;
+    f.faux.setResponses([
+      fauxAssistantMessage(Array.from({ length: 199 }, (_, index) =>
+        fauxToolCall("swift_app", offerArgs(), { id: `retained-offer-${index}` })), { stopReason: "toolUse" }),
+      (value: TranscriptContext) => { context = value; return fauxAssistantMessage("Done"); },
+    ]);
+    await producer.prompt("prepare the requested app offers");
+    await waitFor(() => context && !producer.isBusy ? true : undefined, "the capacity-bound offer turn");
+    const offered = (context!.messages as unknown as Array<Record<string, any>>)
+      .filter(row => row.role === "toolResult" && row.toolName === "swift_app");
+    expect(offered).toHaveLength(199);
+    for (const result of offered) expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+    const offersRoot = join(f.root, "tron/workspace/state/apps/.offers");
+    const before = await readdir(offersRoot);
+    expect(before).toHaveLength(200);
+    // Canonical deletion is the authority, even before the transport's artifact
+    // cleanup. Apps must reconcile via DisplayOwner rather than a second catalog.
+    await f.registry.delete(producer.id);
+    expect((await rpc(f, "apps.list")).apps).toMatchObject([{ id: "kept-app" }]);
+    const retained = await readdir(offersRoot);
+    expect(retained).toHaveLength(1);
+    for (const directory of before.filter(name => !retained.includes(name))) {
+      await expect(readFile(join(offersRoot, directory, "App.swift"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(join(offersRoot, directory, "offer.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    expect(await rpc(f, "apps.review", keptReference)).toMatchObject({ offer: { id: keptReview.offer.id } });
+    expect((await rpc(f, "apps.open", { appId: "kept-app" })).source).toBe(source);
+    await tool(f, offerArgs());
+    expect(await rpc(f, "apps.review", f.displayReference!)).toMatchObject({ offer: { appId: "builds" } });
+    expect(await readdir(offersRoot)).toHaveLength(2);
+    results.push("200 real offers: deleted producer source/config reclaimed, capacity reused, live offer and installed source preserved");
+  });
   it("binds each offer's config to its exact canonical session/artifact, not shared source bytes", async () => {
     const f = await fixture(); await tool(f, offerArgs());
     const referenceA = { ...f.displayReference! };

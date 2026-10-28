@@ -1,7 +1,6 @@
 import Foundation
 import CryptoKit
 import TronMobileCore
-import TronSwiftAppEngine
 
 struct InstalledSwiftAppManifest: Codable, Sendable {
     let version: Int
@@ -30,7 +29,9 @@ struct InstalledSwiftAppSnapshot: Codable, Sendable {
     let app: InstalledSwiftAppManifest
     let source: String
     let state: State
-    let feeds: [String: SwiftAppIOSBuildsFeed]?
+    // Transport data stays below the interpreter; the runner decodes and admits
+    // its declared feed before publishing an executable session.
+    let feeds: [String: JSONValue]?
 
     func admitted(appID: String) throws -> Self {
         guard [1, 2].contains(app.version), app.id == appID, state.appId == appID,
@@ -53,7 +54,11 @@ struct InstalledSwiftAppSnapshot: Codable, Sendable {
                   let feeds, Set(feeds.keys) == Set(declared) else {
                 throw InstalledSwiftAppFailure("The app's declared feed snapshot is invalid.")
             }
-            for feed in feeds.values { _ = try feed.admitted() }
+            for feed in feeds.values {
+                guard try JSONEncoder.gateway.encode(feed).count <= 256_000 else {
+                    throw InstalledSwiftAppFailure("The app's feed snapshot exceeds its bounds.")
+                }
+            }
         }
         var bytes = 0
         for entry in state.entries {

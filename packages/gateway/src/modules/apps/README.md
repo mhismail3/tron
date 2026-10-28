@@ -36,6 +36,10 @@ it does not publish, execute source, network or create a second index.
   read fresh declared feeds; source/state themselves come from one store mutex cut.
 - `ios-builds` reads only the configured Gateway home's publisher. Debug and
   Stable homes are distinct; no implicit live-data copy/fallback.
+- Pending offer retirement uses DisplayOwner's canonical session/artifact retention,
+  not a second catalog. First root access, catalog reads and a full-store offer
+  attempt reclaim unreachable offer source/configuration under the store mutex;
+  installed apps and live offers remain. Unprovable metadata is left unchanged.
 - No background feed polling or change broadcast.
 
 ## Invariants

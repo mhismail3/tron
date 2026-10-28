@@ -86,7 +86,9 @@ struct SwiftAppRunnerSheet: View {
                 session.accept(Dictionary(uniqueKeysWithValues: writes.map { ($0.key, $0.value) }))
             }
         }
-        let feeds = launch.installed?.snapshot.feeds
+        let feeds = try launch.installed?.snapshot.feeds?.mapValues { value in
+            try JSONDecoder.gateway.decode(SwiftAppIOSBuildsFeed.self, from: JSONEncoder.gateway.encode(value))
+        }
         let manifests = feeds.map { $0.values.flatMap { $0.builds.map(\.manifestURL) } }
         return try SwiftAppRuntime(source: launch.source,
             linkPolicy: SwiftAppLinkPolicy(host: launch.linkHost, manifestURLs: manifests), persistence: persistence, feeds: feeds)
