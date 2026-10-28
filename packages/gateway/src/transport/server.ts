@@ -72,7 +72,7 @@ const SLOW_PROMPT_WARNING_MS = 250;
  * method is ignored. Owner-module READ contracts describe their RPCs; this
  * transport set owns cancel-frame eligibility, separately from deadlines below.
  */
-const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
+export const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "session.open",
   "session.list",
   "session.transcript",
