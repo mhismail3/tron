@@ -5,6 +5,7 @@
   ],
   "dependsOn": [
     "gateway/host",
+    "gateway/session-catalog",
     "gateway/pi",
     "gateway/automations-contract"
   ]

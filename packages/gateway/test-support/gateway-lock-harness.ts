@@ -10,6 +10,10 @@ import {
   type AssistantMessage, type SimpleStreamOptions, type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
+import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
+import { KnowledgeStore } from "../src/knowledge/knowledge-store.js";
+import { workspaceModule } from "../src/workspace/workspace-module.js";
+import { registerProfileApprovals } from "../src/modules/home/home-profile-approvals.js";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
@@ -80,6 +84,8 @@ export interface LockGatewayOptions {
    * registry's session-removal observers and the sessions' `schedule` tool.
    */
   readonly automations?: boolean;
+  /** Real Knowledge and profile approval owners for authority-boundary journeys. */
+  readonly knowledge?: boolean;
   /** Wire Tron Home as gateway-main does: the Home workspace is a standalone trust
    * directory, the registry runs Home on the Gateway's model runtime, and the
    * service serves `home.*`. `memorySummarizer` answers Home memory's compactor
@@ -248,8 +254,12 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const notificationService = await options.notifications?.(tronHome);
   const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
   let homeTriggers: AutomationHomeTrigger | undefined;
+  let knowledge: KnowledgeService | undefined;
+  let profileSettings: { model: SettingsModel; changes: SettingsChangePath } | undefined;
   const registry = await createTestRegistry({
     triggerSources: () => homeTriggers ? [homeTriggers] : [],
+    knowledge: () => knowledge,
+    ...(options.knowledge ? { settings: () => profileSettings } : {}),
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
     ...(options.automations ? {
@@ -269,6 +279,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await registry.initialize();
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } }).sessionCatalog.whenPublished();
 
+  if (options.knowledge) knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
   // Production settings wiring (gateway-main.ts): every read reconciles outside changes.
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(root, "home", ".ssh")) }));
   const settingsRecord = new SettingsChangeRecord(tronHome);
@@ -280,6 +291,10 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       async (inspection) => { await registry.commitProjectReload(inspection.projectDir); },
       async (inspection) => { await registry.abortProjectReload(inspection.projectDir); }),
   });
+  if (knowledge) {
+    registerProfileApprovals(settingsChanges, () => knowledge);
+    profileSettings = { model: settingsModel, changes: settingsChanges };
+  }
   registry.setSettings(settingsModel, settingsChanges);
 
   // The relay boundary: what would be pushed to the maintainer's iPhone.
@@ -311,6 +326,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     modelRuntime, devices, sessions: registry, display: displayOwnerOf(registry), modules: registry.moduleHost, trust, settingsModel, settingsChanges, receipts,
     ...(options.home ? { home: homeOwnerOf(registry) } : {}),
     ...(automations ? { automations } : {}),
+    ...(knowledge ? { knowledge } : {}),
     notifications: notificationService
       ?? { enqueue: async (push: unknown) => { notifications.push(normalizeTraceValue(push, normalization)); } },
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
@@ -481,6 +497,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       await server?.close();
       await automations?.dispose();
       await registry.dispose().catch(() => {});
+      knowledge?.dispose();
       await receipts.dispose();
       terminals?.dispose();
       await outside.dispose();

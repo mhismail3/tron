@@ -8,6 +8,7 @@ export type InputDelivery = "user" | "wake";
 /** Gateway-owned trigger sources, never maintainer authority. */
 export type InputTriggerSource = "automation";
 export const INPUT_TRIGGER_MESSAGE = "tron.home-trigger.v1";
+export const INPUT_TRIGGER_RESUME_MESSAGE = "tron.home-trigger-resume.v1";
 export interface InputTriggerAttribution {
   kind: InputTriggerSource; sourceId: string; eventId: string; title: string;
 }
@@ -33,7 +34,12 @@ export interface InputMessage {
   display: boolean;
   details: { eventId: string; taskId?: string; trigger?: InputTriggerAttribution };
 }
-export interface InputTrigger { taskId?: string; message: InputMessage }
+export interface InputTrigger {
+  taskId?: string; message: InputMessage;
+  /** An already-written producer input: commit its receipt with the new wake binding,
+   * rather than asking Pi to append that producer message a second time. */
+  deliveryMessage?: InputMessage;
+}
 export interface InputEnvelopeContext {
   session: AgentSession;
   policy: RequestPolicy;

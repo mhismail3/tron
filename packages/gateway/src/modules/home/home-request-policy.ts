@@ -8,7 +8,7 @@ import {
   type SessionProjection,
 } from "../../kernel/pi/coding-agent.js";
 import { markAnthropicBlocks } from "../../episodic/cache-layout.js";
-import { INPUT_TRIGGER_MESSAGE } from "../../kernel/host/input-admission.js";
+import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/host/input-admission.js";
 import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/run/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
 
@@ -761,7 +761,7 @@ function homeSystemText(prompt: HomeSystemPrompt): string {
 
 /** A settled task result delivered into the canonical session (`home-wake-inbox.ts`). */
 function isTaskResult(message: AgentMessage): boolean {
-  return message.role === "custom" && [HOME_TASK_RESULT_MESSAGE, INPUT_TRIGGER_MESSAGE].includes((message as { customType: string }).customType);
+  return message.role === "custom" && [HOME_TASK_RESULT_MESSAGE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE].includes((message as { customType: string }).customType);
 }
 
 /** A memory view line is `start+span|text`, one per summary (`episodic-memory.ts`). */

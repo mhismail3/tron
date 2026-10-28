@@ -41,7 +41,7 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   blocked or cooling Home retains the individual firings. Eligible messages batch into one
   wake; cooldown is 60 seconds per automation, never global. Pausing a definition stops new
   scheduled firings and holds queued automatic messages until enabled; an explicit
-  manual Run Now remains eligible. Pending messages prevent deletion or retargeting;
+  manual Run Now remains eligible while paused; an uncertain blocked definition needs resolution. Pending messages prevent deletion or retargeting;
   explicit run cancellation addresses an exact unclaimed firing. Claimed delivery refuses
   cancellation until its owner settles. Stale Home routes never redirect to a new Home.
   Canonical `tron.home-trigger.v1` messages render **Automation · name** and have no
@@ -51,8 +51,13 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   unpersisted claims, even while Home is paused. Recovery repairs attribution only through
   the original route and chapter, or acknowledges existing durable proof, without appending
   the same firing again. A stale partial message stays with its original chapter and cannot
-  block admission on the current Home route.
-- **Dispatch.** Every run snapshots its target and concrete session ID before dispatch
+  block admission on the current Home route: it becomes `outcomeUnknown` and uses the existing
+  receipt-backed run-resolution decision. That decision preserves the original message and
+  route; it never silently declares delivery successful or replays it. Current-route partial
+  inputs join one recovery batch. A singleton uses a hidden native resume input, bound to
+  the existing canonical message before acknowledging it, rather than appending it twice.
+  The execution chapter and operation bind only at actual admission, not while queued.
+- **Dispatch.** Ordinary runs snapshot their target and concrete session ID before dispatch
   (workspace runs get a predetermined UUID created through
   `RuntimeRegistry`/`RuntimeSlot`). Existing-session leases, prompt admission and canonical
   recovery/marker reads use those native owners directly. Shared K5 `DelegationOperations`
@@ -112,6 +117,7 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
 
 | Signal | Level | Meaning |
 |---|---|---|
+| `stale-home-delivery` | run state | `automation.run.get`: `outcomeUnknown` preserves the original `executionSessionId` and operation; inspect that chapter before the explicit receipt-backed resolution. No redirect or replay. |
 | `automation.dispatch-failed` | warning | Dispatch, recovery or settlement failed (`automation-diagnostic.ts`): `referenceHash` (automation ID, or `scheduler` for a scan) and optional `operationHash` (run ID), 16 hex characters of SHA-256 |
 | `automation.recovery-step` | info | One part of recovery finished: `step` (`store`, `reconcile-targets`, `scheduler-recover`), `durationMs`; target count and slowest target kind in the message |
 | `automation.recovery-deferred` | warning | Initialization ran before the catalog's first cut, so targets are re-checked next start: `reason=catalog_not_ready` |

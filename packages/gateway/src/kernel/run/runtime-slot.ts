@@ -3862,6 +3862,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
         safeJson(makeContextDeliveryReceipt(candidate.id, "stored", inputMessageOrigin(trigger.message) ?? { source,
           owner: { id: trigger.taskId!, title: settings ? "Settings" : "Home task", source } })), candidate.id);
+      if (trigger.deliveryMessage) {
+        const input = this.sessionManager.getBranch().find(entry => entry.type === "custom_message"
+          && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.deliveryMessage!.details.eventId);
+        if (!input) throw new Error("canonical resumed Home input is unavailable");
+        await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
+          safeJson(makeContextDeliveryReceipt(input.id, "stored", inputMessageOrigin(trigger.deliveryMessage)!)), input.id);
+      }
       await this.dependencies.modules.policy("inputAdmission")?.().committed?.(this.id, operationId);
     });
   }
