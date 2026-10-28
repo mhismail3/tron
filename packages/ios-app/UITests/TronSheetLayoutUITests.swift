@@ -56,6 +56,36 @@ import XCTest
         XCTAssertTrue(actions.exists, "Actions remain in the sheet")
     }
 
+    /// At XXXL a shared row's title keeps the full text width and its Overridden
+    /// pill moves below it, instead of the title shrinking to a fragment.
+    func testSharedRowTitleKeepsFullWidthAtXXXL() {
+        let app = home(xxxl: true)
+        defer { app.terminate() }
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
+        XCTAssertTrue(row.exists, app.debugDescription)
+        let title = row.staticTexts["Worker models"].firstMatch
+        let pill = row.staticTexts["Overridden"].firstMatch
+        XCTAssertTrue(title.exists && pill.exists, row.debugDescription)
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(title.frame.width, window.width * 0.4, "The title is not squeezed beside its pill: \(title.frame)")
+        XCTAssertGreaterThanOrEqual(pill.frame.minY, title.frame.maxY - 1, "The pill stacks below the title: \(pill.frame) vs \(title.frame)")
+    }
+
+    func testCaptureXXXLHome() { for dark in [false, true] { let app = home(dark: dark, xxxl: true); shot("xxxl-home-\(dark ? "dark" : "light")"); app.swipeUp(); shot("xxxl-home-\(dark ? "dark" : "light")-scrolled"); app.terminate() } }
+    func testCaptureXXXLSessionSettings() { for dark in [false, true] { let app = session(dark: dark, xxxl: true); shot("xxxl-session-settings-\(dark ? "dark" : "light")"); app.terminate() } }
+    func testCaptureXXXLSessionMoreSettings() {
+        for dark in [false, true] {
+            let app = session(dark: dark, xxxl: true)
+            let more = app.buttons["settings-section-advanced-open"]
+            reveal(more, in: app)
+            more.tap()
+            expand(app, title: "More Settings")
+            shot("xxxl-more-settings-\(dark ? "dark" : "light")")
+            app.terminate()
+        }
+    }
+    func testCaptureXXXLManageSession() { for dark in [false, true] { let app = sessionApp(dark: dark, xxxl: true); shot("xxxl-manage-session-\(dark ? "dark" : "light")"); app.terminate() } }
+
     func testCaptureHomeLightNormal() { captureHome(dark: false, xxxl: false) }
     func testCaptureHomeDarkNormal() { captureHome(dark: true, xxxl: false) }
     func testCaptureHomeLightXXXL() { captureHome(dark: false, xxxl: true) }
@@ -106,8 +136,8 @@ import XCTest
         return app
     }
 
-    private func session(dark: Bool = false) -> XCUIApplication {
-        let app = sessionApp(dark: dark)
+    private func session(dark: Bool = false, xxxl: Bool = false) -> XCUIApplication {
+        let app = sessionApp(dark: dark, xxxl: xxxl)
         let link = app.buttons["chat-settings-link"]
         reveal(link, in: app)
         link.tap()
@@ -129,9 +159,10 @@ import XCTest
         return app
     }
 
-    private func sessionApp(dark: Bool, extra: [String] = []) -> XCUIApplication {
+    private func sessionApp(dark: Bool, xxxl: Bool = false, extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-configuration-fixture", "-settings-scope-review", "-fixture-appearance", dark ? "dark" : "light"] + extra
+        if xxxl { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
         app.launch()
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
