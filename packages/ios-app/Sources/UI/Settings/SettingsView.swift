@@ -515,22 +515,6 @@ struct SetupSettingsView: View {
     }
 }
 
-enum TronSheetDetentPolicy {
-    case fixed(Set<PresentationDetent>)
-    case contentFit
-}
-
-private struct TronSheetDetentPolicyModifier: ViewModifier {
-    let policy: TronSheetDetentPolicy
-
-    func body(content: Content) -> some View {
-        switch policy {
-        case .fixed(let detents): content.presentationDetents(detents)
-        case .contentFit: content.tronContentFitDetents()
-        }
-    }
-}
-
 struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let accessibilityLabel: String
     let identity: String
@@ -540,9 +524,8 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let label: Label
     let accent: Color?
     let surfaceAccent: Color?
-    /// Settings destinations open at medium and expand to large; a destination
-    /// that publishes `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
-    let detents: TronSheetDetentPolicy
+    /// Settings destinations reserve their opening size before data arrives.
+    let detents: Set<PresentationDetent>
     /// Runs once the destination sheet has actually been dismissed.
     let onDismiss: (() -> Void)?
     /// The link's call site, so two links sharing a label keep separate state.
@@ -558,7 +541,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         identity: String? = nil,
         accent: Color? = nil,
         surfaceAccent: Color? = nil,
-        detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
+        detents: Set<PresentationDetent> = [.medium, .large],
         onDismiss: (() -> Void)? = nil,
         fileID: String = #fileID,
         line: Int = #line,
@@ -608,7 +591,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
-                .modifier(TronSheetDetentPolicyModifier(policy: detents))
+                .presentationDetents(detents)
                 .presentationDragIndicator(.hidden)
             }
     }

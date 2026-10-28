@@ -216,7 +216,7 @@ private struct ProjectLifecycleSheetRow<Destination: View>: View {
     let content: TronListRowContent
     @ViewBuilder let destination: () -> Destination
     var body: some View {
-        TronProgressiveSheetLink(accessibilityLabel: content.title, detents: .fixed([.medium, .large]), destination: destination) {
+        TronProgressiveSheetLink(accessibilityLabel: content.title, detents: [.medium, .large], destination: destination) {
             TronListRow(content)
         }
     }

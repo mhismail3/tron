@@ -169,7 +169,7 @@ struct HostedSettingsThreeLayerPreview: View {
             VStack(alignment: .trailing, spacing: 6) {
                 Text("GPT-6.1 Sol").foregroundStyle(Color.tronTextSecondary)
                 TronProgressiveSheetLink(accessibilityLabel: "Set by Project settings",
-                                         identity: "preview.project-setting-info", detents: .fixed([.height(300), .medium])) {
+                                         identity: "preview.project-setting-info", detents: [.height(300), .medium]) {
                     projectInfo
                 } label: {
                     TronInlineActionLabel("Set by Project settings")

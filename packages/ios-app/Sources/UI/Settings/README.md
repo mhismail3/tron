@@ -88,6 +88,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   catalog header/Switch Model, Effort and an explicit model-qualified Context Window for inspection/Revert. They use the
   same writes, approvals and Revert path; changing the card changes no scope semantics. The model
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
+  Model selectors reserve the standard medium/large sheet size immediately; loading is inline,
+  without a whole-sheet reveal or content-height detent change.
   Home Settings embeds the former Models, Tools and More Settings sections directly under logical
   headers, keeping its introductory caption. Only that first level is flattened: shared row editors,
   pickers, source inspection and Revert stay unchanged. Worker settings render independently of

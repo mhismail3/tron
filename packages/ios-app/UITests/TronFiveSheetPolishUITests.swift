@@ -114,6 +114,114 @@ import Vision
         }
     }
 
+    func testModelsKeepOpeningHeightAndRemainInteractive() {
+        for mode in ["light", "dark"] {
+            let app = manage(mode, extra: ["-five-sheet-model-delay", "-five-sheet-model-catalog"])
+            defer { app.terminate() }
+            let switcher = app.buttons["manage-model-switch"]
+            reveal(switcher, app: app)
+            let start = Date()
+            switcher.tap()
+            let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Loading models…'")).firstMatch
+            XCTAssertTrue(loading.waitForExistence(timeout: 2), app.debugDescription)
+            // Principal titles also have zero-frame AX bookkeeping nodes;
+            // measure the presented sheet's real native toolbar control.
+            shot("models-loading-\(mode)")
+            XCTAssertTrue(loading.exists, "The opening sample precedes the delayed response")
+            guard let openingDone = visibleDone(app) else { XCTFail("No presented sheet toolbar"); return }
+            let openingTop = openingDone.frame.minY
+            let model = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Opus 5.5'")).firstMatch
+            XCTAssertTrue(model.waitForExistence(timeout: 20), app.debugDescription)
+            let elapsed = Date().timeIntervalSince(start) * 1000
+            // Query again after native geometry settles, without changing a detent.
+            XCTAssertTrue(app.buttons["Search models"].waitForExistence(timeout: 5))
+            shot("models-\(mode)")
+            guard let loadedDone = visibleDone(app) else { XCTFail("No loaded sheet toolbar"); return }
+            let loadedTop = loadedDone.frame.minY
+            XCTAssertEqual(openingTop, loadedTop, accuracy: 1, "Loading cannot replace the opening detent")
+            guard abs(openingTop - loadedTop) <= 1 else {
+                let metrics = XCTAttachment(string: "mode=\(mode), controlled_options_delay_ms=12000, tap_to_content_ms=\(elapsed), opening_toolbar_top=\(openingTop), loaded_toolbar_top=\(loadedTop), scroll=not_run_after_geometry_failure")
+                metrics.name = "models-measurements-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
+                continue
+            }
+            let scrollMS = scrollModelsAndSearch(app)
+            let metrics = XCTAttachment(string: "mode=\(mode), controlled_options_delay_ms=12000, tap_to_content_ms=\(elapsed), opening_toolbar_top=\(openingTop), loaded_toolbar_top=\(loadedTop), scroll_round_trip_ms=\(scrollMS)")
+            metrics.name = "models-measurements-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
+        }
+    }
+
+    func testModelsScrollMatchedWorkload() {
+        for mode in ["light", "dark"] {
+            let app = manage(mode, extra: ["-five-sheet-model-catalog"])
+            defer { app.terminate() }
+            tap(app, "manage-model-switch")
+            XCTAssertTrue(app.buttons["Search models"].waitForExistence(timeout: 8))
+            let elapsed = scrollModelsAndSearch(app)
+            let metrics = XCTAttachment(string: "mode=\(mode), catalog_models=42, slow_swipes_up=4, slow_swipes_down=4, scroll_round_trip_ms=\(elapsed), deep_row_reached=true, search_after_scroll=Haiku")
+            metrics.name = "models-scroll-matched-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
+        }
+    }
+
+    private func scrollModelsAndSearch(_ app: XCUIApplication) -> Double {
+        let start = Date()
+        let provider = app.buttons.matching(NSPredicate(format: "label CONTAINS '42 models'")).firstMatch
+        if provider.exists && provider.value as? String == "Collapsed" { provider.tap() }
+        for _ in 0..<4 { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Review Model'")).allElementsBoundByIndex.contains(where: \.isHittable), "Lazy provider rows remain reachable")
+        for _ in 0..<4 { app.swipeDown(velocity: .slow) }
+        let elapsed = Date().timeIntervalSince(start) * 1000
+        app.buttons["Search models"].tap()
+        let search = app.textFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
+        search.tap(); search.typeText("Haiku")
+        let haiku = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Haiku 5.5'")).firstMatch
+        XCTAssertTrue(haiku.waitForExistence(timeout: 5))
+        return elapsed
+    }
+
+    func testModelsOpenWithoutInjectedDelay() {
+        for mode in ["light", "dark"] {
+            let app = manage(mode, extra: ["-five-sheet-model-catalog"])
+            defer { app.terminate() }
+            var samples: [Double] = []
+            for _ in 0..<3 {
+                let switcher = app.buttons["manage-model-switch"]
+                reveal(switcher, app: app)
+                let start = Date()
+                switcher.tap()
+                let opus = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Opus 5.5'")).firstMatch
+                XCTAssertTrue(opus.waitForExistence(timeout: 8))
+                XCTAssertTrue(app.buttons["Search models"].waitForExistence(timeout: 5))
+                samples.append(Date().timeIntervalSince(start) * 1000)
+                guard let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable) else {
+                    XCTFail("Models has no usable Done"); return
+                }
+                done.tap()
+                XCTAssertTrue(switcher.waitForExistence(timeout: 5))
+            }
+            let metrics = XCTAttachment(string: "mode=\(mode), catalog_models=42, injected_delay_ms=0, tap_to_content_ms=\(samples)")
+            metrics.name = "models-no-delay-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
+        }
+    }
+
+    func testModelPickerRevertAndSelectionKeepHomeScope() {
+        let app = manage("light", extra: ["-settings-scope-review"])
+        defer { app.terminate() }
+        let card = e(app, "home-model-summary")
+        tap(app, "manage-model-switch")
+        let revert = app.buttons["settings-row-model.ref_role_chat_-picker-reset"]
+        XCTAssertTrue(revert.waitForExistence(timeout: 8), app.debugDescription)
+        revert.tap()
+        XCTAssertTrue(card.staticTexts["Claude Haiku 5.5"].waitForExistence(timeout: 8),
+                      "Picker Revert acknowledges the Home-scoped inherited value and closes")
+        tap(app, "manage-model-switch")
+        let opus = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Opus 5.5'")).firstMatch
+        XCTAssertTrue(opus.waitForExistence(timeout: 8))
+        opus.tap()
+        XCTAssertTrue(card.staticTexts["Claude Opus 5.5"].waitForExistence(timeout: 8),
+                      "Picking a model keeps the existing Home-scoped receipt path")
+    }
+
     private func assertDoneLabelIsPainted(_ app: XCUIApplication, done: XCUIElement, mode: String) {
         let screenshot = XCUIScreen.main.screenshot().image
         guard let image = screenshot.cgImage else { XCTFail("No actual toolbar screenshot"); return }
@@ -133,6 +241,10 @@ import Vision
             XCTAssertTrue(words.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "done" },
                           "AX can still say Done while the real label is truncated: \(words)")
         } catch { XCTFail("Could not inspect actual toolbar pixels: \(error)") }
+    }
+
+    private func visibleDone(_ app: XCUIApplication) -> XCUIElement? {
+        app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
     }
 
     private func launch(_ mode: String, fixture: String, extra: [String] = []) -> XCUIApplication {

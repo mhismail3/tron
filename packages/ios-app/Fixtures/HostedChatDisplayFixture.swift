@@ -750,9 +750,14 @@ private actor HostedHomeShellGateway {
             return (foreground.providers(.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
                 "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])])), nil)
         case "model.list":
+            let extra = ProcessInfo.processInfo.arguments.contains("-five-sheet-model-catalog")
+                ? (0..<40).map { anthropicModel("review-model-\($0)", name: "Review Model \($0)", window: 200_000) } : []
             return (.object(["models": .array([anthropicModel("claude-opus-5-5", name: "Claude Opus 5.5", window: 1_000_000),
-                anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
-        case "model.recent": return (.object(["models": .array([])]), nil)
+                anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("virtual", name: "Virtual model", virtual: true)] + extra), "nextCursor": .null]), nil)
+        case "model.recent":
+            let recent: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-five-sheet-model-catalog")
+                ? [.object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5"), "lastUsedAt": .string(isoAgo(60))])] : []
+            return (.object(["models": .array(recent)]), nil)
         case "settings.history":
             seedHomeProfileEntry()
             let entries: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-home-settings-history") ? [
@@ -924,6 +929,9 @@ private actor HostedHomeShellGateway {
             if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
             return (homeSettingsResolution(), nil)
         case "settings.options":
+            if ProcessInfo.processInfo.arguments.contains("-five-sheet-model-delay"), params["key"]?.stringValue == "model.ref[role=chat]" {
+                try await Task.sleep(for: .seconds(12))
+            }
             return (try homeSettingsOptions(params), nil)
         case "settings.approvals":
             return (.object(["requests": .array(approvals)]), nil)
@@ -1139,7 +1147,10 @@ private actor HostedHomeShellGateway {
             let options: [JSONValue] = [("claude-opus-5-5", "Claude Opus 5.5"), ("claude-haiku-5-5", "Claude Haiku 5.5")].map { id, name in
                 .object(["value": .object(["provider": .string("anthropic"), "id": .string(id)]), "label": .string(name)])
             }
-            return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options)])
+            let extra: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-five-sheet-model-catalog") ? (0..<40).map { index in
+                .object(["value": .object(["provider": .string("anthropic"), "id": .string("review-model-\(index)")]), "label": .string("Review Model \(index)")])
+            } : []
+            return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options + extra)])
         }
         throw GatewayFailure(code: "invalid_request", message: "Unknown editor options", retryable: false, details: nil)
     }
@@ -1269,7 +1280,8 @@ private actor HostedHomeShellGateway {
     private func anthropicModel(_ id: String, name: String, window: Int) -> JSONValue {
         .object(["provider": .string("anthropic"), "id": .string(id), "name": .string(name), "reasoning": .bool(true),
                  "input": .array([.string("text")]), "contextWindow": .number(Double(window)), "maxTokens": .number(64_000),
-                 "available": .bool(true), "virtual": .bool(false)])
+                 "available": .bool(true), "virtual": .bool(false),
+                 "releaseDate": ProcessInfo.processInfo.arguments.contains("-five-sheet-model-catalog") && !id.hasPrefix("review-model-") ? .string("2026-10-01") : .null])
     }
     /// The Home chat's own configuration, as a real session reports it: its model,
     /// thinking, context window usage, token totals and cost, and its window policy.
