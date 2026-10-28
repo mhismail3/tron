@@ -77,7 +77,10 @@ on the paired host to iOS. The host does not claim OS installation completed.
 
 The hosted-only `-tron-apps-install-design-fixture` composes an Install App
 review using shared settings/document components; it does not register an
-installation or contact a Gateway. `TronAppsInstallDesignUITests` capture the
+installation or contact a Gateway. Both Apps design fixture roots inherit the
+existing in-memory `AppModel` from `TronMobileApp`: the shared runner requires that
+environment for installed-app refresh, even when presenting ephemeral source.
+They do not construct the production scene owner. `TronAppsInstallDesignUITests` capture the
 unchanged historical Builds source beside the
 [Builds visual proposal](../../../tools/web/apps/builds-preview/README.md#installation-design-review-1162) in the actual
 interpreter (light/dark/default/XXXL). Both disable build installation. The
