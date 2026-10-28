@@ -482,7 +482,8 @@ def main() -> int:
                                         for index, part in enumerate(arguments.command))[:HOST_SLOT_COMMAND_CHARACTERS],
                     "lock_path": str(arguments.lock.resolve()),
                     "uid": os.getuid(),
-                    **({"worktree": arguments.worktree} if arguments.worktree is not None else {}),
+                    # The lane tools name no worktree; the checkout this script lives in is theirs.
+                    "worktree": arguments.worktree or str(Path(__file__).resolve().parent.parent),
                 })
                 del metadata["waiting_for_host_slot"]
                 metadata["host_slot"] = slot_index

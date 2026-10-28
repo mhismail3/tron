@@ -2118,7 +2118,7 @@ with open(state / 'events', 'a', encoding='utf-8') as events:
                                       stdout=subprocess.PIPE, text=True, timeout=30)
             self.assertEqual(listing.returncode, 0)
             self.assertEqual(len(re.findall(r"slot \d: free", listing.stdout)), self.cap - 2, listing.stdout)
-            self.assertEqual(len(re.findall(r"slot \d: PID \d+", listing.stdout)), 2, listing.stdout)
+            self.assertEqual(len(re.findall(r"slot \d: worktree \S+, PID \d+", listing.stdout)), 2, listing.stdout)
             self.assertEqual(len(self.host_slot_files(self.environment)), 2)
         finally:
             self.stop_host_slot_holders(holders)
