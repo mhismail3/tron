@@ -1,5 +1,5 @@
 import type { TaskWorkerControl, TaskControlRefusalReason } from "../../kernel/delegation/worker-contract.js";
-import type { InputEnvelope, InputDelivery, InputTrigger, InputMessage } from "../../kernel/host/input-admission.js";
+import type { InputEnvelope, InputDelivery, InputTrigger, InputMessage, InputTriggerInbox } from "../../kernel/host/input-admission.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import { settingsOutcomeRequestIds, type SettingsOutcomeMessage } from "../../kernel/settings/tool-contract.js";
 import type { ImageContent } from "../../kernel/pi/ai.js";
@@ -150,6 +150,8 @@ export interface HomeOwnerOptions {
   knowledge: () => KnowledgeService | undefined;
   /** The settings approvals owner: Home's settled requests wake it as their own turn (#1642). */
   settingsOutcomes?: () => Pick<SettingsChangePath, "takeOutcomes" | "onOutcome"> | undefined;
+  /** Each external source retains its durable outbox. */
+  triggerSources?: () => readonly InputTriggerInbox[];
 }
 
 /** Tron Home's neutral workspace. It is never part of a Project, so project
@@ -558,6 +560,12 @@ export class HomeOwner {
     return (await this.tasks.recoveryStatus()).available;
   }
 
+  triggerRoute() { return this.wakeRoute(); }
+  notifyTrigger(): void { this.requestWake(); }
+  async commitTriggerSources(sessionId: string, operationId: string): Promise<void> {
+    for (const source of this.options.triggerSources?.() ?? []) await source.committed(sessionId, operationId);
+  }
+
   async admitTaskResults(sessionId: string, operationId: string, delivery: InputDelivery, append: (message: InputMessage) => Promise<void>, envelope: () => Promise<InputEnvelope>): Promise<HomeWakeTrigger | InputTrigger | undefined> {
     const route = this.wakeRoute(sessionId);
     if (!route?.enabled) return undefined;
@@ -568,6 +576,11 @@ export class HomeOwner {
       trigger = await this.inbox.admit(route, operationId, delivery, append, envelope);
     }
     if (trigger) return trigger;
+    for (const source of this.options.triggerSources?.() ?? []) {
+      if (!source.pending(route, delivery)) continue;
+      const external = await source.admit(route, operationId, delivery, append, envelope);
+      if (external) return external;
+    }
     // Home owns settings admission for user turns and wakes alike. The SDK hook
     // must not select an uncontrolled second batch outside this envelope.
     const settings = this.options.settingsOutcomes?.();
@@ -589,10 +602,12 @@ export class HomeOwner {
   async releaseWakeTrigger(taskId: string, operationId: string, eventId: string): Promise<void> {
     // Selection did not mutate the approvals store; an unappended settings trigger remains untold.
     if (eventId.startsWith("settings-outcome:")) return;
+    for (const source of this.options.triggerSources?.() ?? []) await source.release(eventId, operationId);
     await this.inbox.releaseTrigger(taskId, operationId, eventId);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
+    await this.commitTriggerSources(sessionId, operationId);
     const route = this.wakeRoute(sessionId);
     if (route && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
     if (route) {
@@ -685,7 +700,9 @@ export class HomeOwner {
     const sessionId = homeSessionId(record);
     const wake = this.options.sessions.wakeHome(sessionId);
     const tasks = await this.inboxAvailable() && (await this.inbox.pendingTasks(record.homeId)).length > 0;
-    if (!tasks && !(await this.options.settingsOutcomes?.()?.takeOutcomes(record.chapters.map(chapter => chapter.sessionId)))) {
+    const route = this.wakeRoute();
+    const triggers = route && this.options.triggerSources?.().some(source => source.pending(route, "wake"));
+    if (!tasks && !triggers && !(await this.options.settingsOutcomes?.()?.takeOutcomes(record.chapters.map(chapter => chapter.sessionId)))) {
       this.lastWakeDelivered = false; return "done";
     }
     // An attempt runs after recovery, so the task namespace and the session catalog are settled here.

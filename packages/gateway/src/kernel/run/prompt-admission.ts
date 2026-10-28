@@ -198,7 +198,8 @@ operations: RunOperations<unknown>,
           // for it. A slow one is the first thing to name when Home stops answering (#906).
           const inboxAdmissionStarted = performance.now();
           try {
-          homeWakeTrigger = await operations.dependencies.modules.policy("inputAdmission")?.().admit(operations.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", message => deliverPromptInput(operations, session, message)
+          homeWakeTrigger = await operations.dependencies.modules.policy("inputAdmission")?.().admit(operations.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", message => deliverPromptInput(operations, session, message,
+            async () => { await operations.dependencies.modules.policy("inputAdmission")?.().committed?.(operations.id, operationId); })
           , () => operations.dependencies.modules.policy("inputAdmission")!().envelope({
             session, policy: operations.homeRequestPolicy!, text, images, signal: ownership?.signal,
             sessionFile: () => operations.sessionFile, entries: () => operations.canonicalEntryCount,
@@ -209,10 +210,10 @@ operations: RunOperations<unknown>,
         }
       }
 
-      if (ownership?.kind === "homeWake") ownership.onDelivered(homeWakeTrigger !== undefined);
+      if (ownership?.kind === "homeWake" && !homeWakeTrigger?.message.details.trigger) ownership.onDelivered(homeWakeTrigger !== undefined);
       ownership?.signal?.throwIfAborted();
       sdkRun = ownership?.kind === "homeWake"
-        ? operations.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve, ownership.inputCancellation, ownership.cancellationEpoch)
+        ? operations.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve, ownership.inputCancellation, ownership.cancellationEpoch, ownership.onDelivered)
         : withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
         images,
         ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),

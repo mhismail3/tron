@@ -129,7 +129,7 @@ import { ChildSessionAdmission } from "../delegation/child-session-admission.js"
 import { extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../../sessions/extension-activity-history.js";
 import { makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "./invocation-receipts.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputTrigger } from "../host/input-admission.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, inputMessageOrigin, type InputTrigger } from "../host/input-admission.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "../../sessions/extension-notification-receipts.js";
 import { userFacingPromptPreview, type ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
 import { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
@@ -448,7 +448,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   private explicitProfile: { sessionId: string; profile: SessionProfile } | undefined;
   public readonly canonicalAppendContext: CanonicalAppendContext;
   /** The Home wake whose trigger is being sent: its canonical binding and receipt follow its message_end. */
-  private homeWakeTrigger: { input: InputTrigger; operationId: string } | undefined;
+  private homeWakeTrigger: { input: InputTrigger; operationId: string; appended?: () => void; binding?: Promise<void> } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
@@ -1571,7 +1571,15 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           // and the digest expectation is recorded after every SDK context stage.
           outer: {
             transformContext: (transformContext, convertToLlm) => homeRequestPolicy.wrapTransformContext(transformContext, convertToLlm),
-            prepareRequest: (prepareRequest) => homeRequestPolicy.wrapPrepareRequest(created.session, prepareRequest),
+            prepareRequest: (prepareRequest) => {
+              const prepare = homeRequestPolicy.wrapPrepareRequest(created.session, prepareRequest);
+              return async (request, signal) => {
+                // Automation delivery owns its durable binding before the model
+                // can append a reply, not merely a best-effort event callback.
+                await this.homeWakeTrigger?.binding;
+                return (await prepare(request, signal)) ?? undefined;
+              };
+            },
           },
         } : {}),
         ...(taskWorker ? {
@@ -3115,7 +3123,16 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           // returns. A wake's trigger is persisted by its run, so its receipts must
           // exist before the run's reply can complete the operation.
           const trigger = this.homeWakeTrigger;
-          if (trigger && (event.message.details as { eventId?: unknown } | undefined)?.eventId === trigger.input.message.details.eventId) this.bindHomeWakeTrigger(trigger.input, trigger.operationId);
+          if (trigger && (event.message.details as { eventId?: unknown } | undefined)?.eventId === trigger.input.message.details.eventId) {
+            trigger.appended?.();
+            const binding = this.bindHomeWakeTrigger(trigger.input, trigger.operationId);
+            if (trigger.input.message.details.trigger) {
+              trigger.binding = binding;
+              // The request gate awaits the original promise. Observe an early
+              // rejection too, even if SDK cancellation prevents that request.
+              void binding.catch(error => this.emit("session.diagnostic", safeJson({ code: "home-trigger-binding-failed", message: error instanceof Error ? error.message : String(error) })));
+            }
+          }
         } else if (event.message.role === "custom") {
           // Custom callbacks are serial. Stored sends already exposed their
           // exact canonical ID at message_start; triggered sends append as soon
@@ -3777,18 +3794,21 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
   public startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
-    accept: (accepted: boolean) => void, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<void> {
-    accept(true);
-    return trigger ? this.sendHomeWake(session, operationId, trigger, inputCancellation, cancellationEpoch) : Promise.resolve();
+    accept: (accepted: boolean) => void, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number, delivered?: (value: boolean) => void): Promise<void> {
+    // New trigger sources acknowledge admission only after the SDK appends their message.
+    // Keep the existing task-result ordering unchanged for #1620.
+    const appended = trigger?.message.details.trigger ? () => { delivered?.(true); accept(true); } : undefined;
+    if (!appended) accept(true);
+    return trigger ? this.sendHomeWake(session, operationId, trigger, inputCancellation, cancellationEpoch, appended) : Promise.resolve();
   }
 
   /** Pi appends the trigger and runs the turn. Refuses to leave an inbox result admitted
    * when the trigger never reached the canonical session: it returns to pending first, so
    * a terminal receipt cannot settle it as outcome-unknown. */
-  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number): Promise<void> {
+  private async sendHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number, appended?: () => void): Promise<void> {
     const eventId = trigger.message.details.eventId;
     this.inboxAttributedMessages.add(eventId);
-    this.homeWakeTrigger = { input: trigger, operationId };
+    this.homeWakeTrigger = { input: trigger, operationId, ...(appended ? { appended } : {}) };
     try {
       // Stop may win while admission awaits receipt, settings or inbox I/O.
       // Keep this inside the existing trigger-release fence, before SDK append.
@@ -3798,7 +3818,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
     } catch (error) {
-      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.modules.policy("inputAdmission")?.().release(trigger.taskId, operationId, eventId);
+      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.modules.policy("inputAdmission")?.().release(trigger.taskId ?? trigger.message.details.trigger!.eventId, operationId, eventId);
       throw error;
     } finally {
       this.inboxAttributedMessages.delete(eventId);
@@ -3813,8 +3833,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   /** Persists the wake's canonical binding (its invocation to the trigger result) and the
    * trigger's delivery receipt. Both are lane work, so they precede the reply's terminal receipt. */
-  private bindHomeWakeTrigger(trigger: InputTrigger, operationId: string): void {
-    void this.lane.run(async () => {
+  private bindHomeWakeTrigger(trigger: InputTrigger, operationId: string): Promise<void> {
+    return this.lane.run(async () => {
       const candidate = this.sessionManager.getBranch().find(entry => entry.type === "custom_message"
         && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.message.details.eventId);
       if (!candidate) throw new Error("canonical Home wake trigger is unavailable");
@@ -3840,8 +3860,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       const settings = candidate.type === "custom_message" && candidate.customType === SETTINGS_OUTCOME_MESSAGE;
       const source = settings ? "gateway:settings" : "gateway:home-task";
       await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
-        safeJson(makeContextDeliveryReceipt(candidate.id, "stored", { source,
-          owner: { id: trigger.taskId, title: settings ? "Settings" : "Home task", source } })), candidate.id);
+        safeJson(makeContextDeliveryReceipt(candidate.id, "stored", inputMessageOrigin(trigger.message) ?? { source,
+          owner: { id: trigger.taskId!, title: settings ? "Settings" : "Home task", source } })), candidate.id);
+      await this.dependencies.modules.policy("inputAdmission")?.().committed?.(this.id, operationId);
     });
   }
 

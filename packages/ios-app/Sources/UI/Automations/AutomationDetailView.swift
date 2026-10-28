@@ -363,6 +363,7 @@ struct AutomationDetailView: View {
 
     private func targetLabel(_ target: GatewayAutomationTarget) -> String {
         switch target {
+        case .home: return "Home · attributed message"
         case let .existingSession(sessionID):
             return projectedTargetTitle(sessionID: sessionID) ?? archivedTargetTitle ?? "Session \(sessionID)"
         case let .workspace(cwd, _):

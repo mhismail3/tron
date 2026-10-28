@@ -49,7 +49,9 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     const operationId = run.operationId;
     if (!operationId) throw new AutomationAdmissionError("Automation operation identity is missing", false, "invalid-operation");
     const target = run.targetSnapshot;
+    if (target.kind === "home") throw new AutomationAdmissionError("Home messages use trigger-source admission", false, "invalid-dispatch");
     const sessionId = run.executionSessionId;
+    if (!sessionId) throw new AutomationAdmissionError("Automation execution session is missing", false, "invalid-dispatch");
     let work: GatewayWorkHandle;
     try {
       work = this.workRegistry.begin({
@@ -231,7 +233,8 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
   }
 
   async recover(record: AutomationRecord, run: AutomationRun): Promise<AutomationRecoveryResult> {
-    if (!run.operationId) return { state: "outcomeUnknown", reason: "operation-identity-missing" };
+    if (run.targetSnapshot.kind === "home") throw new GatewayError("conflict", "Home messages recover through their trigger source");
+    if (!run.operationId || !run.executionSessionId) return { state: "outcomeUnknown", reason: "operation-identity-missing" };
     const evidence = await this.sessions.ownedOperationRecoveryEvidence(run.executionSessionId, run.operationId);
     const invocation = evidence.invocation;
     const marker = evidence.marker;
@@ -271,7 +274,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     const terminalOperations = new Map<string, Set<string>>();
     for (const record of records) {
       for (const run of record.history) {
-        if (!run.operationId) continue;
+        if (run.targetSnapshot.kind === "home" || !run.operationId || !run.executionSessionId) continue;
         const operations = terminalOperations.get(run.executionSessionId) ?? new Set<string>();
         operations.add(run.operationId);
         terminalOperations.set(run.executionSessionId, operations);
@@ -281,6 +284,6 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
   }
 
   async acknowledgeRecovery(record: AutomationRecord, run: AutomationRun): Promise<void> {
-    if (run.operationId) await this.sessions.clearOwnedOperationMarker(run.executionSessionId, run.operationId);
+    if (run.targetSnapshot.kind !== "home" && run.operationId && run.executionSessionId) await this.sessions.clearOwnedOperationMarker(run.executionSessionId, run.operationId);
   }
 }

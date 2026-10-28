@@ -17,6 +17,7 @@ export function homeInputAdmission(owner: HomeOwner, diagnostic?: (record: HomeT
     admit: (sessionId, operationId, delivery, append, envelope) => owner.admitTaskResults(sessionId, operationId, delivery, append, envelope),
     release: (taskId, operationId, eventId) => owner.releaseWakeTrigger(taskId, operationId, eventId),
     settle: (sessionId, operationId) => owner.settleTaskResults(sessionId, operationId),
+    committed: (sessionId, operationId) => owner.commitTriggerSources(sessionId, operationId),
     envelope: homeInputEnvelope,
     finished: (startedAt, delivery) => {
       const durationMs = Math.round(performance.now() - startedAt);

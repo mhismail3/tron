@@ -89,6 +89,8 @@ function admitsAutomationTarget(value: unknown): value is AutomationTarget {
     return exactKeys(input, ["kind", "sessionId"])
       && typeof input.sessionId === "string" && sessionTargetId.test(input.sessionId);
   }
+  if (input.kind === "home") return exactKeys(input, ["kind", "homeId", "routeGeneration"])
+    && isAutomationId(input.homeId) && Number.isSafeInteger(input.routeGeneration) && (input.routeGeneration as number) >= 1;
   return input.kind === "workspace"
     && exactKeys(input, ["kind", "cwd", "sessionPolicy"])
     && bounded(input.cwd, 4_096) && isAbsolute(input.cwd) && !controlCharacter.test(input.cwd)
@@ -137,6 +139,7 @@ function terminalRunState(value: unknown): boolean {
 }
 
 function admitsTargetActionSchedule(target: AutomationTarget, action: AutomationAction, trigger: AutomationTrigger): boolean {
+  if (target.kind === "home") return action.kind === "sessionPrompt" && action.resourceInvocation === undefined;
   if (target.kind === "existingSession") return true;
   if (action.kind !== "sessionPrompt") return false;
   return trigger.kind !== "interval" || trigger.everySeconds >= MINIMUM_WORKSPACE_INTERVAL_SECONDS;
@@ -146,9 +149,9 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
   const input = record(value);
   if (!input) return false;
   const optional = ["manual", "reason", "claimedAt", "startedAt", "terminalAt", "retryAt", "hostEpoch", "claimId",
-    "operationId", "invocationId", "assistantCompletionId", "notificationAdmissionStatus", "error", "resolution"];
+    "operationId", "invocationId", "assistantCompletionId", "notificationAdmissionStatus", "error", "resolution", "homeName", "homeDelivery", "executionSessionId"];
   const required = ["runId", "occurrenceId", "automationRevision", "scheduledFor", "triggerSnapshot",
-    "actionSnapshot", "targetSnapshot", "executionSessionId", "state", "createdAt", "preAdmissionAttemptCount"];
+    "actionSnapshot", "targetSnapshot", "state", "createdAt", "preAdmissionAttemptCount"];
   const keys = Object.keys(input);
   if (keys.length < required.length || !keys.every((key) => required.includes(key) || optional.includes(key))
     || !required.every((key) => keys.includes(key))) return false;
@@ -158,7 +161,8 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
     || !Number.isSafeInteger(input.automationRevision) || (input.automationRevision as number) < 1
     || !timestamp(input.scheduledFor) || !timestamp(input.createdAt)
     || !admitsAutomationTrigger(input.triggerSnapshot) || !admitsAutomationAction(input.actionSnapshot)
-    || !admitsAutomationTarget(input.targetSnapshot) || !bounded(input.executionSessionId, 200)
+    || !admitsAutomationTarget(input.targetSnapshot) || ((input.targetSnapshot as AutomationTarget).kind !== "home" && !bounded(input.executionSessionId, 200))
+    || (input.executionSessionId !== undefined && !bounded(input.executionSessionId, 200))
     || !admitsTargetActionSchedule(
       input.targetSnapshot as AutomationTarget,
       input.actionSnapshot as AutomationAction,
@@ -172,9 +176,15 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
   for (const key of ["claimedAt", "startedAt", "terminalAt", "retryAt"] as const) {
     if (input[key] !== undefined && !timestamp(input[key])) return false;
   }
+  if (input.homeName !== undefined && !bounded(input.homeName, 256)) return false;
+  if ((input.targetSnapshot as AutomationTarget).kind === "home" && !bounded(input.homeName, 256)) return false;
+  if (input.homeDelivery !== undefined && ((input.targetSnapshot as AutomationTarget).kind !== "home"
+    || !["user", "wake"].includes(input.homeDelivery as string) || !bounded(input.executionSessionId, 200)
+    || !bounded(input.operationId, 128))) return false;
   if (input.hostEpoch !== undefined && !bounded(input.hostEpoch, 256)) return false;
   if (input.claimId !== undefined && (!bounded(input.claimId, 64) || !isAutomationId(input.claimId))) return false;
-  if (input.operationId !== undefined && (!bounded(input.operationId, 128) || runIdFromAutomationOperationId(input.operationId) === undefined)) return false;
+  if (input.operationId !== undefined && (!bounded(input.operationId, 128)
+    || ((input.targetSnapshot as AutomationTarget).kind !== "home" && runIdFromAutomationOperationId(input.operationId) === undefined))) return false;
   if (input.invocationId !== undefined && !bounded(input.invocationId, 256)) return false;
   if (input.assistantCompletionId !== undefined && !bounded(input.assistantCompletionId, 256)) return false;
   if (input.notificationAdmissionStatus !== undefined
@@ -196,7 +206,7 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
 export function admitsAutomationRecord(value: unknown): value is AutomationRecord {
   const input = record(value);
   if (!input) return false;
-  const optional = ["description", "nextOccurrenceAt", "currentRun", "queuedLatestOccurrence", "lastRun", "blockedReason"];
+  const optional = ["description", "nextOccurrenceAt", "currentRun", "queuedLatestOccurrence", "lastRun", "blockedReason", "pendingHomeRuns", "homeWakeAt", "homeWakeAfter"];
   const required = ["schemaVersion", "id", "revision", "stateRevision", "name", "activation", "createdAt", "updatedAt", "provenance",
     "target", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action",
     "consecutiveFailureCount", "history"];
@@ -224,6 +234,10 @@ export function admitsAutomationRecord(value: unknown): value is AutomationRecor
     && (input.nextOccurrenceAt === undefined || timestamp(input.nextOccurrenceAt))
     && (input.currentRun === undefined || (admitsAutomationRun(input.currentRun) && !terminalRunState(input.currentRun.state)))
     && (input.queuedLatestOccurrence === undefined || timestamp(input.queuedLatestOccurrence))
+    && (input.pendingHomeRuns === undefined || (input.target as AutomationTarget).kind === "home" && Array.isArray(input.pendingHomeRuns)
+      && input.pendingHomeRuns.every(run => admitsAutomationRun(run) && !terminalRunState(run.state)))
+    && (input.homeWakeAt === undefined || timestamp(input.homeWakeAt))
+    && (input.homeWakeAfter === undefined || timestamp(input.homeWakeAfter))
     && (input.lastRun === undefined || (admitsAutomationRun(input.lastRun) && terminalRunState(input.lastRun.state)))
     && Number.isSafeInteger(input.consecutiveFailureCount) && (input.consecutiveFailureCount as number) >= 0
     && (input.blockedReason === undefined || bounded(input.blockedReason, 256))

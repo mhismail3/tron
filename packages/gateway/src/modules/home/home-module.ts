@@ -29,6 +29,7 @@ import { dispatchWithWorkerChoice, homeTaskPolicy, homeTaskModelQueues, type Hom
 import type { TrustService } from "../../kernel/resources/trust-service.js";
 import type { HomeTaskDiagnostic, HomeTaskDispatchRequest, HomeTaskHandle } from "./home-task-dispatcher.js";
 import { readHomeSessionEntry, type HomeSessionReader } from "./home-session-read.js";
+import type { HomeOwnerOptions } from "./home-owner.js";
 import type { HomeMemoryDiagnostic } from "./home-memory.js";
 import type { HomeRequestRecord } from "./home-request-policy.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
@@ -61,6 +62,7 @@ export interface HomeModuleServices {
 
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
 export interface HomeComposition {
+  triggerSources?: HomeOwnerOptions["triggerSources"];
   runtime: HomeSessionProfileServices["runtime"];
   settings(): Readonly<{ model: SettingsModel; changes: SettingsChangePath }> | undefined;
   knowledge(): KnowledgeService | undefined;
@@ -97,6 +99,7 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
     owner = new HomeOwner({
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
       settingsOutcomes: () => composition.settings()?.changes,
+      ...(composition.triggerSources ? { triggerSources: composition.triggerSources } : {}),
       sessions: {
         wakeHome: sessionId => {
           const captured = sessions.liveRuntime(sessionId);

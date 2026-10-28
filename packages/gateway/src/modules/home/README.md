@@ -129,6 +129,23 @@ Composition supplies the same late K6 settings, Knowledge and raw model owners.
   `results`, `input`. For caching, system prompt and tools are byte-stable, the view only
   grows between rebalances, and Home requests ask for `long` retention.
 
+### Typed trigger inputs
+
+`kernel/host/input-admission.ts` defines the source attribution, route and inbox ports.
+Each producer owns its durable outbox; Home owns eligibility, bounded input admission
+and one single-flight wake, sharing busy, disabled, paused and blocked gates with task
+results. Explicit memory resume reconsiders waiting sources. A maintainer activation
+may also consume pending context without granting it maintainer authority.
+
+Automations bind Home identity and route generation, snapshot each firing and supply
+`tron.home-trigger.v1` custom messages. Producer identity and event identity are separate;
+canonical context attribution identifies the automation, while each firing keeps its
+own event ID. The visible label is **Automation · name**, never a user-message row.
+The Run owner writes canonical binding and context attribution before the automation
+request gate proceeds; only a durable canonical proof retires its source outbox.
+Automations enforce their own per-definition cooldown; task-result timing is unchanged.
+See [Automations](../../automations/README.md) for queue, cancellation and settlement.
+
 ### Memory
 
 HomeOwner owns one `EpisodicMemory` ([gateway/episodic](../../episodic/README.md))

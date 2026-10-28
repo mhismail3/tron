@@ -1,5 +1,6 @@
 import type { ResourceInvocation } from "../protocol/types.js";
 
+export const AUTOMATION_HOME_COOLDOWN_MS = 60_000;
 export const AUTOMATIONS_CAPABILITY = "automations.v2";
 export const AUTOMATIONS_TIMELINE_CAPABILITY = "automations.timeline.v1";
 
@@ -14,7 +15,8 @@ export type AutomationTrigger =
 
 export type AutomationTarget =
   | { kind: "existingSession"; sessionId: string }
-  | { kind: "workspace"; cwd: string; sessionPolicy: "newPerRun" };
+  | { kind: "workspace"; cwd: string; sessionPolicy: "newPerRun" }
+  | { kind: "home"; homeId: string; routeGeneration: number };
 
 export type AutomationAction =
   | { kind: "sessionPrompt"; text: string; resourceInvocation?: ResourceInvocation }
@@ -51,7 +53,7 @@ export interface AutomationRun {
   triggerSnapshot: AutomationTrigger;
   actionSnapshot: AutomationAction;
   targetSnapshot: AutomationTarget;
-  executionSessionId: string;
+  executionSessionId?: string;
   state: AutomationRunState;
   createdAt: string;
   reason?: string;
@@ -60,6 +62,9 @@ export interface AutomationRun {
   terminalAt?: string;
   retryAt?: string;
   preAdmissionAttemptCount: number;
+  /** Immutable Home delivery identity; absent for ordinary session runs. */
+  homeName?: string;
+  homeDelivery?: "user" | "wake";
   hostEpoch?: string;
   claimId?: string;
   operationId?: string;
@@ -92,6 +97,10 @@ export interface AutomationRecord {
   nextOccurrenceAt?: string;
   currentRun?: AutomationRun;
   queuedLatestOccurrence?: string;
+  /** Home messages retain every firing, independently of overlap policy. */
+  pendingHomeRuns?: AutomationRun[];
+  homeWakeAt?: string;
+  homeWakeAfter?: string;
   lastRun?: AutomationRun;
   consecutiveFailureCount: number;
   blockedReason?: string;

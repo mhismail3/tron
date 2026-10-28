@@ -1,6 +1,8 @@
+import type { InputTriggerRoute } from "../kernel/host/input-admission.js";
 import { GatewayError } from "../errors.js";
 import { admitAutomationCreateInput, admitAutomationUpdateInput, admitsAutomationTrigger } from "./automation-contract.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
+import { AutomationHomeTrigger } from "./automation-home-trigger.js";
 import { AutomationStore } from "./automation-store.js";
 import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationRunSummary, AutomationSummary, AutomationTarget, AutomationTrigger } from "./types.js";
 import { nextAutomationOccurrence } from "./schedule.js";
@@ -16,6 +18,7 @@ interface AutomationTargetValidator {
   requirePersistedUserSession(sessionId: string): Promise<void>;
   requireResolvedAutomationWorkspace(cwd: string): Promise<string>;
   workspaceForSession(sessionId: string): Promise<string>;
+  sessionFile(sessionId: string): Promise<string | undefined>;
 }
 
 export interface AutomationPage {
@@ -30,17 +33,23 @@ type AutomationRecoveryStep = (
 ) => void;
 
 export class AutomationService {
+  readonly homeTrigger: AutomationHomeTrigger | undefined;
+
   constructor(
     readonly store: AutomationStore,
     readonly scheduler: AutomationScheduler,
     private readonly targets: AutomationTargetValidator,
     private readonly timelinePages = new AutomationTimelinePaginationStore(),
     private readonly onRecoveryStep: AutomationRecoveryStep = () => {},
-  ) {}
+    private readonly homeTarget?: () => InputTriggerRoute | undefined,
+  ) {
+    this.homeTrigger = homeTarget ? new AutomationHomeTrigger(store, id => targets.sessionFile(id)) : undefined;
+  }
 
   async initialize(): Promise<void> {
     let startedAt = performance.now();
     await this.store.initialize();
+    await this.homeTrigger?.initialize();
     this.onRecoveryStep("store", performance.now() - startedAt);
     startedAt = performance.now();
     const reconciliation = await this.reconcileTargets();
@@ -67,10 +76,17 @@ export class AutomationService {
 
   get(id: string): AutomationRecord { return this.store.get(id); }
 
+  homeRoute(): InputTriggerRoute {
+    const route = this.homeTarget?.();
+    if (!route) throw new GatewayError("conflict", "Designate Home before creating a Home message automation");
+    return route;
+  }
+
   runList(id: string): AutomationRunSummary[] {
     const record = this.store.get(id);
     return [
       ...(record.currentRun ? [record.currentRun] : []),
+      ...record.pendingHomeRuns ?? [],
       ...record.history.slice().reverse(),
     ].map((run) => ({
       runId: run.runId,
@@ -122,7 +138,7 @@ export class AutomationService {
 
   runGet(id: string, runId: string): AutomationRun {
     const record = this.store.get(id);
-    const run = [record.currentRun, ...record.history].find((candidate) => candidate?.runId === runId);
+    const run = [record.currentRun, ...record.pendingHomeRuns ?? [], ...record.history].find((candidate) => candidate?.runId === runId);
     if (!run) throw new GatewayError("not_found", "Automation run was not found");
     return structuredClone(run);
   }
@@ -201,6 +217,7 @@ export class AutomationService {
   }
 
   private async canonicalizeTarget(target: AutomationTarget): Promise<AutomationTarget> {
+    if (target.kind === "home") { await this.validateTarget(target); return target; }
     if (target.kind === "existingSession") {
       await this.targets.requirePersistedUserSession(target.sessionId);
       return target;
@@ -209,7 +226,10 @@ export class AutomationService {
   }
 
   private async validateTarget(target: AutomationTarget): Promise<void> {
-    if (target.kind === "existingSession") await this.targets.requirePersistedUserSession(target.sessionId);
+    if (target.kind === "home") {
+      const route = this.homeTarget?.();
+      if (!route || target.homeId !== route.homeId || target.routeGeneration !== route.routeGeneration) throw new GatewayError("conflict", "Home automation target is unavailable or stale");
+    } else if (target.kind === "existingSession") await this.targets.requirePersistedUserSession(target.sessionId);
     else await this.targets.requireResolvedAutomationWorkspace(target.cwd);
   }
 
@@ -221,6 +241,7 @@ export class AutomationService {
     let slowestTargetKind: "workspace" | "session" | undefined;
     for (const record of this.store.snapshot()) {
       if (record.activation === "completed") continue;
+      if (record.target.kind === "home") continue; // Keep a stale/disabled Home outbox until explicit maintainer disposition.
       const targetStartedAt = performance.now();
       recordsChecked += 1;
       if (record.target.kind === "workspace") {

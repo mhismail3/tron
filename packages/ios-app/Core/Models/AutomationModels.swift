@@ -99,6 +99,7 @@ package enum GatewayAutomationTarget: Codable, Hashable, Sendable {
 
     case existingSession(sessionID: String)
     case workspace(cwd: String, sessionPolicy: SessionPolicy)
+    case home(homeID: String, routeGeneration: Int)
 
     var sessionID: String? {
         if case let .existingSession(sessionID) = self { return sessionID }
@@ -115,10 +116,12 @@ package enum GatewayAutomationTarget: Codable, Hashable, Sendable {
         return nil
     }
 
+    package var isHome: Bool { if case .home = self { return true }; return false }
     package var isWorkspace: Bool { if case .workspace = self { return true }; return false }
 
     package var displayName: String {
         switch self {
+        case .home: return "Home"
         case let .existingSession(sessionID): return "Session \(sessionID)"
         case let .workspace(cwd, _):
             let name = URL(fileURLWithPath: cwd).lastPathComponent
@@ -136,6 +139,12 @@ package enum GatewayAutomationTarget: Codable, Hashable, Sendable {
             let sessionID = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "sessionId")!)
             guard AutomationAdmissionPolicy.validSessionID(sessionID) else { throw Self.invalid() }
             self = .existingSession(sessionID: sessionID)
+        case "home":
+            guard keys == ["kind", "homeId", "routeGeneration"] else { throw Self.invalid() }
+            let homeID = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "homeId")!)
+            let generation = try values.decode(Int.self, forKey: AutomationCodingKey(stringValue: "routeGeneration")!)
+            guard AutomationAdmissionPolicy.validGeneratedSessionID(homeID), generation >= 1, generation <= 9_007_199_254_740_991 else { throw Self.invalid() }
+            self = .home(homeID: homeID, routeGeneration: generation)
         case "workspace":
             guard keys == ["kind", "cwd", "sessionPolicy"] else { throw Self.invalid() }
             let cwd = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "cwd")!)
@@ -153,6 +162,10 @@ package enum GatewayAutomationTarget: Codable, Hashable, Sendable {
         case let .existingSession(sessionID):
             try values.encode("existingSession", forKey: .kind)
             try values.encode(sessionID, forKey: .sessionId)
+        case let .home(homeID, generation):
+            try values.encode("home", forKey: .kind)
+            try values.encode(homeID, forKey: .homeId)
+            try values.encode(generation, forKey: .routeGeneration)
         case let .workspace(cwd, policy):
             try values.encode("workspace", forKey: .kind)
             try values.encode(cwd, forKey: .cwd)
@@ -164,7 +177,7 @@ package enum GatewayAutomationTarget: Codable, Hashable, Sendable {
         DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Invalid Automation target"))
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, sessionId, cwd, sessionPolicy }
+    private enum CodingKeys: String, CodingKey { case kind, sessionId, cwd, sessionPolicy, homeId, routeGeneration }
 }
 
 package struct GatewayAutomationRunSummary: Codable, Hashable, Identifiable, Sendable {
@@ -310,7 +323,7 @@ package struct GatewayAutomationRun: Codable, Hashable, Identifiable, Sendable {
     package let assistantCompletionId: String?
     package let notificationAdmissionStatus: String?
     package let targetSnapshot: GatewayAutomationTarget
-    package let executionSessionId: String
+    package let executionSessionId: String?
     package let error: GatewayAutomationError?
     package let resolution: GatewayAutomationResolution?
     package var id: String { runId }
@@ -455,6 +468,7 @@ package enum AutomationAdmissionPolicy {
 
     package static func admits(_ target: GatewayAutomationTarget) -> Bool {
         switch target {
+        case let .home(homeID, generation): return validGeneratedSessionID(homeID) && generation >= 1 && generation <= 9_007_199_254_740_991
         case let .existingSession(sessionID): return validSessionID(sessionID)
         case let .workspace(cwd, policy): return validWorkspacePath(cwd) && policy == .newPerRun
         }
@@ -462,7 +476,7 @@ package enum AutomationAdmissionPolicy {
 
     package static func admitsActionTarget(actionKind: AutomationActionKind?, target: GatewayAutomationTarget) -> Bool {
         guard let actionKind else { return false }
-        return actionKind == .sessionPrompt || !target.isWorkspace
+        return actionKind == .sessionPrompt || (!target.isWorkspace && !target.isHome)
     }
 
     package static func admits(_ action: GatewayAutomationAction) -> Bool {
@@ -515,9 +529,12 @@ package enum AutomationAdmissionPolicy {
             && admitsActionTarget(actionKind: run.actionSnapshot.typedKind, target: run.targetSnapshot)
             && run.preAdmissionAttemptCount >= 0
             && admits(run.targetSnapshot)
-            && validSessionID(run.executionSessionId)
-            && (run.targetSnapshot.sessionID == run.executionSessionId
-                || run.targetSnapshot.isWorkspace && validGeneratedSessionID(run.executionSessionId))
+            && (run.targetSnapshot.isHome
+                ? (run.executionSessionId.map(validGeneratedSessionID) ?? true)
+                : run.executionSessionId.map { sessionID in
+                    validSessionID(sessionID) && (run.targetSnapshot.sessionID == sessionID
+                        || run.targetSnapshot.isWorkspace && validGeneratedSessionID(sessionID))
+                } == true)
             && (run.claimedAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
             && (run.startedAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
             && (run.terminalAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)

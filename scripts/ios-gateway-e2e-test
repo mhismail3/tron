@@ -77,6 +77,8 @@ ui_owned_journeys=(
   'TronMobileUITests/RealGatewayPairAndChatUITests/testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageLight'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRouteDark'
   "TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets"
@@ -996,6 +998,9 @@ run_ui_journey() {
   # macOS Bash 3 treats an empty array as unset under nounset.
   start_fresh_fixture ${runtime_limits[@]+"${runtime_limits[@]}"}
   load_state
+  if [[ "$journey" == *testHomeAutomationEditorAndAttributedMessageLight || "$journey" == *testHomeAutomationEditorAndAttributedMessageDark ]]; then
+    prepare_home_automation_fixture
+  fi
   if [[ "$journey" == *testProjectLifecycleBusyArchiveUsesCanonicalReason ]]; then
     # A real linked worktree exercises the lifecycle owner's canonical busy reason.
     local busy="$TRON_E2E_WORKSPACE/busy-project"

@@ -10,10 +10,10 @@ definition, retry or ledger. iOS and the first-party `schedule` tool are clients
 ## Owns
 
 `automation-service.ts`, `automation-scheduler.ts`, `automation-executor.ts`,
-`automation-store.ts`, `automation-timeline.ts`, `schedule.ts`,
+`automation-store.ts`, `automation-home-trigger.ts`, `automation-timeline.ts`, `schedule.ts`,
 `schedule-module.ts` (optional-owner descriptor) and `tron-schedule-extension.ts`. Store: `gateway/automations/`, strict schema-version-2
-owner-only documents, each with one definition, at most one nonterminal run and 64
-retained terminal runs. Older shapes are not admitted, migrated or projected. Writes
+owner-only documents, each with one definition, one ordinary nonterminal run or a
+Home message outbox (`currentRun` plus `pendingHomeRuns`), and 64 retained terminal runs. Older shapes are not admitted, migrated or projected. Writes
 sync the file and its directory before acknowledgement.
 
 ## Contract
@@ -33,7 +33,25 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   Gateway-canonical workspace with `newPerRun` sessions (prompts only, intervals of at
   least 24 hours, since generated sessions are never auto-deleted). Workspaces must
   exist and have a resolved trust decision; Automations create no directories,
-  worktrees or branches.
+  worktrees or branches. A Home target binds `homeId` and `routeGeneration`; it accepts
+  plain prompt text only, with no resource invocation or notification action.
+- **Home messages.** Each firing snapshots its name, message and route in the automation
+  ledger. Home owns the typed trigger admission and its existing single-flight wake;
+  Automations own the outbox and its durable acknowledgement. Busy, disabled, memory-paused,
+  blocked or cooling Home retains the individual firings. Eligible messages batch into one
+  wake; cooldown is 60 seconds per automation, never global. Pausing a definition stops new
+  scheduled firings and holds queued automatic messages until enabled; an explicit
+  manual Run Now remains eligible. Pending messages prevent deletion or retargeting;
+  explicit run cancellation addresses an exact unclaimed firing. Claimed delivery refuses
+  cancellation until its owner settles. Stale Home routes never redirect to a new Home.
+  Canonical `tron.home-trigger.v1` messages render **Automation · name** and have no
+  maintainer authority. A run succeeds after its canonical message and attribution are
+  durable, not after Home finishes replying. The service recovers producer claims before
+  exposing its trigger source: absent canonical messages release the whole operation's
+  unpersisted claims, even while Home is paused. Recovery repairs attribution only through
+  the original route and chapter, or acknowledges existing durable proof, without appending
+  the same firing again. A stale partial message stays with its original chapter and cannot
+  block admission on the current Home route.
 - **Dispatch.** Every run snapshots its target and concrete session ID before dispatch
   (workspace runs get a predetermined UUID created through
   `RuntimeRegistry`/`RuntimeSlot`). Existing-session leases, prompt admission and canonical
@@ -65,8 +83,8 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   expires after a minute. More than twelve occurrences of one automation in a day
   become one `series` item, counted analytically across DST. Overflow is an explicit
   retryable error, never dropped occurrences.
-- **`schedule` tool** targets its own persisted session or a new session in its
-  workspace, dedupes by tool-call identity, and refuses mutations from an
+- **`schedule` tool** targets its own persisted session, a new session in its
+  workspace, or `home` for an attributed Home message, dedupes by tool-call identity, and refuses mutations from an
   automation-originated turn. Paired credentials are machine-administrator
   credentials, so any paired client may manage any automation.
   Composition supplies the canonical receipt owner's existing mutation operation;
@@ -87,7 +105,8 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
 ## Entry points
 
 `AutomationService` (RPCs), `AutomationScheduler` (timers, catch-up),
-`GatewayAutomationExecutor` (dispatch), `tron-schedule-extension.ts` (the tool).
+`GatewayAutomationExecutor` (ordinary dispatch), `AutomationHomeTrigger` (Home outbox),
+`tron-schedule-extension.ts` (the tool).
 
 ## Signals
 
@@ -101,7 +120,7 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
 
 ```bash
 scripts/tron verify --module gateway/automations
-scripts/tron test gateway src/automations/automation-scheduler.integration.test.ts
+scripts/tron test gateway src/automations/automation-scheduler.integration.test.ts src/automations/automation-home.e2e.test.ts
 ```
 
 `automation-scheduler.integration.test.ts` uses the real executor, SDK and canonical
