@@ -234,10 +234,16 @@ struct SwiftAppDisplayRunner: View {
     var body: some View {
         if let launch {
             SwiftAppRunnerSheet(launch: launch)
-        } else if let review {
-            SwiftAppInstallReviewSheet(installation: review.installation, source: review.source,
-                artifactName: route.display.artifact?.name ?? "App.swift", profileID: review.profileID, openProblem: problem) { app in open(app, review: review) }
+        } else if route.installsSwiftApp {
+            SwiftAppInstallReviewSheet(installation: review?.installation, source: review?.source ?? "",
+                artifactName: route.display.artifact?.name ?? "App.swift", profileID: review?.profileID ?? "", openProblem: problem) { app in
+                    if let review { open(app, review: review) }
+                }
                 .onDisappear { openRequest = UUID() }
+                .task(id: PresentationActivityTaskID(
+                    source: mediaIdentity,
+                    presentationActive: presentationActivity.allowsPresentationPublication
+                )) { await load() }
         } else {
             TronDocumentSheet(title: route.display.title) {
                 if let problem {
@@ -263,7 +269,7 @@ struct SwiftAppDisplayRunner: View {
     }
 
     private func load() async {
-        guard presentationActivity.allowsPresentationPublication, launch == nil, problem == nil else { return }
+        guard presentationActivity.allowsPresentationPublication, launch == nil, review == nil, problem == nil else { return }
         guard let artifact = route.display.artifact, let identity = mediaIdentity else {
             problem = route.display.fallbackText
             return

@@ -96,6 +96,9 @@ struct HostedReadonlyAttachmentFixture: View {
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(scenario.contains("-light") ? .light : .dark)
+        .background {
+            if scenario.contains("install-review") { HostedInstallReviewProbe().frame(width: 1, height: 1) }
+        }
         .background(ReadonlyPreviewNativeRecorder { value in
             if value.contains("height:640") || value == "file retired:true" { poisonPublished = true }
             if native != value { native = value }
@@ -176,6 +179,7 @@ private actor ReadonlyAttachmentGateway {
     private let file: Data
     private var displayRows: [TranscriptItem] = []
     private var videoData: Data?
+    private var installFixture = HostedInstallReviewGateway()
 
     @MainActor init(scenario: String) {
         self.scenario = scenario
@@ -216,6 +220,16 @@ private actor ReadonlyAttachmentGateway {
             var artifact = display["artifact"] as! [String: Any]
             artifact["kind"] = "video"; artifact["name"] = "fixture.mp4"; artifact["mimeType"] = "video/mp4"
             display["artifact"] = artifact; rows[1]["display"] = display
+        }
+        if scenario.contains("install-review") {
+            var calls = rows[0]["content"] as! [[String: Any]]
+            calls[0]["name"] = "swift_app"
+            rows[0]["content"] = calls
+            rows[1]["toolName"] = "swift_app"
+            var display = rows[1]["display"] as! [String: Any]
+            display["title"] = "Builds"
+            display["caption"] = "Review to Install App"
+            rows[1]["display"] = display
         }
         if !scenario.contains("display-video") {
             displayRows = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
@@ -359,6 +373,7 @@ private actor ReadonlyAttachmentGateway {
         return 200 + index * 10
     }
     func handle(_ method: String, params: [String: JSONValue]) -> JSONValue? {
+        if scenario.contains("install-review"), let result = installFixture.handle(method, params: params, source: file) { return result }
         switch method {
         case "session.open":
             opens += 1; publish()

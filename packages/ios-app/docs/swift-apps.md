@@ -54,7 +54,13 @@ installation or obtain feed authority.
 
 With Run Swift files on, `swift_app offer` renders an inline Swift card whose
 native producer intent opens Install App review, not a disposable preview.
-The review shows target app id/current name, source/hash and declared access.
+Preparation and review share one Settings-style navigation shell and medium/large
+detents. The main review shows the app, where it runs and declared access, with
+plain section footers. Its trailing Install (or Update) is the only install action;
+swiping away cancels review, not an already accepted command. The leading info
+action opens App Details: app id/current installation, artifact, hash, byte size
+and a View Source row opening the shared source reader. Nested sheets inherit
+the opening sheet's theme.
 The canonical session/artifact grant binds the exact offered bytes and config;
 another display of identical source does not inherit permission to install it.
 Install/update uses one Apps-owned command across dismissal/reconnect, never an
@@ -275,6 +281,15 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/TronAppsDesignUITests
 ```
 
 ## Validation
+
+`TronInstallReviewUITests` drives production chat cards, review admission and
+receipt-backed installation through a scripted Gateway socket in the readonly
+attachment fixture (`display-swift-install-review-inline-light/dark`). It checks
+container/play entry without transient runner chrome, toolbar consent, details
+and source navigation, and captures light/dark/default/XXXL simulator images.
+A hosted-only passive mounted-title observer retains transient chrome evidence
+that a post-load accessibility query would miss. The fixture never installs on
+the Mac or opens an iOS build.
 
 Hosted journeys in `TronSwiftAppUITests` run the programs in `HostedSwiftAppFixtureSource`
 through the read-only attachment fixture (`-readonly-preview-scenario display-swift…`):

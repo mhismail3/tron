@@ -98,6 +98,9 @@ private struct TronDocumentSheetChrome: ViewModifier {
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: title, accent: resolvedAccent)
+                        #if HOSTED_TEST
+                        .onAppear { HostedInstallReviewObservation.documentAppeared(title) }
+                        #endif
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {

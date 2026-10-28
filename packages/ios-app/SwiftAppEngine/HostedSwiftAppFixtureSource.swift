@@ -11,6 +11,9 @@ package enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     package static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("install-review") {
+            return ("Builds.swift", "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"Fixture app\") } }")
+        }
         if scenario.contains("builds-preview") {
             // The canonical tools/web/apps/builds-preview/BuildsPreview.swift,
             // byte for byte: the UI test bundle carries it and hands it over.
