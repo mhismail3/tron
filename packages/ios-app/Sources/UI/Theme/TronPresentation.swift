@@ -666,6 +666,9 @@ private struct TronTextEntryDoneModifier: ViewModifier {
                                 .buttonStyle(.borderless)
                                 .controlSize(.regular)
                                 .font(.body)
+                                // Honor the native label's intrinsic width, rather
+                                // than compressing it into the settings proposal.
+                                .fixedSize(horizontal: true, vertical: false)
                                 .tronToolbarAction()
                                 .accessibilityIdentifier("text-entry-done")
                         }

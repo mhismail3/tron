@@ -1,4 +1,6 @@
 import XCTest
+import UIKit
+import Vision
 
 /// Real hosted sheets, unchanged fixture workload on base and candidate. Screenshots
 /// are review evidence, not goldens. Geometry assertions exercise the reported seams.
@@ -18,6 +20,7 @@ import XCTest
             let done = app.buttons["text-entry-done"]
             XCTAssertTrue(done.waitForExistence(timeout: 5), app.debugDescription)
             shot("keyboard-\(mode)")
+            assertDoneLabelIsPainted(app, done: done, mode: mode)
             let keyboard = app.keyboards.firstMatch
             XCTAssertTrue(keyboard.exists)
             XCTAssertLessThanOrEqual(done.frame.height, 44, "Keyboard toolbar must use the system control size, not the app glass target")
@@ -63,7 +66,6 @@ import XCTest
             // Scroll until the complete latest snapshot and its following row are visible.
             let next = e(app, "home-task-checkin-next")
             reveal(next, app: app)
-            shot("checkin-\(mode)")
             let title = e(app, "home-task-checkin-summary-title")
             let meta = e(app, "home-task-checkin-summary-subtext")
             let done = e(app, "home-task-checkin-done-title")
@@ -80,6 +82,7 @@ import XCTest
             let subtitle = viewAll.staticTexts["Every operation and resume"].firstMatch
             XCTAssertTrue(subtitle.exists)
             XCTAssertEqual(subtitle.frame.height, meta.frame.height, accuracy: 0.5)
+            shot("checkin-\(mode)")
         }
     }
 
@@ -141,22 +144,39 @@ import XCTest
                 metrics.name = "models-measurements-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
                 continue
             }
-            let scrollStart = Date()
-            let provider = app.buttons.matching(NSPredicate(format: "label CONTAINS '42 models'")).firstMatch
-            if provider.exists && provider.value as? String == "Collapsed" { provider.tap() }
-            for _ in 0..<4 { app.swipeUp(velocity: .slow) }
-            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Review Model'")).allElementsBoundByIndex.contains(where: \.isHittable), "Lazy provider rows remain reachable")
-            for _ in 0..<4 { app.swipeDown(velocity: .slow) }
-            let scrollMS = Date().timeIntervalSince(scrollStart) * 1000
-            app.buttons["Search models"].tap()
-            let search = app.textFields.firstMatch
-            XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
-            search.tap(); search.typeText("Haiku")
-            let haiku = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Haiku 5.5'")).firstMatch
-            XCTAssertTrue(haiku.waitForExistence(timeout: 5))
+            let scrollMS = scrollModelsAndSearch(app)
             let metrics = XCTAttachment(string: "mode=\(mode), controlled_options_delay_ms=12000, tap_to_content_ms=\(elapsed), opening_toolbar_top=\(openingTop), loaded_toolbar_top=\(loadedTop), scroll_round_trip_ms=\(scrollMS)")
             metrics.name = "models-measurements-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
         }
+    }
+
+    func testModelsScrollMatchedWorkload() {
+        for mode in ["light", "dark"] {
+            let app = manage(mode, extra: ["-five-sheet-model-catalog"])
+            defer { app.terminate() }
+            tap(app, "manage-model-switch")
+            XCTAssertTrue(app.buttons["Search models"].waitForExistence(timeout: 8))
+            let elapsed = scrollModelsAndSearch(app)
+            let metrics = XCTAttachment(string: "mode=\(mode), catalog_models=42, slow_swipes_up=4, slow_swipes_down=4, scroll_round_trip_ms=\(elapsed), deep_row_reached=true, search_after_scroll=Haiku")
+            metrics.name = "models-scroll-matched-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
+        }
+    }
+
+    private func scrollModelsAndSearch(_ app: XCUIApplication) -> Double {
+        let start = Date()
+        let provider = app.buttons.matching(NSPredicate(format: "label CONTAINS '42 models'")).firstMatch
+        if provider.exists && provider.value as? String == "Collapsed" { provider.tap() }
+        for _ in 0..<4 { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Review Model'")).allElementsBoundByIndex.contains(where: \.isHittable), "Lazy provider rows remain reachable")
+        for _ in 0..<4 { app.swipeDown(velocity: .slow) }
+        let elapsed = Date().timeIntervalSince(start) * 1000
+        app.buttons["Search models"].tap()
+        let search = app.textFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
+        search.tap(); search.typeText("Haiku")
+        let haiku = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Haiku 5.5'")).firstMatch
+        XCTAssertTrue(haiku.waitForExistence(timeout: 5))
+        return elapsed
     }
 
     func testModelsOpenWithoutInjectedDelay() {
@@ -200,6 +220,27 @@ import XCTest
         opus.tap()
         XCTAssertTrue(card.staticTexts["Claude Opus 5.5"].waitForExistence(timeout: 8),
                       "Picking a model keeps the existing Home-scoped receipt path")
+    }
+
+    private func assertDoneLabelIsPainted(_ app: XCUIApplication, done: XCUIElement, mode: String) {
+        let screenshot = XCUIScreen.main.screenshot().image
+        guard let image = screenshot.cgImage else { XCTFail("No actual toolbar screenshot"); return }
+        let scale = CGFloat(image.width) / app.frame.width
+        let region = done.frame.insetBy(dx: -6, dy: -4)
+            .applying(CGAffineTransform(scaleX: scale, y: scale))
+        guard let crop = image.cropping(to: region) else { XCTFail("No painted Done region"); return }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.recognitionLanguages = ["en-US"]
+        do {
+            try VNImageRequestHandler(cgImage: crop, options: [:]).perform([request])
+            let words = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+            let evidence = XCTAttachment(string: "Actual painted Done OCR (\(mode)): \(words)")
+            evidence.name = "keyboard-label-\(mode)"; evidence.lifetime = .keepAlways; add(evidence)
+            XCTAssertTrue(words.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "done" },
+                          "AX can still say Done while the real label is truncated: \(words)")
+        } catch { XCTFail("Could not inspect actual toolbar pixels: \(error)") }
     }
 
     private func visibleDone(_ app: XCUIApplication) -> XCUIElement? {

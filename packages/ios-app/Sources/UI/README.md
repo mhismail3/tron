@@ -66,7 +66,7 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   only a structurally lone section loses its heading, never its explanatory detail.
   `TronSettingsGroup.trailingDetail` keeps short counts on the heading baseline, trailing;
   explanatory `detail` remains below. Keyboard Done uses the native borderless toolbar control,
-  independent of compact settings control sizing.
+  with its full intrinsic label width, independent of compact settings control sizing.
   `TronSettingsSections` counts structural section slots before eager or lazy layout; it supplies
   the count to groups and custom `tronSectionHeading` labels. Standalone captions opt out of
   the count with `containerValue`; attached captions stay with their section. Each presentation
