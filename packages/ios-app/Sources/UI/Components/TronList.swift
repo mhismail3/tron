@@ -43,6 +43,11 @@ struct TronListRowContent {
     /// Name the row by its title alone and read status and details as its value,
     /// for rows whose title is a stable name (a subagent) rather than content.
     var accessibilityValueHoldsDetails = false
+    /// Quiet secondary lines under the title, above the subtext: what a row keeps
+    /// beyond its preview (a subagent's model, tools and turns).
+    var detailLines: [String] = []
+    /// A row whose lifecycle and output read best as one spoken sentence names it whole.
+    var accessibilityValueOverride: String?
 
     private var details: [String] {
         [status?.text, subtext, tags.map(\.text).joined(separator: ", "), timestamp]
@@ -51,7 +56,9 @@ struct TronListRowContent {
     var accessibilityLabelText: String {
         accessibilityValueHoldsDetails ? title : ([title] + details).joined(separator: ", ")
     }
-    var accessibilityValueText: String { accessibilityValueHoldsDetails ? details.joined(separator: ", ") : "" }
+    var accessibilityValueText: String {
+        accessibilityValueOverride ?? (accessibilityValueHoldsDetails ? details.joined(separator: ", ") : "")
+    }
 }
 
 enum TronListMetrics {
@@ -88,6 +95,14 @@ struct TronListRow: View {
             if let leading = content.leading { TronListLeadingView(leading: leading) }
             VStack(alignment: .leading, spacing: TronListMetrics.lineGap) {
                 titleLine
+                ForEach(content.detailLines, id: \.self) { line in
+                    Text(line)
+                        .font(TronTypography.settingsRowSubtext)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 if let subtext = content.subtext, !subtext.isEmpty {
                     Text(subtext)
                         .font(content.monoSubtext ? TronTypography.code(size: TronTypography.sizeSecondary) : TronTypography.settingsRowSubtext)

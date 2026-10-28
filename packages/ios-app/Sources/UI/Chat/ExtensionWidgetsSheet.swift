@@ -42,8 +42,11 @@ struct SessionActivitySheet: View {
                             case .heading(let title):
                                 ActivitySectionHeader(title: title)
                             case .process(let process):
-                                SessionProcessRow(process: process, style: .activity, now: context.date) {
-                                    selectedProcess = process
+                                TronFeedCard {
+                                    TronListButton(SessionProcessRowPresentation.activityContent(process, now: context.date),
+                                                   identifier: "subagent-row-\(process.id)") {
+                                        selectedProcess = process
+                                    }
                                 }
                             case .extensions:
                                 VStack(alignment: .leading, spacing: 8) { retainedContent }

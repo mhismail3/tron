@@ -186,215 +186,6 @@ private struct SessionProcessPlaceholder: View {
     }
 }
 
-enum SessionProcessRowStyle {
-    case activity
-    case history
-
-    @MainActor func accent(for lifecycle: SessionProcessLifecycle) -> Color {
-        switch SessionProcessRowPresentation.tone(for: lifecycle) {
-        // Settled paused work is resumable history: it keeps one muted tone in
-        // both sheets instead of the in-progress running accent.
-        case .pausedSettled: .tronTextMuted
-        case .inProgress: .tronAmber
-        // Subagent History settles into Manage Session's emerald theme.
-        case .succeeded: self == .history ? .tronPrimary : .tronSuccess
-        case .unsuccessful: .tronError
-        }
-    }
-}
-
-struct SessionProcessRow: View {
-    let process: SessionProcessActivity
-    let style: SessionProcessRowStyle
-    var now = Date.now
-    var uptime = ProcessInfo.processInfo.systemUptime
-    let openTranscript: () -> Void
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    var body: some View {
-        Button(action: openTranscript) { rowContent }
-            // An inherited sheet theme must not replace this row's lifecycle color.
-            .tronSettingsVisualTheme(accent: cardAccent)
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-            // Label the native Button itself. An extra accessibility grouping
-            // creates a non-button proxy and leaves a second actionable child.
-            .accessibilityLabel(process.title)
-            .accessibilityValue(accessibilityValue)
-            .accessibilityHint(accessibilityHint)
-            .accessibilityIdentifier("subagent-row-\(process.id)")
-    }
-
-    private var heading: some View {
-        // Keep large accessibility text readable rather than squeezing the
-        // title between trailing status/timing text and the card edge.
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-        return layout {
-            Text(process.title)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                if let statusSymbol = SessionProcessRowPresentation.statusSymbol(for: process.lifecycle) {
-                    Image(systemName: statusSymbol)
-                        .font(TronTypography.secondaryCodeDescription)
-                        .foregroundStyle(cardAccent)
-                }
-                Text(statusText)
-                    .font(TronTypography.secondaryCodeDescription)
-                    .foregroundStyle(cardAccent)
-                    .lineLimit(1)
-                if let elapsedMilliseconds {
-                    Text("·")
-                        .font(TronTypography.secondaryCodeDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                    elapsedText(elapsedMilliseconds)
-                }
-            }
-            .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
-        }
-    }
-
-    private var rowContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            heading
-            if let metadata {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("DETAILS")
-                        .tronSectionHeading()
-                        .foregroundStyle(Color.tronTextMuted)
-                    Text(metadata)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            if currentAction != nil || outputPreview != nil {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(outputLabel)
-                        .tronSectionHeading()
-                        .foregroundStyle(process.lifecycle.state == .running ? cardAccent : Color.tronTextMuted)
-                    if let currentAction { activityLabel(currentAction) }
-                    if let outputPreview {
-                        // Keep the newest logical lines visible even when they wrap;
-                        // use the tool cards' bounded tail and truncation treatment.
-                        ToolRowPreviewViewport(
-                            edge: .top,
-                            sourceIsBounded: outputPreview.isBounded || process.outputTruncated,
-                            maximumVisibleLines: nil
-                        ) {
-                            Text(outputPreview.text)
-                                .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .medium))
-                                .foregroundStyle(Color.tronTextSecondary)
-                        }
-                    }
-                }
-                .accessibilityHidden(true)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tronScrollSurface(accent: cardAccent, cornerRadius: 12, tintOpacity: 0.10)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func elapsedText(_ milliseconds: Int) -> some View {
-        Text(SessionProcessRowPresentation.durationText(milliseconds))
-            .font(TronTypography.secondaryCodeDescription)
-            .foregroundStyle(Color.tronTextSecondary)
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private var currentAction: String? {
-        SessionProcessRowPresentation.latestAction(for: process)
-    }
-
-    private func activityLabel(_ text: String) -> some View {
-        Label(text, systemImage: "hammer")
-            .font(TronTypography.secondaryDescription)
-            .foregroundStyle(Color.tronTextSecondary)
-            .lineLimit(1)
-    }
-
-    private var metadata: String? {
-        let lines = [metadataLine, countsLine].compactMap { $0 }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
-    }
-
-    private var metadataLine: String? {
-        let parts = [
-            process.model.map(SessionProcessRowPresentation.modelDisplayName),
-            process.thinking.map { "\($0.capitalized) thinking" },
-            startedText,
-        ].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private var countsLine: String? {
-        let parts = [
-            process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
-            process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },
-            process.childCount.map { SessionProcessRowPresentation.countLabel($0, singular: "child") },
-            process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
-        ].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private var outputPreview: ToolOutputTailPreview? {
-        SessionProcessRowPresentation.outputPreview(process.outputTail)
-    }
-
-    private var outputLabel: String {
-        switch process.lifecycle.state {
-        case .running: "LIVE OUTPUT"
-        case .queued, .paused: "LATEST OUTPUT"
-        case .failed, .rejected, .interrupted: "ERROR"
-        default: "RESULT"
-        }
-    }
-
-    private var cardAccent: Color { style.accent(for: process.lifecycle) }
-
-    /// Explicit lifecycle text accompanies color, including for VoiceOver.
-    private var statusText: String {
-        SessionProcessRowPresentation.statusText(for: process.lifecycle)
-    }
-
-    private var startedText: String? {
-        SessionProcessRowPresentation.startedText(for: process, relativeTo: now)
-    }
-
-    private var elapsedMilliseconds: Int? {
-        SessionProcessRowPresentation.elapsedMilliseconds(for: process, at: now, uptime: uptime)
-    }
-
-    private var summaryParts: [String] {
-        [
-            statusText,
-            elapsedMilliseconds.map(SessionProcessRowPresentation.durationText),
-            metadataLine,
-            countsLine,
-            currentAction,
-            outputPreview.map { "\(outputLabel): \($0.text)" },
-        ].compactMap { $0 }
-    }
-
-    private var accessibilityValue: String { summaryParts.joined(separator: ", ") }
-
-    private var accessibilityHint: String {
-        process.lifecycle.isActiveWork
-            ? "Opens the live read-only subagent session"
-            : "Opens the completed read-only subagent session"
-    }
-}
-
 enum SessionProcessRowTone: Equatable, Sendable {
     case inProgress
     case pausedSettled
@@ -431,6 +222,61 @@ enum SessionProcessRowPresentation {
             accessibilityValueHoldsDetails: true)
     }
 
+    /// An Activity row: the History row plus the details Activity keeps — model and
+    /// thinking, tools, turns and mode as two quiet lines under the title — with the
+    /// live state worded "Live". VoiceOver reads the full lifecycle, timing, details
+    /// and labelled output, as the row always has.
+    @MainActor static func activityContent(_ process: SessionProcessActivity, now: Date = .now,
+                                           uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TronListRowContent {
+        var content = listContent(process, now: now, uptime: uptime)
+        if let status = content.status {
+            content.status = TronListStatus(text: statusText(for: process.lifecycle), tone: status.tone, live: status.live)
+        }
+        // The mode moves from a tag into the counts line, where it always read.
+        content.tags = content.tags.filter { $0.mono }
+        let output = outputPreview(process.outputTail)
+        // The preview shows the latest output line; the current tool stays visible beside it.
+        let action = output == nil ? nil : latestAction(for: process)
+        content.detailLines = [metadataLine(for: process), countsLine(for: process), action].compactMap { $0 }
+        content.accessibilityValueOverride = [
+            statusText(for: process.lifecycle),
+            elapsedMilliseconds(for: process, at: now, uptime: uptime).map(durationText),
+            metadataLine(for: process, relativeTo: now),
+            countsLine(for: process),
+            latestAction(for: process),
+            output.map { "\(outputLabel(for: process.lifecycle.state)): \($0.text)" },
+        ].compactMap { $0 }.joined(separator: ", ")
+        return content
+    }
+
+    private static func metadataLine(for process: SessionProcessActivity, relativeTo now: Date? = nil) -> String? {
+        let parts = [
+            process.model.map(modelDisplayName),
+            process.thinking.map { "\($0.capitalized) thinking" },
+            now.flatMap { startedText(for: process, relativeTo: $0) },
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func countsLine(for process: SessionProcessActivity) -> String? {
+        let parts = [
+            process.toolCount.map { countLabel($0, singular: "tool") },
+            process.turnCount.map { countLabel($0, singular: "turn") },
+            process.childCount.map { countLabel($0, singular: "child") },
+            process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func outputLabel(for state: SessionProcessLifecycleState) -> String {
+        switch state {
+        case .running: "LIVE OUTPUT"
+        case .queued, .paused: "LATEST OUTPUT"
+        case .failed, .rejected, .interrupted: "ERROR"
+        default: "RESULT"
+        }
+    }
+
     static let outputLineLimit = 3
     private static let maximumActionCharacters = 96
     private static let absentValues: Set<String> = ["null", "undefined"]
@@ -456,11 +302,6 @@ enum SessionProcessRowPresentation {
         }
     }
 
-    /// Only a settled paused row carries the pause glyph, next to its muted tag.
-    static func statusSymbol(for lifecycle: SessionProcessLifecycle) -> String? {
-        lifecycle.isSettled && lifecycle.state == .paused ? "pause.fill" : nil
-    }
-
     static func durationText(_ milliseconds: Int) -> String {
         guard milliseconds >= 3_600_000 else { return ToolTiming.format(milliseconds: milliseconds) }
         // Keep the live tick visible even after a subagent has run for an hour.
@@ -476,16 +317,6 @@ enum SessionProcessRowPresentation {
     ) -> String? {
         ToolInvocationTimestamp.text(for: process.startedAt, relativeTo: now, locale: locale, timeZone: timeZone)
             .map { "Started \($0)" }
-    }
-
-    static func completedText(
-        for process: SessionProcessActivity,
-        relativeTo now: Date = .now,
-        locale: Locale = .current,
-        timeZone: TimeZone = .current
-    ) -> String? {
-        guard !process.lifecycle.isActiveWork else { return nil }
-        return ToolInvocationTimestamp.text(for: process.lifecycle.terminalAt, relativeTo: now, locale: locale, timeZone: timeZone)
     }
 
     static func elapsedMilliseconds(
@@ -512,16 +343,6 @@ enum SessionProcessRowPresentation {
 
     static func countLabel(_ count: Int, singular: String) -> String {
         "\(count) \(count == 1 ? singular : "\(singular)s")"
-    }
-
-    // Paused is a canonical resumable state and must not be labeled live.
-    static func activityLabel(for state: SessionProcessLifecycleState) -> String {
-        switch state {
-        case .queued: "QUEUED"
-        case .running: "LIVE ACTIVITY"
-        case .paused: "PAUSED"
-        default: "RECENT ACTIVITY"
-        }
     }
 
     static func modelDisplayName(_ model: String) -> String {
