@@ -658,7 +658,6 @@ enum ModelPickerLayout {
     static let contentTopPadding: CGFloat = 12
     /// Below the Latest rail at the opening detent: clears the card shadows and
     /// the sheet's rounded bottom corners, and stays short of the next header.
-    static let railsBottomMargin: CGFloat = 14
     /// Rows drop in from their header and fade out quickly on collapse, so a
     /// leaving row is gone before the content below slides over it.
     static let rowTransition = AnyTransition.asymmetric(
@@ -680,8 +679,6 @@ struct ModelPicker: View {
     @PresentationState private var providerExpansion = ModelProviderExpansionStore.shared
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(AppModel.self) private var model
-    @PresentationState private var railsHeight: CGFloat = 0
-    @PresentationState private var scrollTopInset: CGFloat = 0
     /// Section order and default expansion follow the selection the picker
     /// opened with, so a pick never reorders or resizes the list under the
     /// finger. Captured on first appearance.
@@ -698,7 +695,6 @@ struct ModelPicker: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if !sections.recent.isEmpty || !sections.latest.isEmpty {
-                    // Availability changes only control chrome, never rail fit.
                     VStack(alignment: .leading, spacing: 8) {
                         if !sections.recent.isEmpty {
                             sectionTitle("Recent")
@@ -710,7 +706,6 @@ struct ModelPicker: View {
                             cardRail(sections.latest)
                         }
                     }
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { railsHeight = $0 }
                 }
                 // Header and rows are separate lazy children, so a long expanded
                 // provider builds only the rows on screen and its neighbours
@@ -751,11 +746,6 @@ struct ModelPicker: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        // Scroll-invariant: the bar inset, not the current offset.
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, inset in
-            scrollTopInset = inset
-        }
-        .preference(key: TronSheetFitHeightKey.self, value: fitHeight)
         .tronScrollEdgeChrome()
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
@@ -797,16 +787,6 @@ struct ModelPicker: View {
                 closingSearch = false
             }
         }
-    }
-
-    /// Visible sheet height, from its top edge, that shows the toolbar and both
-    /// rails and stops before the first provider header. The scroll view spans
-    /// the sheet from its top edge (content scrolls under the toolbar), so the
-    /// bar inset locates the content. Built only from scroll-invariant inputs.
-    private var fitHeight: CGFloat? {
-        guard railsHeight > 0, scrollTopInset > 0, !showingSearch else { return nil }
-        return scrollTopInset + ModelPickerLayout.contentTopPadding + railsHeight
-            + ModelPickerLayout.railsBottomMargin
     }
 
     /// The selection that orders sections and picks default expansion.

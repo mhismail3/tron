@@ -10,7 +10,7 @@ reusable components. Its binding rules are [presentation parity](../../docs/pres
 - `Theme/`: `TronPresentation` (app-wide boundary: managed sheets, settings rows and groups,
   confirmations, loading, top blur, toolbar tint), `TronTheme`, `ThemeColor`, `FontSettings`, `TronFontLoader`,
   `TronSettingControls`, `TronDateControls` (`TronDateValueButton`, `TronDatePickerSheet`, shared by
-  Automations and Home), `TronCardRail`, `TronDisclosure`, `TronContentFitDetent`, `TronWidthCap`,
+  Automations and Home), `TronCardRail`, `TronDisclosure`, `TronWidthCap`,
   `TronSafariView`.
 - `Components/`: `TronDocumentSheet`, `TronList` (the list standard), `TronTextEntrySheet`, `StructuredJSONView`,
   `TechnicalDetailPresentation`, `TronNativeSheetCanvas` (surface-level native containment for

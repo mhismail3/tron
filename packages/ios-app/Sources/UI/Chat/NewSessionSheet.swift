@@ -236,7 +236,7 @@ struct NewSessionSheet: View {
                 }
                 .tronTopBlur(.sheet)
                 .tronSettingsVisualTheme(accent: .tronPrimary)
-                .tronContentFitDetents()
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }
             .onChange(of: model.knowledgePresentationIdentity) { _, _ in publishCreatedRouteIfAdmitted() }
