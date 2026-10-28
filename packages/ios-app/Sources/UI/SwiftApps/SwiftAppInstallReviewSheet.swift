@@ -50,7 +50,7 @@ struct SwiftAppInstallReviewSheet: View {
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: title, accent: accent)
                         #if HOSTED_TEST
-                        .onAppear { HostedInstallReviewObservation.documentAppeared(title) }
+                        .onAppear { HostedPresentationProbe.record?("document-appear", title) }
                         #endif
                 }
                 ToolbarItem(placement: .confirmationAction) {

@@ -32,10 +32,11 @@ struct HostedInstallReviewGateway {
 /// after RPC completion would miss. Only active in this explicitly chosen fixture.
 @MainActor enum HostedInstallReviewObservation {
     static var titles: [String] = []
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("display-swift-install-review-inline-light") || ProcessInfo.processInfo.arguments.contains("display-swift-install-review-inline-dark") }
-    static func documentAppeared(_ title: String) {
-        guard enabled, titles.count < 100 else { return }
-        titles.append(title)
+    static func install() {
+        HostedPresentationProbe.record = { event, title in
+            guard event == "document-appear", titles.count < 100 else { return }
+            titles.append(title)
+        }
     }
 }
 
@@ -48,6 +49,7 @@ struct HostedInstallReviewProbe: UIViewRepresentable {
             isAccessibilityElement = true
             accessibilityIdentifier = "fixture.install-review-titles"
             accessibilityLabel = "Mounted sheet titles"
+            HostedInstallReviewObservation.install()
         }
         required init?(coder: NSCoder) { fatalError("not used") }
         override var accessibilityValue: String? {
