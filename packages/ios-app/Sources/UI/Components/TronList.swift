@@ -251,6 +251,7 @@ struct TronListSection<Row: Identifiable> {
 struct TronListGroup<Row: Identifiable, RowView: View>: View {
     let sections: [TronListSection<Row>]
     @Environment(\.tronSettingsSectionCount) private var sectionCount
+    @Environment(\.tronSettingsVisualTheme) private var theme
     var hasLeading = false
     var identifier: String?
     @ViewBuilder let row: (Row) -> RowView
@@ -271,7 +272,7 @@ struct TronListGroup<Row: Identifiable, RowView: View>: View {
                 VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
                     if sectionCount != 1 || sections.count > 1, let title = section.title {
                         HStack(alignment: .firstTextBaseline) {
-                            Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(section.tint ?? .tronAccentText)
+                            Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(section.tint ?? theme?.accent ?? .tronAccentText)
                             Spacer(minLength: 8)
                             Text(section.rows.count.formatted()).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
                         }
