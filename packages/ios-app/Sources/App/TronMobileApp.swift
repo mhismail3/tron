@@ -89,9 +89,9 @@ struct TronMobileApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-pagination-fixture") {
                 HostedSessionPaginationFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-apps-install-design-fixture") {
-                HostedAppsInstallDesignFixture()
+                HostedAppsInstallDesignFixture().environment(hostedModel)
             } else if ProcessInfo.processInfo.arguments.contains("-tron-apps-design-fixture") {
-                HostedAppsDesignFixture()
+                HostedAppsDesignFixture().environment(hostedModel)
             } else if ProcessInfo.processInfo.arguments.contains("-tron-automation-fixture") {
                 HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-archive-fixture") {
