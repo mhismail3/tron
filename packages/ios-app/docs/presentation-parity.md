@@ -201,7 +201,15 @@ compact status extends the shared pill palette's semantic success role, not per-
   section (a Resources kind) keeps its category tint instead of the primary identity. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
   Long feeds overlay a bottom-centred position chip whose 44-pt target takes every touch (tap:
-  newest); the feed ends with room to clear it. An empty feed (and an empty
+  newest); the feed ends with room to clear it. The chip labels its unit as Items; Home
+  Memory and Tasks count rows newest-first, not memory catalog addresses. Their total is the
+  current scoped list's loaded row count, marked `+` (VoiceOver: “at least”) until its final
+  page; Memory's RPC message count is not a row total. The capsule keeps an elevated surface
+  behind its glass so scrolling text cannot show through the label, and wraps at large type.
+  A sheet iOS draws shrunk (a stacked medium detent measured about 0.96) grows the chip's layout
+  height by its measured scale so the target stays 44 screen points; unshrunk sheets are unchanged.
+  Chapter topics need no explanatory subtitle; sheet toolbar titles remain single-line.
+  An empty feed (and an empty
   Profile) is a `TronFeedEmptyState`: caption on top, the shared `TronPlaceholderState` centred
   below, no card.
   Each `TronListRow` has: a centred kind icon or ordinal, the title, one status pill top-right,

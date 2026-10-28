@@ -66,7 +66,7 @@ struct HomePagedListSheet: View {
         return .end("First task · \(TronListTime.short(milliseconds: first.createdAt))")
     }
 
-    private struct MemoryRow: Identifiable { let line: HomeMemoryViewDTO.Line; var id: String { line.id } }
+    private struct MemoryRow: Identifiable { let line: HomeMemoryViewDTO.Line; let position: Int; var id: String { line.id } }
     private struct HistoryRow: Identifiable { let item: HomeTaskHistoryPageDTO.Item; let position: Int; var id: String { item.id } }
     private var historyRows: [HistoryRow] {
         var seen = Set<String>()
@@ -76,7 +76,8 @@ struct HomePagedListSheet: View {
 
     private var memoryRows: [MemoryRow] {
         var seen = Set<String>()
-        return memoryPages.flatMap(\.lines).filter { seen.insert($0.id).inserted }.map(MemoryRow.init)
+        return memoryPages.flatMap(\.lines).filter { seen.insert($0.id).inserted }.enumerated()
+            .map { MemoryRow(line: $1, position: $0 + 1) }
     }
     private var taskRows: [TaskRow] {
         var seen = Set<String>()
@@ -92,8 +93,8 @@ struct HomePagedListSheet: View {
                     TronFeedEmptyState(identifier: "\(identifier)-viewport") { captions } placeholder: { placeholders }
                 } else if store.hasPage {
                     if isMemory {
-                        TronFeed(items: memoryRows, identifier: "\(identifier)-viewport", ordinal: { $0.line.start + $0.line.span },
-                                 total: memoryPages.first?.totalMessages, tail: tail, loadMore: loadMore, retry: retry) {
+                        TronFeed(items: memoryRows, identifier: "\(identifier)-viewport", ordinal: \.position,
+                                 total: memoryRows.count, totalIsExact: next == nil, tail: tail, loadMore: loadMore, retry: retry) {
                             header
                         } row: { memoryRow($0.line) }
                     } else if isHistory {
