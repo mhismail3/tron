@@ -5,8 +5,10 @@ import XCTest
 @MainActor final class TronFiveSheetPolishUITests: XCTestCase {
     func testNumericKeyboardToolbar() {
         for mode in ["light", "dark"] {
-            let app = launch(mode, fixture: "-tron-settings-navigation-fixture")
+            let app = launch(mode, fixture: "-tron-mac-settings-fixture", extra: ["-settings-nested"])
             defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
+            app.buttons["Open Settings"].tap()
             let link = app.buttons["settings-link-App Customizations"]
             reveal(link, app: app)
             link.tap()
@@ -92,6 +94,11 @@ import XCTest
                 if boundary.exists && boundary.isHittable && boundary.frame.maxY < app.frame.maxY - 180 { break }
                 app.swipeUp(velocity: .slow)
             }
+            // Frame both neighbours without pressing a tappable memory card.
+            if boundary.frame.minY < app.frame.height * 0.30 {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.40))
+                    .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.65)))
+            }
             shot("memory-\(mode)")
             let above = e(app, "home-memory-card-34-container")
             let below = e(app, "home-memory-card-32-container")
@@ -114,22 +121,23 @@ import XCTest
             switcher.tap()
             let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Loading models…'")).firstMatch
             XCTAssertTrue(loading.waitForExistence(timeout: 2), app.debugDescription)
-            let title = app.navigationBars.staticTexts["Models"].firstMatch
-            XCTAssertTrue(title.waitForExistence(timeout: 2))
-            XCTAssertTrue(wait(title, "frame.height > 0 AND frame.minY > 0"))
+            // Principal titles also have zero-frame AX bookkeeping nodes;
+            // measure the presented sheet's real native toolbar control.
             shot("models-loading-\(mode)")
             XCTAssertTrue(loading.exists, "The opening sample precedes the delayed response")
-            let openingTop = title.frame.minY
+            guard let openingDone = visibleDone(app) else { XCTFail("No presented sheet toolbar"); return }
+            let openingTop = openingDone.frame.minY
             let model = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Opus 5.5'")).firstMatch
-            XCTAssertTrue(model.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(model.waitForExistence(timeout: 20), app.debugDescription)
             let elapsed = Date().timeIntervalSince(start) * 1000
             // Query again after native geometry settles, without changing a detent.
             XCTAssertTrue(app.buttons["Search models"].waitForExistence(timeout: 5))
-            let loadedTop = title.frame.minY
             shot("models-\(mode)")
+            guard let loadedDone = visibleDone(app) else { XCTFail("No loaded sheet toolbar"); return }
+            let loadedTop = loadedDone.frame.minY
             XCTAssertEqual(openingTop, loadedTop, accuracy: 1, "Loading cannot replace the opening detent")
             guard abs(openingTop - loadedTop) <= 1 else {
-                let metrics = XCTAttachment(string: "mode=\(mode), controlled_options_delay_ms=3000, tap_to_content_ms=\(elapsed), opening_title_top=\(openingTop), loaded_title_top=\(loadedTop), scroll=not_run_after_geometry_failure")
+                let metrics = XCTAttachment(string: "mode=\(mode), controlled_options_delay_ms=12000, tap_to_content_ms=\(elapsed), opening_toolbar_top=\(openingTop), loaded_toolbar_top=\(loadedTop), scroll=not_run_after_geometry_failure")
                 metrics.name = "models-measurements-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
                 continue
             }
@@ -141,12 +149,12 @@ import XCTest
             for _ in 0..<4 { app.swipeDown(velocity: .slow) }
             let scrollMS = Date().timeIntervalSince(scrollStart) * 1000
             app.buttons["Search models"].tap()
-            let search = app.textFields["Search models"].firstMatch
+            let search = app.textFields.firstMatch
             XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
             search.tap(); search.typeText("Haiku")
             let haiku = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude Haiku 5.5'")).firstMatch
             XCTAssertTrue(haiku.waitForExistence(timeout: 5))
-            let metrics = XCTAttachment(string: "mode=\(mode), controlled_options_delay_ms=3000, tap_to_content_ms=\(elapsed), opening_title_top=\(openingTop), loaded_title_top=\(loadedTop), scroll_round_trip_ms=\(scrollMS)")
+            let metrics = XCTAttachment(string: "mode=\(mode), controlled_options_delay_ms=12000, tap_to_content_ms=\(elapsed), opening_toolbar_top=\(openingTop), loaded_toolbar_top=\(loadedTop), scroll_round_trip_ms=\(scrollMS)")
             metrics.name = "models-measurements-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
         }
     }
@@ -174,6 +182,10 @@ import XCTest
             let metrics = XCTAttachment(string: "mode=\(mode), catalog_models=42, injected_delay_ms=0, tap_to_content_ms=\(samples)")
             metrics.name = "models-no-delay-\(mode)"; metrics.lifetime = .keepAlways; add(metrics)
         }
+    }
+
+    private func visibleDone(_ app: XCUIApplication) -> XCUIElement? {
+        app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
     }
 
     private func launch(_ mode: String, fixture: String, extra: [String] = []) -> XCUIApplication {

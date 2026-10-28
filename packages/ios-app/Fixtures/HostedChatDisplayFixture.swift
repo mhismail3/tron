@@ -930,7 +930,7 @@ private actor HostedHomeShellGateway {
             return (homeSettingsResolution(), nil)
         case "settings.options":
             if ProcessInfo.processInfo.arguments.contains("-five-sheet-model-delay"), params["key"]?.stringValue == "model.ref[role=chat]" {
-                try await Task.sleep(for: .seconds(3))
+                try await Task.sleep(for: .seconds(12))
             }
             return (try homeSettingsOptions(params), nil)
         case "settings.approvals":
