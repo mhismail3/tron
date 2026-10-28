@@ -52,6 +52,10 @@ import UIKit
                 let plus = app.buttons["Add attachment"]
                 XCTAssertTrue(plus.waitForExistence(timeout: 15))
                 let screenshot = app.screenshot()
+                let attachment = XCTAttachment(screenshot: screenshot)
+                attachment.name = "composer-placeholder-\(theme)-\(mode)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
                 guard let image = screenshot.image.cgImage else { XCTFail("No image"); return }
                 let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
                 let field = CGRect(x: plus.frame.maxX + 12, y: plus.frame.midY - 14, width: 220, height: 28)

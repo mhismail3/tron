@@ -55,8 +55,10 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   `TronSettingsVisualTheme` carries foreground and surface accents together through inherited
   destinations; an explicit semantic accent keeps its own surface unless one is supplied.
   Semantic status and resource identities stay independent. UIKit inputs refresh primary ink
-  on update, not only creation. Composer placeholders use the shared muted text role, not
-  saturated primary ink. Normal usage labels, context-ring arcs and Changes states use primary;
+  on update, not only creation. Home and session composer placeholders share `inputPlaceholder`,
+  primary ink at 70% opacity; typed text and controls retain full primary ink. This preserves theme
+  hue rather than using neutral muted text; dark Burgundy inherits the palette's low-contrast
+  small-text exception and is not a WCAG AA placeholder. Normal usage labels, context-ring arcs and Changes states use primary;
   warning and failure colors remain semantic. Memory kind icons use smaller primary symbols.
   `ProcessActivityOrb` defaults to primary ink for both solving dots and thinking strands;
   dashboard activity and the composer's active/recent activity and extension-content glyph
