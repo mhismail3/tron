@@ -30,13 +30,16 @@ extension RealGatewayPairAndChatUITests {
         try buildsPrompt(app, "BUILDS-APP-JOURNEY")
         let card = app.buttons["swiftApp.card"].firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 60), app.debugDescription)
+        let originalOffer = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: offeredSourceURL(tron: tron, source: source))) as? [String: Any])
+        let originalReference = try XCTUnwrap(originalOffer["reference"] as? [String: String])
+        let originalSessionID = try XCTUnwrap(originalReference["sessionId"])
         keepScreenshot(app, name: "1162-offer-\(suffix)")
         card.tap()
         let review = app.scrollViews["apps.install.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(FileManager.default.fileExists(atPath: appDirectory.path), "Review must not install")
         keepScreenshot(app, name: "1162-install-review-\(suffix)")
-        buildsReveal(app, app.buttons["apps.install.confirm"], in: review)
+        buildsReveal(app, app.buttons["apps.install.confirm"], in: review, capturePrefix: large ? "1162-install-scroll-\(suffix)" : nil)
         keepScreenshot(app, name: "1162-install-review-continued-\(suffix)")
         app.buttons["apps.install.confirm"].tap()
         let openApp = app.buttons["apps.install.open"]
@@ -78,6 +81,11 @@ extension RealGatewayPairAndChatUITests {
         app.buttons["Manage"].tap()
         XCTAssertTrue(app.buttons["installed-app-manage-remove"].waitForExistence(timeout: 20), app.debugDescription)
         keepScreenshot(app, name: "1162-manage-before-update-\(suffix)")
+        if large {
+            buildsReveal(app, app.buttons["installed-app-manage-remove"])
+            app.scrollViews.allElementsBoundByIndex.last(where: { $0.isHittable })?.swipeUp()
+            keepScreenshot(app, name: "1162-manage-before-update-continued-\(suffix)")
+        }
         buildsClose(app); buildsClose(app)
         createSession(app, inWorkspace: fixture.workspace)
         try (source + "\n// explicit reviewed update\n").write(to: sourceURL, atomically: true, encoding: .utf8)
@@ -86,7 +94,7 @@ extension RealGatewayPairAndChatUITests {
         card.tap()
         XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
         keepScreenshot(app, name: "1162-update-review-\(suffix)")
-        buildsReveal(app, app.buttons["apps.install.confirm"], in: review)
+        buildsReveal(app, app.buttons["apps.install.confirm"], in: review, capturePrefix: large ? "1162-update-scroll-\(suffix)" : nil)
         keepScreenshot(app, name: "1162-update-review-continued-\(suffix)")
         app.buttons["apps.install.confirm"].tap()
         XCTAssertTrue(openApp.waitForExistence(timeout: 30), app.debugDescription)
@@ -102,23 +110,24 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(card.waitForExistence(timeout: 60), app.debugDescription)
         card.tap()
         XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
-        let digest = SHA256.hash(data: Data(errorSource.utf8)).map { String(format: "%02x", $0) }.joined()
-        let offersRoot = tron.appendingPathComponent("workspace/state/apps/.offers")
-        let offered = try FileManager.default.contentsOfDirectory(at: offersRoot, includingPropertiesForKeys: nil).first { directory in
-            let record = try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("offer.json"))) as? [String: Any]
-            return record?["sourceSha256"] as? String == digest
-        }
-        let offerURL = try XCTUnwrap(offered).appendingPathComponent("offer.json")
+        let offerURL = try offeredSourceURL(tron: tron, source: errorSource)
         var offer = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: offerURL)) as? [String: Any])
         offer["name"] = "Changed after review"
         try JSONSerialization.data(withJSONObject: offer).write(to: offerURL, options: .atomic)
         buildsReveal(app, app.buttons["apps.install.confirm"], in: review)
+        keepScreenshot(app, name: "1162-error-before-confirm-\(suffix)")
         app.buttons["apps.install.confirm"].tap()
         let failure = app.otherElements["apps.install.error"].firstMatch
         let failureText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Installation was not confirmed")).firstMatch
         XCTAssertTrue(failureText.waitForExistence(timeout: 30), app.debugDescription)
         buildsReveal(app, failure.exists ? failure : failureText, in: review)
         keepScreenshot(app, name: "1162-update-error-\(suffix)")
+        review.swipeUp()
+        keepScreenshot(app, name: "1162-update-error-detail-\(suffix)")
+        if large {
+            review.swipeUp()
+            keepScreenshot(app, name: "1162-update-error-end-\(suffix)")
+        }
         XCTAssertFalse(app.buttons["apps.install.confirm"].isEnabled, "A failed accepted command cannot be replaced on another tap")
         buildsClose(app)
         app.buttons["Back"].tap()
@@ -129,6 +138,8 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(remove.waitForExistence(timeout: 20), app.debugDescription)
         keepScreenshot(app, name: "1162-manage-after-update-\(suffix)")
         buildsReveal(app, remove)
+        if large { app.scrollViews.allElementsBoundByIndex.last(where: { $0.isHittable })?.swipeUp() }
+        keepScreenshot(app, name: "1162-manage-after-update-continued-\(suffix)")
         remove.tap()
         let confirm = app.buttons["Remove App"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 15), app.debugDescription)
@@ -139,7 +150,11 @@ extension RealGatewayPairAndChatUITests {
             // Revisit the SAME completed offer. A retained success must not
             // replace fresh consent with Open after this instance was removed.
             buildsClose(app)
-            let original = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "BUILDS-APP-JOURNEY,")).firstMatch
+            let original = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "session-row-", ":\(originalSessionID)")).firstMatch
+            for _ in 0..<4 {
+                if original.exists { break }
+                app.collectionViews.firstMatch.swipeDown()
+            }
             buildsReveal(app, original); original.tap()
             XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription); card.tap()
             XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
@@ -158,6 +173,16 @@ extension RealGatewayPairAndChatUITests {
             XCTAssertTrue(app.staticTexts["No apps are installed on this Mac yet. Ask Tron to build one and install it."].waitForExistence(timeout: 30), app.debugDescription)
             XCTAssertFalse(FileManager.default.fileExists(atPath: appDirectory.path), "Fixture reinstallation must be removed too")
         }
+    }
+
+    private func offeredSourceURL(tron: URL, source: String) throws -> URL {
+        let digest = SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined()
+        let root = tron.appendingPathComponent("workspace/state/apps/.offers")
+        let offered = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first { directory in
+            let record = try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("offer.json"))) as? [String: Any]
+            return record?["sourceSha256"] as? String == digest
+        }
+        return try XCTUnwrap(offered).appendingPathComponent("offer.json")
     }
 
     private func seedBuild(tron: URL, second: Bool) throws {
@@ -197,9 +222,17 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.buttons["Apps"].waitForExistence(timeout: 15), app.debugDescription)
         app.buttons["Apps"].tap()
     }
-    @MainActor private func buildsReveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement? = nil) {
+    @MainActor private func buildsReveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement? = nil, capturePrefix: String? = nil) {
         XCTAssertTrue(element.waitForExistence(timeout: 20), app.debugDescription)
-        for _ in 0..<12 { if element.isHittable { break }; (scroll ?? app).swipeUp() }
+        let container = scroll
+            ?? app.scrollViews.allElementsBoundByIndex.last(where: { $0.isHittable })
+            ?? app.collectionViews.allElementsBoundByIndex.last(where: { $0.isHittable })
+            ?? app
+        for step in 0..<12 {
+            if element.isHittable { break }
+            container.swipeUp()
+            if let capturePrefix { keepScreenshot(app, name: "\(capturePrefix)-\(step + 1)") }
+        }
         XCTAssertTrue(element.isHittable, app.debugDescription)
     }
 }

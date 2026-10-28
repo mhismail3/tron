@@ -136,14 +136,7 @@ struct SwiftAppRunnerSheet: View {
         .onDisappear { activeSession?.dismiss(launch.id) }
     }
 
-#if HOSTED_TEST
-    @State private var hostedRefreshCalls = 0
-#endif
-
     private func refresh(_ previous: SwiftAppRuntime) async {
-#if HOSTED_TEST
-        hostedRefreshCalls += 1
-#endif
         guard let session = activeSession else { return }
         await session.settle()
         guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
@@ -203,12 +196,6 @@ struct SwiftAppRunnerSheet: View {
                     }
                 }
 #if HOSTED_TEST
-                .overlay(alignment: .bottomLeading) {
-                    Text("Feed snapshot: \(activeSession?.snapshot.feeds?["ios-builds"]?.status ?? "none"), builds: \(activeSession?.snapshot.feeds?["ios-builds"]?.builds.count ?? -1), refresh calls: \(hostedRefreshCalls), active: \(presentationActivity.allowsPresentationPublication)")
-                        .accessibilityIdentifier("swiftApp.feedProbe")
-                        .opacity(0.01)
-                        .frame(width: 1, height: 1)
-                }
                 .overlay(alignment: .topLeading) {
                     Text("Timer callbacks: \(runtime.hostedTimerCallbackCount), subscriptions: \(runtime.hostedTimerSubscriptionCount), global: \(SwiftAppTimerTestProbe.shared.activeSubscriptions)")
                         .accessibilityIdentifier("swiftApp.timerProbe")

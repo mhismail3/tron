@@ -2,78 +2,82 @@
 
 ## Purpose
 
-Installed single-file SwiftUI apps: their source, manifest and key/value data.
-The Gateway owns them; the iPhone runner consumes bounded projections. The
-[installed-app contract](../../../docs/swift-apps.md) specifies storage and limits.
+Own installed single-file SwiftUI source, manifests, state and reviewed
+installation. The [contract](../../../docs/swift-apps.md) owns versions, bounds,
+RPCs and recovery. The iPhone interprets disposable projections, not server code.
 
 ## Owns
 
-`module.ts` constructs one `SwiftAppStore` in descriptor `start`, using the
-workspace module's contract. Both descriptor RPCs and `swift_app` use that store.
-It serializes operations over `<workspace>/state/apps/<appId>/`: `app.json`,
-`App.swift` and `data.sqlite`. There is no second store in the registry or phone.
+`module.ts` constructs one `SwiftAppStore` over the workspace contract and
+receives the canonical display owner. RPCs and `swift_app` share that store.
+`swift-app-format.ts` admits explicit v1/v2 manifests, source/config history and
+session/artifact-bound offers. `swift-app-display.ts` reads exact granted UTF-8
+artifact bytes with a bounded lease; it never invents artifact authority.
+
+`swift-app-store.ts` serializes `state/apps/`: named v1 `App.swift`, v2 immutable
+`sources/<sha>.swift` and atomic `app.json` head, unchanged SQLite v1, pending
+offers and explicit v1 upgrade backups. It owns interrupted publication/removal
+cleanup. `ios-builds-feed.ts` reads the existing publisher under its POSIX lock;
+it does not publish, execute source, network or create a second index.
 
 ## Contract
 
-- Descriptor `tron-swift-apps` advertises `swift-apps.v1`. Its `swift_app` tool is
-  available in ordinary sessions, not Home's curated profile.
-- Reads: `apps.list`, `apps.get`, `apps.state`, coherent `apps.open` (source + state).
-  Mutations `apps.commit`, `apps.rename`, `apps.reset`, `apps.remove`, under transport command receipts and the expected state revision;
-  interpreter writes additionally fence the source revision that produced them.
-- Tool actions: list, install, state, commit and remove. Install reads a visible,
-  link-free `.swift` source relative to the session or internal workspace files.
-- Sources and state are exact executable/restorable data: RPCs bypass transcript
-  string/array clipping, with the store enforcing their bounds. No change event
-  is currently broadcast.
-- `SwiftAppManifest`, `SwiftAppStateSnapshot` and `SwiftAppCommit` currently live
-  in `swift-app-store.ts`. They are the existing public values for a future pure
-  contract extraction; the descriptor and store remain behavior owners, not a
-  second schema or a re-export facade.
+- Descriptor `tron-swift-apps`, capability `swift-apps.v1`; ordinary-session
+  `swift_app`, not Home's curated tool profile.
+- `offer` creates an exact source/configuration display; it never installs.
+  Review/install require its producing session/artifact grant, not caller SHA
+  authority. Identical bytes in another display do not inherit an offer.
+- Reviewed install/update uses existing transport mutation receipts and fences
+  the reviewed head/instance. Accepted uncertain commands never replay on reconnect.
+- V1 remains readable through the named reader. Only explicit opted-in update
+  backs it up and publishes v2; no read/restart upgrade or SQLite migration.
+  The named tool install contract remains v1-only and cannot downgrade v2.
+- Source/state are exact data, never transcript-clipped. V2 opens additionally
+  read fresh declared feeds; source/state themselves come from one store mutex cut.
+- `ios-builds` reads only the configured Gateway home's publisher. Debug and
+  Stable homes are distinct; no implicit live-data copy/fallback.
+- No background feed polling or change broadcast.
 
 ## Invariants
 
-- First installation may create state; missing or unsafe established storage
-  refuses rather than resetting it. Reads do not initialize an absent store.
-- Reinstallation replaces source/metadata but keeps data. Source hash mismatch
-  refuses a torn publication instead of serving unverified source.
-- Source and state revisions are separate. Stale state/source-fenced commits refuse;
-  launch reads serialize with install/remove/commit, and bounds are checked within
-  the SQLite transaction before publication.
-- Removal renames the directory aside durably before deleting source and data.
-  Short-lived database connections close before the serialized operation ends.
+- Established missing/unsafe storage refuses instead of initializing fresh data.
+- Publication precedes the manifest head; new apps stage their entire directory.
+  Updates preserve data and immutable instance identity.
+- State/source/instance fences protect stale writes and removed/reinstalled apps.
+- Remove syncs its retirement rename before erasing data. Restart reclaims only
+  exact owner-controlled retirement/staging names.
+- Explicit upgrade retries preserve old backups and create a current snapshot;
+  backup attempts are bounded. Publication success precedes deferred cleanup.
 
 ## Entry points
 
-`module.ts` owns registration, RPC validation and store construction;
-`tron-swift-app-extension.ts` owns tool admission and source resolution;
-`swift-app-store.ts` owns persistence and revision admission. The iOS runner
-contract is [documented separately](../../../../ios-app/docs/swift-apps.md).
+`module.ts`: RPC admission/registration and store composition.
+`tron-swift-app-extension.ts`: tool/source admission and display offer production.
+The [iOS runner](../../../../ios-app/docs/swift-apps.md) owns execution and link UI.
 
 ## Signals
 
-`GatewayError` refusals distinguish invalid input, missing apps and conflicting
-or unsafe state. Missing/unsafe databases and unsupported schemas are restoration
-problems, not permission to retry with revision zero. No module-specific log
-signal or background timer is registered.
+`GatewayError` distinguishes invalid input, missing grants/apps and conflicting
+or unsafe state. `details.outcomeUnknown` identifies an interrupted receipt,
+not replay permission. Feed `unavailable` is distinct from `empty`; check the
+selected Gateway home and publisher lock/records before retrying a read.
+Missing/unsafe SQLite is a restoration problem, never permission for revision zero.
 
 ## Verify
 
 ```bash
 scripts/tron verify --module gateway/apps
-scripts/tron test gateway src/modules/apps/swift-app-store.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
 ```
 
-`apps.store.lock.integration.test.ts` protects persisted state. The integration
-journey drives the tool through a real runtime/faux model and RPCs through
-`GatewayService`: exact source, receipt replay, stale/bounded commits, reinstall,
-restart, removal and unsafe/missing storage. It writes
-`test-results/swift-app-store/report.json`. `run-prompt-stream` additionally
-locks the ordinary-session tool surface; `protocol.wire` guards shared wire
-values. These consumer locks do not replace the module's store journey.
+Store/lock journeys retain the named v1 and real SQLite oracles.
+The install journey crosses RuntimeRegistry, canonical display grants,
+GatewayService/receipts, real publisher files and the native interpreter.
+Artifacts: `test-results/apps-install/report.json`.
+Fixture kill cuts release the workspace lease first; they do not prove whole-Gateway
+ungraceful crash or power-loss recovery.
 
 ## Not here
 
-Workspace root authority: [workspace](../../workspace/README.md). RPC receipt,
-drain and disconnect ownership: transport. Swift interpretation and rendering:
-the iPhone Swift app engine. No feeds, scheduling, source execution or app-state
-migration is implemented here.
+Workspace root authority, transport receipts, scheduling, source execution,
+HTML apps, a full history browser, publisher changes or app-state migrations.

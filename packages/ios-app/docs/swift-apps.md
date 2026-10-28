@@ -26,7 +26,7 @@ profile's link host). Past the 320,000-byte preview bound it reads "Too large to
 Source", a failed load "Unavailable · View Source"; both open the source and never run. Done
 discards the program; cards never auto-open, so cache install, reconnect and relaunch replay
 nothing; turning the flag off swaps an open runner for the source sheet. No new authority,
-Gateway change, feed or storage. Canonical mini-app source lives in
+feed or storage in source-only previews. Offers use the explicit review below. Canonical mini-app source lives in
 [`tools/web/apps/<app-id>/`](../../../tools/web/README.md).
 
 ## Tron styling (#909)
@@ -46,11 +46,34 @@ Installed apps with their own Mac-side data are the Gateway's (`swift-apps.v1`, 
 `swift_app` tool; [Gateway Swift apps](../../gateway/docs/swift-apps.md)). The Tron
 menu's Apps sheet opens a coherent source/state snapshot in this runner through
 `InstalledSwiftApps`; accepted writes stay with that receipt-backed owner across
-runner dismissal. Manage supports rename, clear data and removal. Source
-installation is currently tool-only; displayed Swift files still run disposable
-previews, not installed instances.
+runner dismissal. Manage supports confirmed rename, clear data and removal.
+Ordinary `display` source still runs a disposable preview; it does not make an
+installation or obtain feed authority.
 
-## Install design review (#1162)
+## Reviewed Install App and Builds (#1162)
+
+With Run Swift files on, `swift_app offer` renders an inline Swift card whose
+native producer intent opens Install App review, not a disposable preview.
+The review shows target app id/current name, source/hash and declared access.
+The canonical session/artifact grant binds the exact offered bytes and config;
+another display of identical source does not inherit permission to install it.
+Install/update uses one Apps-owned command across dismissal/reconnect, never an
+automatic replay. A failed command remains terminal for that review identity;
+prepare a fresh offer for another explicit attempt. Successful removal permits
+fresh consent/reinstallation of the same offer, with fresh app data.
+
+New reviewed installs use manifest v2. Explicit source updates retain data and
+instance identity. V1 stays readable; upgrading it needs the review's backed-up
+v2 opt-in. SQLite stays v1. No read or reconnect migrates an app.
+
+[`Builds.swift`](../../../tools/web/apps/builds/README.md) consumes only its declared
+`AppFeed.iosBuilds()` snapshot. Opens and native pull-to-refresh read the selected
+Gateway's existing publisher; there is no app networking or background polling.
+Refresh preserves committed AppStorage values, admits a new runtime before
+publication and resets the old interpreter's view scopes. Dirty/failed writers
+remain owned rather than being silently replaced. Install Build is distinct from
+Install App: only its explicit native action can hand an exact snapshot manifest
+on the paired host to iOS. The host does not claim OS installation completed.
 
 The hosted-only `-tron-apps-install-design-fixture` composes an Install App
 review using shared settings/document components; it does not register an
@@ -58,7 +81,9 @@ installation or contact a Gateway. `TronAppsInstallDesignUITests` capture the
 unchanged historical Builds source beside the
 [Builds visual proposal](../../../tools/web/apps/builds-preview/README.md#installation-design-review-1162) in the actual
 interpreter (light/dark/default/XXXL). Both disable build installation. The
-proposal is not the declared feed or installed-app install/update flow.
+proposal is synthetic. The real-Gateway `testBuildsInstallLight/Dark/LightXXXL/DarkXXXL`
+journeys separately exercise the production offer/review/Apps paths with the canonical
+interpreted source and synthetic publisher files; they never tap Install Build.
 
 ## Flag
 
@@ -67,10 +92,8 @@ An iPhone-only preference (`ExperimentalSettingsContent`, UserDefaults key
 sheets gain or lose the control at once. The launch argument
 `-tron.experimental.swiftApps YES|NO` sets the same stored choice:
 
-```bash
-xcrun simctl launch booted com.tron.mobile.beta -tron.experimental.swiftApps YES
-xcrun devicectl device process launch --device <device-id> --terminate-existing com.tron.mobile -tron.experimental.swiftApps YES
-```
+Use the [iOS development helpers](../../../.agents/skills/tron-ios/SKILL.md) for
+simulator/device work; do not bypass their host leases.
 
 ## Runtime and safety
 
@@ -87,8 +110,10 @@ dynamic values, a tree-walking evaluator, the bounded library and value-to-Swift
 - **Links (#1160)** via `SwiftAppLinkPolicy`, only on the host of the profile selected at Run:
   an `itms-services://?action=download-manifest&url=…` whose manifest is `https` on that host
   (straight to the system prompt), or an `https` page there after an **Open link?** alert.
-  Anything else diagnoses in place (`Link`) or rolls back (`openURL`); a link opens only after
-  its action commits. Other `@Environment` keys diagnose.
+  V2 additionally requires an exact manifest from the installed feed and an explicit
+  native user action; lifecycle/timer/change callbacks cannot open an OS install.
+  Source-only/v1 previews retain their named host policy. Refused links diagnose or
+  roll back; admitted links open only after action commit. Other environment keys diagnose.
 - **Diagnostics.** Unsupported syntax is collected per construct with its line, stopping at 10
   (saying more may remain); no partial program runs; lexer, delimiter and nesting errors are
   fatal. A failing view statement is isolated so siblings and ForEach rows keep rendering; value
@@ -193,7 +218,9 @@ receipt-backed mutations; `apps.open` loads source/state coherently and every in
 commit fences source and state revisions. `SwiftAppRunnerSheet` injects the port only when
 its launch supplies that installed session. Closing stops timers, not accepted writes;
 unsaved/failed changes remain owned and appear in the existing notice/error surfaces.
-Clean reopens read the Gateway afresh.
+Clean reopens read the Gateway afresh. Presented program versions remain owned until
+closed, so another clean reader cannot orphan a writer. Manage rechecks unresolved
+writes after awaits; accepted install work also blocks conflicting management.
 
 ## Apps menu and Manage
 
@@ -203,8 +230,9 @@ the selected Gateway's `apps.list`, refreshed on open, pull and after a runner o
 A row opens the app through `apps.open` in the shared runner; touch and hold offers Open and
 Manage. Manage renames, clears data and removes the app (each confirmed, receipts-backed), and
 offers Discard Unsaved Changes when a save was refused. Rows with unsaved work carry an
-Unsaved tag. Feeds, Builds Install, source history and provenance (#1159, #1162, #2078, #2079)
-are not part of this surface; the `HostedAppsDesignFixture` remains the design review fixture.
+Unsaved tag. V2 declared feeds and reviewed source updates are implemented above;
+full history/provenance browsing and HTML remain separate scope. The hosted design
+fixture is not evidence that those remaining surfaces are implemented.
 
 The Gateway app-store boundary journey compiles its
 [`PersistenceBoundaryMain.swift`](../../gateway/src/modules/apps/fixtures/PersistenceBoundaryMain.swift)

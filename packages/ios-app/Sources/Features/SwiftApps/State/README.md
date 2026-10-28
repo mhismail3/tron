@@ -1,57 +1,70 @@
 # Installed Swift-app state
 
 ## Purpose
-Own the phone's installed-app projections and accepted write lifecycle. The Gateway's
-`modules/apps` store remains canonical. The interpreter stays synchronous and has no
-transport, credentials or ambient installed identity.
+Own installed-app projections and accepted writes. Gateway `modules/apps` remains
+canonical; the interpreter stays synchronous without transport or credentials.
 
 ## Owns
-- `InstalledSwiftAppWire`: coherent launch, source/state revision fences and bounded DTO admission.
-- `InstalledSwiftApps`: the observable catalog (`apps`, `phase`), latest-request-fenced opens, at most
-  200 retained sessions, and confirmed rename / clear-data / remove / explicit discard-unsaved.
-  `Sources/State/InstalledSwiftAppsGateway` composes its Gateway ports from the lifecycle and receipts owners (AppModel only calls it), keeping this module free of those owners.
-- `InstalledSwiftAppSession`: optimistic JSON projection, bounded unsent key coalescing,
-  immutable dispatched command and failed/uncertain changes retained past sheet dismissal.
+- `InstalledSwiftAppWire`: bounded explicit v1/v2 launch admission, exact source,
+  declared feed and source/state/instance revision fences.
+- `SwiftAppInstallWire`: source/configuration review and immutable install command.
+- `InstalledSwiftApps`: latest-request-fenced catalog/opens, retained sessions and
+  installation coordinators, confirmed Manage operations and explicit discard.
+- `SwiftAppInstallation`: one accepted install command/result across dismissal.
+- `InstalledSwiftAppSession`: optimistic JSON, coalesced unsent keys and an immutable
+  dispatched command; failed/uncertain work remains owned after its view closes.
+- `Sources/State/InstalledSwiftAppsGateway` composes existing pinned-connection
+  read ports and confirmed-mutation receipts; AppModel only calls that composition.
 
 ## Contract
-`AppModel` only composes the read/commit ports. Reads pin the selected Gateway and connection
-epoch and require that admission after their await. Writes use the existing
-`ConfirmedMutationExecutor`; each immutable command carries its source revision, state
-revision and stable command ID. The composition may not route a queued request into a new
-Gateway connection authority.
+Reads pin the selected Gateway and connection epoch through every await.
+Writes use `ConfirmedMutationExecutor` and stable command IDs. A queued request
+must not be routed into another Gateway authority.
 
-The runner injects `SwiftAppPersistence` only for an installed session. Its committed JSON
-batches enter `accept`; one unstructured session-owned task drains them. Closing the sheet
-stops interpreter timers, not accepted writes. Reopening a clean app loads `apps.open` again;
-reopening an unsaved app retains its projection and failure instead of discarding data.
+A review binds the exact producer session/artifact, source SHA and configuration
+to the reviewed existing head. Accepted installation belongs to the Apps owner,
+not its sheet Task. A repeated presentation reuses unresolved work; a settled
+success cannot present Open after an authoritative review observes removal.
+Confirmed removal invalidates completed installation projections.
+
+The runner injects persistence/feed ports only for an installed session.
+Its committed JSON enters one session-owned drain task. Closing stops timers,
+not writes. Clean opens read the Gateway again; dirty/failed sessions stay owned.
+Presented program versions are retained independently so a fresh reader cannot
+orphan a still-presented writer. Refresh admits the new runtime before publishing
+its session and refuses a dirty/no-op replacement. Only disposable clean,
+unpresented sessions may be evicted.
 
 ## Invariants
-- At most 1,000 keys/512 KiB of projected JSON, 256 keys per dispatched batch, 200 retained
-  sessions/opens. A dispatched command is never mutated by newer actions.
-- A save failure retains the exact pending command and newer dirty values, surfaces through
-  the existing app notice/error owners and never automatically reloads or resubmits.
-- No source/storage schema migration, local database or second installed-app catalog.
-- Clean reads may be discarded; accepted/uncertain writes may not be evicted.
+- At most 1,000 keys/512 KiB JSON, 256 keys per dispatched batch, 200 retained
+  sessions/opens and 200 installation identities. Never mutate a dispatched command.
+- Failure retains pending command/new dirty values, uses existing notices/overlays
+  and never automatically reloads or resubmits. Installation failures are terminal
+  for that review identity; prepare a fresh offer for another explicit attempt.
+- Rename, reset, removal and source update refuse unresolved local writes or an
+  active installation. Recheck writes after asynchronous management operations.
+- No local database, second canonical app catalog or implicit format migration.
 
 ## Entry points
-`InstalledSwiftApps.open(appID:profileID:)`, `InstalledSwiftAppSession.accept`, `settle`.
-`SwiftAppRunnerSheet` hosts the projection; `UI/SwiftApps/InstalledAppsSheet` (Tron menu → Apps) is its
-consumer. Clear data and remove refuse while the app has unsaved work; only an explicit confirmed
-discard drops it.
+`review`, `installation`, `open`, session `accept`/`settle`, confirmed Manage.
+`SwiftAppRunnerSheet` and `SwiftAppInstallReviewSheet` host these projections.
+Only explicit confirmed discard gives up accepted unsaved work.
 
 ## Signals
-The existing app error notice and runner error overlay report unsaved writes; the retained
-`pending.commandId` identifies the command for receipt diagnosis. No content logging.
+The app notice and runner/review error overlays identify unsaved or unconfirmed
+operations. Retained `pending.commandId` / installation command identifies its
+receipt. No source or app-data logging.
 
 ## Verify
 ```bash
-scripts/tron test gateway src/modules/apps/swift-app-store.integration.test.ts
-scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen
+scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
+scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight
 ```
-Also `testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded` and
-`testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation`. They install through a real Pi
-tool and drive the production Tron menu, Apps sheet and runner against the real Gateway.
+Also retain the existing installed-app reopen, refused-save and confirmed Manage
+real-Gateway journeys. The Builds journeys use canonical interpreted source,
+synthetic publisher records and actual production pairing/chat/review/Apps paths;
+they inspect but never invoke OS build installation.
 
 ## Not here
-Interpreter evaluation, sheet visuals, app installation, feeds, HTML execution, catalog UI,
-history/provenance and app-store migrations.
+Interpreter evaluation, sheet styling, HTML execution, publisher ownership,
+full history/provenance browsing or SQLite migration.
