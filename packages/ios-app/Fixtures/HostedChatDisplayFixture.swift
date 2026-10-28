@@ -779,9 +779,8 @@ private actor HostedHomeShellGateway {
         case "home.taskList":
             taskListReads += 1
             if HostedHomeTaskHistoryFixture.enabled {
-                let active = HostedHomeTaskHistoryFixture.row(taskSummary("active"), id: "active")
-                let old = HostedHomeTaskHistoryFixture.row(taskSummary("terminal"), id: "terminal")
-                return (.object(["items": .array(params["filter"]?.stringValue == "finished" ? [] : params["filter"] != nil ? [active] : [active, old])]), nil)
+                let active = HostedHomeTaskHistoryFixture.row(taskSummary("active"))
+                return (.object(["items": .array(params["filter"]?.stringValue == "finished" ? [] : [active])]), nil)
             }
             // Hold the real sheet's read at the socket boundary, not its view state.
             // Both Manage Home and its nested Tasks sheet must lay out before data.

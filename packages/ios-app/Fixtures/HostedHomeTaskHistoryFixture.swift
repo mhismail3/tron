@@ -18,12 +18,11 @@ enum HostedHomeTaskHistoryFixture {
             "refs": .object(["branch": .string("fix/task-history"), "commit": .string("99a69ce97"), "issue": .string("#2073")])
         ])
     }
-    static func row(_ base: JSONValue, id: String) -> JSONValue {
+    static func row(_ base: JSONValue) -> JSONValue {
         var row = base.objectValue!
         row["title"] = .string("Restructure #1345 · Phase 3")
-        row["checkins"] = .array([checkin(id == "active" ? 22 : 10)])
+        row["checkins"] = .array([checkin(22)])
         row["attention"] = .bool(true)
-        if id == "terminal" { row["outcome"] = .string("needs-input"); row["attention"] = .bool(true) }
         return .object(row)
     }
     static func history(_ params: [String: JSONValue]) -> JSONValue {

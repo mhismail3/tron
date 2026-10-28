@@ -93,6 +93,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
         XCTAssertTrue(element(app, "home-task-checkin-blocked").label.contains("Maintainer visual approval needed."))
         let time = element(app, "home-task-checkin-time")
         XCTAssertTrue(time.exists)
+        shot("2073-after-summary-\(name)")
         time.tap()
         XCTAssertTrue(element(app, "home-task-checkin-absolute-time").waitForExistence(timeout: 5))
         shot("2073-after-time-\(name)")
