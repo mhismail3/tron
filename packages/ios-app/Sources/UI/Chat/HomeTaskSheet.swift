@@ -20,6 +20,7 @@ struct HomeTaskSheet: View {
     @PresentationState var failure: String?
     /// The brief opened whole in the shared document sheet.
     @PresentationState private var reading: HomeTextReading?
+    @PresentationState private var checkinHistory: HomeSheetDestination?
     @Environment(\.tronSettingsVisualTheme) private var visualTheme
     @PresentationState var revoking: PendingRevocation?
 
@@ -95,6 +96,10 @@ struct HomeTaskSheet: View {
         }
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
+        }
+        .tronManagedSheet(item: $checkinHistory, identity: { "home.\(profileID).\($0.id)" }) { destination in
+            HomeSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
+                .tronSettingsVisualTheme(accent: accent)
         }
         .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { pending in
             TronConfirmationSheet(
@@ -257,19 +262,23 @@ struct HomeTaskSheet: View {
     /// The worker: its model, its subagents, the runs live right now and its token spend.
     @ViewBuilder private func workerCard(_ task: HomeTaskDTO) -> some View {
         let runs = task.subagentRuns.flatMap { $0.total > 0 ? $0 : nil }
-        if task.workerModel != nil || task.subagents != nil || runs != nil || task.spend != nil || task.checkins?.last != nil {
-            TronSettingsGroup("Worker", accent: accent) {
+        TronSettingsGroup("Worker", accent: accent) {
                 VStack(spacing: 0) {
                     let rows = workerRows(task)
                     if let checkin = task.checkins?.last {
-                        TronSettingsRow(icon: "text.bubble", title: "Latest check-in",
-                                        subtitle: HomeTaskPresentation.checkinText(checkin),
-                                        subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityIdentifier("home-task-checkin")
-                            .tronListMarkers("home-task-checkin")
-                        if !rows.isEmpty { TronSettingsDivider(accent: accent) }
+                        HomeTaskCheckinView(checkin: checkin, identifier: "home-task-checkin",
+                            context: checkin.operationId == task.operationId
+                                ? "Current operation · \(HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome))"
+                                : "Earlier operation", heading: "Latest check-in")
+                        TronSettingsDivider(accent: accent)
                     }
+                    Button { checkinHistory = .taskHistory(task.taskId) } label: {
+                        TronSettingsRow(icon: "clock.arrow.circlepath", title: "View all check-ins",
+                                        subtitle: "Every operation and resume", accent: accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("home-task-view-checkins")
+                    if !rows.isEmpty { TronSettingsDivider(accent: accent) }
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { TronSettingsDivider(accent: accent) }
                         // Title over value, as every other Home detail row reads.
@@ -297,7 +306,6 @@ struct HomeTaskSheet: View {
                     }
                 }
             }
-        }
     }
 
     private func workerRows(_ task: HomeTaskDTO) -> [(icon: String, title: String, value: String, id: String)] {

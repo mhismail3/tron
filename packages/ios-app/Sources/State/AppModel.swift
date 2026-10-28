@@ -4629,11 +4629,17 @@ extension AppModel {
             }
             return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions,
                                          profile: try await profileList))
-        case .tasks(let cursor):
+        case .tasks(let cursor, let filter):
             let status = try await readTaskStatus()
-            var params: [String: JSONValue] = ["limit": .number(20)]
+            var params: [String: JSONValue] = ["limit": .number(20), "filter": .string(filter.rawValue)]
             if let cursor { params["cursor"] = .string(cursor) }
             return .tasks(status.admitsTaskReads ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params))) : nil, status)
+        case .taskHistory(let id, let cursor):
+            let status = try await readTaskStatus()
+            guard status.admitsTaskReads else { throw GatewayFailure(code: "unavailable", message: "Home task history is unavailable.", retryable: false, details: nil) }
+            var params: [String: JSONValue] = ["taskId": .string(id), "limit": .number(20)]
+            if let cursor { params["cursor"] = .string(cursor) }
+            return .taskHistory(try HomeTaskHistoryPageDTO.decode(try await read("home.taskHistory", .object(params))))
         case .task(let id):
             let status = try await readTaskStatus()
             return .task(status.admitsTaskReads ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)

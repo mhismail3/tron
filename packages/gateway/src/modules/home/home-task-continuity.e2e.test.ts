@@ -7,7 +7,7 @@ import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-regis
 import { execFile, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
@@ -197,6 +197,212 @@ describe("resuming a stopped Home worker in place", () => {
     expect((await homeOwnerOf(cold).taskStatus(resumed.taskId) as any).checkins).toEqual(final.checkins);
     evidence.push({ case: "durable-checkins-stop-resume", status, list, resumed: final });
   }, 60_000);
+  it("projects one current row per resumed lineage without merging separate same-title delegations", async () => {
+    const f = await fixture(false, true);
+    const { service } = await listen(f);
+    const client = { clientId: "lineage-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const owner = homeOwnerOf(f.registry);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("report", { resultId: "first-result", outcome: "needs-input", text: "Awaiting approval", evidence: ["Retained work"] })], { stopReason: "toolUse" })]);
+    const first = await owner.dispatchTask(f.home.sessionId, { taskId: "lineage", intent: "Same title", target: f.cwd });
+    await first.completion;
+    const entered = { count: 0 };
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("checkin", { step: "Review resumed work", done: "Clean 99a69ce97\nretained", next: "Capture 4 light/dark images" })], { stopReason: "toolUse" }), holding(entered)]);
+    const resumed = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: first.taskId }) as { taskId: string; operationId: string };
+    await waitFor(() => entered.count === 1, "resumed worker check-in");
+    const page = await service.invoke(client, "home.taskList", { limit: 1 }) as any;
+    expect(page.items.map((row: any) => row.taskId)).toEqual([resumed.taskId]);
+    expect(page.nextCursor).toBeUndefined();
+    expect(page.counts).toEqual({ active: 1, finished: 0 });
+    expect(page.items[0]).toMatchObject({ sessionId: first.sessionId, lifecycle: "active", attention: false });
+    expect(page.items[0].checkins.at(-1).done).toBe("Clean 99a69ce97\nretained");
+    await owner.stopTask(resumed);
+    await waitFor(async () => (await owner.taskStatus(resumed.taskId)).lifecycle === "terminal", "resume stopped");
+    f.faux.setResponses([fauxAssistantMessage([reportCall("separate-result")], { stopReason: "toolUse" })]);
+    await (await owner.dispatchTask(f.home.sessionId, { taskId: "separate", intent: "Same title", target: f.cwd })).completion;
+    const all = await service.invoke(client, "home.taskList", {}) as any;
+    expect(all.items.map((row: any) => row.taskId)).toEqual(["separate", resumed.taskId]);
+    expect((await service.invoke(client, "home.taskList", { filter: "open" }) as any).items).toEqual([]);
+    expect((await owner.taskStatus(first.taskId)).terminalEvidence?.outcome).toBe("needs-input");
+    evidence.push({ case: "one-row-per-lineage", page, all });
+  }, 60_000);
+
+  it("pages every canonical check-in and every operation across resumes, beyond the recent-record limit", async () => {
+    const f = await fixture(false, true);
+    const { service } = await listen(f);
+    const client = { clientId: "history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const owner = homeOwnerOf(f.registry);
+    const request = { step: "Readable progress", done: "Clean 99a69ce97\nrc65 uncapped 289.538s", next: "Same 4 light/dark captures" };
+    f.faux.setResponses([fauxAssistantMessage(Array.from({ length: 14 }, (_, index) => fauxToolCall("checkin", { ...request, step: `Milestone ${index}` })), { stopReason: "toolUse" }), fauxAssistantMessage([reportCall("history-initial")], { stopReason: "toolUse" })]);
+    const first = await owner.dispatchTask(f.home.sessionId, { taskId: "history-lineage", intent: "Finite history", target: f.cwd });
+    await first.completion;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("history-empty-resume")], { stopReason: "toolUse" })]);
+    const second = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: first.taskId }) as { taskId: string };
+    await waitFor(async () => (await owner.taskStatus(second.taskId)).lifecycle === "terminal", "empty resume settles");
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("checkin", { ...request, step: "Final review" })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall("history-final")], { stopReason: "toolUse" })]);
+    const third = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: second.taskId }) as { taskId: string };
+    await waitFor(async () => (await owner.taskStatus(third.taskId)).lifecycle === "terminal", "final resume settles");
+    const items: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await service.invoke(client, "home.taskHistory", { taskId: first.taskId, limit: 4, ...(cursor ? { cursor } : {}) }) as any;
+      expect(page.items.length).toBeLessThanOrEqual(4);
+      expect(page.total).toBe(18);
+      items.push(...page.items); cursor = page.nextCursor;
+    } while (cursor);
+    const checkins = items.filter(row => row.checkin).map(row => row.checkin);
+    expect(checkins.map(row => row.step)).toEqual(["Final review", ...Array.from({ length: 14 }, (_, index) => `Milestone ${13 - index}`)]);
+    expect(new Set(checkins.map(row => row.id)).size).toBe(15);
+    expect(checkins.every(row => row.done === request.done && row.next === request.next)).toBe(true);
+    expect(items.filter(row => !row.checkin).map(row => row.taskId)).toEqual([third.taskId, second.taskId, first.taskId]);
+    const newest = await service.invoke(client, "home.taskHistory", { taskId: third.taskId, limit: 4 }) as any;
+    expect(newest.items).toEqual(items.slice(0, 4));
+    evidence.push({ case: "all-operation-checkin-history", items });
+  }, 60_000);
+
+  it("does not present an inherited blocker as the current resumed operation's check-in", async () => {
+    const f = await fixture();
+    const { service } = await listen(f);
+    const client = { clientId: "current-operation-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const owner = homeOwnerOf(f.registry);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("checkin", { step: "Earlier review", done: "Work retained", next: "Approve", blocker: "Old approval", needsAttention: true })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("report", { resultId: "old-blocker-result", outcome: "needs-input", text: "Needs approval", evidence: ["Work retained"] })], { stopReason: "toolUse" }),
+    ]);
+    const first = await owner.dispatchTask(f.home.sessionId, { taskId: "old-blocker", intent: "Finite work", target: f.cwd });
+    await first.completion;
+    const entered = { count: 0 }; f.faux.setResponses([holding(entered)]);
+    const resumed = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: first.taskId }) as { taskId: string; operationId: string };
+    await waitFor(() => entered.count === 1, "resumed worker before its first check-in");
+    const page = await service.invoke(client, "home.taskList", { filter: "open" }) as any;
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ taskId: resumed.taskId, lifecycle: "active", attention: false, checkins: [] });
+    expect((await owner.taskStatus(first.taskId)).checkins).toHaveLength(1);
+    await owner.stopTask(resumed);
+    await waitFor(async () => (await owner.taskStatus(resumed.taskId)).lifecycle === "terminal", "resumed worker settled");
+    evidence.push({ case: "current-operation-without-inherited-blocker", page });
+  }, 60_000);
+
+  it("does not number refused resume admissions as worker operations in history", async () => {
+    const f = await fixture();
+    const { service } = await listen(f);
+    const client = { clientId: "refused-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const owner = homeOwnerOf(f.registry);
+    f.faux.setResponses([fauxAssistantMessage([reportCall("admitted-first")], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall("admitted-next")], { stopReason: "toolUse" })]);
+    const first = await owner.dispatchTask(f.home.sessionId, { taskId: "refused-history", intent: "Finite work", target: f.cwd });
+    await first.completion;
+    const registry = f.registry.administrativeWorkRegistry;
+    const busy = registry.begin({ kind: "compaction-export", sessionId: first.sessionId, hostEpoch: registry.runtimeEpoch });
+    try { await expect(owner.taskTool(f.home.sessionId, { action: "resume", taskId: first.taskId })).rejects.toThrow(/busy/u); }
+    finally { busy.settle(); }
+    const resumed = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: first.taskId }) as { taskId: string };
+    await waitFor(async () => (await owner.taskStatus(resumed.taskId)).lifecycle === "terminal", "admitted resume settled");
+    const page = await service.invoke(client, "home.taskHistory", { taskId: first.taskId }) as any;
+    expect(page.items).toHaveLength(2);
+    expect(page.items.map((row: any) => [row.taskId, row.operationNumber])).toEqual([[resumed.taskId, 2], [first.taskId, 1]]);
+    expect((await owner.taskStatus("refused-history.resume-1")).operationId).toBeNull();
+    evidence.push({ case: "refused-admission-not-a-worker-operation", page });
+  }, 60_000);
+
+  it("refuses a history read whose operation settles during canonical evidence loading", async () => {
+    const f = await fixture();
+    const { service } = await listen(f);
+    const client = { clientId: "racing-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    let releaseModel!: () => void; let releaseRead!: () => void;
+    const modelGate = new Promise<void>(resolve => { releaseModel = resolve; });
+    const readGate = new Promise<void>(resolve => { releaseRead = resolve; });
+    let modelEntered = false; let readEntered = false;
+    f.faux.setResponses([async () => { modelEntered = true; await modelGate; return fauxAssistantMessage([reportCall("history-race-result")], { stopReason: "toolUse" }); }]);
+    const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "history-race", intent: "Finite work", target: f.cwd });
+    const read = f.registry.readTaskEvidence.bind(f.registry);
+    f.registry.readTaskEvidence = async id => {
+      if (id === task.sessionId) { readEntered = true; await readGate; }
+      return read(id);
+    };
+    cleanups.push(async () => { releaseModel(); releaseRead(); f.registry.readTaskEvidence = read; });
+    await waitFor(() => modelEntered, "worker model admitted");
+    const result = service.invoke(client, "home.taskHistory", { taskId: task.taskId }).then(value => ({ value }), error => ({ error }));
+    await waitFor(() => readEntered, "history reached the real canonical evidence port");
+    releaseModel(); await task.completion; releaseRead();
+    expect(await result).toMatchObject({ error: { code: "conflict" } });
+    f.registry.readTaskEvidence = read;
+    evidence.push({ case: "history-refuses-cross-version-evidence" });
+  }, 60_000);
+
+  it("refuses contradictory persisted lineage links as a typed conflict on both read APIs", async () => {
+    const f = await fixture();
+    const { service } = await listen(f);
+    const client = { clientId: "invalid-lineage-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("valid-lineage-result")], { stopReason: "toolUse" })]);
+    const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "invalid-lineage", intent: "Finite work", target: f.cwd });
+    await task.completion;
+    const directory = join(f.tronHome, "gateway/home/tasks");
+    const file = join(directory, (await readdir(directory)).find(name => name.endsWith(`-${task.taskId}.json`))!);
+    const record = JSON.parse(await readFile(file, "utf8"));
+    record.resumes = { taskId: "missing-parent", operationId: "missing-operation" };
+    await writeFile(file, JSON.stringify(record));
+    await expect(service.invoke(client, "home.taskList", {})).rejects.toMatchObject({ code: "conflict" });
+    await expect(service.invoke(client, "home.taskHistory", { taskId: task.taskId })).rejects.toMatchObject({ code: "conflict" });
+    evidence.push({ case: "invalid-lineage-fails-closed-with-conflict" });
+  }, 60_000);
+
+  it("does not claim completeness when old nested check-ins outlive their retained evidence", async () => {
+    const f = await fixture(false, true);
+    const { service } = await listen(f);
+    const client = { clientId: "nested-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: 'for (let index = 0; index < 14; index++) await tools.checkin({step: "Nested " + index, done: "Normal spaced prose", next: "Retain history"});' })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall("nested-history-result")], { stopReason: "toolUse" }),
+    ]);
+    const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "nested-history", intent: "Finite work", target: f.cwd });
+    await task.completion;
+    const page = await service.invoke(client, "home.taskHistory", { taskId: task.taskId, limit: 50 }) as any;
+    expect(page.complete).toBe(false);
+    expect(page.items.filter((row: any) => row.checkin)).toHaveLength(12);
+    evidence.push({ case: "unrecoverable-nested-history-is-explicit", page });
+  }, 60_000);
+
+  it("proves retained nested check-ins complete through cold history reads and refuses foreign lineage cursors", async () => {
+    const f = await fixture(false, true);
+    const { service } = await listen(f);
+    const client = { clientId: "complete-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const owner = homeOwnerOf(f.registry);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: 'for (let index = 0; index < 2; index++) await tools.checkin({step: "Nested " + index, done: "Normal spaced prose", next: "Retain history"});' })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall("complete-nested-result")], { stopReason: "toolUse" }),
+    ]);
+    const task = await owner.dispatchTask(f.home.sessionId, { taskId: "complete-history", intent: "Finite work", target: f.cwd });
+    await task.completion;
+    const page = await service.invoke(client, "home.taskHistory", { taskId: task.taskId, limit: 1 }) as any;
+    expect(page.complete).toBe(true);
+    expect(page.total).toBe(3);
+    f.faux.setResponses([fauxAssistantMessage([reportCall("foreign-history-result")], { stopReason: "toolUse" })]);
+    await (await owner.dispatchTask(f.home.sessionId, { taskId: "foreign-history", intent: "Separate work", target: f.cwd })).completion;
+    await expect(service.invoke(client, "home.taskHistory", { taskId: "foreign-history", cursor: page.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+    const cold = await f.restart();
+    const coldService = new GatewayService({ display: displayOwnerOf(cold), sessions: cold, home: homeOwnerOf(cold) } as unknown as GatewayServiceDependencies);
+    const reopened = await coldService.invoke(client, "home.taskHistory", { taskId: task.taskId, limit: 50 }) as any;
+    expect(reopened.complete).toBe(true);
+    expect(reopened.items.filter((row: any) => row.checkin).map((row: any) => row.checkin.step)).toEqual(["Nested 1", "Nested 0"]);
+    evidence.push({ case: "complete-nested-cold-history", reopened });
+  }, 60_000);
+
+  it("honors the SDK nested-call completeness flag when calls exceed its retained catalog", async () => {
+    const f = await fixture(false, true);
+    const { service } = await listen(f);
+    const client = { clientId: "capped-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: 'for (let index = 0; index < 256; index++) { try { await tools.read({path: "missing-" + index}); } catch {} } await tools.checkin({step: "After the nested catalog cap", done: "Accepted after other calls", next: "Read retained evidence"});' })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall("capped-history-result")], { stopReason: "toolUse" }),
+    ]);
+    const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "capped-history", intent: "Finite work", target: f.cwd });
+    await task.completion;
+    const page = await service.invoke(client, "home.taskHistory", { taskId: task.taskId }) as any;
+    expect(page.complete).toBe(false);
+    expect(page.items.filter((row: any) => row.checkin).map((row: any) => row.checkin.step)).toEqual(["After the nested catalog cap"]);
+    evidence.push({ case: "sdk-nested-catalog-gap-is-explicit", page });
+  }, 60_000);
+
   it("bounds check-in storage and projections and refuses malformed requests without ending the worker", async () => {
     const f = await fixture(false, true);
     const request = { step: "Validating", done: "Previous milestone", next: "Next milestone" };

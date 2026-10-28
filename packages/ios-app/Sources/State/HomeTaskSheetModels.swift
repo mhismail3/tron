@@ -30,11 +30,18 @@ struct HomeTaskCheckinDTO: Decodable, Equatable, Sendable {
     let done: String
     let next: String
     let blocker: String?
+    let needsAttention: Bool?
+    let attention: String?
+    struct Refs: Decodable, Equatable, Sendable { let branch: String?; let commit: String?; let issue: String? }
+    let refs: Refs?
     var valid: Bool {
         [id, taskId, sessionId, operationId].allSatisfy(homeID)
             && HomeChapterPresentation.parse(at) != nil && homeText(step, bytes: 256)
             && homeText(done, bytes: 512) && homeText(next, bytes: 512)
             && (blocker.map { homeText($0, bytes: 512) } ?? true)
+            && (needsAttention != true || blocker != nil)
+            && (attention.map { ["none", "requested", "rate-limited", "pending"].contains($0) } ?? true)
+            && [refs?.branch, refs?.commit, refs?.issue].compactMap { $0 }.allSatisfy { homeText($0, bytes: 256) }
     }
     static func valid(_ values: [Self]) -> Bool {
         values.count <= 3 && values.allSatisfy(\.valid) && Set(values.map(\.id)).count == values.count
@@ -294,6 +301,7 @@ enum HomeTaskPresentation {
             + ["\(count(spend.outputTokens)) out"]).joined(separator: " · ")
     }
 
+    /// The tool transcript keeps its compact check-in preview; task sheets use structured rows.
     static func checkinText(_ checkin: HomeTaskCheckinDTO) -> String {
         [HomeSheetTime.relative(checkin.at), checkin.step, "Done: \(checkin.done)", "Next: \(checkin.next)",
          checkin.blocker.map { "Blocker: \($0)" }].compactMap { $0 }.joined(separator: "\n")

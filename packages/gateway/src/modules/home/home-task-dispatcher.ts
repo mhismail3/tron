@@ -26,6 +26,8 @@ import { basename } from "node:path";
 import { TRON_ASK_USER_INTERRUPTED } from "../../extensions/tron-ask-user-contract.js";
 import { abortableRead } from "../../util/abortable-read.js";
 import { HostPressure, type HostPressureDiagnostic } from "./host-pressure.js";
+import { homeTaskNeedsAttention } from "./home-task-lineage.js";
+import { readHomeTaskHistory } from "./home-task-history.js";
 
 /** One shared home.taskList store pass and the readers waiting on it. */
 interface ListFlight { result: Promise<HomeTaskPage>; readers: number; controller: AbortController }
@@ -1028,8 +1030,8 @@ export class HomeTaskDispatcher {
    * and never a report body. Identical reads in flight share that pass (#906): a
    * client that re-asks while one read is pending adds no store work. The pass
    * leaves the store queue once every reader waiting on it has gone. */
-  async list(input: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<HomeTaskPage> {
-    const key = JSON.stringify([input.limit ?? null, input.cursor ?? null]);
+  async list(input: { limit?: number; cursor?: string; filter?: "all" | "open" | "finished" }, signal?: AbortSignal): Promise<HomeTaskPage> {
+    const key = JSON.stringify([input.limit ?? null, input.cursor ?? null, input.filter ?? "all"]);
     let flight = this.listFlights.get(key);
     if (!flight) {
       const controller = new AbortController();
@@ -1056,18 +1058,23 @@ export class HomeTaskDispatcher {
     return this.store.activeTargets(signal);
   }
 
-  private async readList(input: { limit?: number; cursor?: string }, signal: AbortSignal): Promise<HomeTaskPage> {
-    const page = await this.store.page(input, signal);
+  private async readList(input: { limit?: number; cursor?: string; filter?: "all" | "open" | "finished" }, signal: AbortSignal): Promise<HomeTaskPage> {
+    const page = await this.store.page({ ...input, lineages: true }, signal);
     const items: HomeTaskSummary[] = [];
     for (const { task, pendingGrant } of page.items) {
       items.push({
         taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt, sessionId: task.sessionId, target: task.target,
         lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
-        attention: task.terminalEvidence?.outcome === "needs-input" || task.terminalEvidence?.outcome === "unknown",
-        checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE), pendingGrant, ...await this.display(task),
+        attention: homeTaskNeedsAttention(task),
+        checkins: (task.checkins ?? []).filter(checkin => checkin.operationId === task.operationId).slice(-HOME_TASK_CHECKIN_VISIBLE), pendingGrant, ...await this.display(task),
       });
     }
     return { items, counts: page.counts, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+  }
+
+  async history(input: { taskId: string; limit?: number; cursor?: string }, signal?: AbortSignal) {
+    await this.assertAvailable();
+    return readHomeTaskHistory(this.store, this.sessions, input, signal);
   }
 
   /** A task's display. A worker's name is read from its canonical session, never a transcript scan. */

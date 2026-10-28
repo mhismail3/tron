@@ -467,7 +467,8 @@ struct HomeSheetReadIdentity: Hashable {
 
 enum HomeSheetReadQuery: Hashable, Sendable {
     case manage
-    case tasks(String?), task(String), permissions
+    case tasks(String?, filter: HomeTaskFilter = .open), task(String), permissions
+    case taskHistory(String, cursor: String?)
     case chapters
     case profile
     /// One chapter's memory when `sessionID` is set; otherwise the whole memory view.
@@ -480,6 +481,7 @@ enum HomeSheetReadQuery: Hashable, Sendable {
 enum HomeSheetContent {
     case manage(HomeManageDTO)
     case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
+    case taskHistory(HomeTaskHistoryPageDTO)
     case chapters(HomeChapterListDTO)
     case profile(HomeProfileListDTO)
     case memory(HomeMemoryViewDTO)

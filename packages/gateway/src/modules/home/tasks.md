@@ -129,10 +129,30 @@ next startup; it is not treated as a successful cleanup.
 
 ## Control and spend status
 
-- `home.taskList` pages by `createdAt` desc, ID asc, with exact `counts: { active, finished }`;
-  rows carry ID, dates, `title`, `project`, `sessionId`, target, lifecycle, outcome, spend,
-  `attention`, `pendingGrant`. `home.taskStatus` adds the operation, result, `workerModel`,
-  `subagents` and `subagentRuns` (≤ 20 live).
+- `home.taskList` pages one current operation per explicit resume lineage by `createdAt`
+  desc, ID asc. Separate delegations stay separate even with the same title. Exact
+  `counts: { active, finished }` count these current operations, not superseded records.
+  `filter` is `all` (API default), `open` (non-terminal or needs attention), or `finished`;
+  cursors bind that filter. Rows retain the current task ID, dates, title, project, worker
+  session, lifecycle, outcome, spend, attention, pending grant and recent check-ins from
+  that operation; an inherited predecessor blocker is never presented as current.
+  A successor refused before starting never supersedes its worker's current operation.
+- `home.taskHistory` reads any task ID in a lineage, returning newest-first events for
+  every admitted operation (including empty resumes) and accepted check-in. Refused
+  admissions keep their records but neither emit an operation nor consume a resume number. Pages default to 20,
+  max 50, with total and namespace/lineage-bound cursors. Canonical `checkin` tool-result
+  details recover history beyond the twelve recent snapshots; snapshots cover an accepted
+  check-in whose tool result is not yet appended. IDs deduplicate inherited copies.
+  Text and whitespace remain verbatim: this read never guesses missing producer spaces.
+  `complete` is false if older nested calls lack exact retained records: codemode records
+  arguments/status, not result details, so an aged-out nested check-in's ID/time cannot
+  be reconstructed honestly. Retained nested snapshots are matched to the SDK's canonical
+  nested-call record; its incomplete flag also exposes argument/count limits. The client
+  names an evidence gap instead of inventing records. State is current, not a fabricated
+  historical phase at check-in time. A changed task store or authority epoch during the
+  canonical read refuses rather than mixing operation versions.
+- `home.taskStatus` remains the exact named operation, adding result, worker model,
+  subagents and ≤ 20 live runs. Historical task records and worker sessions are not deleted.
 - Home's `task` tool (`list`, `status`, `report`, `steer`, `interrupt`, `stop`, `resume`,
   `rename`) acts only on its own identity and generation; refusals name the state and the
   action to use (`home.task.control`). Rename writes the canonical session name.

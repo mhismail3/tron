@@ -19,6 +19,8 @@ enum HomeSheetDestination: Identifiable {
     case chapter(HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits)
     case tasks
     case task(String)
+    case taskHistory(String)
+    case checkin(HomeTaskHistoryPageDTO.Item)
 
     var id: String {
         switch self {
@@ -33,6 +35,8 @@ enum HomeSheetDestination: Identifiable {
         case .profileItem: "profile-item"
         case .tasks: "tasks"
         case .task: "task"
+        case .taskHistory: "task-history"
+        case .checkin: "checkin"
         }
     }
 
@@ -44,6 +48,8 @@ enum HomeSheetDestination: Identifiable {
         case .chapters, .chapter: "Chapters"
         case .profile, .profileItem: "Profile"
         case .tasks, .task: "Tasks"
+        case .taskHistory: "Check-ins"
+        case .checkin: "Check-in"
         }
     }
 
@@ -53,21 +59,22 @@ enum HomeSheetDestination: Identifiable {
         case .memory(let sessionID, _): .memory(sessionID: sessionID, continuation: nil)
         case .memorySummary(let line, let sessionID): .memoryPart(sessionID: sessionID, line)
         // Carried by the destination and never loaded; see `loadsPage`.
-        case .memoryItem, .chapter: .chapters
+        case .memoryItem, .chapter, .checkin: .chapters
         case .evidence(let source): .evidence(source, offset: 0)
         case .chapters: .chapters
         case .profile, .profileItem: .profile
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
+        case .taskHistory(let id): .taskHistory(id, cursor: nil)
         }
     }
 
     var isTaskSurface: Bool {
-        switch self { case .tasks, .task: true; default: false }
+        switch self { case .tasks, .task, .taskHistory, .checkin: true; default: false }
     }
 
     var loadsPage: Bool {
-        switch self { case .memoryItem, .chapter: false; default: true }
+        switch self { case .memoryItem, .chapter, .checkin: false; default: true }
     }
 }
 
@@ -167,6 +174,10 @@ struct HomeSheet: View {
                 HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if case .tasks = destination {
                 HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
+            } else if case .taskHistory = destination {
+                HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
+            } else if case .checkin(let item) = destination {
+                HomeTaskCheckinSheet(item: item)
             } else if destination.isTaskSurface {
                 HomeTaskSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else if isEvidence {
@@ -330,7 +341,7 @@ struct HomeSheet: View {
                 case .memory(let view): memory(view)
                 case .evidence(let page):
                     evidenceSheet(page)
-                case .tasks, .task, .permissions: EmptyView()
+                case .tasks, .task, .taskHistory, .permissions: EmptyView()
                 }
             } else {
                 TronSheetLoadingState(label: "Waiting for Home…", accent: accent)

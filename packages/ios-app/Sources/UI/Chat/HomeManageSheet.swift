@@ -141,6 +141,7 @@ extension HomeSheet {
                         TronSettingsRow(icon: "house.slash", title: "Disable Home",
                                         subtitle: "Stops activations; history is preserved",
                                         accent: .tronError, titleColor: .tronError, subtitleColor: .tronError)
+                            .tronSettingsVisualTheme(accent: .tronError)
                     }
                     .buttonStyle(.plain)
                     .disabled(mutating)

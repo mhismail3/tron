@@ -774,8 +774,14 @@ private actor HostedHomeShellGateway {
             return profileChange(params)
         case "settings.undo":
             return profileUndo(params)
+        case "home.taskHistory" where HostedHomeTaskHistoryFixture.enabled:
+            return (HostedHomeTaskHistoryFixture.history(params), nil)
         case "home.taskList":
             taskListReads += 1
+            if HostedHomeTaskHistoryFixture.enabled {
+                let active = HostedHomeTaskHistoryFixture.row(taskSummary("active"))
+                return (.object(["items": .array(params["filter"]?.stringValue == "finished" ? [] : [active])]), nil)
+            }
             // Hold the real sheet's read at the socket boundary, not its view state.
             // Both Manage Home and its nested Tasks sheet must lay out before data.
             if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(12)) }
@@ -808,6 +814,13 @@ private actor HostedHomeShellGateway {
             taskStatusReads += 1
             guard let id = params["taskId"]?.stringValue,
                   ["active", "terminal"].contains(id) || (sheetState == "paging" && id.hasPrefix("paged-")) else { return taskRefusal() }
+            if HostedHomeTaskHistoryFixture.enabled {
+                var record = taskRecord(id).objectValue!
+                record["title"] = .string("Restructure #1345 · Phase 3")
+                record["checkins"] = .array([HostedHomeTaskHistoryFixture.checkin(22)])
+                record["intent"] = .object(["text": .string("Review the retained task and its complete progress history.")])
+                return (.object(record), nil)
+            }
             return (taskRecord(id), nil)
         case "home.taskPermissions":
             if sheetState == "tasks-empty" {

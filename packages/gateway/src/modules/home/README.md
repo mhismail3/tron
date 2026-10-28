@@ -178,7 +178,7 @@ changes keep its store, cursors and spend.
 - Reads: `home.status` (phase, readiness, recovery, chapter, `openSessionId`, `live`,
   `waitingForUser`, `taskRecovery`, memory counters; derived, never stored), `home.context`,
   `home.open`, `home.chapterList` (ledger, metrics and derived `contents`), `home.profileList`,
-  `home.taskList`, `home.taskStatus`, `home.taskPermissions`.
+  `home.taskList`, `home.taskStatus`, `home.taskHistory`, `home.taskPermissions`.
 - Receipted: `home.prompt`, `home.designate`, `home.disable`, `home.pauseMemory`,
   `home.resumeMemory`, `home.profileChange`, `home.reconfirmPermissions`, task controls.
 - **Memory browser.** `home.memory.view` (newest-first lines, `part`, `sessionId` filter,
