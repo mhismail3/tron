@@ -1393,6 +1393,15 @@ private actor HostedHomeShellGateway {
     /// a chapter answers its own lines, and a part answers its two halves.
     private func memoryView(_ params: [String: JSONValue], empty: Bool) -> JSONValue {
         let revision = JSONValue.string(String(repeating: memoryAdvanced ? "b" : "a", count: 64))
+        // An old chapter's catalog addresses differ from both its message count
+        // and its displayed summary count; exercise the real sheet over RPC.
+        if ProcessInfo.processInfo.arguments.contains("-memory-position-regression") {
+            let scoped = params["sessionId"]?.stringValue == "home-chapter-sealed"
+            let count = scoped ? 32 : 40
+            let lines = (0..<count).reversed().map { memoryLine(start: 7424 + $0 * 8, span: 8) }
+            return .object(["homeId": .string("home-fixture"), "revision": revision,
+                "totalMessages": .number(Double(scoped ? 256 : 7744)), "lines": .array(lines)])
+        }
         func view(_ lines: [JSONValue], next: String? = nil) -> JSONValue {
             var result: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": revision,
                 "totalMessages": .number(Double(empty ? 0 : Self.memoryTotal)), "lines": .array(empty ? [] : lines)]
