@@ -376,12 +376,12 @@ export const STORES: readonly StoreSpec[] = [
     module: "gateway/apps", name: "store-swift-apps",
     paths: ["workspace/state/apps"],
     record: (home) => withWorkspace(home, async (workspace) => {
-      const apps = new SwiftAppStore(workspace);
+      const apps = new SwiftAppStore(workspace, () => { throw new Error("The v1 corpus has no display offers"); });
       await apps.install({ appId: CORPUS_IDS.app, name: "Corpus counter", source: "import SwiftUI\nstruct CounterApp: View { var body: some View { Text(\"0\") } }\n" });
       await apps.commit({ appId: CORPUS_IDS.app, expectedRevision: 0, set: [{ key: "count", value: 3 }], remove: [] });
     }),
     read: (home) => withWorkspace(home, async (workspace) => {
-      const apps = new SwiftAppStore(workspace);
+      const apps = new SwiftAppStore(workspace, () => { throw new Error("The v1 corpus has no display offers"); });
       return { list: await apps.list(), app: await apps.get(CORPUS_IDS.app), state: await apps.state(CORPUS_IDS.app) };
     }),
   },
