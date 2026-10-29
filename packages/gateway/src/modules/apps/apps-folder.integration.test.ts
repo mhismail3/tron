@@ -6,7 +6,11 @@ import { AppsFolderIndex } from "./apps-folder-index.js";
 import type { FolderWatchRequest } from "../../util/folder-watch.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
+import { afterEach, expect, it, vi } from "vitest";
+import { AppsFolderStore } from "./apps-folder-store.js";
+import * as folderFormat from "./apps-folder-format.js";
 import { createTestRegistry, displayOwnerOf } from "../../../test-support/gateway-registry.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
@@ -26,7 +30,12 @@ async function fixture(existingRoot?: string) {
   if (!existingRoot) roots.push(root);
   const agentDir = join(root, "agent"), tronHome = join(root, "tron");
   await mkdir(agentDir, { recursive: true });
+  const faux = fauxProvider({ provider: "apps-folder-fixture", tokensPerSecond: 100_000 });
   const registry = await createTestRegistry({ agentDir, tronHome, trust: new TrustService(agentDir),
+    modelRuntimeFactory: async () => {
+      const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
+      runtime.registerNativeProvider(faux.provider); return runtime;
+    },
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
   registries.push(registry); await registry.initialize(); await registry.initializeBlobStorage();
   const service = new GatewayService({ display: displayOwnerOf(registry),
@@ -36,7 +45,7 @@ async function fixture(existingRoot?: string) {
   } as unknown as GatewayServiceDependencies);
   const apps = join(tronHome, "workspace/files/apps");
   await mkdir(apps, { recursive: true, mode: 0o700 });
-  return { root, apps, service, registry, rpc: async (method: string, params: Record<string, unknown> = {}) => await service.invoke(phone, method, params) as Record<string, any> };
+  return { root, apps, service, registry, faux, rpc: async (method: string, params: Record<string, unknown> = {}) => await service.invoke(phone, method, params) as Record<string, any> };
 }
 it("isolates a malformed entry while a good Swift sibling opens through GatewayService", async () => {
   const f = await fixture();
@@ -223,6 +232,111 @@ it("does not silently truncate 1,001 folders and rejects a cursor across a chang
   await rm(join(f.apps, "entry-0"), { recursive: true });
   await waitFor(async () => (await f.rpc("apps.catalog")).revision !== first.revision ? true : undefined, "catalog revision after external deletion");
   await expect(f.rpc("apps.catalog", { cursor: first.nextCursor })).rejects.toMatchObject({ diagnosticReason: "catalog_changed" });
+});
+
+it("supplies folder ownership instructions to a real Pi turn without a profile override", async () => {
+  const f = await fixture(), project = join(f.root, "project"); await mkdir(project);
+  const slot = await f.registry.create(project), model = f.faux.getModel(); await slot.setModel(model.provider, model.id);
+  let context: TranscriptContext | undefined;
+  f.faux.setResponses([value => { context = value; return fauxAssistantMessage("Acknowledged"); }]);
+  await slot.prompt("Acknowledge.");
+  await waitFor(() => context && !slot.isBusy ? true : undefined, "model receives built-in folder ownership context");
+  const supplied = JSON.stringify(context!.messages);
+  expect(supplied).toContain("files/apps/<id>/");
+  expect(supplied).toContain("deleting files preserves saved app data");
+});
+
+it("reads and seeds orphan saved values through the real Pi app_data tool without granting access", async () => {
+  const f = await fixture();
+  const project = join(f.root, "project"); await mkdir(project);
+  const slot = await f.registry.create(project), model = f.faux.getModel(); await slot.setModel(model.provider, model.id);
+  let context: TranscriptContext | undefined;
+  f.faux.setResponses([
+    fauxAssistantMessage([
+      fauxToolCall("app_data", { action: "state", id: "tool-data" }, { id: "data-read" }),
+      fauxToolCall("app_data", { action: "commit", id: "tool-data", expectedRevision: 0, set: [{ key: "count", value: 9 }] }, { id: "data-seed" }),
+      fauxToolCall("app_data", { action: "list" }, { id: "data-list" }),
+      fauxToolCall("app_data", { action: "clear", id: "tool-data", expectedRevision: 1 }, { id: "data-unconfirmed-clear" }),
+    ], { stopReason: "toolUse" }),
+    value => { context = value; return fauxAssistantMessage("Done"); },
+  ]);
+  await slot.prompt("Read then seed the requested saved app values. Do not grant runtime access or authorize data clearing.");
+  await waitFor(() => context && !slot.isBusy ? true : undefined, "app_data tool turn settles");
+  const results = context!.messages.filter(message => message.role === "toolResult") as unknown as Array<Record<string, any>>;
+  expect(results).toHaveLength(4);
+  for (const result of results.slice(0, 3)) expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+  expect(results[2]!.details.states).toMatchObject([{ id: "tool-data", orphan: true }]);
+  expect(results[3]!.isError).toBe(true);
+  expect(await f.rpc("apps.state", { id: "tool-data" })).toMatchObject({ revision: 1, entries: [{ key: "count", value: 9 }] });
+  expect((await f.rpc("apps.catalog")).rows).toHaveLength(0);
+  await expect(readFile(join(f.root, "tron/workspace/state/app-permissions/tool-data.json"))).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("refuses a stale app_data inventory cursor instead of silently omitting a newly inserted id", async () => {
+  const f = await fixture(), project = join(f.root, "project"); await mkdir(project);
+  for (let index = 0; index < 51; index++) await f.rpc("apps.state", { id: `saved-${String(index).padStart(2, "0")}` });
+  const slot = await f.registry.create(project), model = f.faux.getModel(); await slot.setModel(model.provider, model.id);
+  let context: TranscriptContext | undefined;
+  f.faux.setResponses([
+    fauxAssistantMessage([fauxToolCall("app_data", { action: "list" }, { id: "inventory-first" })], { stopReason: "toolUse" }),
+    async value => {
+      const first = value.messages.findLast(message => message.role === "toolResult") as unknown as Record<string, any>;
+      await f.rpc("apps.state", { id: "inserted-before-cursor" });
+      return fauxAssistantMessage([fauxToolCall("app_data", { action: "list", cursor: first.details.nextCursor }, { id: "inventory-stale" })], { stopReason: "toolUse" });
+    },
+    value => { context = value; return fauxAssistantMessage("Done"); },
+  ]);
+  await slot.prompt("List the saved-data inventory, following its cursor.");
+  await waitFor(() => context && !slot.isBusy ? true : undefined, "inventory tool turn settles");
+  const results = context!.messages.filter(message => message.role === "toolResult") as unknown as Array<Record<string, any>>;
+  expect(results[0]!.details.states).toHaveLength(50);
+  expect(results[1]!.isError).toBe(true);
+  expect((await f.rpc("apps.catalog")).rows).toHaveLength(0);
+});
+
+it("manages orphan saved data with explicit clear authorization and revision CAS, without creating membership or grants", async () => {
+  const f = await fixture();
+  expect(await f.rpc("apps.state", { id: "orphan" })).toMatchObject({ revision: 0, entries: [] });
+  expect((await f.rpc("apps.catalog")).rows).toHaveLength(0);
+  await expect(f.rpc("apps.reset", { commandId: "orphan-unconfirmed-clear", id: "orphan", expectedRevision: 0, confirmed: false })).rejects.toMatchObject({ code: "invalid_request" });
+  expect(await f.rpc("apps.reset", { commandId: "orphan-confirmed-clear", id: "orphan", expectedRevision: 0, confirmed: true })).toMatchObject({ revision: 1 });
+  await expect(f.rpc("apps.reset", { commandId: "orphan-stale-clear", id: "orphan", expectedRevision: 0, confirmed: true })).rejects.toMatchObject({ code: "conflict" });
+  expect((await f.rpc("apps.catalog")).rows).toHaveLength(0);
+  await expect(readFile(join(f.root, "tron/workspace/state/app-permissions/orphan.json"))).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("never removes the live directory when an external writer replaces it after validation", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-delete-race-"))); roots.push(root);
+  const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
+  const apps = join(root, "tron/workspace/files/apps"), directory = join(apps, "victim");
+  const store = new AppsFolderStore(workspace, join(root, "tron"));
+  let validated = false, replaced = false;
+  const originalRead = folderFormat.readAppEntry;
+  const originalResolve = store.index.entryForDeletion.bind(store.index);
+  const resolveHook = vi.spyOn(store.index, "entryForDeletion").mockImplementation(async key => {
+    const entry = await originalResolve(key); validated = true; return entry;
+  });
+  // Wrap the real filesystem reader, without fabricating its returned facts.
+  // The external writer runs exactly after the last validation read and before
+  // the store resumes at rename; no production test hook or timing race is used.
+  const validationHook = vi.spyOn(folderFormat, "readAppEntry").mockImplementation(async (path, name) => {
+    const entry = await originalRead(path, name);
+    if (validated && !replaced && path === apps && name === "victim") {
+      replaced = true;
+      await rename(directory, join(root, "original"));
+      await mkdir(directory); await writeFile(join(directory, "note.txt"), "replacement");
+    }
+    return entry;
+  });
+  try {
+    await mkdir(directory, { recursive: true, mode: 0o700 }); await writeFile(join(directory, "note.txt"), "original");
+    const row = (await store.index.catalog()).rows[0]!;
+    await expect(store.deleteFiles(row.rowKey, row.contentRevision)).rejects.toMatchObject({ code: expect.stringMatching(/conflict|unsupported/) });
+    expect(replaced).toBe(true);
+    expect(await readFile(join(directory, "note.txt"), "utf8")).toBe(replaced ? "replacement" : "original");
+  } finally {
+    validationHook.mockRestore(); resolveHook.mockRestore(); await store.dispose(); await workspace.dispose();
+  }
 });
 
 it("keeps the replacement real watcher alive when a retired watch reports a delayed reset", async () => {
