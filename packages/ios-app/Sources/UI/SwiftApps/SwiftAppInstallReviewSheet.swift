@@ -17,18 +17,9 @@ struct SwiftAppPendingOfferReview: View {
         Group {
             if let launch {
                 SwiftAppRunnerSheet(launch: launch)
-            } else if let installation {
+            } else {
                 SwiftAppInstallReviewSheet(installation: installation, source: source,
                     artifactName: "App.swift", profileID: profileID, openProblem: problem, onOpen: open)
-            } else {
-                TronDocumentSheet(title: "Install App") {
-                    if let problem {
-                        TronInfoCard(icon: "exclamationmark.triangle", text: problem, accent: .tronAmber)
-                            .padding(TronSpacing.xlarge)
-                    } else {
-                        TronSheetLoadingState(label: "Preparing app review…", accent: .tronPrimary)
-                    }
-                }
             }
         }
         .task(id: PresentationActivityTaskID(source: offer.id, presentationActive: presentationActivity.allowsPresentationPublication)) {

@@ -37,18 +37,25 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.staticTexts["Read-only feed"].firstMatch.exists, app.debugDescription)
         XCTAssertFalse(FileManager.default.fileExists(atPath: appDirectory.path), "Opening review must not install")
         keepScreenshot(app, name: "2104-pending-review-\(suffix)")
-        buildsReveal(app, app.buttons["apps.install.source"], in: review)
+        app.buttons["apps.install.info"].tap()
+        let details = app.scrollViews["apps.install.details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10), app.debugDescription)
+        buildsReveal(app, app.buttons["apps.install.source"], in: details)
         keepScreenshot(app, name: "2104-pending-review-source-\(suffix)")
         app.buttons["apps.install.source"].tap()
         XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["App.swift"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         keepScreenshot(app, name: "2104-pending-source-\(suffix)")
+        buildsClose(app)
         buildsClose(app)
         buildsReveal(app, app.buttons["apps.install.confirm"], in: review)
         keepScreenshot(app, name: "2104-pending-review-confirm-\(suffix)")
         app.buttons["apps.install.confirm"].tap()
         XCTAssertTrue(app.buttons["apps.install.open"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(FileManager.default.fileExists(atPath: appDirectory.appendingPathComponent("app.json").path), "Only explicit confirmation installs")
-        buildsClose(app)
+        let reviewBar = app.navigationBars.containing(.button, identifier: "apps.install.confirm").firstMatch
+        reviewBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         let installed = app.buttons["installed-app-row-builds"]
         XCTAssertTrue(installed.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(pending.exists, "Installed app must leave Pending")

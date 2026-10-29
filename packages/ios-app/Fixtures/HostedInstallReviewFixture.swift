@@ -13,7 +13,7 @@ struct HostedInstallReviewGateway {
         let offer = SwiftAppInstallOffer(reference: reference, version: 1, id: String(repeating: "a", count: 64), appId: "builds", name: "Builds", icon: "shippingbox", sourceSha256: SHA256.hash(data: source).map { String(format: "%02x", $0) }.joined(), sourceBytes: source.count, feeds: ["ios-builds"])
         switch method {
         case "apps.review":
-            return try! JSONValue.encode(SwiftAppInstallReview(offer: offer, installed: installed, reference: reference))
+            return try! JSONValue.encode(SwiftAppInstallReview(offer: offer, installed: installed, reference: reference, source: String(decoding: source, as: UTF8.self)))
         case "apps.install":
             guard params["offerId"]?.stringValue == offer.id,
                   params["sessionId"]?.stringValue == reference.sessionId,
