@@ -3,8 +3,8 @@
 ## Purpose
 
 Own folder-backed Apps membership and scoped access separately from saved SQLite
-data. The approved target contract is in `docs/design/apps-folder/DESIGN.md` on
-`design/2108-apps-folders`. This implementation checkpoint is not a paired-client
+data. The target design is pinned at `b4d1a8ce21ed9bfcfa3f09b6bd36e0b09af7d8e6`
+on branch `design/2108-apps-folders`. This checkpoint is not a paired-client
 release: display materialization, the paired iOS consumer and conversion remain
 incomplete.
 
