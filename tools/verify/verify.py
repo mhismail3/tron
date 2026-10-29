@@ -316,7 +316,9 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             if full_reasons:
                 batch_tests |= set(locks)
                 reasons.append(f"full batch required; widened to every lock ({len(locks)} files) in batch: {', '.join(full_reasons)}")
-        declared |= chosen - narrow
+        # Retired owners still seed consumers/full risk above, but only live
+        # modules own verification commands that can execute now.
+        declared |= (chosen - narrow) & modules.keys()
     for key in sorted(declared):
         external = set()
         for command in modules[key].get("verify", []):

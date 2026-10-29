@@ -86,6 +86,28 @@ class TierTests(fixture.VerifyCase):
         r.commit('security code')
         self.assertEqual(self.plan()['selection']['tier'], 'full')
 
+    def test_retired_module_keeps_full_tier_and_runs_its_surviving_consumer(self):
+        import shutil
+        r = self.repo
+        path = 'mods/beta/beta.module.json'
+        data = json.loads((r.path / path).read_text())
+        r.write(path, json.dumps({**data, 'dependsOn': ['repo/alpha']}))
+        r.write('mods/beta/test-beta.lock.py',
+                "from pathlib import Path\nPath('test-results/retirement-consumer').write_text('executed')\n" + fixture.PASSING)
+        r.commit('live producer and consumer')
+        r.git('branch', '-f', 'base')
+        shutil.rmtree(r.path / 'mods/alpha')
+        r.write(path, json.dumps(data))
+        r.commit('retire producer and remove consumer edge')
+        planned = self.plan()
+        self.assertEqual(planned['selection']['tier'], 'full')
+        self.assertIn('deleted module repo/alpha', planned['selection']['fullReasons'])
+        self.assertIn('mods/beta/test-beta.lock.py', planned['selection']['tests'])
+        result = r.verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((r.path / 'test-results/retirement-consumer').read_text(), 'executed')
+        self.assertEqual(r.report()['passingTests'], 2)
+
     def test_serial_nested_files_run_once_in_batch_unless_the_test_itself_changed(self):
         r = self.repo
         root = 'packages/gateway'
