@@ -86,7 +86,7 @@ class TierTests(fixture.VerifyCase):
         r.commit('security code')
         self.assertEqual(self.plan()['selection']['tier'], 'full')
 
-    def test_retired_module_keeps_full_tier_and_runs_its_surviving_consumer(self):
+    def test_retired_module_with_updated_consumer_keeps_full_tier_and_live_checks(self):
         import shutil
         r = self.repo
         path = 'mods/beta/beta.module.json'
@@ -97,6 +97,8 @@ class TierTests(fixture.VerifyCase):
         r.commit('live producer and consumer')
         r.git('branch', '-f', 'base')
         shutil.rmtree(r.path / 'mods/alpha')
+        # This atomic consumer-edge update selects beta directly. The oracle
+        # proves retired-declaration exclusion, not reverse dependency closure.
         r.write(path, json.dumps(data))
         r.commit('retire producer and remove consumer edge')
         planned = self.plan()
