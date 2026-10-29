@@ -54,7 +54,7 @@ share a physical `kernel/session/` directory but have different manifest owners.
 The native browser uses `home.memory.view` and `home.memory.evidence`, plus
 `home.chapterList` for chapters. iOS `State/HomeSheetReadOwner.swift` owns bounded
 DTO validation and current-request publication; `AppModel.readHomeSheet` performs
-the identity/capability-fenced RPC. Both belong to `Sources/State/state.module.json`.
+the identity/capability-fenced RPC. Both belong to `Sources/state.module.json` (its State directory claim).
 
 `HomeSheets.swift`, `HomePagedListSheet.swift`, `HomeMemorySheets.swift` and
 `HomeChapterSheets.swift` own native routes, the disposable page feed and rendering
