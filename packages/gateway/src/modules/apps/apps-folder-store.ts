@@ -4,11 +4,13 @@ import { dirname, join } from "node:path";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import type { ByteRange } from "../../util/byte-stream.js";
+import type { AppReference } from "./apps-reference.js";
 import type { AppOpenProjection } from "./apps-open-projection.js";
 import { durableAtomicWriteJson, syncDurably } from "../../util/durable-json.js";
 import { readSecureJson } from "../../util/secure-json.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { AppDataStore, type AppDataCommit } from "./app-data-store.js";
+import type { DirectoryPublisher } from "../../machine/directory-publication.js";
 import { AppsFolderIndex } from "./apps-folder-index.js";
 import { APP_ID, type ReadyAppEntry, type AppPermissions } from "./apps-folder-format.js";
 import { readIOSBuildsFeed } from "./ios-builds-feed.js";
@@ -22,8 +24,9 @@ export class AppsFolderStore {
   private readonly data: AppDataStore;
   private readonly mutex = new AsyncMutex();
   private readonly prompts = new Map<string, Consent>();
-  constructor(private readonly workspace: TronWorkspace, private readonly tronHome: string, changed?: (revision: string) => void) {
-    this.index = new AppsFolderIndex(workspace, changed); this.data = new AppDataStore(workspace);
+  constructor(private readonly workspace: TronWorkspace, private readonly tronHome: string, changed?: (revision: string) => void, publisher?: DirectoryPublisher,
+    private readonly admitLive?: (reference: Extract<AppReference, { kind: "live" }>) => void) {
+    this.index = new AppsFolderIndex(workspace, changed, undefined, publisher); this.data = new AppDataStore(workspace);
   }
   private async permissionPath(id: string, create = false): Promise<string> {
     if (!APP_ID.test(id)) throw new GatewayError("invalid_request", "Invalid app id");
@@ -80,6 +83,13 @@ export class AppsFolderStore {
       if (this.needsAccess(entry) && !grant) {
         return { kind: "permissionRequired", row: entry.row, permissions: entry.permissions, token: this.token({ id, contentRevision,
           executableDigest: entry.executableDigest, identity: entry.identity, device, expires: Date.now() + 10 * 60_000 }) };
+      }
+      if (entry.payload.kind === "reference") {
+        if (entry.payload.reference.kind === "live") {
+          if (!this.admitLive) throw new GatewayError("not_found", "Live view ended");
+          this.admitLive(entry.payload.reference);
+        }
+        return { kind: "reference", row: entry.row, reference: entry.payload.reference };
       }
       if (entry.payload.kind === "artifact") return { kind: "artifact", row: entry.row, artifact: entry.payload.artifact };
       const state = entry.permissions.data === "none" ? { appId: id, revision: 0, entries: [] } : await this.data.state(id);

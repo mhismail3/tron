@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
+import { readAppReference, type AppReference } from "./apps-reference.js";
 import { appArtifactPath } from "./apps-artifact-resource.js";
 import { appFileFormat, type ArtifactMedia } from "./apps-file-format.js";
 import { fileIdentity, readAppBundle, safeRelative, snapshotDigest, snapshotSize, type AppFileSnapshot } from "./apps-folder-files.js";
@@ -20,7 +21,7 @@ export interface ReadyAppEntry extends EntryIdentity {
   row: AppRow & { id: string; kind: AppKind; status: { kind: "ready" } };
   manifest: AppManifest; permissions: AppPermissions; executableDigest: string;
   files: ReadonlyMap<string, AppFileSnapshot>; entry: string; file: AppFileSnapshot;
-  payload: { kind: "swift"; source: Buffer } | { kind: "artifact"; artifact: AppArtifact };
+  payload: { kind: "swift"; source: Buffer } | { kind: "artifact"; artifact: AppArtifact } | { kind: "reference"; reference: AppReference };
 }
 export interface AppArtifact {
   entry: string; resourcePath: string; media: ArtifactMedia; mimeType: string; size: number; digest: string;
@@ -110,12 +111,14 @@ export async function readAppEntry(root: string, name: string, signal?: AbortSig
     if (!["swift", "web"].includes(kind) && (p.data !== "none" || p.feeds.length || p.network.length && !["link", "video"].includes(kind))) fail("Permissions are not supported for this kind");
     const executableDigest = hash(JSON.stringify([identity, canonical.filter(([path]) => path !== "app.json"), entry, kind, p]));
     if (["swift", "web"].includes(kind) && bundle.size > 32 * 1024 * 1024) fail("Executable bundle exceeds 32 MiB");
-    if (kind === "web" || p.network.length) throw new GatewayError("unsupported", "This entry needs a sandbox that is not available yet");
-    if (kind === "live" || kind === "link") throw new GatewayError("unsupported", "This reference needs its display owner to open");
+    if (kind === "web" || p.network.length && kind !== "link") throw new GatewayError("unsupported", "This entry needs a sandbox that is not available yet");
     if (!format) fail("Unsupported file type");
     if (kind === "swift" && !Buffer.isBuffer(source)) fail("Swift source must be bounded text");
-    const payload: ReadyAppEntry["payload"] = kind === "swift" && Buffer.isBuffer(source) ? { kind: "swift", source }
+    const payload: ReadyAppEntry["payload"] = (kind === "live" || kind === "link") && Buffer.isBuffer(source)
+      ? { kind: "reference", reference: readAppReference(source, kind) } : kind === "swift" && Buffer.isBuffer(source) ? { kind: "swift", source }
       : { kind: "artifact", artifact: { entry, resourcePath: appArtifactPath(name, row.contentRevision), media: format.media, mimeType: format.mimeType, size: snapshotSize(source), digest: snapshotDigest(source) } };
+    if (payload.kind === "reference" && payload.reference.kind === "url" && !p.network.includes(new URL(payload.reference.url).origin))
+      fail("Declare the link HTTPS origin in permissions.network before opening");
     return { name, identity, changedAt, row: { ...row, id: name, kind, status: { kind: "ready" } },
       manifest, permissions: p, executableDigest, files: bundle.files, entry, file: source, payload };
   } catch (error) {

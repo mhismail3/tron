@@ -1,3 +1,4 @@
+import { directoryPublisher } from "../src/machine/directory-publication.js";
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { DisplayArtifactStore } from "../src/display/display-artifact-store.js";
 import { DisplayOwner } from "../src/display/display-modules.js";
@@ -61,7 +62,7 @@ export function homeOwnerOf(registry: RuntimeRegistry): HomeOwner {
 /** One real registry fixture: the production composition, then the real registry.
  * Options remain the boundary's own inputs; no production overrides or test hooks. */
 export async function createTestRegistry(options: RegistryOptions & HomeTestOptions & { projectOptions?: ConstructorParameters<typeof import("../src/modules/projects/project-lifecycle.js").ProjectLifecycle>[2] } & Omit<ModuleOwners, "registry" | "sessionSearch" | "home" | "openAIModelEligibility" | "display"> & { browserLiveViews?: BrowserLiveViewRegistry; providerUsage?: ModelQueueOptions["usage"]; modelQueueDiagnostic?: ModelQueueOptions["log"]; modelRuntimeFactory?: () => Promise<ModelRuntime>; openAIModelEligibility?: OpenAIModelEligibility; knowledge?: HomeComposition["knowledge"]; sessionSearch?: () => SessionSearchService | undefined; settings?: HomeComposition["settings"] }): Promise<RuntimeRegistry> {
-  const { projectOptions, notifications, knowledge = () => undefined, settings = () => undefined, browserLiveViews, providerUsage, modelQueueDiagnostic, connections, scheduleToolOperations, sessionSearch, recentModelsChanged, modelRuntimeFactory, openAIModelEligibility = new OpenAIModelEligibility(), homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport, triggerSources, ...registryOptions } = options;
+  const { directoryPublisher: publication = process.env.TRON_TEST_DIRECTORY_PUBLICATION_BINARY ? directoryPublisher(process.env.TRON_TEST_DIRECTORY_PUBLICATION_BINARY) : undefined, projectOptions, notifications, knowledge = () => undefined, settings = () => undefined, browserLiveViews, providerUsage, modelQueueDiagnostic, connections, scheduleToolOperations, sessionSearch, recentModelsChanged, modelRuntimeFactory, openAIModelEligibility = new OpenAIModelEligibility(), homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport, triggerSources, ...registryOptions } = options;
   const modelQueue = options.gatewayModelRuntime ? new ModelQueueOwner({
     runtime: options.gatewayModelRuntime,
     usage: providerUsage ?? new ProviderUsageOwner(),
@@ -83,7 +84,7 @@ export async function createTestRegistry(options: RegistryOptions & HomeTestOpti
     homeTaskDiagnostic: options.homeTaskDiagnostic, homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport,
   };
   const { modules, home: owner, projects: projectOwner, recentModels } = await startGatewayModules({ tronHome: options.tronHome, log: { log: () => {} } },
-    () => ({ registry, home, display, openAIModelEligibility, connections, scheduleToolOperations, recentModelsChanged, persistenceDiagnostic: options.persistenceDiagnostic, sessionSearch: sessionSearch?.() }), projectOptions);
+    () => ({ registry, home, display, ...(publication ? { directoryPublisher: publication } : {}), openAIModelEligibility, connections, scheduleToolOperations, recentModelsChanged, persistenceDiagnostic: options.persistenceDiagnostic, sessionSearch: sessionSearch?.() }), projectOptions);
   const registry: RuntimeRegistry = new RuntimeRegistry({ ...registryOptions, modules, settingsSchema: TEST_SETTINGS_SCHEMA,
     beforeSessionRekey: async (previousId, nextId, runtime) => {
       await display.grantReferences(previousId, nextId, runtime);

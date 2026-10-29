@@ -1,3 +1,4 @@
+import { abortableRead } from "../util/abortable-read.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, createReadStream, createWriteStream, type ReadStream } from "node:fs";
 import {
@@ -459,6 +460,14 @@ export class DisplayArtifactStore {
     });
   }
 
+  /** Immutable admitted bytes, not a producer filesystem path. Acquisition
+   * rechecks ownership and storage integrity; publication never reopens source. */
+  snapshot(id: string, sessionID: string) {
+    const metadata = this.index.get(id);
+    if (!metadata?.owners.includes(sessionID)) throw new GatewayError("not_found", "Display artifact is unavailable");
+    return { size: metadata.size, digest: metadata.digest,
+      acquire: (signal: AbortSignal) => abortableRead(signal, () => this.acquire(id, sessionID), lease => lease.release()) };
+  }
   hasOwner(id: string, sessionID: string): boolean {
     return this.index.get(id)?.owners.includes(sessionID) === true;
   }

@@ -57,6 +57,7 @@ export interface DisplayProjection {
   presentation: DisplayPresentationPreference;
   eligibleSurfaces: DisplaySurface[];
   fallbackText: string;
+  app?: { id: string; contentRevision: string };
   artifact?: DisplayArtifactDescriptor;
   markdownImages?: DisplayMarkdownImage[];
   remoteURL?: string;

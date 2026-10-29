@@ -99,18 +99,19 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
   state.assertToolName(name);
   const definition = adaptedToolDefinition(state.extension, name, registered.definition);
   const execute = ownCallback(async (...args: Parameters<ToolDefinition["execute"]>) => {
+    const observation = state.browserLiveView && { observer: state.browserLiveView, cwd: args[4].cwd };
     const result = await definition.execute(...args);
-    if (!state.browserLiveView) return result;
-    return state.browserLiveView.observeResult({
+    if (!observation) return result;
+    return await observation.observer.observeResult({
       // The SDK finalizes public package provenance after extensionsOverride.
       // Read it at execution, never authorize from the provisional owner.
       owner: state.owner(),
       toolName: name,
       toolCallId: args[0],
-      result,
-      sessionId: state.browserLiveView.sessionId,
-      runtimeGeneration: state.browserLiveView.runtimeGeneration,
-      loadToken: state.browserLiveView.loadToken,
+      result, toolArguments: args[1], signal: args[2], cwd: observation.cwd,
+      sessionId: observation.observer.sessionId,
+      runtimeGeneration: observation.observer.runtimeGeneration,
+      loadToken: observation.observer.loadToken,
     }) as Awaited<ReturnType<ToolDefinition["execute"]>>;
   }, state);
   attributedToolOwners.set(execute, state.owner);

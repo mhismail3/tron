@@ -45,7 +45,15 @@ migration. The excluded retained offer remains untouched.
   recovery rather than becoming garbage. Replacing files cannot redirect cleanup.
   Source acquisitions must honor cancellation; disposal aborts source reads and
   joins streams/leases while accepted native work still joins its real callback.
-  This port is not yet connected to display producers and grants no runtime/data permission.
+  Successful display execution awaits immutable materialization through this port
+  before its canonical result becomes visible; publication grants no runtime/data permission.
+  Producers lease admitted artifact bytes, including Markdown dependencies, rather
+  than reopening original source paths. The index alone selects an explicit existing
+  entry or publishes a fresh content identity. App labels are bounded independently
+  of chat titles. app.json and link/live descriptor names are copied as ordinary
+  content.json; standalone Swift source uses a .txt suffix, preserving the 5 MiB
+  display-data limit without changing executable Swift's 320,000-byte ceiling.
+  Selecting an already-declared app entry instead preserves its normal admission.
 - `apps-folder-format.ts` is the index-internal filesystem edge: one private
   manifest decoder and typed ready/broken snapshots. `apps-folder-files.ts`
   admits regular descriptors without following any parent/leaf link and hashes
@@ -57,7 +65,9 @@ migration. The excluded retained offer remains untouched.
   descriptors, 64 KiB stream chunks, range validation, stat checks before/after
   reads, abort/release/disposal and retirement on a changed catalog cut. It has
   no discovery, membership or grant authority.
-  Unsupported web/network entries are visible but blocked, never unsandboxed.
+  Unsupported web entries and non-link network scopes remain blocked. Displayed
+  HTML/Swift snapshots remain inert documents; explicit executable entries still
+  require their normal runtime/data admission.
 - `AppsFolderStore` serializes grant/content admission and saved-data management. An open revalidates bytes instead of trusting the
   index. Prompt tokens bind exact content, folder identity, device and expiry.
   Tokens are one-use, expire after ten minutes, are bounded to 256 live prompts,
@@ -86,9 +96,12 @@ composition name, `tron-swift-apps`.
   Apps before Artifacts, then content-change time and id. A stale cursor returns
   `conflict` with diagnostic reason `catalog_changed`, never a mixed cut.
 - `apps.open {id, expectedContentRevision}`: reopens safe bytes; either returns
-  the closed `swift | artifact | permissionRequired` projection. Only Swift has
+  the closed `swift | artifact | reference | permissionRequired` projection. Only Swift has
   source/state/feeds; artifacts carry media/MIME/size/digest and `resourcePath`.
-  A changed entry refuses. The paired iOS renderer remains incomplete.
+  A changed entry refuses. URL references require exact-origin first-open consent
+  and never fetch during publication. Live references revalidate their original
+  active session/view/generation owner at open and cannot reconnect an ended view.
+  The paired iOS renderer remains incomplete.
 - Authenticated `GET` of an artifact's `resourcePath` supports byte ranges,
   immutable ETags/304 and 416 with total size. One shared byte HTTP adapter serves
   Apps, retained display artifacts and blobs; every outcome releases its lease.
@@ -124,7 +137,11 @@ Text is limited to 5 MiB/file, images/documents to 25 MiB/file, streamed
 video/audio to 2 GiB/file. Swift remains 320,000 bytes, manifests 32 KiB and
 executable bundles 32 MiB/1,000 files. All bundles cap retained text at 32 MiB
 and aggregate streamed bytes at 2 GiB. Signature/type mismatches become broken
-rows. Display publication/copy and dependency materialization are not yet wired.
+rows. Canonical display publication copies admitted immutable source/dependency
+leases; browser app bindings survive nested parent resealing. Browser receipts
+remain process-ephemeral. The app reference survives in canonical details after
+process restart, but no live projection or reconnect authority is restored.
+Cold-history app-card presentation awaits the paired inert UI/protocol consumer.
 
 ## Signals
 

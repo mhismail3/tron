@@ -28,7 +28,7 @@ export function registerNestedPresentationHandlers(pi: Parameters<ExtensionFacto
       const browserReceipt = event.toolName === "agent_browser"
         ? (() => {
             const receipt = admitBrowserToolReference(event.toolName, event.toolCallId, event.details, sessionId);
-            return receipt ? sealBrowserToolReference(sessionId, event.parentToolCallId!, receipt.descriptor, receipt.automatic) : undefined;
+            return receipt ? sealBrowserToolReference(sessionId, event.parentToolCallId!, receipt.descriptor, receipt.automatic, receipt.app) : undefined;
           })()
         : undefined;
       const descriptor: NestedDisplayDescriptor = {

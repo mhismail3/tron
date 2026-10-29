@@ -1,3 +1,7 @@
+import { admitBrowserToolReference, sealBrowserToolReference } from "./browser-tool-reference.js";
+import { publishDisplay } from "./display-publication.js";
+import type { AppReference } from "../modules/apps/apps-reference.js";
+import type { AppsFolderStore } from "../modules/apps/apps-folder-store.js";
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
@@ -33,6 +37,14 @@ export class DisplayOwner {
     readonly liveViews: BrowserLiveViewRegistry | undefined,
     private readonly sessions: () => DisplaySessions,
   ) {}
+
+  admitLiveReference(reference: Extract<AppReference, { kind: "live" }>): void {
+    const view = reference.liveView;
+    if (!this.liveViews || !this.authorizeLiveView(reference.sessionId, view.viewId, view.generation))
+      throw new GatewayError("not_found", "Live view ended");
+    const active = this.liveViews.describe(reference.sessionId, view.viewId, view.generation);
+    if (active.schema !== view.schema) throw new GatewayError("not_found", "Live view ended");
+  }
 
   async maintainArtifacts(): Promise<void> {
     await this.artifacts.maintain(() => this.sessions().sessionIDsForStorageMaintenance());
@@ -92,10 +104,10 @@ export class DisplayOwner {
   }
 }
 
-export function createDisplayModule(services: () => DisplayOwner): ModuleDescriptor {
+export function createDisplayModule(services: () => DisplayOwner, apps: ModuleDescriptor<AppsFolderStore>): ModuleDescriptor {
   return {
     name: "tron-display", purpose: "Shows documents, images and live views in the app.",
-    tools: ["display"], commands: [], dependsOn: [workspaceModule],
+    tools: ["display"], commands: [], dependsOn: [workspaceModule, apps],
     start: host => {
       const workspace = host.contract(workspaceModule);
       const projection: ToolResultProjection = {
@@ -105,12 +117,32 @@ export function createDisplayModule(services: () => DisplayOwner): ModuleDescrip
           new Set(displayReferences(entries, sessionId).artifacts)),
         beginBrowserLoad: (sessionId, runtimeGeneration) => {
           const views = services().liveViews;
-          return views ? { sessionId, runtimeGeneration, loadToken: views.beginSessionLoad(sessionId),
-            observeResult: input => projection.observeBrowserResult(input) } : undefined;
+          return { sessionId, runtimeGeneration, loadToken: views?.beginSessionLoad(sessionId) ?? runtimeGeneration,
+            observeResult: input => projection.observeBrowserResult(input) };
         },
-        observeBrowserResult: input => {
-          const views = services().liveViews;
-          return views ? observeTrustedAgentBrowserResult({ ...input, views }) : input.result;
+        observeBrowserResult: async input => {
+          const owners = services(), views = owners.liveViews;
+          const result = views ? observeTrustedAgentBrowserResult({ ...input, views }) : input.result;
+          if (!result || typeof result !== "object" || (result as { isError?: boolean }).isError) return result;
+          const details = (result as { details?: unknown }).details;
+          const display = admitToolDisplayProjection(input.toolName, details, input.toolCallId, input.sessionId);
+          if (!display) return result;
+          const args = input.toolArguments as { source?: { kind?: string; path?: string } } | undefined;
+          let source: { root: string; path: string } | undefined;
+          if (args?.source && typeof args.source.path === "string") {
+            const root = args.source.kind === "internal_file" ? await workspace.filesRoot()
+              : input.cwd;
+            if (!root) throw new GatewayError("conflict", "Display runtime is unavailable");
+            source = { root, path: args.source.path };
+          }
+          display.app = await publishDisplay(host.contract(apps).index, owners.artifacts, input.sessionId, display, source, input.signal);
+          if (input.toolName === "agent_browser") {
+            const reference = admitBrowserToolReference(input.toolName, input.toolCallId, details, input.sessionId);
+            if (!reference) throw new GatewayError("conflict", "Browser admission ended before publication");
+            return { ...result, details: { ...(details as object), tronBrowserReference:
+              sealBrowserToolReference(input.sessionId, input.toolCallId, reference.descriptor, reference.automatic, display.app) } };
+          }
+          return { ...result, details: { display } };
         },
       };
       return { hooks: {

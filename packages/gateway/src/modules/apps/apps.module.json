@@ -7,6 +7,7 @@
     "gateway/foundation",
     "gateway/host",
     "gateway/machine",
+    "gateway/display-contract",
     "gateway/pi",
     "gateway/protocol",
     "gateway/util",

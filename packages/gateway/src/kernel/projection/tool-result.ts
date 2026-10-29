@@ -17,10 +17,15 @@ export interface ToolResultProjection {
     toolName: string;
     toolCallId: string;
     result: unknown;
+    // File materialization needs the real invocation context; reference-only
+    // browser observations do not read source paths. The execute wrapper supplies both.
+    toolArguments?: unknown;
+    cwd?: string;
+    signal?: AbortSignal | undefined;
     sessionId: string;
     runtimeGeneration: string;
     loadToken: string;
-  }): unknown;
+  }): Promise<unknown>;
 }
 
 export type ToolDisplayProjection = ToolResultProjection["display"];

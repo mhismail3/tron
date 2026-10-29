@@ -31,6 +31,7 @@ export function appFileFormat(path: string): AppFileFormat | undefined {
     case ".gif": return binary("image", "image", "image/gif", 25 * MiB);
     case ".heic": case ".heif": return binary("image", "image", "image/heic", 25 * MiB);
     case ".bmp": return binary("image", "image", "image/bmp", 25 * MiB);
+    case ".bin": return binary("document", "document", "application/octet-stream", 25 * MiB);
     case ".rtf": return binary("document", "document", "application/rtf", 25 * MiB);
     case ".webp": return binary("image", "image", "image/webp", 25 * MiB);
     case ".pdf": return binary("document", "pdf", "application/pdf", 25 * MiB);

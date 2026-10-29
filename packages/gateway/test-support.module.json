@@ -35,6 +35,7 @@
     "test-support/network-isolation.ts",
     "test-support/native-publication-fixture.py",
     "test-support/native-publication-global-setup.ts",
+    "test-support/native-publication-runtime.ts",
     "test-support/profile-partition-crash.ts",
     "test-support/profile-v1-fixture.ts",
     "test-support/runtime-registry-fixture.ts",

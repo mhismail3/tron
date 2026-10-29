@@ -1,18 +1,20 @@
+import type { DirectoryPublisher } from "../../machine/directory-publication.js";
 import type { ModuleDescriptor } from "../../kernel/host/module-host.js";
 import type { JsonValue } from "../../protocol/types.js";
 import { integer, rejectUnknownFields, string } from "../../util/validation.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { AppsFolderStore } from "./apps-folder-store.js";
 import { createAppDataExtension } from "./app-data-extension.js";
+import type { AppReference } from "./apps-reference.js";
 import type { AppDataCommit } from "./app-data-store.js";
 
 /** Files are the only membership authority. No offer or install admission. */
-export function createAppsModule(): ModuleDescriptor<AppsFolderStore> { return {
+export function createAppsModule(publisher?: DirectoryPublisher, admitLive?: (reference: Extract<AppReference, { kind: "live" }>) => void): ModuleDescriptor<AppsFolderStore> { return {
   name: "tron-swift-apps",
   purpose: "Indexes folder-backed apps and artifacts; owns scoped access and saved data.",
   tools: ["app_data"], commands: [], dependsOn: [workspaceModule],
   start: host => {
-    const store = new AppsFolderStore(host.contract(workspaceModule), host.tronHome);
+    const store = new AppsFolderStore(host.contract(workspaceModule), host.tronHome, undefined, publisher, admitLive);
     const id = (params: Record<string, unknown>) => string(params.id, "id", { max: 80 });
     const revision = (params: Record<string, unknown>) => string(params.expectedContentRevision, "expectedContentRevision", { max: 64 });
     return {

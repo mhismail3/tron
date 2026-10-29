@@ -1,3 +1,4 @@
+import { directoryPublisher } from "../machine/directory-publication.js";
 import { ProjectLifecycle } from "../modules/projects/project-lifecycle.js";
 import { projectsModule } from "../modules/projects/module.js";
 import { projectRuntimePort } from "../modules/projects/runtime-admission.js";
@@ -28,6 +29,7 @@ import type { SessionSearchService } from "../sessions/session-search-service.js
 /** The owners modules read per runtime: the registry's own services and the
  * composition's, which never pass through the registry. */
 export interface ModuleOwners extends RecentModelSignals {
+  directoryPublisher?: import("../machine/directory-publication.js").DirectoryPublisher;
   registry: RuntimeRegistry;
   home: HomeComposition;
   display: DisplayOwner;
@@ -46,7 +48,8 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
   const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, signal => home.owner().activeTaskTargets(signal)), projectOptions));
-  const apps = createAppsModule();
+  const publishDirectory = directoryPublisher();
+  const apps = createAppsModule((...args) => (owners().directoryPublisher ?? publishDirectory)(...args), reference => owners().display.admitLiveReference(reference));
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
   return { home: home.owner, projects, providers, apps, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,
@@ -58,8 +61,8 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     settingsModule,
     projects,
     askUserModule,
-    createDisplayModule(() => owners().display),
     apps,
+    createDisplayModule(() => owners().display, apps),
     createNativeCaptureModule(() => owners().display),
     computerModule,
     createScheduleModule(() => owners().scheduleToolOperations),

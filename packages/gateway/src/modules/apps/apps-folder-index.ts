@@ -3,7 +3,7 @@ import { directoryPublisher, type DirectoryPublisher } from "../../machine/direc
 import { publishApp, type AppPublication } from "./apps-publication.js";
 import { AppPublicationStaging, publicationFilesystemMismatch } from "./apps-publication-staging.js";
 import { constants as osConstants } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { backgroundWork } from "../../background-work.js";
 import { GatewayError } from "../../errors.js";
 import { watchFolder, FOLDER_WATCH_RETRY_MS, FOLDER_RECONCILE_INTERVAL_MS, type FolderWatchHandle } from "../../util/folder-watch.js";
@@ -12,7 +12,7 @@ import { APP_ID, hash, isReadyAppEntry, readAppEntry, type AppEntry, type AppRow
 import type { ByteLease, ByteRange } from "../../util/byte-stream.js";
 import { AppPreviewLeases } from "./apps-preview-leases.js";
 import { abortableRead } from "../../util/abortable-read.js";
-import type { StreamedAppFile } from "./apps-folder-files.js";
+import { snapshotDigest, type StreamedAppFile } from "./apps-folder-files.js";
 
 interface PreviewCut { identity: string; path: string; file: StreamedAppFile; mimeType: string }
 type IndexedEntry = Pick<AppEntry, "name" | "row" | "changedAt"> & { preview: PreviewCut | undefined };
@@ -242,13 +242,32 @@ export class AppsFolderIndex {
         path: entry.entry, file: entry.file, mimeType: entry.payload.artifact.mimeType }, range, signal);
     }));
   }
+  /** Only this owner interprets whether a displayed path is an existing entry. */
+  async selectDisplayedFile(path: string, digest: string): Promise<ReadyAppEntry["row"] | undefined> {
+    const descriptor = await this.workspace.describe();
+    if (!descriptor.available) throw new GatewayError("conflict", "Tron workspace is unavailable");
+    const selected = relative(join(descriptor.root, "files/apps"), resolve(path));
+    if (isAbsolute(selected) || selected === ".." || selected.startsWith("../")) return undefined;
+    await this.initialize();
+    return this.enqueue(async () => {
+      const [name, ...parts] = selected.split("/");
+      if (!name || !APP_ID.test(name)) throw new GatewayError("invalid_request", "Display an app's declared entry");
+      return this.withRoot(name, async root => {
+        const entry = await readAppEntry(root, name);
+        if (!isReadyAppEntry(entry) || parts.join("/") !== entry.entry || snapshotDigest(entry.file) !== digest)
+          throw new GatewayError("conflict", "Display must select the app's current declared entry");
+        return entry.row;
+      });
+    });
+  }
   stopPublications(): void { this.publicationStop.abort(new GatewayError("conflict", "Apps publication is closed")); }
   recoverPublications(): Promise<void> { return this.enqueue(() => this.staging.recoverAtStartup()); }
   /** The same lane owns publication and discovery; no producer installs a row. */
-  async publish(input: AppPublication): Promise<ReadyAppEntry["row"]> {
+  async publish(input: AppPublication, signal?: AbortSignal): Promise<ReadyAppEntry["row"]> {
+    const lifetime = signal ? AbortSignal.any([signal, this.publicationStop.signal]) : this.publicationStop.signal;
     const accepted = await this.enqueue(async () => {
-      const active = () => { this.publicationStop.signal.throwIfAborted(); if (this.closed) throw new GatewayError("conflict", "Apps index is closed"); };
-      try { return await publishApp(this.workspace, input, this.publishDirectory, active, this.publicationStop.signal, this.staging); }
+      const active = () => { lifetime.throwIfAborted(); if (this.closed) throw new GatewayError("conflict", "Apps index is closed"); };
+      try { return await publishApp(this.workspace, input, this.publishDirectory, active, lifetime, this.staging); }
       catch (error) {
         this.full = true; active();
         if (Math.abs((error as NodeJS.ErrnoException).errno ?? 0) === osConstants.errno.EXDEV) publicationFilesystemMismatch();

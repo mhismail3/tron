@@ -28,6 +28,10 @@ native publication project. It owns a source-hashed compiled cache, holds a kern
 lock through readers, and retires waiting/preparing callers on EOF. Compiler groups
 and scratch are owned until joined; cancellation masks cover process admission.
 Its script contract test crosses actual compiler, FIFO, signal and native binary boundaries.
+`native-publication-runtime.ts` gives selected workers the prepared candidate;
+`gateway-registry.ts` supplies it through the normal directory-publisher port.
+Spawned Registry fixtures inherit that candidate path without importing Vitest.
+A publication consumer must select this project rather than depend on an installed Mac export.
 
 ## Contract
 

@@ -17,7 +17,7 @@ import { hash, isReadyAppEntry, readAppEntry, type AppKind, type AppPermissions,
 /** Producers must cancel pending acquisition on signal; after acquisition this
  * owner cancels the readable and joins the lease's physical release. */
 export interface AppPublicationFile { path: string; size: number; digest: string; acquire(signal: AbortSignal): Promise<ByteLease> }
-export interface AppPublication { entry: string; kind: AppKind; title?: string; icon?: string; permissions?: AppPermissions; files: readonly AppPublicationFile[] }
+export interface AppPublication { entry: string; kind?: AppKind; title?: string; icon?: string; permissions?: AppPermissions; files: readonly AppPublicationFile[] }
 function conflict(): never { throw new GatewayError("conflict", "Publication bytes or canonical namespace changed; display again"); }
 function key(kind: AppKind, entry: string, p: AppPermissions, files: Array<[string, string]>): string {
   return hash(JSON.stringify([kind, entry, { data: p.data, feeds: [...p.feeds].sort(), network: [...p.network].sort() }, files.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)]));
@@ -30,7 +30,8 @@ function entryKey(entry: ReadyAppEntry): string {
  * substitute copy/overwrite for native exclusive rename. */
 export async function publishApp(workspace: TronWorkspace, input: AppPublication, publish: DirectoryPublisher, active: () => void, signal: AbortSignal, staging: AppPublicationStaging): Promise<ReadyAppEntry> {
   active();
-  const files = input.files.map(file => ({ ...file })), entry = input.entry, kind = input.kind;
+  const files = input.files.map(file => ({ ...file })), entry = input.entry, kind = input.kind ?? appFileFormat(entry)?.kind;
+  if (!kind) throw new GatewayError("unsupported", "Unsupported publication entry");
   const p = input.permissions ? { data: input.permissions.data, feeds: [...input.permissions.feeds], network: [...input.permissions.network] } : { data: "none" as const, feeds: [], network: [] };
   let total = 0;
   if (!files.length || files.length > 999 || !safeRelative(entry)) throw new GatewayError("invalid_request", "Invalid publication bundle");
