@@ -1471,10 +1471,9 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Home's role title ignores a generated canonical session name. The leading
-    /// toolbar action opens the existing terminal route, never a Home-specific shell.
+    /// Home's role title ignores a generated canonical session name.
     @MainActor
-    func testHomeTitleAndManageTerminalUseCanonicalRoute() {
+    func testHomeTitleUsesCanonicalRole() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
@@ -1487,35 +1486,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.navigationBars.staticTexts["Home fixture chat"].exists)
         keepScreenshot(named: "home-canonical-title")
         openManageHome(app)
-        let terminal = app.buttons["manage-home-terminal"]
-        let done = app.buttons["home-sheet-done-manage"]
-        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
-        XCTAssertTrue(terminal.isEnabled)
-        XCTAssertLessThan(terminal.frame.midX, app.frame.width / 2)
-        XCTAssertEqual(terminal.frame.midY, done.frame.midY, accuracy: 8)
-        XCTAssertGreaterThan(done.frame.minY, app.frame.height * 0.4, "Manage Home still opens at medium")
-        keepScreenshot(named: "manage-home-leading-terminal")
-        terminal.tap()
-        XCTAssertTrue(app.staticTexts["Terminal unavailable"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Fixture terminal unavailable for home-session"].exists,
-                      "The standard TerminalSheet must request terminal.list for the exact Home session")
-        keepScreenshot(named: "home-terminal-established-unavailable-state")
-    }
-
-    @MainActor
-    func testManageHomeTerminalRespectsUnavailableCapability() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-terminal-unsupported"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
-        let terminal = app.buttons["manage-home-terminal"]
-        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
-        XCTAssertFalse(terminal.isEnabled)
-        keepScreenshot(named: "manage-home-terminal-unsupported")
     }
 
     /// Manage Home opens at medium, drags to large, and lists every Home entry. Its

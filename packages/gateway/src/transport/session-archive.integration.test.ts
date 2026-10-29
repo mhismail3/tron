@@ -167,7 +167,7 @@ async function fixture(options: {
       uploads,
       terminals: { belongsToSession: () => false },
       logger: { log: captureLog },
-      sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
+
     } as never);
     server = new GatewayServer({ display: displayOwnerOf(registry),
       host: "127.0.0.1",

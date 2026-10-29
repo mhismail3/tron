@@ -155,7 +155,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
       info: () => ({ protocolVersion: 8 }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       invoke: vi.fn(),
     } as never,

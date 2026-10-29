@@ -14,7 +14,7 @@ const client: ClientContext = {
   id: "dashboard", identity: "device:dashboard", isLocal: false, signal: undefined,
   beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
   setPresentationVisibility: () => ({ visible: true, revision: 1 }), unsubscribe: () => false,
-  attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+
   isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 };
 afterEach(async () => {

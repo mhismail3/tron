@@ -31,17 +31,17 @@ final class MacTerminalEnrollmentStore {
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
-    func enrollment(machineID: String) -> MacTerminalEnrollment? { all()[machineID] }
+    func enrollment(machineID: String) throws -> MacTerminalEnrollment? { try all()[machineID] }
 
-    func save(_ enrollment: MacTerminalEnrollment) {
-        var values = all()
+    func save(_ enrollment: MacTerminalEnrollment) throws {
+        var values = try all()
         values[enrollment.machineID] = enrollment
         if let data = try? JSONEncoder().encode(values) { defaults.set(data, forKey: Self.enrollmentsKey) }
     }
 
     /// Forgets the enrollment and destroys the key: a later enrollment makes a new one.
     func remove(machineID: String) throws {
-        var values = all()
+        var values = try all()
         values.removeValue(forKey: machineID)
         if let data = try? JSONEncoder().encode(values) { defaults.set(data, forKey: Self.enrollmentsKey) }
         let status = SecItemDelete(keyQuery(machineID) as CFDictionary)
@@ -63,9 +63,35 @@ final class MacTerminalEnrollmentStore {
     /// The existing key only; nil before enrollment created one.
     func existingKey(machineID: String) throws -> MacTerminalPrivateKey? { try storedKey(machineID) }
 
-    private func all() -> [String: MacTerminalEnrollment] {
+    /// Approved forward-only retirement. Edit the original bytes, not a decoded
+    /// enrollment: re-encoding would change pins' spelling and unknown fields.
+    /// The backup is completed and checked before the first defaults mutation.
+    private func retireHostCommand() throws {
+        let marker = "macTerminal.hostCommandRetired.v1"
+        guard !defaults.bool(forKey: marker) else { return }
+        if let original = defaults.data(forKey: Self.enrollmentsKey) {
+            var retirement = EnrollmentFieldRetirement(original)
+            if let rewritten = try retirement.removingHostCommand() {
+                let backup = URL.applicationSupportDirectory.appending(path: "MacTerminal/enrollments.v1-before-host-command-removal.json")
+                if FileManager.default.fileExists(atPath: backup.path) {
+                    guard try Data(contentsOf: backup) == original else { throw CocoaError(.fileReadCorruptFile) }
+                } else {
+                    try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try original.write(to: backup, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                }
+                guard try Data(contentsOf: backup) == original else { throw CocoaError(.fileReadCorruptFile) }
+                defaults.set(rewritten, forKey: Self.enrollmentsKey)
+                guard defaults.synchronize() else { throw CocoaError(.fileWriteUnknown) }
+            }
+        }
+        defaults.set(true, forKey: marker)
+        guard defaults.synchronize() else { throw CocoaError(.fileWriteUnknown) }
+    }
+
+    private func all() throws -> [String: MacTerminalEnrollment] {
+        try retireHostCommand()
         guard let data = defaults.data(forKey: Self.enrollmentsKey) else { return [:] }
-        return (try? JSONDecoder().decode([String: MacTerminalEnrollment].self, from: data)) ?? [:]
+        return try JSONDecoder().decode([String: MacTerminalEnrollment].self, from: data)
     }
 
     private func keyQuery(_ machineID: String) -> [String: Any] {
@@ -109,6 +135,107 @@ final class MacTerminalEnrollmentStore {
         .secureEnclave(try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: data))
     }
     #endif
+}
+
+/// A JSON byte editor, not a legacy enrollment decoder. Only the obsolete
+/// endpoint property and its separator are removed; every surviving byte is copied.
+private struct EnrollmentFieldRetirement {
+    private let bytes: [UInt8]
+    private var index = 0
+    private var removals: [Range<Int>] = []
+
+    init(_ data: Data) { bytes = Array(data) }
+
+    mutating func removingHostCommand() throws -> Data? {
+        guard try JSONSerialization.jsonObject(with: Data(bytes)) is [String: Any] else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        try value(path: [], depth: 0)
+        guard !removals.isEmpty else { return nil }
+        var merged: [Range<Int>] = []
+        for range in removals.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            if let last = merged.last, last.upperBound >= range.lowerBound {
+                merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+            } else { merged.append(range) }
+        }
+        var result = Data()
+        var copied = 0
+        for range in merged {
+            result.append(contentsOf: bytes[copied..<range.lowerBound])
+            copied = range.upperBound
+        }
+        result.append(contentsOf: bytes[copied...])
+        return result
+    }
+
+    private mutating func whitespace() {
+        while index < bytes.count, [9, 10, 13, 32].contains(bytes[index]) { index += 1 }
+    }
+
+    private mutating func string() throws -> String {
+        guard index < bytes.count, bytes[index] == 34 else { throw CocoaError(.fileReadCorruptFile) }
+        let start = index
+        index += 1
+        while index < bytes.count {
+            let byte = bytes[index]
+            index += 1
+            if byte == 92 { index += 1 }
+            else if byte == 34 { return try JSONDecoder().decode(String.self, from: Data(bytes[start..<index])) }
+        }
+        throw CocoaError(.fileReadCorruptFile)
+    }
+
+    private mutating func value(path: [String], depth: Int) throws {
+        guard depth < 128 else { throw CocoaError(.fileReadCorruptFile) }
+        whitespace()
+        guard index < bytes.count else { throw CocoaError(.fileReadCorruptFile) }
+        switch bytes[index] {
+        case 123:
+            index += 1
+            whitespace()
+            if bytes[index] == 125 { index += 1; return }
+            var previousComma: Int?
+            while true {
+                let start = index
+                let key = try string()
+                whitespace()
+                guard bytes[index] == 58 else { throw CocoaError(.fileReadCorruptFile) }
+                index += 1
+                try value(path: path + [key], depth: depth + 1)
+                let end = index
+                whitespace()
+                let followedByComma = bytes[index] == 44
+                if path.count == 2, path[1] == "endpoint", key == "hostCommand" {
+                    removals.append(followedByComma ? start..<(index + 1) : (previousComma ?? start)..<end)
+                }
+                if followedByComma {
+                    previousComma = index
+                    index += 1
+                    whitespace()
+                } else {
+                    guard bytes[index] == 125 else { throw CocoaError(.fileReadCorruptFile) }
+                    index += 1
+                    return
+                }
+            }
+        case 91:
+            index += 1
+            whitespace()
+            if bytes[index] == 93 { index += 1; return }
+            while true {
+                try value(path: path + ["[]"], depth: depth + 1)
+                whitespace()
+                if bytes[index] == 93 { index += 1; return }
+                guard bytes[index] == 44 else { throw CocoaError(.fileReadCorruptFile) }
+                index += 1
+            }
+        case 34:
+            _ = try string()
+        default:
+            // JSONSerialization validated numbers, booleans and null already.
+            while index < bytes.count, ![9, 10, 13, 32, 44, 93, 125].contains(bytes[index]) { index += 1 }
+        }
+    }
 }
 
 struct MacTerminalKeyError: LocalizedError {

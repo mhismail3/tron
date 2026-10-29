@@ -24,7 +24,6 @@ protocol GatewayLifecycleProjectionDelegate: AnyObject, Sendable {
     )
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async
     func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool
-    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws
     func lifecycleRetireProjection(final: Bool) async
     func lifecycleSurface(_ error: Error)
@@ -1156,8 +1155,7 @@ final class GatewayLifecycleCoordinator {
             guard let self else { return }
             async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
             async let restore = self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? true
-            async let terminals: Void = self.delegate?.lifecycleReattachTerminals(admission: admission) ?? ()
-            let (_, restored, _) = await (refresh, restore, terminals)
+            let (_, restored) = await (refresh, restore)
             guard !Task.isCancelled, self.admits(admission) else { return }
             // The event reducer can lag transport retirement: consult the client
             // before publishing a projection for a socket that is already gone.

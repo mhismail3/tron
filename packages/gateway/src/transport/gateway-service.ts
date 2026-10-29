@@ -45,7 +45,6 @@ import { GitWorktreeService, type SessionSourceControlRequest } from "../machine
 import { MAXIMUM_PROMPT_ATTACHMENTS } from "../kernel/resources/prompt-bounds.js";
 import { type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, BROWSER_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../modules/display/contract.js";
-import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
@@ -284,7 +283,6 @@ const restartDrainMethods = new Set([
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
-  "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
   "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read", "knowledge.x.credits",
   "connections.list",
@@ -316,9 +314,6 @@ export interface ClientContext {
     visible: boolean,
   ): { visible: boolean; revision: number };
   unsubscribe(sessionId: string, subscriptionToken?: string): boolean;
-  attachTerminal(terminalId: string): void;
-  detachTerminal(terminalId: string): void;
-  ownsTerminal(terminalId: string): boolean;
   /** Request-scoped observer/authority fences supplied by GatewayServer. */
   isSubscribed(sessionId: string): boolean;
   isRevoked(): boolean;
@@ -341,7 +336,6 @@ export interface GatewayServiceDependencies {
   workspaceInspector?: WorkspaceInspectionService;
   gitWorktrees?: GitWorktreeService;
   uploads: UploadStore;
-  terminals: TerminalService;
   trust: TrustService;
   /** The settings model's resolver (docs/settings-model.md). */
   settingsModel: SettingsModel<SettingsStoreAdapter>;
@@ -365,7 +359,6 @@ export interface GatewayServiceDependencies {
   requestRestart: (restartNow?: boolean) => void;
   /** Drain-owned intentional shutdown; the process owner chooses the non-relaunch exit policy. */
   requestStop: () => void;
-  sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
   workRegistry?: GatewayWorkRegistry;
@@ -586,7 +579,6 @@ export class GatewayService {
         DISPLAY_CAPABILITY,
         BROWSER_LIVE_VIEW_CAPABILITY,
         NATIVE_LIVE_VIEW_CAPABILITY,
-        "terminal.v1",
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
         PROCESS_ACTIVITY_CAPABILITY,
@@ -1217,7 +1209,7 @@ export class GatewayService {
               this.dependencies.requestRestart(true);
               return safeJson({ restarting: false, scheduled: true, restartNow: true, drain: currentDrain });
             }
-            await this.admitTerminalsForDrain("restarting");
+            await this.admitAdministrativeDrain();
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
@@ -1262,7 +1254,7 @@ export class GatewayService {
               && (currentDrain.phase === "preparing" || currentDrain.phase === "waiting")) {
               throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
             }
-            await this.admitTerminalsForDrain("stopping");
+            await this.admitAdministrativeDrain();
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
@@ -1742,7 +1734,6 @@ export class GatewayService {
           client.unsubscribe(sessionId);
           this.processTranscriptLeases.releaseSession(sessionId);
           await this.dependencies.sessions.delete(sessionId, workToken);
-          this.dependencies.sessionDeleted(sessionId);
           const cleanup = await Promise.allSettled([
             this.dependencies.uploads.removeSession(sessionId),
             this.dependencies.display.removeArtifacts(sessionId),
@@ -2395,95 +2386,15 @@ export class GatewayService {
         )));
       }
 
-      case "terminal.list": {
-        const slot = await this.openedSlot(client, params);
-        return safeJson({ terminals: this.dependencies.terminals.list(slot.id) });
-      }
-      case "terminal.open": {
-        const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
-          ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
-        return this.mutation(client, method, params, async () => {
-          this.requireRetainedSession(client, params, releaseSession);
-          const slot = await this.openedSlot(client, params);
-          const terminal = this.dependencies.terminals.open(
-            slot.id,
-            slot.cwd,
-            params.columns === undefined ? 100 : integer(params.columns, "columns", 20, 500),
-            params.rows === undefined ? 30 : integer(params.rows, "rows", 5, 300),
-            slot.sessionEnvironment(),
-          );
-          // Revocation retires the connection observer, not this already
-          // admitted canonical PTY effect. Keep its result even though a
-          // revoked connection cannot retain terminal ownership.
-          if (!client.isRevoked()) client.attachTerminal(terminal.id);
-          return safeJson({ terminal, replay: this.dependencies.terminals.attach(terminal.id, 0) });
-        }).finally(releaseSession);
-      }
-      case "terminal.attach": {
-        const terminalId = string(params.terminalId, "terminalId", { max: 100 });
-        const replay = this.dependencies.terminals.attach(terminalId, params.afterSequence === undefined ? 0 : integer(params.afterSequence, "afterSequence", 0, Number.MAX_SAFE_INTEGER));
-        client.attachTerminal(terminalId);
-        return safeJson(replay);
-      }
-      case "terminal.detach": {
-        const terminalId = string(params.terminalId, "terminalId", { max: 100 });
-        client.detachTerminal(terminalId);
-        return { detached: true };
-      }
-      case "terminal.write":
-        return this.mutation(client, method, params, async () => {
-          const terminalId = string(params.terminalId, "terminalId", { max: 100 });
-          this.requireOwnedTerminal(client, terminalId);
-          this.dependencies.terminals.write(
-            terminalId,
-            string(params.writeId, "writeId", { max: 100 }),
-            typeof params.data === "string" && params.data.length <= 65_536 ? params.data : (() => { throw new GatewayError("invalid_request", "Terminal data is too large"); })(),
-          );
-          return { written: true };
-        });
-      case "terminal.resize":
-        return this.mutation(client, method, params, async () => {
-          const terminalId = string(params.terminalId, "terminalId", { max: 100 });
-          this.requireOwnedTerminal(client, terminalId);
-          this.dependencies.terminals.resize(terminalId, integer(params.columns, "columns", 20, 500), integer(params.rows, "rows", 5, 300));
-          return { resized: true };
-        });
-      case "terminal.terminate":
-        return this.mutation(client, method, params, async () => {
-          const terminalId = string(params.terminalId, "terminalId", { max: 100 });
-          this.requireOwnedTerminal(client, terminalId);
-          await this.dependencies.terminals.terminate(terminalId);
-          return { terminated: true };
-        }, true);
       default:
         throw new GatewayError("not_found", `Unknown gateway method: ${method}`);
     }
   }
 
-  terminalBelongsToSession(terminalId: string, sessionId: string): boolean {
-    return this.dependencies.terminals.belongsToSession(terminalId, sessionId);
-  }
-
-  /** Terminal admission for a restart or stop drain (#479): abandoned prompts
-   * close, busy terminals refuse and are named by why. The terminal check reads
-   * the process table, so a drain another request started meanwhile wins. */
-  private async admitTerminalsForDrain(action: "restarting" | "stopping"): Promise<void> {
-    const admission = await this.dependencies.terminals.beginRestartDrain();
-    if (!admission.admitted) {
-      const reasons = ([
-        ["attached", "open on a device"], ["running", "running a program"], ["input", "with typed input"],
-      ] as const).filter(([reason]) => admission.busy[reason] > 0).map(([reason, label]) => `${admission.busy[reason]} ${label}`);
-      throw new GatewayError("busy", `Close active terminal sessions before ${action} the Gateway: ${reasons.join(", ")}`, true);
-    }
+  private async admitAdministrativeDrain(): Promise<void> {
     const drain = this.dependencies.sessions.administrativeDrainSnapshot();
     if (this.dependencies.sessions.isAdministrativeDrainStarted && (drain.phase === "preparing" || drain.phase === "waiting")) {
       throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
-    }
-  }
-
-  private requireOwnedTerminal(client: ClientContext, terminalId: string): void {
-    if (!client.ownsTerminal(terminalId)) {
-      throw new GatewayError("invalid_request", "Attach the terminal before controlling it");
     }
   }
 

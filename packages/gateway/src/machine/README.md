@@ -3,13 +3,13 @@
 ## Purpose
 
 The Gateway's reach into this Mac: filesystem and Git browsing, Project-root
-resolution, worktrees, uploads, PTY terminals, and the native capture and
+resolution, worktrees, uploads, and the native capture and
 `computer` clients.
 
 ## Owns
 
 `filesystem-service.ts`, `workspace-inspection-service.ts` (workspace projection),
-`git-worktree-service.ts`, `upload-store.ts`, `terminal-service.ts`,
+`git-worktree-service.ts`, `upload-store.ts`,
 `native-capture-client.ts`, `native-capture-transport.ts`,
 `cua-client.ts`, path containment and workspace bounds.
 
@@ -36,15 +36,14 @@ and Project settings changes reload every live chat of the root.
 
 SSH login shells on this Mac through macOS Remote Login over Tailscale, independent of
 the Gateway, so they keep working while Tron.app or the Gateway is down. The Gateway
-only enrolls and revokes keys (`src/security/mac-terminal.ts`) and ships the host:
+only enrolls and revokes keys (`src/security/mac-terminal.ts`):
 
 - **`macTerminal.status`** (paired iPhones, no parameters): login `username`, `port`
   22, `hosts` (MagicDNS name, then Tailscale addresses), `hostKeys`, `remoteLogin`
-  (`on`/`off`/`unknown` from one loopback connect; Tron never changes it), `enrolled`,
-  and `hostCommand`, the argv that reaches the shell host (omitted with no compiled
-  host).
-- **The shell host** belongs to [gateway/mac-terminal](../modules/mac-terminal/README.md)
-  and uses this module's `TerminalService` in its own process.
+  (`on`/`off`/`unknown` from one loopback connect; Tron never changes it), and `enrolled`.
+- **Shell persistence** uses built-in sshd and tmux on the Mac. The iPhone directly
+  attaches the stable session; no Gateway PTY or custom shell host exists. The
+  maintainer owns the required server-side PF exposure policy.
 - **The key** is the Global setting `permissions.macTerminalKey` (qualified by
   `device`): one `~/.ssh/authorized_keys` line restricted to Tailscale ranges with no
   forwarding, admitting only `ecdsa-sha2-nistp256` (Secure Enclave) keys. Adding is
@@ -82,11 +81,6 @@ The iPhone pins the host keys at enrollment
 - A native executor keeps its tool promise through native cleanup
   ([native-tool settlement](../../docs/native-tool-settlement.md)).
 
-### PTY terminals
-
-`TerminalService` uses node-pty's macOS `spawn-helper`; the package `postinstall`
-enforces its executable bit and terminal tests open a real PTY.
-
 ## Invariants
 
 - No Mac Terminal state lives in the Gateway: the `authorized_keys` file is the store.
@@ -97,14 +91,12 @@ enforces its executable bit and terminal tests open a real PTY.
 ## Entry points
 
 `projectRoot`, `WorkspaceInspectionService`, `GitWorktreeService`, `UploadStore`,
-`TerminalService`, `MacTerminalShellHost`, `CuaComputerClient`.
+`CuaComputerClient`.
 
 ## Signals
 
 | Signal | Level | Meaning |
 |---|---|---|
-| `terminal.auto-closed` | info | The Gateway closed a non-busy app terminal: terminal id, `reason` (`idle`, `restart`), `elapsedMs` since its last input or attachment; never content or cwd |
-| `terminal.idle-check-failed` | warning | An idle pass could not read the idle setting or process table; every terminal is kept: `error` |
 | `uploads.storage-pressure` | info on return to `normal`; warning otherwise | A 10-minute maintenance pass changed attachment storage pressure; free bytes and the floor in the message |
 | `storage.maintenance-failed` | warning | The bounded artifact maintenance pass threw and will retry: `error` |
 
@@ -112,15 +104,15 @@ enforces its executable bit and terminal tests open a real PTY.
 
 ```bash
 scripts/tron verify --module gateway/machine
-scripts/tron test gateway src/machine/terminal-service.integration.test.ts \
-  src/kernel/resources/project-root.integration.test.ts
+scripts/tron test gateway src/kernel/resources/project-root.integration.test.ts
 cd packages/gateway && npm run test:mac-terminal   # needs the tailnet and Swift 6.2
 ```
 
 `project-root.integration.test.ts` uses a real repository, linked worktree, stdio MCP
 server and faux model (`test-results/project-root-864.json`). `test:mac-terminal`
 enrolls through a real Gateway into a real sshd and logs in with the app's SSH client,
-then drives the real shell host (`test-results/mac-terminal.json`). Installed XPC and
+then proves same-PID tmux reattachment after transport/network loss and refuses
+missing tmux (`test-results/mac-terminal.json`). Installed XPC and
 real-window capture remain manual qualification.
 
 ## Not here

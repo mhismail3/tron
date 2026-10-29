@@ -40,7 +40,7 @@ const client = {
   id: "phone", identity: "device:mcp-auth-test", isLocal: true,
   beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
   setPresentationVisibility: () => ({ visible: true, revision: 0 }), unsubscribe: () => true,
-  attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+
   isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 } as any;
 

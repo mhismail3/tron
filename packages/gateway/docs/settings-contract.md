@@ -47,7 +47,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-48 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+47 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -98,7 +98,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.npmCommand` | — | sources | global | none | live | next-change | notify |
 | `setup.sessionDir` | — | setup | global | as allowed | live | restart | notify |
 | `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | quiet |
-| `setup.terminalIdleMinutes` | — | setup | global | as allowed | live | next-change | notify |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 

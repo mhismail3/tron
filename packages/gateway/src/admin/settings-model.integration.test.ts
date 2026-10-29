@@ -17,7 +17,6 @@ import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
-import { terminalIdleLimitMs } from "../kernel/settings/settings-schema.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
@@ -163,30 +162,6 @@ describe("settings.resolve", () => {
       const pi = SettingsManager.create(project, agentDir, { projectTrusted: true });
       expect([pi.getCacheWarmingMode(), pi.getDefaultProjectTrust(), pi.getGlobalSettings().httpProxy]).toEqual(["off", "never", "http://mac.invalid"]);
     } finally { await rm(root, { recursive: true, force: true }); }
-  });
-  it("persists the app-terminal idle period in the Gateway store and serves it live to the terminal owner (#479)", async () => {
-    const f = await fixture();
-    const target = { kind: "global" };
-    const store = join(f.tronHome, "gateway", "settings", "gateway.json");
-    // Unset: the built-in 60 minutes.
-    expect(row(await f.service.invoke(subscribed(), "settings.resolve", { target }) as Resolution, "setup.terminalIdleMinutes"))
-      .toMatchObject({ value: 60, layer: "global" });
-    expect(await terminalIdleLimitMs(f.settingsModel)).toBe(3_600_000);
-
-    const change = async (commandId: string, value: unknown) => f.service.invoke(subscribed(), "settings.change", {
-      commandId, target, changes: [{ key: "setup.terminalIdleMinutes", layer: "global", op: value === undefined ? "unset" : "set", ...(value === undefined ? {} : { value }) }],
-    }) as Promise<{ status: string }>;
-    expect((await change("terminal-idle-15", 15)).status).toBe("applied");
-    expect(JSON.parse(await readFile(store, "utf8"))).toEqual({ terminal: { idleMinutes: 15 } });
-    expect(await terminalIdleLimitMs(f.settingsModel)).toBe(900_000);
-    // Off disables auto-close.
-    expect((await change("terminal-idle-off", 0)).status).toBe("applied");
-    expect(await terminalIdleLimitMs(f.settingsModel)).toBeNull();
-    // Only the offered periods are accepted; a refusal leaves the store as it was.
-    await expect(change("terminal-idle-odd", 7)).rejects.toThrow("one of the offered periods");
-    expect(JSON.parse(await readFile(store, "utf8"))).toEqual({ terminal: { idleMinutes: 0 } });
-    expect((await change("terminal-idle-unset", undefined)).status).toBe("applied");
-    expect(await terminalIdleLimitMs(f.settingsModel)).toBe(3_600_000);
   });
   it("changes bounded Home profile fields through the canonical change path and reads them from profile.json", async () => {
     const f = await fixture();

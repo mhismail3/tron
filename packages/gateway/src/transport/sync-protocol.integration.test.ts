@@ -31,7 +31,7 @@ describe("two-phase session synchronization protocol", () => {
     const oversizedNext = { value: false };
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
       invoke: async (context: any, method: string, params: any) => {
@@ -288,7 +288,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const recoveryStarted = new Promise<void>((resolve) => { recoveryStartedResolve = resolve; });
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       recoverySnapshot: async (sessionId: string) => {
         if (sessionId === "gone") return undefined;
@@ -465,7 +465,7 @@ describe("connection-wide synchronization ownership", () => {
     const pendingOpenStarted = new Promise<void>((resolve) => { pendingOpenStartedResolve = resolve; });
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-before" && sessionId === "before",
+
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
       recoverySnapshot: async (sessionId: string) => ({ sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 99, revision: 99 }),
@@ -487,10 +487,7 @@ describe("connection-wide synchronization ownership", () => {
           return { synchronized: true };
         }
         if (method === "session.close") return { closed: context.unsubscribe(sessionId, params.subscriptionToken) };
-        if (method === "terminal.attach") {
-          context.attachTerminal(params.terminalId);
-          return { attached: true };
-        }
+
         if (method === "session.fork") {
           const nextSessionId = sessionId === "before" ? "after" : `${sessionId}-after`;
           gateway.rekeySession(sessionId, nextSessionId);
@@ -556,15 +553,12 @@ describe("connection-wide synchronization ownership", () => {
 
     const openedBefore = await request("open-before", "session.open", "before");
     await request("sync-before", "session.sync", "before", { syncToken: openedBefore.result.syncToken });
-    await request("attach-before", "terminal.attach", "before", { terminalId: "terminal-before" });
     await request("fork", "session.fork", "before", { commandId: "command-fork" });
     const afterEvents = frames.length;
     gateway.broadcastSession("before", "session.progress", event("before", 2) as any);
     gateway.broadcastSession("after", "session.progress", event("after", 2) as any);
-    gateway.broadcastTerminal("terminal-before", "terminal.output", { data: "must be detached" } as any);
     await waitFor(() => frames.slice(afterEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === "after"), "the events after the marker");
     expect(frames.slice(afterEvents).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["after"]);
-    expect(frames.slice(afterEvents).some((frame) => frame.topic === "terminal.output")).toBe(false);
 
     // A replacement open rotates the carried fork token. A late close from the
     // retired parent view resolves through the alias but cannot revoke the
@@ -648,7 +642,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       invoke: async (context: ClientContext, method: string, params: ClientRequest) => {
         const sessionId = params.sessionId;
@@ -780,7 +774,7 @@ describe("disposable read cancellation", () => {
     const records: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
       invoke: async (context: any, method: string, params: any) => {
@@ -1000,7 +994,7 @@ describe("mobile presentation slot", () => {
     const openGates = new Map<string, () => void>();
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
       invoke: async (context: any, method: string, params: any) => {

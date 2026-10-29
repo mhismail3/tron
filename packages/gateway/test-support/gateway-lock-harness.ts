@@ -25,7 +25,6 @@ import { HookResources } from "../src/admin/hook-resources.js";
 import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
-import { TerminalService } from "../src/machine/terminal-service.js";
 import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/kernel/session/runtime-registry.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import { GatewayAutomationExecutor } from "../src/automations/automation-executor.js";
@@ -318,7 +317,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     scheduleTool = new GatewayScheduleToolOperations(automations, receipts);
   }
   const lifecycleRequests: LockLifecycleRequest[] = [];
-  const terminals = options.lifecycleRequests ? new TerminalService(64_000, () => {}) : undefined;
   // The real upload owner: a prompt materializes its (empty) attachment list through it.
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
@@ -332,15 +330,12 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
     logger: { log: () => {} },
-    sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
     ...(options.lifecycleRequests ? {
       requestRestart: (restartNow?: boolean) => { lifecycleRequests.push({ kind: "restart", restartNow: restartNow === true }); },
       requestStop: () => { lifecycleRequests.push({ kind: "stop" }); },
-      terminals,
     } : {
       requestRestart: () => { throw new Error("Lock scenario requested a restart"); },
       requestStop: () => { throw new Error("Lock scenario requested a stop"); },
-      terminals: { belongsToSession: () => false },
     }),
     uploads,
     filesystem: unreachable("filesystem"), modelConfig: unreachable("modelConfig"),
@@ -499,7 +494,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       await registry.dispose().catch(() => {});
       knowledge?.dispose();
       await receipts.dispose();
-      terminals?.dispose();
       await outside.dispose();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
