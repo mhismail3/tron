@@ -210,7 +210,6 @@ operations: RunOperations<unknown>,
         }
       }
 
-      if (ownership?.kind === "homeWake" && !homeWakeTrigger?.message.details.trigger) ownership.onDelivered(homeWakeTrigger !== undefined);
       ownership?.signal?.throwIfAborted();
       sdkRun = ownership?.kind === "homeWake"
         ? operations.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve, ownership.inputCancellation, ownership.cancellationEpoch, ownership.onDelivered)
