@@ -4315,26 +4315,6 @@
         "type": "custom"
       },
       {
-        "customType": "tron.chat-invocation.v1",
-        "data": {
-          "createdAt": "<timestamp>",
-          "invocationId": "<id>",
-          "lifecycle": "accepted",
-          "operationId": "<id>",
-          "receiptId": "<id>",
-          "receiptKind": "transition",
-          "sequence": "<n>",
-          "sessionId": "<id>",
-          "source": "homeWake",
-          "version": 1,
-          "writer": "gateway"
-        },
-        "id": "<id>",
-        "parentId": "<id>",
-        "timestamp": "<timestamp>",
-        "type": "custom"
-      },
-      {
         "content": "Home task: Summarize notes.txt in the lock project. | outcome: final | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nThe notes say: lock notes.\n\nEvidence:\n- read notes.txt",
         "customType": "tron.home-task-result.v1",
         "details": {
@@ -4363,6 +4343,26 @@
         "parentId": "<id>",
         "timestamp": "<timestamp>",
         "type": "custom_message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "homeWake",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       },
       {
         "customType": "tron.chat-invocation.v1",
