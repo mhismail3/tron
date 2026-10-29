@@ -16,7 +16,6 @@ import { GatewayServer } from "./server.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { sessionSettingChange, changedRevision, type SessionSetting } from "../../test-support/session-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { TerminalService } from "../machine/terminal-service.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle
@@ -143,7 +142,6 @@ async function fixture(options: {
     receipts: new CommandReceiptStore(root),
     uploads,
     // The real owner with no PTYs: restart admission reads its true state.
-    terminals: new TerminalService(64_000, () => {}),
     logger: diagnosticLogger,
     ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
     ...(auth ? { auth } : {}),
@@ -155,7 +153,6 @@ async function fixture(options: {
         () => { retirement = "failed"; },
       );
     },
-    sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
   } as never);
   server = new GatewayServer({ display: displayOwnerOf(registry),
     host: "127.0.0.1",

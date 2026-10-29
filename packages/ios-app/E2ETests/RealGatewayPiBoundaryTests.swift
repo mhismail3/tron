@@ -1866,7 +1866,6 @@ private final class StallingRestoreProjection: GatewayLifecycleProjectionDelegat
         await withCheckedContinuation { restoreContinuation = $0 }
         return true
     }
-    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}
     func lifecycleSurface(_ error: Error) {}

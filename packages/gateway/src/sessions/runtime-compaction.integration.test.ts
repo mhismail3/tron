@@ -275,7 +275,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
       id: "phone", identity: "device:test", isLocal: false,
       beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
       setPresentationVisibility: (_id, _token, revision, visible) => ({ revision, visible }),
-      unsubscribe: () => true, attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+      unsubscribe: () => true,
       isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
     };
     let command = 0;

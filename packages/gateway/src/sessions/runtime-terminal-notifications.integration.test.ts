@@ -155,7 +155,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
         info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine-terminal-test", machineName: "test", capabilities: [] }),
-        terminalBelongsToSession: () => false,
+
         releaseClient: vi.fn(),
         invoke: async (context: any, method: string, params: any) => {
           if (method === "session.open") {

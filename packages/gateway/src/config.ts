@@ -21,7 +21,6 @@ export interface GatewayConfig {
   readonly machineName: string;
   readonly maxFrameBytes: number;
   readonly maxUploadBytes: number;
-  readonly terminalReplayBytes: number;
   readonly idleRuntimeMs: number;
   readonly maxConnections: number;
   readonly maxConnectionsPerIdentity: number;
@@ -445,7 +444,6 @@ export async function loadConfig(
     machineName: next.machineName,
     maxFrameBytes: 1_048_576,
     maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
-    terminalReplayBytes: 768 * 1_024,
     idleRuntimeMs: 10 * 60_000,
     maxConnections: 32,
     maxConnectionsPerIdentity: 4,

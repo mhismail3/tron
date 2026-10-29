@@ -22,17 +22,12 @@ public struct MacTerminalEndpoint: Codable, Equatable, Sendable {
     public var username: String
     /// The Mac's sshd host public keys in OpenSSH form, pinned at enrollment.
     public var hostKeys: [String]
-    /// The argv that reaches the Mac's shell host, which keeps shells across
-    /// disconnects (Gateway `modules/mac-terminal/mac-terminal-host.ts`). Absent from a Mac
-    /// whose Tron has none; Mac Terminal then opens a plain login shell.
-    public var hostCommand: [String]?
 
-    public init(hosts: [String], port: Int = 22, username: String, hostKeys: [String], hostCommand: [String]? = nil) {
+    public init(hosts: [String], port: Int = 22, username: String, hostKeys: [String]) {
         self.hosts = hosts
         self.port = port
         self.username = username
         self.hostKeys = hostKeys
-        self.hostCommand = hostCommand
     }
 }
 
@@ -47,6 +42,8 @@ public enum MacTerminalError: Error, Equatable, Sendable, LocalizedError {
     case authenticationRefused
     case noPinnedHostKey
     case shellRefused
+    case tmuxMissing
+    case invalidEndpoint
     case disconnected(String)
 
     public var errorDescription: String? {
@@ -63,6 +60,10 @@ public enum MacTerminalError: Error, Equatable, Sendable, LocalizedError {
             "The Mac refused this iPhone's key. It may have been revoked or removed from ~/.ssh/authorized_keys. Enable Mac Terminal again while the Gateway is running."
         case .noPinnedHostKey:
             "No Mac host key is pinned. Enable Mac Terminal again while the Gateway is running."
+        case .tmuxMissing:
+            "tmux is not installed on the Mac. Install tmux on the Mac, then reconnect. Tron did not start a replacement shell."
+        case .invalidEndpoint:
+            "Mac Terminal requires a numeric Tailscale address and a valid pinned SSH endpoint. Re-enable Mac Terminal through the trusted Gateway."
         case .shellRefused:
             "The Mac accepted the connection but refused to start a shell."
         case .disconnected(let reason):
@@ -134,6 +135,20 @@ public func macTerminalHasTailnetAddress() -> Bool {
     return false
 }
 
+/// Numeric Tailscale destinations only. Merely having another tailnet interface
+/// does not make an arbitrary DNS result or cached LAN address safe to dial.
+public func macTerminalIsTailnetHost(_ host: String) -> Bool {
+    var v4 = in_addr()
+    if host.withCString({ inet_pton(AF_INET, $0, &v4) }) == 1 {
+        return UInt32(bigEndian: v4.s_addr) & 0xFFC0_0000 == 0x6440_0000
+    }
+    var v6 = in6_addr()
+    if host.withCString({ inet_pton(AF_INET6, $0, &v6) }) == 1 {
+        return withUnsafeBytes(of: v6) { $0.starts(with: [0xFD, 0x7A, 0x11, 0x5C, 0xA1, 0xE0]) }
+    }
+    return false
+}
+
 /// One live shell. `events` ends after `.closed`.
 public final class MacTerminalSession: Sendable {
     public let events: AsyncStream<MacTerminalEvent>
@@ -162,8 +177,7 @@ public final class MacTerminalSession: Sendable {
         shell.triggerUserOutboundEvent(request, promise: nil)
     }
 
-    /// Closing ends the SSH connection; sshd hangs up what the channel ran
-    /// (a PTY shell gets SIGHUP; the shell host's relay sees end of input).
+    /// Closes only the SSH attachment. The tmux server retains the shell.
     public func close() {
         connection.close(promise: nil)
     }
@@ -176,25 +190,24 @@ public enum MacTerminalClient {
     public static func connect(
         endpoint: MacTerminalEndpoint,
         privateKey: MacTerminalPrivateKey,
+        sessionName: String,
         columns: Int,
         rows: Int,
         term: String = "xterm-256color",
         connectTimeout: TimeAmount = .seconds(8)
     ) async throws -> MacTerminalSession {
-        try await dial(endpoint: endpoint, privateKey: privateKey, request: .shell(term: term, columns: columns, rows: rows),
-                       connectTimeout: connectTimeout)
-    }
-
-    /// Runs one command without a PTY (an SSH exec channel): its stdout is
-    /// `.output`, its stderr `.diagnostic`. Mac Terminal runs its shell host's
-    /// relay this way (`MacTerminalHostLink`).
-    public static func exec(
-        endpoint: MacTerminalEndpoint,
-        privateKey: MacTerminalPrivateKey,
-        command: String,
-        connectTimeout: TimeAmount = .seconds(8)
-    ) async throws -> MacTerminalSession {
-        try await dial(endpoint: endpoint, privateKey: privateKey, request: .exec(command), connectTimeout: connectTimeout)
+        guard !sessionName.isEmpty, sessionName.count <= 80,
+              sessionName.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 45 }) else {
+            throw MacTerminalError.invalidEndpoint
+        }
+        // A dedicated tmux socket prevents user tmux configuration from changing
+        // the mobile session's lifecycle. There is no unpersisted-shell fallback.
+        let command = "export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; "
+            + "if ! command -v tmux >/dev/null 2>&1; then printf 'TRON_TMUX_MISSING\\n'; exit 127; fi; "
+            + "printf 'TRON_TMUX_READY\\n'; exec tmux -L tron-mobile -f /dev/null -u new-session -A -s \(sessionName) \\; set-option -t \(sessionName) status off"
+        return try await dial(endpoint: endpoint, privateKey: privateKey,
+                              request: .shell(term: term, columns: columns, rows: rows, command: command),
+                              connectTimeout: connectTimeout)
     }
 
     private static func dial(
@@ -205,9 +218,13 @@ public enum MacTerminalClient {
     ) async throws -> MacTerminalSession {
         let pinned = Set(endpoint.hostKeys.compactMap { try? NIOSSHPublicKey(openSSHPublicKey: $0) })
         guard !pinned.isEmpty else { throw MacTerminalError.noPinnedHostKey }
+        let hosts = endpoint.hosts.filter(macTerminalIsTailnetHost)
+        guard !hosts.isEmpty, (1...65535).contains(endpoint.port), !endpoint.username.isEmpty else {
+            throw MacTerminalError.invalidEndpoint
+        }
         var refused = false
         var lastError: MacTerminalError = .macUnreachable
-        for host in endpoint.hosts {
+        for host in hosts {
             do {
                 return try await open(
                     host: host, endpoint: endpoint, pinned: pinned, privateKey: privateKey.sshKey,
@@ -264,7 +281,7 @@ public enum MacTerminalClient {
             throw classifyDial(error)
         }
 
-        let (events, continuation) = AsyncStream.makeStream(of: MacTerminalEvent.self, bufferingPolicy: .unbounded)
+        let (events, continuation) = AsyncStream.makeStream(of: MacTerminalEvent.self, bufferingPolicy: .bufferingOldest(256))
         // The dial timeout ends at TCP; an sshd that accepts and then never
         // answers the handshake or the shell request must not hang the sheet.
         let deadline = connection.eventLoop.scheduleTask(in: handshakeTimeout) {
@@ -287,7 +304,7 @@ public enum MacTerminalClient {
                         }
                         return child.eventLoop.makeCompletedFuture {
                             try child.pipeline.syncOperations.addHandler(ShellHandler(
-                                request: request, ready: ready, continuation: continuation))
+                                request: request, ready: ready, outcome: outcome, continuation: continuation))
                         }
                     }
                 } catch {
@@ -400,13 +417,10 @@ private final class ConnectionErrorHandler: ChannelInboundHandler {
 /// What a session channel asks sshd for.
 enum ChannelRequest: Sendable {
     /// A PTY, then the login shell.
-    case shell(term: String, columns: Int, rows: Int)
-    /// One command, no PTY.
-    case exec(String)
+    case shell(term: String, columns: Int, rows: Int, command: String)
 }
 
-/// The session channel: requests a PTY and a login shell, or execs a command,
-/// then streams bytes.
+/// Requests a PTY and executes the tmux attachment, then streams bytes.
 private final class ShellHandler: ChannelInboundHandler {
     typealias InboundIn = SSHChannelData
 
@@ -414,13 +428,17 @@ private final class ShellHandler: ChannelInboundHandler {
 
     let request: ChannelRequest
     let continuation: AsyncStream<MacTerminalEvent>.Continuation
+    let outcome: HandshakeOutcome
     private var ready: EventLoopPromise<Void>?
     private var stage = Stage.pty
     private var exitStatus: Int?
+    private var startup = [UInt8]()
+    private var foundStartupMarker = false
 
-    init(request: ChannelRequest, ready: EventLoopPromise<Void>,
+    init(request: ChannelRequest, ready: EventLoopPromise<Void>, outcome: HandshakeOutcome,
          continuation: AsyncStream<MacTerminalEvent>.Continuation) {
         self.request = request
+        self.outcome = outcome
         self.ready = ready
         self.continuation = continuation
     }
@@ -431,7 +449,7 @@ private final class ShellHandler: ChannelInboundHandler {
 
     func channelActive(context: ChannelHandlerContext) {
         switch request {
-        case .shell(let term, let columns, let rows):
+        case .shell(let term, let columns, let rows, _):
             let pty = SSHChannelRequestEvent.PseudoTerminalRequest(
                 wantReply: true, term: term,
                 terminalCharacterWidth: max(columns, 1), terminalRowHeight: max(rows, 1),
@@ -439,9 +457,6 @@ private final class ShellHandler: ChannelInboundHandler {
                 terminalModes: SSHTerminalModes([:])
             )
             context.triggerUserOutboundEvent(pty, promise: nil)
-        case .exec(let command):
-            stage = .shell
-            context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true), promise: nil)
         }
         context.fireChannelActive()
     }
@@ -452,11 +467,11 @@ private final class ShellHandler: ChannelInboundHandler {
             switch stage {
             case .pty:
                 stage = .shell
-                context.triggerUserOutboundEvent(SSHChannelRequestEvent.ShellRequest(wantReply: true), promise: nil)
+                if case .shell(_, _, _, let command) = request {
+                    context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true), promise: nil)
+                }
             case .shell:
-                stage = .running
-                ready?.succeed(())
-                ready = nil
+                break // Startup output below distinguishes missing tmux before publishing the session.
             case .running:
                 break
             }
@@ -474,8 +489,44 @@ private final class ShellHandler: ChannelInboundHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let message = unwrapInboundIn(data)
         guard case .byteBuffer(let buffer) = message.data else { return }
-        let bytes = Array(buffer.readableBytesView)
-        continuation.yield(message.type == .stdErr ? .diagnostic(bytes) : .output(bytes))
+        var bytes = Array(buffer.readableBytesView)
+        if !foundStartupMarker {
+            startup += bytes
+            guard let newline = startup.firstIndex(of: 10) else {
+                if startup.count > 64 {
+                    ready?.fail(MacTerminalError.shellRefused); ready = nil
+                    context.close(promise: nil)
+                }
+                return
+            }
+            let header = String(decoding: startup[..<newline], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard header == "TRON_TMUX_READY" else {
+                let error: MacTerminalError = header == "TRON_TMUX_MISSING" ? .tmuxMissing : .shellRefused
+                outcome.record(error)
+                ready?.fail(error)
+                ready = nil
+                context.close(promise: nil)
+                return
+            }
+            bytes = Array(startup.dropFirst(newline + 1))
+            startup.removeAll()
+            foundStartupMarker = true
+        }
+        if stage != .running {
+            // The prelude only proves tmux exists. Its first terminal output
+            // proves attachment has started, so early input cannot be flushed
+            // when tmux switches the remote PTY into raw mode.
+            guard !bytes.isEmpty else { return }
+            stage = .running
+            ready?.succeed(())
+            ready = nil
+        }
+        if case .dropped = continuation.yield(message.type == .stdErr ? .diagnostic(bytes) : .output(bytes)) {
+            // Never let a suspended/slow consumer grow memory without bound or
+            // silently continue an emulator after lost bytes. tmux retains the
+            // screen; a fresh attachment will repaint it.
+            context.close(promise: nil)
+        }
     }
 
     func channelInactive(context: ChannelHandlerContext) {

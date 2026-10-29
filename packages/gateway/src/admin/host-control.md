@@ -3,7 +3,7 @@
 Gateway update, Mac replacement, iPhone install, device labels, drain and exit.
 Owners: `gateway/admin` (`gateway-update-service.ts`, `ios-device-install-service.ts`),
 `gateway/run` (`restart-drain.ts`, `gateway-work-registry.ts`), `gateway/lifecycle`
-(`exit-after-shutdown.ts`), `gateway/machine` (`terminal-service.ts`). A reference,
+(`exit-after-shutdown.ts`). A reference,
 not authorization: Stable rebuild, update, rollback, promotion, restart and
 `scripts/tron dev handoff` are the maintainer's
 ([charter](../../../../AGENTS.md#safety-boundaries)); agents run only the Debug
@@ -121,12 +121,7 @@ worker as a `.resume-N` successor once.
   when no exact owner represents it. Package and provider-login work stays until it
   settles. A paused extension artifact stops blocking only after an observed versioned
   `processTerminal` proof.
-- Terminals (#479): busy while attached, while the shell has a child, or after a
-  half-typed line. Restart and stop close idle terminals ("Closed for a Gateway
-  restart") and refuse while a busy one remains; an idle pass every 30 s closes
-  terminals untouched for `setup.terminalIdleMinutes` (default 60). `closedReason` is
-  kept in `terminal.list` and `terminal.exit`.
 
-Verify: `exit-after-shutdown.e2e.test.ts`, `terminal-idle.e2e.test.ts`,
+Verify: `exit-after-shutdown.e2e.test.ts`,
 `administrative-drain-snapshot.integration.test.ts`,
 `node --test scripts/gateway-payload-deploy.test.mjs`, signed `MacQuitGatewayTests`.

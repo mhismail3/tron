@@ -68,7 +68,7 @@ function row(index: number, unread: boolean): NotificationInboxEntry {
 const client = (): ClientContext => ({
   id: "connection-integration", identity: "device_abcdefgh", isLocal: false,
   beginSynchronization: () => "sync", establishSynchronization() {}, completeSynchronization() {}, unsubscribe: () => true,
-  attachTerminal() {}, detachTerminal() {}, ownsTerminal: () => false,
+
   isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 });
 

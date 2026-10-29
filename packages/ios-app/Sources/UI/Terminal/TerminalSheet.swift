@@ -3,128 +3,29 @@ import SwiftUI
 import UIKit
 import TronMobileCore
 
-/// Manage Session and Manage Home share the same launch affordance and shell owner.
-struct SessionTerminalToolbarButton: View {
-    let enabled: Bool
-    let identifier: String
-    /// The presenting sheet's title tint.
-    var accent: SwiftUI.Color = .tronPrimary
-    let action: () -> Void
+enum TerminalConnectionPhase: Equatable {
+    case connecting, connected, unavailable, notConnected
 
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "terminal")
-                .font(TronTypography.buttonSM)
-                .tronToolbarAction(accent: accent)
+    var label: String {
+        switch self {
+        case .connecting: "Connecting"
+        case .connected: "Connected"
+        case .unavailable: "Unavailable"
+        case .notConnected: "Not connected"
         }
-        .disabled(!enabled)
-        .accessibilityLabel(TerminalSheet.title)
-        .accessibilityIdentifier(identifier)
+    }
+
+    var color: SwiftUI.Color {
+        switch self {
+        case .connected: .tronEmerald
+        case .connecting: .tronAmber
+        case .unavailable: .tronError
+        case .notConnected: .tronTextSecondary
+        }
     }
 }
 
-struct TerminalSheet: View {
-    /// The one label of this sheet's title and the Manage Session row that opens it.
-    static let title = "Terminal"
-    let sessionID: String
-    @Environment(AppModel.self) private var model
-    // Presentation-scoped: SwiftUI may rebuild this content while the sheet
-    // stays presented, and the attachment and emulator must survive it (#1073).
-    @PresentationState private var controller = TerminalController()
-    @PresentationState private var keyboard = TerminalKeyboardController()
-    @PresentationState private var emulator = TerminalEmulatorHost()
-    @PresentationState private var confirmQuit = false
-
-    var body: some View {
-        TerminalSheetChrome(title: Self.title, phase: controller.connectionPhase, keyboard: keyboard) { accent in
-            if let error = controller.error, controller.terminal == nil {
-                ScrollView {
-                    TronPlaceholderState(title: "Terminal unavailable", detail: error,
-                                         icon: "terminal", accent: accent)
-                }
-                .scrollEdgeEffectStyle(.soft, for: .all)
-            } else if let terminal = controller.terminal {
-                let replay = model.terminalReplay(for: terminal.id)
-                let identity = TerminalRendererIdentity(terminalID: terminal.id, replayRevision: replay.revision)
-                TerminalSurface(
-                    chunks: replay.chunks,
-                    isInteractive: controller.isRunning(model: model),
-                    keyboard: keyboard,
-                    emulator: emulator,
-                    emulatorIdentity: identity,
-                    onSend: { controller.send($0, model: model) },
-                    onResize: { controller.resize(columns: $0, rows: $1, model: model) }
-                )
-                .id(identity)
-            } else {
-                TronSheetLoadingState(label: "Connecting terminal…", accent: accent)
-            }
-        } menu: {
-            terminalMenu
-        }
-        // Idempotent: a rebuilt sheet finds its attachment already started.
-        // It stops when the sheet is dismissed (`presentationDidRetire`).
-        .task {
-            controller.start(sessionID: sessionID, model: model)
-        }
-        .tronConfirmation("Quit Terminal?", isPresented: $confirmQuit) {
-            Button("Quit Terminal", role: .destructive) { controller.terminate(model: model) }
-        } message: {
-            Text("The shell and its running process group will stop. Closing the sheet alone only detaches.")
-        }
-    }
-
-    private var openTerminals: [TerminalSummary] {
-        controller.history.filter { $0.exitedAt == nil && !model.terminalHasExited($0.id) }
-    }
-
-    private var recentTerminals: [TerminalSummary] {
-        controller.history.filter { $0.exitedAt != nil || model.terminalHasExited($0.id) }
-    }
-
-    @ViewBuilder
-    private var terminalMenu: some View {
-            if !controller.isRunning(model: model) {
-                Button("Open Live Terminal", systemImage: "terminal") {
-                    controller.openLive(model: model)
-                }
-            }
-            if !openTerminals.isEmpty {
-                Section("Open terminals") {
-                    ForEach(openTerminals) { terminal in
-                        Button {
-                            controller.show(terminal, model: model)
-                        } label: {
-                            Text(terminal.createdAt)
-                        }
-                    }
-                }
-            }
-            if !recentTerminals.isEmpty {
-                Section("Recent terminals") {
-                    ForEach(recentTerminals) { terminal in
-                        Button {
-                            controller.show(terminal, model: model)
-                        } label: {
-                            // A menu item's second text is its subtitle: why the
-                            // Gateway closed it, when it did (#479).
-                            Text(terminal.exitedAt ?? terminal.createdAt)
-                            if let reason = terminal.closedReason { Text(reason) }
-                        }
-                        .accessibilityLabel([terminal.exitedAt ?? terminal.createdAt, terminal.closedReason]
-                            .compactMap { $0 }.joined(separator: ", "))
-                    }
-                }
-            }
-            Button("Quit Terminal", role: .destructive) { confirmQuit = true }
-                .disabled(!controller.isRunning(model: model))
-    }
-}
-
-/// The one terminal sheet chrome: the session terminal (Manage Session and
-/// Manage Home) and Mac Terminal (Settings) share its title with the phase dot,
-/// options menu, Done button, top blur and detents, so the two read as one
-/// component. Content supplies the emulator or a placeholder.
+/// Mac Terminal's title, connection phase, menu, Done and emulator surface.
 struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
     let title: String
     let phase: TerminalConnectionPhase
@@ -185,7 +86,7 @@ struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
     }
 }
 
-/// The emulator with the session terminal's padding and keyboard control bar.
+/// The emulator with its padding and keyboard control bar.
 struct TerminalSurface: View {
     let chunks: [TerminalChunk]
     let isInteractive: Bool

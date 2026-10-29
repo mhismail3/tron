@@ -169,35 +169,6 @@ package struct GatewayEventCursor: Sendable, Equatable {
     }
 }
 
-package struct PreparedTerminalOutputEvent: Decodable, Sendable, Equatable {
-    package let terminalId: String
-    package let sequence: Int
-    package let data: String
-
-    package init(terminalId: String, sequence: Int, data: String) {
-        self.terminalId = terminalId
-        self.sequence = sequence
-        self.data = data
-    }
-}
-
-package struct PreparedTerminalExitEvent: Decodable, Sendable, Equatable {
-    package let terminalId: String
-    package let sequence: Int?
-    package let exitCode: Int?
-
-    package init(terminalId: String, sequence: Int?, exitCode: Int?) {
-        self.terminalId = terminalId
-        self.sequence = sequence
-        self.exitCode = exitCode
-    }
-}
-
-package enum PreparedTerminalEvent: Sendable, Equatable {
-    case output(PreparedTerminalOutputEvent)
-    case exit(PreparedTerminalExitEvent)
-}
-
 package enum GatewayEventPreparation: Sendable, Equatable {
     case none
     case sessionSummary(SessionSummaryUpdate)
@@ -209,7 +180,6 @@ package enum GatewayEventPreparation: Sendable, Equatable {
     case knowledgeChanged(KnowledgeChanged)
     case knowledgeCurationJob(KnowledgeCurationJob)
     case notificationInboxChanged(NotificationInboxChanged)
-    case terminalEvent(PreparedTerminalEvent)
 }
 
 package struct GatewayEvent: Decodable, Sendable, Equatable {
@@ -304,7 +274,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                 eventSequence: event.envelope.eventSequence
             )
         case .none, .sessionSummary, .processTranscriptChanged, .automationChanged,
-             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged, .terminalEvent:
+             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged:
             return nil
         }
     }
@@ -321,7 +291,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
         case .none:
             return !topic.hasPrefix("session.")
         case .sessionSummary, .processTranscriptChanged, .automationChanged,
-             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged, .terminalEvent:
+             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged:
             return true
         }
     }
@@ -376,10 +346,6 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                   ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot),
                   SessionProcessAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
             return .sessionRebaseline(PreparedSessionRebaseline(snapshot: payload.snapshot, subscriptionToken: payload.subscriptionToken))
-        case "terminal.output":
-            return (try? adapter.decode(PreparedTerminalOutputEvent.self)).map { .terminalEvent(.output($0)) } ?? .none
-        case "terminal.exit":
-            return (try? adapter.decode(PreparedTerminalExitEvent.self)).map { .terminalEvent(.exit($0)) } ?? .none
         case "session.processTranscript.changed":
             guard let changed = try? adapter.decode(ProcessTranscriptChanged.self),
                   SessionProcessAdmissionPolicy.admits(changed) else { return .none }

@@ -93,7 +93,6 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 | `sources.npmCommand` | sources | M | no | no | no | Next package operation |
 | `setup.sessionDir` | setup | M, no writer | no | no | no | Stopped-runtime configuration; hide from Settings |
 | `setup.installTelemetry` | setup | M | no | no | no | Next request |
-| `setup.terminalIdleMinutes` | setup | M | no | no | no | Next terminal idle evaluation |
 
 Model-qualified keys: chat thinking, context window, compaction reserve/recent. Dynamic instances:
 trust by project, terminal key by device, floors by key/direction. Expanding these is not a new key.

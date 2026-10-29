@@ -2,75 +2,58 @@
 
 ## Purpose
 
-Terminal sheets: the session terminal over a Gateway-retained PTY, and Mac Terminal, which reaches
-login shells on the paired Mac over SSH without the Gateway.
+Mac Terminal reaches macOS built-in Remote Login over Tailscale. One stable tmux
+session preserves the same shell across dismissal, backgrounding and reconnect;
+neither Tron.app nor the Gateway owns its process or connection.
 
 ## Owns
 
-`TerminalSheet`, `MacTerminalSheet`, `TerminalPresentationController`, `TerminalRenderer`
-(SwiftTerm), and the shared `TerminalSheetChrome`/`TerminalSurface` chrome both sheets use.
+`MacTerminalSheet`, `TerminalSheetChrome`, `TerminalSurface` and `TerminalRenderer`
+(SwiftTerm). State and enrollment belong to `MacTerminalController` and
+`MacTerminalEnrollmentStore`; SSH transport belongs to `MacTerminalSSH`.
 
 ## Contract
 
-- **Session terminal.** `TerminalCoordinator` and its `TerminalReducer` (State) own wire, intents,
-  shared attachment leases and a global 16-terminal / 256-chunk / 1 MiB event quarantine.
-  `terminal.open` requires the exact installed session subscription. Open and attach install one
-  strictly contiguous replay; duplicates, reordering or a missing middle trigger a bounded
-  follow-up. A reset advances the replay revision so SwiftTerm is recreated. Resize is debounced
-  120 ms per presentation within 20–400 columns and 5–200 rows.
-- **Presentation.** The controller owns one active start/show/open flight and one latest pending
-  route; possibly-sent attach/open phases finish under their revoked intent so stale receipts reach
-  compensating cleanup. Switching or dismissing revokes intake synchronously; presentations sharing
-  a terminal keep the subscription until the last closes. After exit the emulator is
-  non-interactive with a steady cursor, and menus separate live from exited terminals. Quit asks
-  for confirmation and waits for Gateway-observed process-group exit; Done only detaches.
-- **Closed by the Gateway.** An idle or restart-closed terminal (#479) carries
-  `TerminalSummary.closedReason`, shown as its Recent terminals subtitle and the replay's last line;
-  the idle period is the Gateway's `setup.terminalIdleMinutes` setting.
-- **Mac Terminal.** Settings › System › **Mac Terminal**. Only enrollment and removal
-  use the Gateway ([contract](../../../../gateway/README.md#mac-terminal)), so shells work while
-  Tron.app or the Gateway is down.
-  - *Key:* `MacTerminalEnrollmentStore` keeps one Secure Enclave P-256 key per Mac
-    (`AfterFirstUnlockThisDeviceOnly`); the Simulator uses a software key.
-  - *Enrollment:* reads `macTerminal.status`, sends the public key as
-    `permissions.macTerminalKey[device]` through `settings.change`, and pins host keys, which are
-    never replaced silently.
-  - *Shells live on the Mac* (#1075): `MacTerminalHostLink` speaks the host's line protocol;
-    closing the sheet only closes the link. `AppModel.macTerminal` is app-scoped, so a reopened
-    sheet shows retained output (≤ 1 MiB) and reattaches after the last sequence. ⋯ › New Shell
-    opens another; Open and Recent shells are shared by every enrolled iPhone of that Mac user.
-  - *Connection* (`MacTerminalSSH`) refuses specifically: no Tailscale address, Mac unreachable,
-    Remote Login off, unpinned host key (with its `SHA256:` fingerprint), refused key, stalled
-    handshake. A dropped link says the shell still runs and reattaches on foreground.
-  - *Lifeline:* without a host command the terminal opens a plain PTY login shell that ends with
-    its connection. *Removal* unsets the key on the Mac first.
-- Keyboard, emulator and alerts are presentation-scoped; only dismissal detaches
-  ([presentation-scoped state](../../../docs/presentation-parity.md#presentation-scoped-state)).
-
-## Invariants
-
-- No second terminal lifecycle: Home's terminal button reuses `TerminalSheet(sessionID:)` and
-  requires `terminal.v1`.
-- Output is never replayed into a rebuilt sheet; `TerminalEmulatorHost` keeps the SwiftTerm view.
-
-## Entry points
-
-`TerminalSheet.swift`, `MacTerminalSheet.swift`, `TerminalPresentationController.swift`.
-
-## Signals
-
-None of its own.
+- Settings › System › **Mac Terminal** is the only entry point. The Gateway is
+  needed only to enroll or revoke this iPhone's key, not to reconnect.
+- The physical iPhone uses a non-exportable Secure Enclave P-256 key with
+  `AfterFirstUnlockThisDeviceOnly`; only the Simulator uses a software key.
+  Enrollment pins host keys; they are never silently replaced.
+- The client accepts numeric Tailscale IPv4/IPv6 destinations, validates the
+  endpoint/session name and verifies a pinned host key before authentication.
+  Unreachable Mac, refused key and changed host key have distinct errors.
+- An SSH PTY executes tmux `new-session -A` on the dedicated `tron-mobile`
+  socket, without loading user tmux configuration. The stable session name is
+  derived from the Mac/device IDs. Missing tmux is an explicit setup error;
+  there is no plain-shell fallback or custom shell-host protocol.
+- Done/background closes the SSH attachment, not the tmux shell. Foreground or
+  **Reconnect** opens a new attachment and uses tmux's authoritative repaint.
+  Input is never replayed. Shell exit ends that shell; reconnect starts another.
+- Each connection is generation-fenced. Output retained by the controller is
+  bounded to 1 MiB; the SSH event stream is bounded and disconnects rather than
+  silently continuing an emulator after lost bytes.
+- Keyboard, emulator and alerts are presentation-scoped. Within an attachment,
+  a rebuilt sheet adopts the same emulator; a new attachment gets a fresh one.
+  SwiftTerm reads the active screen, including tmux's alternate screen.
+- A one-time forward migration removes only the obsolete endpoint `hostCommand`
+  property from `macTerminal.enrollments.v1`. It copies every surviving byte,
+  completes and verifies an original-record backup before the rewrite, then marks
+  completion. A failed backup blocks reads/mutations without touching keys or
+  pins. Subsequent launches do not repeat the migration.
+- Removal revokes the authorized key on the Mac before deleting local enrollment.
+  Already-running tmux shells are not terminated by key removal.
+- The maintainer owns Remote Login and the selected PF exposure policy. Client
+  address checks and authorized-key source restrictions do not prove a server
+  firewall boundary or fail-closed boot behavior.
 
 ## Verify
 
 ```bash
-scripts/tron-ios-test run --only-testing TronMobileUITests/TronSessionTerminalUITests
-scripts/ios-mac-terminal-journey   # TronMacTerminalUITests against real sshd; after build, Mac on its tailnet
+scripts/tron-ios-test build
+scripts/ios-mac-terminal-journey
 scripts/tron test gateway --config vitest.mac-terminal.config.ts
 ```
 
-Interactive PTY input, the native keyboard and the shortcut surfaces remain a device check.
-
-## Not here
-
-Terminal state owners: [State](../../State/README.md). The SSH client: `MacTerminalSSH`.
+The journey uses real sshd and the app's SSH client. Physical-device Secure
+Enclave, radio interruption, and privileged PF/reboot/rollback remain separate
+qualification boundaries; simulator screenshots are not device proof.
