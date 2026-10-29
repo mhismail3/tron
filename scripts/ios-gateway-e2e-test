@@ -470,9 +470,6 @@ install_gateway_if_needed() {
     fi
   fi
   "$NPM_BIN" --prefix "$gateway_dir" run build
-  # The same check the fixture start repeats, here so an install (and, for
-  # `all`/`run-ui`, the xcodebuild that follows) cannot come before a clear
-  # refusal for a Node that cannot load the modules it just installed (#445).
 }
 
 source "$repo_root/scripts/ios-gateway-e2e-fixture.sh"
