@@ -61,6 +61,31 @@ it("isolates a malformed entry while a good Swift sibling opens through GatewayS
   expect(await f.rpc("apps.open", { id: good.id, expectedContentRevision: good.contentRevision })).toMatchObject({ kind: "swift", source });
 });
 
+it("reports a folder removed after cataloging as a scoped not-found admission, not an internal filesystem error", async () => {
+  const f = await fixture();
+  await mkdir(join(f.apps, "removed")); await writeFile(join(f.apps, "removed/Main.swift"), "import SwiftUI");
+  const row = (await f.rpc("apps.catalog")).rows[0];
+  await rm(join(f.apps, "removed"), { recursive: true });
+  await expect(f.rpc("apps.open", { id: row.id, expectedContentRevision: row.contentRevision }))
+    .rejects.toMatchObject({ code: "not_found" });
+  expect((await f.rpc("apps.catalog")).rows).toHaveLength(0);
+});
+
+it("keeps whole-workspace loss distinct from entry removal when files vanish during admission", async () => {
+  const f = await fixture();
+  await mkdir(join(f.apps, "root-loss")); await writeFile(join(f.apps, "root-loss/Main.swift"), "import SwiftUI");
+  const row = (await f.rpc("apps.catalog")).rows[0];
+  const originalRead = folderFormat.readAppEntry;
+  const hook = vi.spyOn(folderFormat, "readAppEntry").mockImplementation(async (root, name) => {
+    if (root === f.apps && name === "root-loss") await rename(join(f.root, "tron/workspace/files"), join(f.root, "saved-files"));
+    return originalRead(root, name);
+  });
+  try {
+    await expect(f.rpc("apps.open", { id: row.id, expectedContentRevision: row.contentRevision }))
+      .rejects.toMatchObject({ code: "conflict" });
+  } finally { hook.mockRestore(); }
+});
+
 it("requires exact-code consent, retains state after external file deletion, and refuses a stale runner after recreation", async () => {
   const f = await fixture();
   await mkdir(join(f.apps, "counter"));
@@ -313,11 +338,13 @@ it("refuses disabled deletion with unsupported while leaving an external replace
   const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
   const apps = join(root, "tron/workspace/files/apps"), directory = join(apps, "victim");
   const store = new AppsFolderStore(workspace, join(root, "tron"));
-  let validated = false, replaced = false;
+  let validating = false, replaced = false;
   const originalRead = folderFormat.readAppEntry;
-  const originalResolve = store.index.entryForDeletion.bind(store.index);
-  const resolveHook = vi.spyOn(store.index, "entryForDeletion").mockImplementation(async key => {
-    const entry = await originalResolve(key); validated = true; return entry;
+  const originalResolve = store.index.validateRow.bind(store.index);
+  const resolveHook = vi.spyOn(store.index, "validateRow").mockImplementation(async (...args) => {
+    // The index now owns the final read, not its caller. Keep the external
+    // writer at that real read's completion, without a legacy resolver alias.
+    validating = true; return originalResolve(...args);
   });
   // Wrap the real filesystem reader, without fabricating its returned facts.
   // The external writer runs after the last validation read. The fail-before
@@ -325,7 +352,7 @@ it("refuses disabled deletion with unsupported while leaving an external replace
   // No production test hook or timing race is used.
   const validationHook = vi.spyOn(folderFormat, "readAppEntry").mockImplementation(async (path, name) => {
     const entry = await originalRead(path, name);
-    if (validated && !replaced && path === apps && name === "victim") {
+    if (validating && !replaced && path === apps && name === "victim") {
       replaced = true;
       await rename(directory, join(root, "original"));
       await mkdir(directory); await writeFile(join(directory, "note.txt"), "replacement");

@@ -4,12 +4,14 @@ import { backgroundWork } from "../../background-work.js";
 import { GatewayError } from "../../errors.js";
 import { watchFolder, FOLDER_WATCH_RETRY_MS, FOLDER_RECONCILE_INTERVAL_MS, type FolderWatchHandle } from "../../util/folder-watch.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
-import { APP_ID, hash, readAppEntry, type AppEntry, type AppRow } from "./apps-folder-format.js";
+import { APP_ID, hash, isReadyAppEntry, readAppEntry, type AppEntry, type AppRow, type ReadyAppEntry } from "./apps-folder-format.js";
+
+type IndexedEntry = Pick<AppEntry, "name" | "row" | "changedAt">;
 
 /** Disposable membership, never a registry. Every publication is a filesystem
  * cut; events bound the pending set and enqueue work on the same serial lane. */
 export class AppsFolderIndex {
-  private entries = new Map<string, AppEntry>();
+  private entries = new Map<string, IndexedEntry>();
   private revision = hash("empty");
   private lane: Promise<void> = Promise.resolve();
   private watcher: FolderWatchHandle | undefined;
@@ -108,7 +110,7 @@ export class AppsFolderIndex {
         const root = await this.root(); // Attach before baseline enumeration.
         const all = this.full; this.full = false;
         const pending = [...this.pending]; this.pending.clear();
-        const next = all ? new Map<string, AppEntry>() : new Map(this.entries);
+        const next = all ? new Map<string, IndexedEntry>() : new Map(this.entries);
         let names: string[];
         if (all) {
           try { names = await readdir(root); }
@@ -120,10 +122,9 @@ export class AppsFolderIndex {
             const info = await lstat(join(root, name));
             if (info.isDirectory() || info.isSymbolicLink()) {
               const entry = await readAppEntry(root, name);
-              // The index retains metadata, never every app's source/assets.
-              // Admission reopens bytes under the store's serial lane.
-              entry.files.clear();
-              next.set(name, entry);
+              // Keep only the catalog projection; admission owns a fresh typed
+              // byte snapshot, never a cleared or incomplete execution object.
+              next.set(name, { name: entry.name, row: entry.row, changedAt: entry.changedAt });
             } else next.delete(name); // Loose regular/special files are not entries.
           } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; next.delete(name); }
           if (++count % 50 === 0) await backgroundWork.yieldToLoop();
@@ -155,20 +156,47 @@ export class AppsFolderIndex {
     return { revision: this.revision, rows: rows.slice(offset, offset + limit).map(entry => entry.row),
       ...(offset + limit < rows.length ? { nextCursor: Buffer.from(JSON.stringify([this.revision, offset + limit])).toString("base64url") } : {}) };
   }
+  /** One edge read for every admission path, including opaque broken-row keys. */
+  private async current(name: string, expectedContentRevision: string): Promise<AppEntry> {
+    const root = await this.root();
+    let entry: AppEntry;
+    try { entry = await readAppEntry(root, name); }
+    catch (error) {
+      if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      this.invalidate(name);
+      // Verify the parent availability, never retry the entry read. Losing the
+      // workspace is unavailable, not a missing row or an empty Apps catalog.
+      await this.root();
+      throw new GatewayError("not_found", "Entry no longer exists", true, { reason: "entry_changed" });
+    }
+    if (entry.row.contentRevision !== expectedContentRevision) {
+      // A rejected admission also invalidates a known-stale cut if its OS hint
+      // was lost. It does not publish another membership authority.
+      this.entryChanged(name);
+    }
+    return entry;
+  }
+  private entryChanged(name: string): never {
+    this.invalidate(name);
+    throw new GatewayError("conflict", "Entry changed; open its current version", true, { reason: "entry_changed" });
+  }
   /** Admission always reopens bytes, including a replacement missed by fs.watch. */
-  async requireEntry(id: string, expectedContentRevision: string): Promise<AppEntry> {
+  async requireEntry(id: string, expectedContentRevision: string): Promise<ReadyAppEntry> {
     if (!APP_ID.test(id)) throw new GatewayError("invalid_request", "Invalid app id");
     await this.initialize();
     return this.enqueue(async () => {
-      const entry = await readAppEntry(await this.root(), id);
-      if (entry.row.contentRevision !== expectedContentRevision) {
-        // A rejected admission is also an authoritative invalidation hint. Do
-        // not leave callers refreshing a stale cut if the OS hint was lost.
-        this.invalidate(id);
-        throw new GatewayError("conflict", "Entry changed; open its current version", true, { reason: "entry_changed" });
-      }
-      if (entry.row.status.kind !== "ready") throw new GatewayError("unsupported", entry.row.status.reason);
+      const entry = await this.current(id, expectedContentRevision);
+      if (!isReadyAppEntry(entry)) throw new GatewayError("unsupported", entry.row.status.reason);
       return entry;
+    });
+  }
+  async validateRow(rowKey: string, expectedContentRevision: string): Promise<void> {
+    await this.initialize();
+    return this.enqueue(async () => {
+      const indexed = [...this.entries.values()].find(entry => entry.row.rowKey === rowKey);
+      if (!indexed) throw new GatewayError("not_found", "Entry no longer exists");
+      const entry = await this.current(indexed.name, expectedContentRevision);
+      if (entry.row.rowKey !== rowKey) this.entryChanged(indexed.name);
     });
   }
   async membership(ids: readonly string[]): Promise<ReadonlySet<string>> {
@@ -176,12 +204,6 @@ export class AppsFolderIndex {
     return new Set(ids.filter(id => this.entries.has(id)));
   }
   async refreshAll(): Promise<void> { this.full = true; await this.reconcile(); }
-  async entryForDeletion(rowKey: string): Promise<AppEntry> {
-    await this.initialize();
-    const entry = [...this.entries.values()].find(entry => entry.row.rowKey === rowKey);
-    if (!entry) throw new GatewayError("not_found", "Entry no longer exists");
-    return entry;
-  }
   async dispose(): Promise<void> {
     this.closed = true; this.generation++;
     this.watcher?.close(); this.watcher = undefined; this.unregister?.();

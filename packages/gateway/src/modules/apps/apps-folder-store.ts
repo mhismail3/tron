@@ -8,7 +8,7 @@ import { readSecureJson } from "../../util/secure-json.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { AppDataStore, type AppDataCommit } from "./app-data-store.js";
 import { AppsFolderIndex } from "./apps-folder-index.js";
-import { APP_ID, readAppEntry, type AppEntry, type AppPermissions } from "./apps-folder-format.js";
+import { APP_ID, type ReadyAppEntry, type AppPermissions } from "./apps-folder-format.js";
 import { readIOSBuildsFeed } from "./ios-builds-feed.js";
 
 interface Grant { version: 1; executableDigest: string; identity: string; permissions: AppPermissions; revision: string; device: string }
@@ -41,7 +41,7 @@ export class AppsFolderStore {
     }
     return join(path, `${id}.json`);
   }
-  private async grantFor(entry: AppEntry): Promise<Grant | undefined> {
+  private async grantFor(entry: ReadyAppEntry): Promise<Grant | undefined> {
     try {
       const raw = await readSecureJson<unknown>(await this.permissionPath(entry.name), 8192);
       if (!raw.present || !raw.value || typeof raw.value !== "object") return undefined;
@@ -51,7 +51,7 @@ export class AppsFolderStore {
         ? grant : undefined;
     } catch { return undefined; } // Unsafe/corrupt grants confer no authority.
   }
-  private needsAccess(entry: AppEntry): boolean {
+  private needsAccess(entry: ReadyAppEntry): boolean {
     return entry.permissions.data !== "none" || entry.permissions.feeds.length > 0 || entry.permissions.network.length > 0;
   }
   private token(consent: Consent): string {
@@ -83,7 +83,7 @@ export class AppsFolderStore {
       const feeds = entry.permissions.feeds.includes("ios-builds") ? { "ios-builds": await readIOSBuildsFeed(this.tronHome) } : {};
       // Feed/data awaits cannot extend authority across an external replacement.
       await this.index.requireEntry(id, contentRevision);
-      return { kind: entry.row.kind, row: entry.row, source: entry.files.get(entry.entry!)!.toString("utf8"), permissions: entry.permissions,
+      return { kind: entry.row.kind, row: entry.row, source: entry.source.toString("utf8"), permissions: entry.permissions,
         state, feeds, grantRevision: grant?.revision ?? null };
     });
   }
@@ -143,11 +143,7 @@ export class AppsFolderStore {
   async deleteFiles(rowKey: string, expectedContentRevision: string): Promise<never> {
     return this.mutex.run(async () => {
       await this.index.reconcile();
-      const entry = await this.index.entryForDeletion(rowKey);
-      const current = await readAppEntry(join(await this.workspace.filesRoot(), "apps"), entry.name);
-      if (current.row.rowKey !== rowKey || current.row.contentRevision !== expectedContentRevision) {
-        throw new GatewayError("conflict", "Entry changed; refresh before deleting", true, { reason: "entry_changed" });
-      }
+      await this.index.validateRow(rowKey, expectedContentRevision);
       // Node's pathname rename has no compare-and-rename or no-replace restore.
       // Admission may refuse a stale request, but never moves any directory.
       // Keep the receipt-backed endpoint inert until its filesystem owner can

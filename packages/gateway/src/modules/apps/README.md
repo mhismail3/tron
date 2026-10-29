@@ -20,9 +20,14 @@ incomplete.
   watcher and joins reads. A rejected content admission also invalidates its
   metadata cut, so a lost OS hint cannot strand the next refresh on known stale
   bytes. Reads also compare the Apps root inode/mtime/ctime cut to catch missing
-  startup membership hints. The index retains metadata, not source/assets.
-- `apps-folder-format.ts` reads bounded regular files without following links,
-  infers the optional manifest and computes content/executable identities.
+  startup membership hints. The index retains only row metadata, never cleared
+  execution objects or source/assets. All fresh entry and opaque-row admission
+  routes through this owner. A vanished entry returns `not_found`; losing the
+  whole workspace during admission remains unavailable, not an empty catalog.
+- `apps-folder-format.ts` is the index-internal filesystem edge: one private
+  manifest decoder, bounded regular-file reads without following links, and
+  typed ready/broken snapshots. Only ready snapshots carry exact source bytes,
+  permissions and executable identity; downstream code never parses app.json.
   Unsupported web/network entries are visible but blocked, never unsandboxed.
 - `AppsFolderStore` serializes grant/content admission and saved-data management. An open revalidates bytes instead of trusting the
   index. Prompt tokens bind exact content, folder identity, device and expiry.

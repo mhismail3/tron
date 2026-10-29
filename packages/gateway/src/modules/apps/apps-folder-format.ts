@@ -14,10 +14,17 @@ export interface AppRow {
   id?: string; rowKey: string; title: string; icon: string; kind?: AppKind; section: "Apps" | "Artifacts";
   contentRevision: string; status: { kind: "ready" } | { kind: "cannotOpen"; code: string; reason: string };
 }
-export interface AppEntry {
-  name: string; identity: string; row: AppRow; changedAt: number; manifest: AppManifest;
-  permissions: AppPermissions; executableDigest: string; files: Map<string, Buffer>; entry?: string;
+interface EntryIdentity { name: string; identity: string; changedAt: number }
+export interface ReadyAppEntry extends EntryIdentity {
+  row: AppRow & { id: string; kind: AppKind; status: { kind: "ready" } };
+  manifest: AppManifest; permissions: AppPermissions; executableDigest: string;
+  files: ReadonlyMap<string, Buffer>; entry: string; source: Buffer;
 }
+export interface BrokenAppEntry extends EntryIdentity {
+  row: AppRow & { status: { kind: "cannotOpen"; code: string; reason: string } };
+}
+export type AppEntry = ReadyAppEntry | BrokenAppEntry;
+export function isReadyAppEntry(entry: AppEntry): entry is ReadyAppEntry { return entry.row.status.kind === "ready"; }
 const kinds: AppKind[] = ["swift", "web", "document", "image", "video", "link", "live"];
 const emptyPermissions = (): AppPermissions => ({ data: "none", feeds: [], network: [] });
 function fail(reason: string): never { throw new GatewayError("invalid_request", reason); }
@@ -37,7 +44,7 @@ function stringList(value: unknown, maximum: number): string[] {
 export function safeRelative(path: string): boolean {
   return !!path && !path.includes("\\") && !path.includes("\0") && path.split("/").every(part => !!part && part !== "." && part !== "..");
 }
-export function readAppManifest(bytes: Buffer | undefined): AppManifest {
+function readAppManifest(bytes: Buffer | undefined): AppManifest {
   if (!bytes) return {};
   if (bytes.length > 32 * 1024) fail("Manifest exceeds 32 KiB");
   let value: unknown;
@@ -129,14 +136,14 @@ export async function readAppEntry(root: string, name: string): Promise<AppEntry
   const info = await lstat(join(root, name)), identity = identityOf(info);
   const row: AppRow = { ...(APP_ID.test(name) ? { id: name } : {}), rowKey: hash(`${name}\0${identity}`),
     title: name, icon: "doc", section: "Artifacts", contentRevision: hash(`${identity}:${info.mtimeMs}:${info.size}`), status: { kind: "ready" } };
-  const result: AppEntry = { name, identity, row, changedAt: info.mtimeMs, manifest: {}, permissions: emptyPermissions(), executableDigest: "", files: new Map() };
+  let changedAt = info.mtimeMs;
   try {
     if (!APP_ID.test(name)) fail("Invalid entry directory name");
     if (!info.isDirectory() || info.isSymbolicLink()) fail("Entry must be a directory, not a symbolic link");
-    const bundle = await readBundle(join(root, name)); result.files = bundle.files; result.changedAt = bundle.changedAt;
+    const bundle = await readBundle(join(root, name)); changedAt = bundle.changedAt;
     const canonical = [...bundle.files].map(([path, bytes]) => [path, hash(bytes)]);
     row.contentRevision = hash(JSON.stringify([identity, canonical]));
-    const manifest = readAppManifest(bundle.files.get("app.json")); result.manifest = manifest;
+    const manifest = readAppManifest(bundle.files.get("app.json"));
     row.title = manifest.title ?? name; row.icon = manifest.icon ?? "doc";
     let entry = manifest.entry;
     if (!entry) {
@@ -151,16 +158,18 @@ export async function readAppEntry(root: string, name: string): Promise<AppEntry
     const inferred = inferKind(entry), kind = manifest.kind ?? inferred;
     if (!kind) fail("Unsupported file type");
     if (inferred !== kind && !(kind === "document" && inferred === "web")) fail("Entry kind does not match file type");
-    result.entry = entry; row.kind = kind; row.section = ["swift", "web"].includes(kind) ? "Apps" : "Artifacts";
+    row.kind = kind; row.section = ["swift", "web"].includes(kind) ? "Apps" : "Artifacts";
     row.icon = manifest.icon ?? (kind === "swift" ? "app" : kind === "image" ? "photo" : "doc");
-    result.permissions = manifest.permissions ?? emptyPermissions();
-    const p = result.permissions;
+    const p = manifest.permissions ?? emptyPermissions();
     if (!["swift", "web"].includes(kind) && (p.data !== "none" || p.feeds.length || p.network.length && !["link", "video"].includes(kind))) fail("Permissions are not supported for this kind");
-    result.executableDigest = hash(JSON.stringify([identity, canonical.filter(([path]) => path !== "app.json"), entry, kind, p]));
+    const executableDigest = hash(JSON.stringify([identity, canonical.filter(([path]) => path !== "app.json"), entry, kind, p]));
     if (kind === "web" || p.network.length) throw new GatewayError("unsupported", "This entry needs a sandbox that is not available yet");
     if (kind === "live" || kind === "link") throw new GatewayError("unsupported", "This reference needs its display owner to open");
+    return { name, identity, changedAt, row: { ...row, id: name, kind, status: { kind: "ready" } },
+      manifest, permissions: p, executableDigest, files: bundle.files, entry, source };
   } catch (error) {
-    row.status = { kind: "cannotOpen", code: error instanceof GatewayError ? error.code : "invalid_request", reason: error instanceof GatewayError ? error.message : "Entry could not be read safely" };
+    return { name, identity, changedAt, row: { ...row, status: { kind: "cannotOpen",
+      code: error instanceof GatewayError ? error.code : "invalid_request",
+      reason: error instanceof GatewayError ? error.message : "Entry could not be read safely" } } };
   }
-  return result;
 }
