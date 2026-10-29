@@ -58,7 +58,7 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     projects,
     askUserModule,
     createDisplayModule(() => owners().display),
-    createAppsModule(() => owners().display),
+    createAppsModule(),
     createNativeCaptureModule(() => owners().display),
     computerModule,
     createScheduleModule(() => owners().scheduleToolOperations),

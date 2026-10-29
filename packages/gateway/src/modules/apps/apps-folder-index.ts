@@ -1,0 +1,152 @@
+import { lstat, readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { backgroundWork } from "../../background-work.js";
+import { GatewayError } from "../../errors.js";
+import { watchFolder, type FolderWatchHandle } from "../../util/folder-watch.js";
+import type { TronWorkspace } from "../../workspace/tron-workspace.js";
+import { APP_ID, hash, readAppEntry, type AppEntry, type AppRow } from "./apps-folder-format.js";
+
+/** Disposable membership, never a registry. Every publication is a filesystem
+ * cut; events bound the pending set and enqueue work on the same serial lane. */
+export class AppsFolderIndex {
+  private entries = new Map<string, AppEntry>();
+  private revision = hash("empty");
+  private lane: Promise<void> = Promise.resolve();
+  private watcher: FolderWatchHandle | undefined;
+  private watchedIdentity: string | undefined;
+  private pending = new Set<string>();
+  private full = true;
+  private scheduled: NodeJS.Timeout | undefined;
+  private unregister?: () => void;
+  private closed = false;
+  private started = false;
+  private generation = 0;
+  private unavailable?: unknown;
+  constructor(private readonly workspace: TronWorkspace, private readonly changed: (revision: string) => void = () => {}) {}
+
+  private async root(): Promise<string> {
+    const files = await this.workspace.filesRoot();
+    const info = await lstat(files), identity = `${info.dev}:${info.ino}`;
+    if (identity !== this.watchedIdentity) {
+      this.watcher?.close(); this.watcher = undefined; this.watchedIdentity = undefined; this.full = true;
+    }
+    if (!this.watcher && !this.closed) {
+      this.watcher = watchFolder({ root: files, onEvent: path => {
+        if (path !== null && path !== "apps" && !path.startsWith("apps/")) return;
+        const entry = path?.split("/")[1];
+        if (!entry || this.pending.size >= 256) { this.full = true; this.pending.clear(); }
+        else this.pending.add(entry);
+        this.schedule();
+      }, onReset: () => {
+        this.watcher?.close(); this.watcher = undefined; this.watchedIdentity = undefined;
+        this.full = true; this.schedule();
+      } });
+      this.watchedIdentity = identity;
+    }
+    const root = join(files, "apps");
+    try {
+      const info = await lstat(root);
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new GatewayError("conflict", "Apps folder is not a safe directory");
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    return root;
+  }
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.lane.then(operation); this.lane = result.then(() => {}, () => {}); return result;
+  }
+  private schedule(): void {
+    if (this.scheduled || this.closed) return;
+    this.scheduled = setTimeout(() => {
+      this.scheduled = undefined;
+      void this.reconcile().catch(() => { /* Reads report unavailable; shared backstop retries. */ });
+    }, 250);
+    this.scheduled.unref();
+  }
+  private async initialize(): Promise<void> {
+    if (this.closed) throw new GatewayError("conflict", "Apps index is closed");
+    if (this.started) return;
+    this.started = true;
+    this.unregister = backgroundWork.register({ name: "apps.reconcile", intervalMs: 30 * 60_000,
+      slice: async () => { this.full = true; await this.reconcile(); } });
+    await this.reconcile();
+  }
+  /** Display publication and RPC reads await the same observation cut. */
+  async reconcile(): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.closed) return;
+      const generation = this.generation;
+      try {
+        const root = await this.root(); // Attach before baseline enumeration.
+        const all = this.full; this.full = false;
+        const pending = [...this.pending]; this.pending.clear();
+        const next = all ? new Map<string, AppEntry>() : new Map(this.entries);
+        let names: string[];
+        if (all) {
+          try { names = await readdir(root); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; names = []; }
+        } else names = pending;
+        let count = 0;
+        for (const name of names) {
+          try {
+            const info = await lstat(join(root, name));
+            if (info.isDirectory() || info.isSymbolicLink()) {
+              const entry = await readAppEntry(root, name);
+              // The index retains metadata, never every app's source/assets.
+              // Admission reopens bytes under the store's serial lane.
+              entry.files.clear();
+              next.set(name, entry);
+            } else next.delete(name); // Loose regular/special files are not entries.
+          } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; next.delete(name); }
+          if (++count % 50 === 0) await backgroundWork.yieldToLoop();
+          if (this.closed || generation !== this.generation) return;
+        }
+        await this.workspace.filesRoot();
+        if (this.closed || generation !== this.generation) return;
+        const revision = hash(JSON.stringify([...next.values()].sort((a, b) => a.name.localeCompare(b.name)).map(entry => entry.row)));
+        const changed = revision !== this.revision;
+        this.entries = next; this.revision = revision; this.unavailable = undefined;
+        if (changed) this.changed(revision);
+      } catch (error) { this.full = true; this.unavailable = error; throw error; }
+    });
+  }
+  async catalog(cursor?: string, limit = 50): Promise<{ revision: string; rows: AppRow[]; nextCursor?: string }> {
+    await this.initialize(); await this.reconcile();
+    if (this.unavailable) throw this.unavailable;
+    let offset = 0;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new GatewayError("invalid_request", "Catalog limit must be 1–50");
+    if (cursor !== undefined) {
+      let cut: unknown;
+      try { cut = JSON.parse(Buffer.from(cursor, "base64url").toString()); } catch { throw new GatewayError("invalid_request", "Invalid catalog cursor"); }
+      if (!Array.isArray(cut) || cut.length !== 2 || typeof cut[0] !== "string" || !Number.isSafeInteger(cut[1]) || cut[1] < 0) throw new GatewayError("invalid_request", "Invalid catalog cursor");
+      if (cut[0] !== this.revision) throw new GatewayError("conflict", "Apps catalog changed; read the first page again", true, { reason: "catalog_changed" }, "catalog_changed");
+      offset = cut[1] as number;
+    }
+    const rows = [...this.entries.values()].sort((a, b) =>
+      Number(b.row.section === "Apps") - Number(a.row.section === "Apps") || b.changedAt - a.changedAt || a.name.localeCompare(b.name));
+    return { revision: this.revision, rows: rows.slice(offset, offset + limit).map(entry => entry.row),
+      ...(offset + limit < rows.length ? { nextCursor: Buffer.from(JSON.stringify([this.revision, offset + limit])).toString("base64url") } : {}) };
+  }
+  /** Admission always reopens bytes, including a replacement missed by fs.watch. */
+  async requireEntry(id: string, expectedContentRevision: string): Promise<AppEntry> {
+    if (!APP_ID.test(id)) throw new GatewayError("invalid_request", "Invalid app id");
+    await this.initialize();
+    return this.enqueue(async () => {
+      const entry = await readAppEntry(await this.root(), id);
+      if (entry.row.contentRevision !== expectedContentRevision) throw new GatewayError("conflict", "Entry changed; open its current version", true, { reason: "entry_changed" });
+      if (entry.row.status.kind !== "ready") throw new GatewayError("unsupported", entry.row.status.reason);
+      return entry;
+    });
+  }
+  async refreshAll(): Promise<void> { this.full = true; await this.reconcile(); }
+  async entryForDeletion(rowKey: string): Promise<AppEntry> {
+    await this.initialize();
+    const entry = [...this.entries.values()].find(entry => entry.row.rowKey === rowKey);
+    if (!entry) throw new GatewayError("not_found", "Entry no longer exists");
+    return entry;
+  }
+  async dispose(): Promise<void> {
+    this.closed = true; this.generation++;
+    this.watcher?.close(); this.watcher = undefined; this.unregister?.();
+    if (this.scheduled) clearTimeout(this.scheduled);
+    await this.lane; this.entries.clear(); this.pending.clear();
+  }
+}

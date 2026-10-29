@@ -2,93 +2,85 @@
 
 ## Purpose
 
-Own installed single-file SwiftUI source, manifests, state and reviewed
-installation. The [contract](../../../docs/swift-apps.md) owns versions, bounds,
-RPCs and recovery. The iPhone interprets disposable projections, not server code.
+Own folder-backed Apps membership and scoped access separately from saved SQLite
+data. The approved target contract is in `docs/design/apps-folder/DESIGN.md` on
+`design/2108-apps-folders`. This implementation checkpoint is not a paired-client
+release: display materialization, the iOS consumer, conversion and removal of
+retired source owners remain incomplete.
 
-## Owns
+## Owners
 
-`module.ts` constructs one `SwiftAppStore` over the workspace contract and
-receives the canonical display owner. RPCs and `swift_app` share that store.
-`swift-app-format.ts` admits explicit v1/v2 manifests, source/config history and
-session/artifact-bound offers. `swift-app-display.ts` reads exact granted UTF-8
-artifact bytes with a bounded lease; it never invents artifact authority.
+- `AppsFolderIndex` derives disposable rows from immediate directories in
+  `files/apps/`. Entry errors are row values; loose files never create rows.
+  It watches the files parent so removing/replacing the apps root is visible.
+  Filesystem events are hints, reconciled on one serial lane. The shared
+  background scheduler owns the reconciliation backstop. Disposal closes the
+  watcher and joins reads. The index retains metadata, not source/assets.
+- `apps-folder-format.ts` reads bounded regular files without following links,
+  infers the optional manifest and computes content/executable identities.
+  Unsupported web/network entries are visible but blocked, never unsandboxed.
+- `AppsFolderStore` serializes grant and content admission with Gateway file
+  deletion and data writes. An open revalidates bytes instead of trusting the
+  index. Prompt tokens bind exact content, folder identity, device and expiry.
+  Gateway-only grants live under `state/app-permissions/`; no grant tool exists.
+- `AppDataStore` keeps the existing `data.sqlite` schema, revision/CAS, JSON/key/
+  whole-state bounds and short-lived SQLite connections. Files never determine
+  data lifetime. Losing an established database is not revision zero.
+- `ios-builds-feed.ts` reads the existing publisher under its POSIX lock; it
+  neither publishes nor runs source, fetches network, or indexes Apps.
 
-`swift-app-store.ts` serializes `state/apps/`: named v1 `App.swift`, v2 immutable
-`sources/<sha>.swift` and atomic `app.json` head, unchanged SQLite v1, pending
-offers and explicit v1 upgrade backups. It owns interrupted publication/removal
-cleanup. `ios-builds-feed.ts` reads the existing publisher under its POSIX lock;
-it does not publish, execute source, network or create a second index.
+The old Swift registry/offer files and their surviving boundary oracles are
+retained until replacement feed/interpreter/conversion coverage is complete.
+They are not registered as runtime RPCs or agent tools by `module.ts`.
 
-## Contract
+## Gateway contract
 
-- Descriptor `tron-swift-apps`, capability `swift-apps.v1`; ordinary-session
-  `swift_app`, not Home's curated tool profile.
-- `offer` creates an exact source/configuration display; it never installs.
-  Review/install require its producing session/artifact grant, not caller SHA
-  authority. Identical bytes in another display do not inherit an offer.
-- Reviewed install/update uses existing transport mutation receipts and fences
-  the reviewed head/instance. Accepted uncertain commands never replay on reconnect.
-- V1 remains readable through the named reader. Only explicit opted-in update
-  backs it up and publishes v2; no read/restart upgrade or SQLite migration.
-  The named tool install contract remains v1-only and cannot downgrade v2.
-- Source/state are exact data, never transcript-clipped. V2 opens additionally
-  read fresh declared feeds; source/state themselves come from one store mutex cut.
-- `ios-builds` reads only the configured Gateway home's publisher. Debug and
-  Stable homes are distinct; no implicit live-data copy/fallback.
-- Pending offer retirement uses DisplayOwner's canonical session/artifact retention,
-  not a second catalog. First root access, catalog reads and a full-store offer
-  attempt reclaim unreachable offer source/configuration under the store mutex;
-  installed apps and live offers remain. Unprovable metadata is left unchanged.
-- `apps.pending` derives valid uninstalled offers from the same store, verifying
-  the producing canonical session/artifact and source bytes; no second index.
-  `apps.review` returns the exact granted source for both Apps and chat review.
-  Neither read installs; only the existing explicit install mutation does.
-- No background feed polling or change broadcast.
+Capability: `apps-folder.v1`. The module descriptor retains its existing runtime
+composition name, `tron-swift-apps`.
 
-## Invariants
+- `apps.catalog {cursor?, limit?}`: revision-bound pages of at most 50 rows,
+  Apps before Artifacts, then content-change time and id. A stale cursor returns
+  `conflict` with diagnostic reason `catalog_changed`, never a mixed cut.
+- `apps.open {id, expectedContentRevision}`: reopens safe bytes; either returns
+  a runner snapshot or a device-bound `permissionRequired` prompt. A changed
+  entry refuses. Preview payload/renderer integration is incomplete.
+- `apps.permissions.grant {commandId, token}` and
+  `apps.permissions.revoke {commandId, id}`: authenticated receipt-backed device
+  actions. Code/assets/scopes/folder identity invalidate old grants; title/icon
+  changes alone do not. Revocation invalidates subsequent data operations.
+- `apps.commit {commandId, id, expectedContentRevision, grantRevision,
+  expectedRevision, set?, remove?}`: checks live write authority before the SQLite
+  transaction. Accepted duplicates return the original durable receipt.
+- `apps.deleteFiles {commandId, rowKey, expectedContentRevision}`: CAS file-only
+  deletion through staging outside the catalog. It preserves `state/apps/<id>/`.
+  Broken names are identified by opaque row keys, not unchecked executable ids.
+  After a committed rename, uncertain cleanup is a receipt uncertainty fence.
 
-- Established missing/unsafe storage refuses instead of initializing fresh data.
-- Publication precedes the manifest head; new apps stage their entire directory.
-  Updates preserve data and immutable instance identity.
-- State/source/instance fences protect stale writes and removed/reinstalled apps.
-- Remove syncs its retirement rename before erasing data. Restart reclaims only
-  exact owner-controlled retirement/staging names.
-- Explicit upgrade retries preserve old backups and create a current snapshot;
-  backup attempts are bounded. Publication success precedes deferred cleanup.
-
-## Entry points
-
-`module.ts`: RPC admission/registration and store composition.
-`tron-swift-app-extension.ts`: tool/source admission and display offer production.
-The [iOS runner](../../../../ios-app/docs/swift-apps.md) owns execution and link UI.
+There are no list/pending/review/install/legacy RPC aliases. State management,
+metadata editing, agent `app_data`, Apps change broadcasting and paired protocol
+advancement are incomplete and must land atomically with their consumers.
+The current bundle reader uses a conservative 32 MiB bound; preserving larger
+existing display-artifact limits requires the streaming materialization boundary.
 
 ## Signals
 
-`GatewayError` distinguishes invalid input, missing grants/apps and conflicting
-or unsafe state. `details.outcomeUnknown` identifies an interrupted receipt,
-not replay permission. Feed `unavailable` is distinct from `empty`.
-Missing/unsafe SQLite is a restoration problem, never permission for revision zero.
+`GatewayError` distinguishes invalid input, missing access, changed content and
+unsafe/lost state. `details.outcomeUnknown` is not replay permission. A missing
+Apps subfolder is empty; a missing/unsafe workspace files root is unavailable.
 
 | Signal | One-step diagnosis / boundary |
 | --- | --- |
-| `ios-builds` unavailable | `ls -1 <configured-Gateway-home>/ios-builds/builds` identifies committed candidates. Both timestamp/commit and timestamp/UUID/commit names are valid; a retained release must not make the whole feed unavailable. Check the publisher lock and bounded record/IPA/manifest identity, not app state or reinstall. The mixed-publication RPC journey covers both names and unsafe-input refusal. |
+| `ios-builds` unavailable | `ls -1 <configured-Gateway-home>/ios-builds/builds` identifies committed candidates. Both timestamp/commit and timestamp/UUID/commit names are valid. Inspect the publisher lock and bounded record/IPA/manifest identity, not app state or reinstall. |
 
 ## Verify
 
 ```bash
-scripts/tron verify --module gateway/apps
-scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps-folder.integration.test.ts
+scripts/tron-node exec npm --prefix packages/gateway run check
+scripts/tron-node exec npm --prefix packages/gateway run lint
 ```
 
-Store/lock journeys retain the named v1 and real SQLite oracles.
-The install journey crosses RuntimeRegistry, canonical display grants,
-GatewayService/receipts, real publisher files and the native interpreter.
-Artifacts: `test-results/apps-install/report.json`.
-Fixture kill cuts release the workspace lease first; they do not prove whole-Gateway
-ungraceful crash or power-loss recovery.
-
-## Not here
-
-Workspace root authority, transport receipts, scheduling, source execution,
-HTML apps, a full history browser, publisher changes or app-state migrations.
+The folder suite crosses a real RuntimeRegistry, GatewayService, receipt store,
+filesystem watchers and SQLite. It does not prove display publication, the native
+interpreter, migration, UI, watcher overflow recovery or runner shutdown on revoke.
+Do not remove the old feed/interpreter/crash oracles before their replacements pass.

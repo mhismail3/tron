@@ -1,4 +1,4 @@
-import { watch } from "node:fs";
+import { watchFolder } from "../util/folder-watch.js";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { backgroundWork, type BackgroundWorkRegistration } from "../background-work.js";
@@ -202,13 +202,7 @@ interface SessionCatalogWatchHandle {
 /** The production watcher: a recursive `fs.watch` (FSEvents on macOS), the only
  * source that sees an external writer — a subagent child, a copied-in file —
  * without a walk. `persistent: false` keeps it from holding the process open. */
-function watchCatalogFolder(request: SessionCatalogWatchRequest): SessionCatalogWatchHandle {
-  const watcher = watch(request.root, { recursive: true, persistent: false }, (_event, filename) => {
-    request.onEvent(typeof filename === "string" ? filename : null);
-  });
-  watcher.on("error", () => request.onReset("error"));
-  return { close: () => watcher.close() };
-}
+const watchCatalogFolder = watchFolder;
 
 /** The watcher ignores exactly the directories discovery ignores, or the index
  * would carry rows no scan can prove are canonical. */
