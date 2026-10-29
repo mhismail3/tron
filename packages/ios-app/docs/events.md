@@ -175,9 +175,9 @@ transcript paging and session-keyed context/tree/resources/commands.
 - **Processes.** `processOverview`, `processActivities` and `session.processActivity` drive the
   subagent projection; lifecycle is latched and the Gateway owns the five-minute recent boundary.
   `session.processTranscript.changed` is lease-scoped, dispatched before the generic session path.
-- **Terminals.** Output is admitted only for a current presentation lease, sequence-checked and
-  deduplicated; frames arriving during attach or gap recovery are quarantined and joined to
-  `terminal.attach(afterSequence:)` replay. A gap gets at most three immediate recovery attempts.
+- **Mac Terminal.** SSH output belongs to the current connection generation, not the
+  Gateway event stream. Reconnect creates a new attachment and emulator for tmux's
+  authoritative screen repaint; it never replays input or Gateway terminal events.
 - **Workspace.** Filesystem and Git have no event stream; visible sheets reconcile on a bounded
   cadence ([Chat](../Sources/UI/Chat/README.md)).
 
