@@ -17,6 +17,9 @@ export function createAppsModule(): ModuleDescriptor<AppsFolderStore> { return {
     const revision = (params: Record<string, unknown>) => string(params.expectedContentRevision, "expectedContentRevision", { max: 64 });
     return {
       contract: store,
+      hooks: { kernelLifecycle: () => ({ initialize: async () => {},
+        started: () => { void store.index.recoverPublications().catch(() => host.log.log("warning", "Apps staging recovery unavailable")); },
+        closing: () => store.index.stopPublications(), dispose: () => store.dispose() }) },
       extension: () => createAppDataExtension(store),
       stop: () => store.dispose(),
       capabilities: ["apps-folder.v1"],

@@ -1,4 +1,8 @@
 import { lstat, readdir } from "node:fs/promises";
+import { directoryPublisher, type DirectoryPublisher } from "../../machine/directory-publication.js";
+import { publishApp, type AppPublication } from "./apps-publication.js";
+import { AppPublicationStaging, publicationFilesystemMismatch } from "./apps-publication-staging.js";
+import { constants as osConstants } from "node:os";
 import { join } from "node:path";
 import { backgroundWork } from "../../background-work.js";
 import { GatewayError } from "../../errors.js";
@@ -22,6 +26,8 @@ function previewCut(entry: AppEntry): PreviewCut | undefined {
 export class AppsFolderIndex {
   private entries = new Map<string, IndexedEntry>();
   private readonly previews = new AppPreviewLeases();
+  private readonly publicationStop = new AbortController();
+  private readonly staging: AppPublicationStaging;
   private revision = hash("empty");
   private lane: Promise<void> = Promise.resolve();
   private watcher: FolderWatchHandle | undefined;
@@ -37,7 +43,7 @@ export class AppsFolderIndex {
   private generation = 0;
   private unavailable?: unknown;
   constructor(private readonly workspace: TronWorkspace, private readonly changed: (revision: string) => void = () => {},
-    private readonly observe: typeof watchFolder = watchFolder) {}
+    private readonly observe: typeof watchFolder = watchFolder, private readonly publishDirectory: DirectoryPublisher = directoryPublisher()) { this.staging = new AppPublicationStaging(workspace, this.publicationStop.signal); }
 
   private async root(): Promise<string> {
     const files = await this.workspace.filesRoot().catch(error => {
@@ -236,6 +242,23 @@ export class AppsFolderIndex {
         path: entry.entry, file: entry.file, mimeType: entry.payload.artifact.mimeType }, range, signal);
     }));
   }
+  stopPublications(): void { this.publicationStop.abort(new GatewayError("conflict", "Apps publication is closed")); }
+  recoverPublications(): Promise<void> { return this.enqueue(() => this.staging.recoverAtStartup()); }
+  /** The same lane owns publication and discovery; no producer installs a row. */
+  async publish(input: AppPublication): Promise<ReadyAppEntry["row"]> {
+    const accepted = await this.enqueue(async () => {
+      const active = () => { this.publicationStop.signal.throwIfAborted(); if (this.closed) throw new GatewayError("conflict", "Apps index is closed"); };
+      try { return await publishApp(this.workspace, input, this.publishDirectory, active, this.publicationStop.signal, this.staging); }
+      catch (error) {
+        this.full = true; active();
+        if (Math.abs((error as NodeJS.ErrnoException).errno ?? 0) === osConstants.errno.EXDEV) publicationFilesystemMismatch();
+        if (["ENOENT", "ENOTDIR", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")) throw new GatewayError("conflict", "Publication namespace changed");
+        throw error;
+      }
+    });
+    this.full = true; await this.initialize(); await this.reconcile();
+    return (await this.requireEntry(accepted.name, accepted.row.contentRevision)).row;
+  }
   async membership(ids: readonly string[]): Promise<ReadonlySet<string>> {
     await this.initialize(); await this.reconcile();
     return new Set(ids.filter(id => this.entries.has(id)));
@@ -243,9 +266,10 @@ export class AppsFolderIndex {
   async refreshAll(): Promise<void> { this.full = true; await this.reconcile(); }
   async dispose(): Promise<void> {
     this.closed = true; this.generation++;
+    this.stopPublications();
     this.watcher?.close(); this.watcher = undefined; this.unregister?.();
     if (this.scheduled) clearTimeout(this.scheduled);
     if (this.watchRetry) clearTimeout(this.watchRetry);
-    await Promise.all([this.lane, this.previews.dispose()]); this.entries.clear(); this.pending.clear();
+    await Promise.all([this.lane, this.previews.dispose()]); await this.staging.dispose(); this.entries.clear(); this.pending.clear();
   }
 }

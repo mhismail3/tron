@@ -28,6 +28,24 @@ migration. The excluded retained offer remains untouched.
   admission still hashes fresh bytes. All fresh entry and opaque-row admission
   routes through this owner. A vanished entry returns `not_found`; losing the
   whole workspace during admission remains unavailable, not an empty catalog.
+- `index.publish` serializes immutable leased-byte publication on that same lane.
+  It hashes kind/entry/permissions and sorted asset bytes into `display-<sha256>`,
+  excluding presentation labels. Private staging is synced and validated through
+  the existing typed entry edge before the native exclusive rename. The owner can
+  bootstrap missing files/apps namespaces only for explicit publication; it never
+  recreates a lost workspace. Pinned canonical parent identities are fenced before
+  and after native completion; collisions are freshly admitted and compared, never
+  overwritten. Reuse preserves existing metadata. Publication then awaits normal
+  reconciliation and fresh admission, not a second catalog write.
+  `AppPublicationStaging` owns `state/apps-publication-staging/stage-<uuid>`:
+  owner-only 0700, pinned root, outside user-replaceable files/apps. It verifies
+  destination/staging device identity before staging, refuses mismatches with
+  `details.reason=apps_staging_filesystem_mismatch`, and never falls back to copy.
+  Startup recovery removes only owned UUID stages; unknown/corrupt entries refuse
+  recovery rather than becoming garbage. Replacing files cannot redirect cleanup.
+  Source acquisitions must honor cancellation; disposal aborts source reads and
+  joins streams/leases while accepted native work still joins its real callback.
+  This port is not yet connected to display producers and grants no runtime/data permission.
 - `apps-folder-format.ts` is the index-internal filesystem edge: one private
   manifest decoder and typed ready/broken snapshots. `apps-folder-files.ts`
   admits regular descriptors without following any parent/leaf link and hashes
@@ -53,6 +71,11 @@ migration. The excluded retained offer remains untouched.
 
 There is no registry/offer/install source owner. Legacy corpus source/manifest
 files are inert retained bytes; the recorded lock reads saved values only.
+
+## Signals
+
+- `Apps staging recovery unavailable`: inspect the private staging root's owner,
+  mode, links and unknown entries; ordinary catalog reads remain independent.
 
 ## Gateway contract
 

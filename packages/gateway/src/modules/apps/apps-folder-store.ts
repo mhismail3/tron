@@ -158,6 +158,8 @@ export class AppsFolderStore {
     });
   }
   async dispose(): Promise<void> {
+    // An open can hold this mutex while queued behind a publication source.
+    this.index.stopPublications();
     await this.mutex.run(async () => { this.prompts.clear(); await this.index.dispose(); });
   }
 }

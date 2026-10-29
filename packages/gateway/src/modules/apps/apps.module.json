@@ -6,6 +6,7 @@
   "dependsOn": [
     "gateway/foundation",
     "gateway/host",
+    "gateway/machine",
     "gateway/pi",
     "gateway/protocol",
     "gateway/util",
