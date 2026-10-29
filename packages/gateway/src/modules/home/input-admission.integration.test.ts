@@ -34,9 +34,9 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
   let stateAfterRefusal: string | undefined;
   let callsBeforePersistence: number | undefined;
   const fault = vi.spyOn(session, "sendCustomMessage").mockImplementation(async (message, options) => {
-    if (options?.triggerTurn && message.customType === HOME_TASK_RESULT_MESSAGE) {
-      // Isolate release from the pre-existing failed-wake retry loop (#1620).
-      await homeOwnerOf(f.registry).pauseMemory();
+    if (!refused && options?.triggerTurn && message.customType === HOME_TASK_RESULT_MESSAGE) {
+      // Refuse only the first send, without pausing Home. A premature retry
+      // reaches the real canonical/provider boundary and violates the checks below.
       refused = true;
       throw new Error("controlled pre-persistence trigger refusal");
     }
@@ -54,6 +54,8 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
     expect(f.faux.state.callCount).toBe(calls);
   } finally { fault.mockRestore(); }
 
+  // Pause only after proving refusal stayed pending without an automatic retry.
+  await homeOwnerOf(f.registry).pauseMemory();
   f.faux.setResponses([fauxAssistantMessage("Read the retained result")]);
   await homeOwnerOf(f.registry).resumeMemory();
   await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(run.taskId)).wake?.state === "acknowledged", "released result acknowledged");
