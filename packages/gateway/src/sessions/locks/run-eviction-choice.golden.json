@@ -2646,7 +2646,7 @@
         "projects",
         "ask_user",
         "display",
-        "swift_app",
+        "app_data",
         "computer"
       ],
       "promptSections": [
@@ -2655,7 +2655,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:61736c2605ae6d81a0ccf8253c071fbfba8e8fdebb555e92ea86cce86a758274",
+      "promptHash": "sha256:efd453d21a7442e1d5ef7f3e3e4ccb1c8b8c4ca65011f6554bf985116375f533",
       "messages": [
         {
           "role": "user",
@@ -2675,7 +2675,7 @@
         "projects",
         "ask_user",
         "display",
-        "swift_app",
+        "app_data",
         "computer"
       ],
       "promptSections": [
@@ -2684,7 +2684,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:61736c2605ae6d81a0ccf8253c071fbfba8e8fdebb555e92ea86cce86a758274",
+      "promptHash": "sha256:efd453d21a7442e1d5ef7f3e3e4ccb1c8b8c4ca65011f6554bf985116375f533",
       "messages": [
         {
           "role": "user",
@@ -2704,7 +2704,7 @@
         "projects",
         "ask_user",
         "display",
-        "swift_app",
+        "app_data",
         "computer"
       ],
       "promptSections": [
@@ -2713,7 +2713,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:61736c2605ae6d81a0ccf8253c071fbfba8e8fdebb555e92ea86cce86a758274",
+      "promptHash": "sha256:efd453d21a7442e1d5ef7f3e3e4ccb1c8b8c4ca65011f6554bf985116375f533",
       "messages": [
         {
           "role": "user",

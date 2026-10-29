@@ -428,7 +428,7 @@
         "projects",
         "ask_user",
         "display",
-        "swift_app",
+        "app_data",
         "computer",
         "notify"
       ],
@@ -438,7 +438,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
+      "promptHash": "sha256:18060b82cefbdd8e217a8033b40e32c9469a99fec614a7bf36a6c362fc643e6a",
       "messages": [
         {
           "role": "user",
@@ -459,7 +459,7 @@
         "projects",
         "ask_user",
         "display",
-        "swift_app",
+        "app_data",
         "computer",
         "notify"
       ],
@@ -469,7 +469,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
+      "promptHash": "sha256:18060b82cefbdd8e217a8033b40e32c9469a99fec614a7bf36a6c362fc643e6a",
       "messages": [
         {
           "role": "user",
@@ -502,7 +502,7 @@
         "projects",
         "ask_user",
         "display",
-        "swift_app",
+        "app_data",
         "computer",
         "notify"
       ],
@@ -512,7 +512,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
+      "promptHash": "sha256:18060b82cefbdd8e217a8033b40e32c9469a99fec614a7bf36a6c362fc643e6a",
       "messages": [
         {
           "role": "user",
@@ -553,7 +553,7 @@
         "projects",
         "ask_user",
         "display",
-        "swift_app",
+        "app_data",
         "computer",
         "notify"
       ],
@@ -563,7 +563,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:73849c8df33ac9b2f763d995a3652b102ed05374ed870d5ed59fd2a142be9609",
+      "promptHash": "sha256:18060b82cefbdd8e217a8033b40e32c9469a99fec614a7bf36a6c362fc643e6a",
       "messages": [
         {
           "role": "user",
