@@ -389,6 +389,16 @@ Partial removal/replacement (all other logic in these files remains coherent):
   after new migration+state preservation oracle passes, not because text changed.
   Keep `fixtures/InstalledPersistence.swift`/`PersistenceBoundaryMain.swift` and
   engine persistence/feed tests. Do not delete SwiftAppViews.swift or SwiftAppEngine.
+- Remove old tool/prompt payloads, not their surviving kernel lock oracles, in
+  `packages/gateway/src/sessions/locks/`: project-root-trust.golden.json,
+  run-abort.golden.json, run-cold-load-eviction.golden.json,
+  run-compaction.golden.json, run-drain-blockers.golden.json,
+  run-drain-snapshot.golden.json, run-eviction-choice.golden.json,
+  run-extension-ui.golden.json, run-lifecycle-rpcs.golden.json,
+  run-prompt-stream.golden.json, run-queue-control.golden.json and
+  run-steer.golden.json. Their owning `sessions/run.lock.integration.test.ts`
+  and project-trust boundary locks survive; obtain required before/after golden
+  review when implementation changes the built-in tool list and prompt.
 - Update module manifests/references and owning docs: gateway modules/apps README,
   gateway docs/swift-apps + internal-workspace + display README, iOS docs/swift-apps
   + display-artifacts + events, SwiftApps state/UI READMEs, tools/web Apps/Builds
