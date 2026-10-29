@@ -253,16 +253,18 @@ export class SettingsChangeRecord {
     return { entries, settled: settledPending, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
   }
 
-  /** An entry and every later fact that refers to it, oldest first. */
-  async entry(changeId: string): Promise<{ entry: ChangeEntry; facts: ChangeEntry[] } | undefined> {
+  /** An entry, its decision facts, and whether a later committed Undo consumed it. */
+  async entry(changeId: string): Promise<{ entry: ChangeEntry; facts: ChangeEntry[]; undone: boolean } | undefined> {
     const index = await this.index();
     const facts: ChangeEntry[] = [];
+    let undone = false;
     for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
       const lines = await this.segmentLines(index.segments[segmentIndex]!.name);
       for (let line = lines.length - 1; line >= 0; line -= 1) {
         const entry = lines[line]!;
+        if (entry.undoOf === changeId && ["applied", "approved", "committed"].includes(entry.status)) undone = true;
         if (entry.refersTo === changeId) facts.unshift(entry);
-        else if (entry.changeId === changeId && !entry.refersTo) return { entry, facts };
+        else if (entry.changeId === changeId && !entry.refersTo) return { entry, facts, undone };
       }
     }
     return undefined;

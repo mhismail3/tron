@@ -77,6 +77,7 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     await expect(f.service.invoke(f.client, "settings.undo", { ...undo, commandId: randomUUID() })).rejects.toMatchObject({ code: "conflict" });
     const redone = await f.service.invoke(f.client, "settings.undo", { ...undo, commandId: randomUUID(), changeId: reverted.changes[0]!.changeId }) as unknown as ChangeResult;
     expect(retryValue(await f.resolve(slot, ["run.retry.maxRetries"]))).toBe(3);
+    await expect(f.service.invoke(f.client, "settings.undo", { ...undo, commandId: randomUUID() })).rejects.toMatchObject({ code: "conflict" });
     const entries = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
     expect(entries.find(entry => entry.changeId === reverted.changes[0]!.changeId)?.undoOf).toBe(original);
     expect(entries.find(entry => entry.changeId === redone.changes[0]!.changeId)?.undoOf).toBe(reverted.changes[0]!.changeId);
@@ -106,6 +107,28 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries.filter(entry => entry.status === "applied")).toHaveLength(1);
     evidence.push({ case: "expected-session-winner", winner });
   });
+  it("admits only one concurrent Global Undo and refuses every fresh duplicate without another audit fact", async () => {
+    const f = await setup();
+    const applied = await f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "global" },
+      changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 }],
+    }) as unknown as ChangeResult;
+    const original = applied.changes[0]!.changeId;
+    const results = await Promise.allSettled(Array.from({ length: 16 }, () => f.service.invoke(f.client, "settings.undo", {
+      commandId: randomUUID(), changeId: original,
+    })));
+    const winners = results.filter((result): result is PromiseFulfilledResult<unknown> => result.status === "fulfilled");
+    expect(winners).toHaveLength(1);
+    const refusals = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(refusals).toHaveLength(15);
+    for (const refusal of refusals) expect(refusal.reason).toMatchObject({ code: "conflict" });
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).retry.maxRetries).toBe(1);
+    const facts = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries.filter(entry => entry.undoOf === original);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({ before: 3, after: 1, status: "applied" });
+    evidence.push({ case: "concurrent-global-undo-admission", original, facts, refused: refusals.length });
+  });
+
   it("refuses a stale expected value for a Session-owned field without changing its effective value", async () => {
     const f = await setup();
     const slot = await f.create();
