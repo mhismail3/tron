@@ -2,7 +2,8 @@
 
 Index only. The [Home module README](../src/modules/home/README.md) owns Home's contract and
 [Home tasks](../src/modules/home/tasks.md) owns delegated tasks. Each heading below keeps its inbound
-anchor and links to the current owner.
+anchor and links to the current owner. The [memory ownership map](home-memory-ownership.md)
+locates the chapter, tree, canonical-read and native-presentation boundaries.
 
 ## Display identity
 
