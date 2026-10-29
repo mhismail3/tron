@@ -24,10 +24,16 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
   await run.completion;
   await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(run.taskId)).wake?.push === "decided", "paused result push decided");
   const eventId = (await homeOwnerOf(f.registry).taskResult(run.taskId)).wake!.eventId;
-  const entries = async () => (await readFile(home.sessionFile!, "utf8")).trimEnd().split("\n")
-    .map(line => JSON.parse(line) as SessionEntry);
+  const entries = async () => {
+    const text = await readFile(home.sessionFile!, "utf8");
+    // A threadpool read may overlap Pi's append: only complete JSONL entries
+    // are published. Malformed complete records still fail instead of retrying.
+    const end = text.lastIndexOf("\n");
+    return end < 0 ? [] : text.slice(0, end).split("\n").map(line => JSON.parse(line) as SessionEntry);
+  };
   const rows = async () => (await entries())
-    .filter(entry => entry.type === "custom_message" && entry.customType === HOME_TASK_RESULT_MESSAGE && entry.details?.eventId === eventId);
+    .filter(entry => entry.type === "custom_message" && entry.customType === HOME_TASK_RESULT_MESSAGE
+      && (entry.details as { eventId?: string } | undefined)?.eventId === eventId);
   const refusalSettled = async () => invocationReceipts(await entries(), f.home.sessionId)
     .some(receipt => receipt.receiptKind === "terminal" && receipt.source === "homeWake" && receipt.errorCode === "preflight-rejected");
   const calls = f.faux.state.callCount;
