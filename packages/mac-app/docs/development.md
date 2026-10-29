@@ -98,9 +98,13 @@ scripts/gateway-payload-deploy.test.mjs`, `node --test scripts/gateway-install-i
 `python3 scripts/test-verify-mac-install.py` (fixture app and real TLS listeners, report in
 `test-results/mac-verify/report.json`) and `python3 scripts/test-tron-mac-replace.py`.
 Pi SDK rollback: `cd packages/gateway && npm run test:pi-sdk-rollback`.
-The real compiled directory-publication boundary runs with `scripts/tron test gateway
-src/machine/native-directory-publish.integration.test.ts`; its disposable universal
-binary never replaces or loads the installed app's client.
+The compiled directory-publication boundary runs with `scripts/tron test gateway
+src/machine/native-directory-publish.integration.test.ts`. Its selected Vitest project's
+global setup prepares a source-hashed universal fixture in `test-results/native-publication/cache`,
+not inside a test hook. A kernel lock pins the artifact until readers join; reuse checks
+source inputs and binary bytes, and the owner retains only the current hash. It never
+replaces or loads the installed client. Cache cold/warm/invalidation/corruption proof:
+`scripts/tron-node exec node --test packages/gateway/scripts/native-publication-fixture.integration.test.mjs`.
 
 ## Permission identity and stale listings
 

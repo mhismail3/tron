@@ -2,6 +2,7 @@
   "layer": "L5",
   "owns": [
     "scripts/fixture-process-owner.integration.test.mjs",
+    "scripts/native-publication-fixture.integration.test.mjs",
     "scripts/tron-home-environment-preflight.integration.test.mjs",
     "test-fixtures/browser-live.jpg",
     "test-fixtures/browser-live.ts",
@@ -32,6 +33,8 @@
     "test-support/mcp-oauth-fixture.mjs",
     "test-support/nested-vitest-payload.ts",
     "test-support/network-isolation.ts",
+    "test-support/native-publication-fixture.py",
+    "test-support/native-publication-global-setup.ts",
     "test-support/profile-partition-crash.ts",
     "test-support/profile-v1-fixture.ts",
     "test-support/runtime-registry-fixture.ts",

@@ -3,17 +3,14 @@ import { constants } from "node:fs";
 import { mkdir, mkdtemp, open, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { join } from "node:path";
+import { afterAll, beforeAll, expect, inject, it } from "vitest";
 
 type Binding = { publishDirectoryExclusive(source: number, name: string, destination: number, leaf: string, done: (error: Error | null, published: boolean) => void): void };
 let root: string, artifact: string, native: Binding;
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 beforeAll(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), "tron-native-directory-")));
-  artifact = process.env.TRON_DIRECTORY_PUBLICATION_TEST_BINARY ?? join(root, "binary/tron-native-capture.node");
-  if (!process.env.TRON_DIRECTORY_PUBLICATION_TEST_BINARY) execFileSync("python3", [join(repo, "packages/mac-app/native-gateway-client/build.py"), "--output", artifact, "--headers", resolve(dirname(process.execPath), "../include/node")], { encoding: "utf8" });
+  artifact = inject("nativePublicationBinary");
   native = createRequire(import.meta.url)(artifact);
 });
 afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }); });

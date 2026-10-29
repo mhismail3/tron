@@ -5,7 +5,7 @@
 The Gateway test harness shared by integration and E2E suites: hang-bounded waits,
 network isolation, fixture process ownership, lock harnesses and real-runtime
 fixtures. Its manifest is `../test-support.module.json` (it also owns fixtures under
-`test-fixtures/` and two `scripts/` tests).
+`test-fixtures/` and three `scripts/` tests).
 
 ## Owns
 
@@ -22,6 +22,12 @@ one accepted recovery through the existing work owner.
 Registry process. The fixture releases its workspace lease before the parent kills
 it; this proves Apps recovery at those cuts, not whole-Gateway ungraceful crash,
 stale-lock or power-loss recovery.
+
+`native-publication-global-setup.ts` starts the Python fixture owner only for the
+native publication project. It owns a source-hashed compiled cache, holds a kernel
+lock through readers, and retires waiting/preparing callers on EOF. Compiler groups
+and scratch are owned until joined; cancellation masks cover process admission.
+Its script contract test crosses actual compiler, FIFO, signal and native binary boundaries.
 
 ## Contract
 
