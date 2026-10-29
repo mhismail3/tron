@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { freemem, totalmem } from "node:os";
 import { monitorEventLoopDelay, PerformanceObserver, performance, type EventLoopUtilization } from "node:perf_hooks";
 import { getHeapStatistics } from "node:v8";
-import { drainDurableWriteStats } from "../util/durable-json.js";
+import { drainDurableWriteStats } from "../foundation/durable-json.js";
 import type { ResourceRecorder, ResourceRuntimeEntry } from "../util/resource-recorder.js";
 
 /** The `monitorEventLoopDelay` histogram; @types/node renamed its interface across majors. */

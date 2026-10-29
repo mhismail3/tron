@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLocalAuthDocument } from "../security/device-store.js";
-import { readSecureJson } from "../util/secure-json.js";
+import { readSecureJson } from "../foundation/secure-json.js";
 
 // The owning credential store bounds its own document at 4 KiB; this reader is
 // reached from the terminal client and keeps its separate, larger bound.

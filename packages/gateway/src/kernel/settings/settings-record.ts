@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { createHash, randomUUID } from "node:crypto";
-import { durablePublishBoundedJson, syncDurably } from "../../util/durable-json.js";
+import { durablePublishBoundedJson, syncDurably } from "../../foundation/durable-json.js";
 
 /**
  * The settings change record (docs/settings-model.md 5.2, foundation F2).

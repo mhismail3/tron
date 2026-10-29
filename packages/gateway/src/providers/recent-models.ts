@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
-import { boundedString, boundedTimestamp, readJson } from "../util/json.js";
+import { durableAtomicWriteJson } from "../foundation/durable-json.js";
+import { boundedString, boundedTimestamp, readJson } from "../foundation/json.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 64 * 1_024;

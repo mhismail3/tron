@@ -32,9 +32,9 @@ import { EpisodicSourceChangedError } from "../../kernel/session/canonical-reade
 import { HomeSourceProofs, readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../../episodic/home-source.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
-import { durablePublishBoundedJson, isDurablePublicationUncertain, syncDurably } from "../../util/durable-json.js";
-import { boundedString, boundedTimestamp } from "../../util/json.js";
-import { readSecureJson, SecureJsonFileError } from "../../util/secure-json.js";
+import { durablePublishBoundedJson, isDurablePublicationUncertain, syncDurably } from "../../foundation/durable-json.js";
+import { boundedString, boundedTimestamp } from "../../foundation/json.js";
+import { readSecureJson, SecureJsonFileError } from "../../foundation/secure-json.js";
 import {
   HomeMemory, homeMemoryToolUnavailable,
   type HomeMemoryDiagnostic, type HomeMemoryToolAccess, type HomeMemoryToolResult,

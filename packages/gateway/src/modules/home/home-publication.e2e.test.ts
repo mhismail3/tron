@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const publication = vi.hoisted(() => ({ failAfterVisibleWrite: false }));
-vi.mock("../../util/durable-json.js", async importOriginal => {
-  const actual = await importOriginal<typeof import("../../util/durable-json.js")>();
+vi.mock("../../foundation/durable-json.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../foundation/durable-json.js")>();
   return {
     ...actual,
     durablePublishBoundedJson: async (...args: Parameters<typeof actual.durablePublishBoundedJson>) => {

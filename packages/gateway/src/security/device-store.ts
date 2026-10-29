@@ -3,8 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain } from "../util/durable-json.js";
-import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
+import { durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain } from "../foundation/durable-json.js";
+import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 

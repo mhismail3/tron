@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GatewayError } from "../errors.js";
-import { syncDurably } from "../util/durable-json.js";
+import { syncDurably } from "../foundation/durable-json.js";
 import { resolvePiCliExecutable } from "../kernel/pi/packages.js";
 
 export const SESSION_EXPORT_MAX_ITEM_BYTES = 2 * 1_024 * 1_024 * 1_024;

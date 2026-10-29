@@ -11,7 +11,7 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsApprovals, APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
 import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
-import * as durability from "../util/durable-json.js";
+import * as durability from "../foundation/durable-json.js";
 
 const evidence: unknown[] = [];
 afterEach(async () => { vi.restoreAllMocks(); syncBuiltinESMExports(); await disposeFixtures(); });

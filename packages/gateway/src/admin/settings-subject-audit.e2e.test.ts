@@ -7,7 +7,7 @@ import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeProfileItems } from "../modules/home/home-profile.js";
 import type { SubjectWrite } from "../kernel/settings/settings-change.js";
-import * as durability from "../util/durable-json.js";
+import * as durability from "../foundation/durable-json.js";
 
 const evidence: unknown[] = [];
 let knowledge: KnowledgeService | undefined;

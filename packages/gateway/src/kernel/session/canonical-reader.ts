@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { dirname } from "node:path";
-import { syncDurably } from "../../util/durable-json.js";
+import { syncDurably } from "../../foundation/durable-json.js";
 import { EpisodicMemoryError } from "../../errors.js";
-import { asRecord } from "../../util/json.js";
+import { asRecord } from "../../foundation/json.js";
 
 /*
  * Canonical session JSONL is read by a bounded reader that can never repair,

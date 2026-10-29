@@ -1,5 +1,5 @@
 import { episodicDigest as digest, type EpisodicCanonicalEntry } from "../kernel/session/canonical-reader.js";
-import { asRecord } from "../util/json.js";
+import { asRecord } from "../foundation/json.js";
 import { redactCredentials } from "../util/credential-redaction.js";
 import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_OMITTED_TEXT, type EpisodicLimits, type EpisodicMessageKind, type EpisodicSourceCursor } from "./episodic-contract.js";
 import { capText } from "./episodic-tree.js";

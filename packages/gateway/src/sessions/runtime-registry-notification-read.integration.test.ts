@@ -7,7 +7,7 @@ import { TrustService } from "../kernel/resources/trust-service.js";
 import { NotificationGrantStore, notificationHash } from "../notifications/grant-store.js";
 import { NotificationService } from "../notifications/notification-service.js";
 import type { PushRelayClient } from "../notifications/relay-client.js";
-import * as durableJson from "../util/durable-json.js";
+import * as durableJson from "../foundation/durable-json.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 
 const roots: string[] = [];

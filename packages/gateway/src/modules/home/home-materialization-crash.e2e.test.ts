@@ -12,8 +12,8 @@ const publication = vi.hoisted(() => ({
   failAfterVisibleWrite: false,
   intercept: undefined as undefined | ((path: string, document: unknown, publish: () => Promise<void>) => Promise<void>),
 }));
-vi.mock("../../util/durable-json.js", async importOriginal => {
-  const actual = await importOriginal<typeof import("../../util/durable-json.js")>();
+vi.mock("../../foundation/durable-json.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../foundation/durable-json.js")>();
   return {
     ...actual,
     durablePublishBoundedJson: async (...args: Parameters<typeof actual.durablePublishBoundedJson>) => {
@@ -35,7 +35,7 @@ import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeOwner, type HomeSessionPort } from "./home-owner.js";
 import { homeTaskPolicy } from "./home-task-worker-choice.js";
 import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../../kernel/session/runtime-registry.js";
-import { durableAtomicWriteJson } from "../../util/durable-json.js";
+import { durableAtomicWriteJson } from "../../foundation/durable-json.js";
 
 const roots: string[] = [];
 const report: Array<{ cut: string; recovered: string; replayed: false }> = [];

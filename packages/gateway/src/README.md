@@ -12,6 +12,12 @@ recurring background work. Every other module under `src/` has its own manifest;
 `tron-home.ts`, `config.ts`, `version.ts`, `errors.ts`, `background-work.ts`
 (`backgroundWork`) and the Tron-home environment policy.
 
+`foundation/` owns the shared physical JSON primitives: atomic durable publication
+and removal (including the process-wide fsync counters), secure owner-only reads,
+and locked preference updates. Stores retain document admission and per-record
+bounds; these primitives do not own domain state. The three implementation
+modules stay separate, so read-only consumers do not gain a lockfile dependency.
+
 ## Contract
 
 ### State layout

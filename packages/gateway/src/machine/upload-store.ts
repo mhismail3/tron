@@ -8,8 +8,8 @@ import {
 import { basename, dirname, extname, join } from "node:path";
 import type { ImageContent } from "../kernel/pi/ai.js";
 import { GatewayError } from "../errors.js";
-import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
-import { readJson } from "../util/json.js";
+import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.js";
+import { readJson } from "../foundation/json.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { PromptAttachmentState } from "../protocol/types.js";

@@ -10,7 +10,7 @@ import { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { profileOperationKey } from "../../knowledge/knowledge-notes.js";
 import { HomeProfileItems } from "./home-profile.js";
 import type { KnowledgeRecord } from "../../knowledge/knowledge-contract.js";
-import * as durability from "../../util/durable-json.js";
+import * as durability from "../../foundation/durable-json.js";
 
 const evidence: unknown[] = [];
 let knowledge: KnowledgeService | undefined;

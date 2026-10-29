@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { CatalogLineLimitError, readCatalogLines } from "./catalog-jsonl.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { syncDurably } from "../util/durable-json.js";
+import { syncDurably } from "../foundation/durable-json.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { SessionCreationOrigin } from "../protocol/types.js";
 import { userFacingPromptPreview } from "../kernel/resources/resource-invocation.js";

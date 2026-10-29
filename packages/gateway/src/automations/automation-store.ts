@@ -3,8 +3,8 @@ import { lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
-import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
+import { durableAtomicWriteJson, durableRemove } from "../foundation/durable-json.js";
+import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
 import {
   AUTOMATION_FAILURE_CIRCUIT_LIMIT,
   MAXIMUM_AUTOMATION_AGGREGATE_BYTES,

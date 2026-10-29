@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
-import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
+import { durableAtomicWriteJson } from "../foundation/durable-json.js";
+import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 

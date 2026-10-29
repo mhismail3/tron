@@ -6,8 +6,8 @@ import { join, dirname } from "node:path";
 import type { ResourceRoot } from "../kernel/resources/resource-root.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson, durableRemove, syncDurably } from "../util/durable-json.js";
-import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
+import { durableAtomicWriteJson, durableRemove, syncDurably } from "../foundation/durable-json.js";
+import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
 import {
   DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, normalizeKnowledgeSourceUrl,
   type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest, type KnowledgeScope,

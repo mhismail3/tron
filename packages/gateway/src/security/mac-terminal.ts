@@ -5,7 +5,7 @@ import { userInfo } from "node:os";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { syncDurably } from "../util/durable-json.js";
+import { syncDurably } from "../foundation/durable-json.js";
 import { readTailscaleStatus, runBoundedCommand, type BoundedCommand } from "../platform/tailscale-status.js";
 
 /**

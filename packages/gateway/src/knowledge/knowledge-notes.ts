@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { lstat, readdir } from "node:fs/promises";
 import { GatewayError } from "../errors.js";
 import { assertProfileCapacity, profilePath, type ProfileMetadata } from "./knowledge-profile-placement.js";
-import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
-import { readSecureJson } from "../util/secure-json.js";
+import { durableAtomicWriteJson, durableRemove } from "../foundation/durable-json.js";
+import { readSecureJson } from "../foundation/secure-json.js";
 import { assertKnowledgeId, validateKnowledgeRecord, type KnowledgeRecord, type NoteContent } from "./knowledge-contract.js";
 
 export type ProfileFile = "core" | "home" | `scopes/${string}`;

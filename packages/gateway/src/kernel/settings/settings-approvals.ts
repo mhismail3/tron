@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { GatewayError } from "../../errors.js";
-import { readJson, updateJsonLocked } from "../../util/json.js";
+import { readJson, updateJsonLocked } from "../../foundation/json.js";
 import type { Actor, TierBasis } from "./settings-record.js";
 import { type ApprovalActionPreview, type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier } from "./tool-contract.js";
 

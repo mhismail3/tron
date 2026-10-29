@@ -1,8 +1,8 @@
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { readSecureJson } from "../util/secure-json.js";
-import { durableAtomicWriteJson, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
+import { readSecureJson } from "../foundation/secure-json.js";
+import { durableAtomicWriteJson, syncDurably, type DurableJsonFileSystem } from "../foundation/durable-json.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemoryError } from "../errors.js";
 import { HOME_MAX_CHAPTERS, EPISODIC_STORE_VERSION, EPISODIC_HOME_CURSOR_MAX_BYTES, EPISODIC_STATE_MAX_BYTES, type EpisodicContextRun, type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState } from "./episodic-contract.js";

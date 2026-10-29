@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import { readJson, updateJsonLocked } from "../util/json.js";
+import { readJson, updateJsonLocked } from "../foundation/json.js";
 import { object } from "../util/validation.js";
 
 const MODEL_CONFIG_MAX_BYTES = 768 * 1_024;

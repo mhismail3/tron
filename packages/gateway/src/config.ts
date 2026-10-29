@@ -5,9 +5,9 @@ import { isIP } from "node:net";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import lockfile from "proper-lockfile";
-import { updateJsonLocked } from "./util/json.js";
-import { durableAtomicWriteJson } from "./util/durable-json.js";
-import { readSecureJson, SecureJsonFileError } from "./util/secure-json.js";
+import { updateJsonLocked } from "./foundation/json.js";
+import { durableAtomicWriteJson } from "./foundation/durable-json.js";
+import { readSecureJson, SecureJsonFileError } from "./foundation/secure-json.js";
 import { GatewayError } from "./errors.js";
 import { resolveTronHome } from "./tron-home.js";
 

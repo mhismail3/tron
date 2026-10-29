@@ -7,7 +7,7 @@ import { createTestRegistry, displayOwnerOf } from "./gateway-registry.js";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";
-import { durableAtomicWriteJson } from "../src/util/durable-json.js";
+import { durableAtomicWriteJson } from "../src/foundation/durable-json.js";
 
 // Test-only crash cuts around real writes. No process suspension, synthetic
 // app/receipt files or production test hooks: the parent owns and joins SIGKILL.

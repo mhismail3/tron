@@ -1,7 +1,7 @@
 import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { GatewayError } from "../errors.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { captureSettingsMigration, migrationFileHash, settingsMigrationInventory } from "./settings-migration-plan.js";
 

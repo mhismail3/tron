@@ -12,8 +12,8 @@ import { issueGrant } from "../../../test-support/home-task-grant.js";
 // Counts the task-directory files the store reads. The wrapper is transparent;
 // only the cost cases below switch the counter on.
 const fileReads = vi.hoisted(() => ({ active: false, tasks: 0, authority: 0 }));
-vi.mock("../../util/secure-json.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../util/secure-json.js")>();
+vi.mock("../../foundation/secure-json.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../foundation/secure-json.js")>();
   return {
     ...actual,
     readSecureJson: (async (path: string, maximumBytes: number) => {

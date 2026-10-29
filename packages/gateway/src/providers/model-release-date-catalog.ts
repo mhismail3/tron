@@ -3,7 +3,7 @@ import { join } from "node:path";
 import aliases from "./model-release-date-aliases.json" with { type: "json" };
 import baseline from "./model-release-dates.json" with { type: "json" };
 import { RELEASE_DATE_SOURCE, releaseDatesFromCatalog } from "./release-date-normalization.mjs";
-import { durablePublishBoundedJson } from "../util/durable-json.js";
+import { durablePublishBoundedJson } from "../foundation/durable-json.js";
 
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 const MAXIMUM_AGE_MS = 12 * 60 * 60 * 1000;

@@ -4,7 +4,7 @@ import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.j
 import { waitFor } from "../../../test-support/wait-for.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { expect, it, vi } from "vitest";
-import * as durability from "../../util/durable-json.js";
+import * as durability from "../../foundation/durable-json.js";
 import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command, history, undo, maintainer } from "../../../test-support/home-profile-fixture.js";
 
 profileReportFile("test-results/home-profile/hierarchy.json");

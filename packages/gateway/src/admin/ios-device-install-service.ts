@@ -7,9 +7,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { GatewayError } from "../errors.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
-import { removeIfExists } from "../util/json.js";
-import { readSecureJson } from "../util/secure-json.js";
+import { durableAtomicWriteJson } from "../foundation/durable-json.js";
+import { removeIfExists } from "../foundation/json.js";
+import { readSecureJson } from "../foundation/secure-json.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
   COMMAND_ID,

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { it } from "vitest";
 import { GatewayError } from "../errors.js";
 import { storePathLock } from "../../test-support/store-path-lock.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 
 /**
@@ -117,7 +117,7 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
       failWrite = undefined;
       throw new Error(`injected ${(value as { status: string }).status} receipt write failure`);
     }
-    const { durableAtomicWriteJson } = await import("../util/durable-json.js");
+    const { durableAtomicWriteJson } = await import("../foundation/durable-json.js");
     await durableAtomicWriteJson(path, value, mode);
     const hook = afterCompleted;
     if (hook && (value as { status?: unknown }).status === "completed") { afterCompleted = undefined; await hook(); }

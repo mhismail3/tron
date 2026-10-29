@@ -12,7 +12,7 @@ import { validateProjectSettings } from "../kernel/settings/settings-sdk-manager
 import { contextWindowLimits, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
 import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
-import { updateJsonLocked } from "../util/json.js";
+import { updateJsonLocked } from "../foundation/json.js";
 import { gitHeadState, projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";

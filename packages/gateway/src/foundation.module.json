@@ -6,6 +6,7 @@
     "config.ts",
     "errors.ts",
     "foundation.module.json",
+    "foundation/**",
     "tron-home-environment-policy.d.ts",
     "tron-home-environment-policy.mjs",
     "tron-home.ts",

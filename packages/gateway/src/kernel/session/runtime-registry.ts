@@ -66,7 +66,7 @@ import type { ResourceRoot } from "../resources/resource-root.js";
 import type { ModuleHost } from "../host/module-host.js";
 import { GatewayWorkRegistry } from "../run/gateway-work-registry.js";
 import { readCanonicalSessionFile } from "./canonical-reader.js";
-import { syncDurably } from "../../util/durable-json.js";
+import { syncDurably } from "../../foundation/durable-json.js";
 import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 import {
   invocationProjection,

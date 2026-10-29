@@ -3,8 +3,8 @@ import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { GatewayError } from "../errors.js";
 import type { TronWorkspaceDescriptor } from "../kernel/resources/resource-root.js";
-import { readSecureJson } from "../util/secure-json.js";
-import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
+import { readSecureJson } from "../foundation/secure-json.js";
+import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.js";
 
 /** The capabilities that record their namespace's initialization beside the
  * workspace root. Adding one here is what lets a missing namespace be reported

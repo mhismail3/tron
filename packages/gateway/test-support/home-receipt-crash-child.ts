@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { CommandReceiptStore, type CommandReceiptBinding } from "../src/transport/command-receipts.js";
 import type { JsonValue } from "../src/protocol/types.js";
-import { durableAtomicWriteJson } from "../src/util/durable-json.js";
+import { durableAtomicWriteJson } from "../src/foundation/durable-json.js";
 
 const [root, cut, marker] = process.argv.slice(2);
 if (!root || !marker || !["binding", "effects", "completion"].includes(cut!)) throw new Error("expected receipt crash fixture arguments");
