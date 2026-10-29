@@ -48,7 +48,6 @@ const SOURCES = new Set<InvocationSource>(["plain", "skill", "prompt", "extensio
 const UNNAMED_SOURCES: ReadonlySet<unknown> = new Set<InvocationSource>(["plain", "subagentWake", "homeWake"]);
 
 type ReceiptKind = "start" | "transition" | "terminal" | "binding";
-type ReceiptSource = InvocationSource;
 
 interface InvocationReceiptCommon {
   receiptId: string;
@@ -57,7 +56,7 @@ interface InvocationReceiptCommon {
   invocationId: string;
   operationId: string;
   sessionId: string;
-  source: ReceiptSource;
+  source: InvocationSource;
   sequence: number;
   createdAt: string;
 }
@@ -117,12 +116,6 @@ type InvocationReceiptInput =
   | ReceiptInput<InvocationTerminalReceipt>
   | ReceiptInput<InvocationBindingReceipt>;
 
-function validArguments(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0
-    && Buffer.byteLength(value, "utf8") <= RESOURCE_ARGUMENTS_MAX_BYTES
-    && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
-}
-
 function validResources(value: unknown, source: unknown, name: unknown, argumentsText: unknown): value is InvokedResource[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAXIMUM_RESOURCE_INVOCATIONS
     || argumentsText !== undefined) return false;
@@ -171,12 +164,12 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   if (r.writer !== INVOCATION_RECEIPT_WRITER || r.version !== 1
       || !validText(r.receiptId, MAX_ID_BYTES) || !validText(r.invocationId, MAX_ID_BYTES)
       || !validText(r.operationId, MAX_ID_BYTES) || !validText(r.sessionId, MAX_ID_BYTES)
-      || !SOURCES.has(r.source as ReceiptSource) || !KINDS.has(r.receiptKind as ReceiptKind)
+      || !SOURCES.has(r.source as InvocationSource) || !KINDS.has(r.receiptKind as ReceiptKind)
       || !Number.isSafeInteger(r.sequence) || Number(r.sequence) < 0 || !validTimestamp(r.createdAt)
       || !Object.keys(r).every(key => ALLOWED_KEYS[r.receiptKind as ReceiptKind].has(key))) return undefined;
   const kind = r.receiptKind as ReceiptKind;
   if (r.name !== undefined && !validText(r.name, MAX_NAME_BYTES)) return undefined;
-  if (r.arguments !== undefined && !validArguments(r.arguments)) return undefined;
+  if (r.arguments !== undefined && !validText(r.arguments, RESOURCE_ARGUMENTS_MAX_BYTES, true)) return undefined;
   if (r.submittedText !== undefined && (typeof r.submittedText !== "string"
       || Buffer.byteLength(r.submittedText, "utf8") > 192 * 1_024
       || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(r.submittedText))) return undefined;

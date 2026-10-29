@@ -8,6 +8,7 @@ import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../../protoco
 import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "../settings/tool-contract.js";
 import { classifyCapturedExtensionOwner } from "../../sessions/extension-activity-history.js";
+import { validText } from "../../sessions/receipt-fields.js";
 
 export async function deliverPromptInput(
   context: { readonly inboxAttributedMessages: Set<string>; persistCanonicalCustomEntry(type: string, data: JsonValue, identity: string): Promise<void> },
@@ -46,23 +47,16 @@ interface ContextDeliveryReceiptData {
   wakeOperationId?: string;
 }
 
-function boundedText(value: unknown, maximumBytes: number): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && Buffer.byteLength(value) <= maximumBytes
-    && !/[\u0000-\u001f\u007f]/u.test(value);
-}
-
 function parseOrigin(value: unknown): ExtensionToolOrigin | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
-  if (!boundedText(record.source, 256)) return undefined;
+  if (!validText(record.source, 256)) return undefined;
   if (record.owner === undefined) return { source: record.source };
   if (!record.owner || typeof record.owner !== "object" || Array.isArray(record.owner)) return undefined;
   const owner = record.owner as Record<string, unknown>;
-  if (!boundedText(owner.id, 256) || !boundedText(owner.title, 256)
-      || !boundedText(owner.source, 256)
+  if (!validText(owner.id, 256) || !validText(owner.title, 256)
+      || !validText(owner.source, 256)
       || (owner.kind !== undefined && owner.kind !== "subagent" && owner.kind !== "extension")) return undefined;
   return {
     source: record.source,
@@ -97,11 +91,11 @@ function parseReceipt(value: unknown, historical: boolean): ContextDeliveryRecei
       || record.source !== "extension"
       || (!historical && record.delivery !== "stored" && record.delivery !== "triggeredTurn")
       || (historical && record.trigger !== "turn")
-      || !boundedText(record.targetEntryId, 256)) return undefined;
+      || !validText(record.targetEntryId, 256)) return undefined;
   const origin = parseOrigin(record.origin);
   if (record.origin !== undefined && !origin) return undefined;
   if (record.wakeOperationId !== undefined && (historical || record.delivery !== "stored"
-      || !boundedText(record.wakeOperationId, 256))) return undefined;
+      || !validText(record.wakeOperationId, 256))) return undefined;
   const allowed = new Set([
     "writer", "version", "targetEntryId", "source",
     historical ? "trigger" : "delivery", "origin", ...(!historical ? ["wakeOperationId"] : []),
