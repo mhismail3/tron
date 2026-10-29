@@ -79,6 +79,8 @@ actual K3 host; native frames do not select product modules or keep another list
   asynchronous selection. Native Stop and retirement invalidate that same logical
   lifetime across physical frame replacement; lane and SDK-send cuts reject stale
   preparation. Ordinary sessions retain their physical cancellation lifetime.
+  Task-result and typed wakes acknowledge delivery and acceptance from the same
+  canonical-message callback; a pre-append refusal stays pending without an idle retry.
   Ordinary outcome acknowledgement requires the bounded canonical reader's durable
   file-and-directory proof; failed proof defers without refusing the prompt.
   Root supplies its actual settings instances directly to Home and installs the
@@ -185,7 +187,7 @@ artifacts are written to `packages/gateway/test-results/kernel-run-lifecycle.jso
 
 ## Entry points
 
-`RuntimeSlot` in [`sessions`](../../sessions/README.md) installs these
+[`RuntimeSlot`](runtime-slot.ts), the native frame in this module, installs these
 primitives. `direct-bash-process-owner.integration.test.ts` exercises real shells,
 detached descendants, timeout, Stop and environment boundaries.
 
@@ -197,6 +199,7 @@ no additional logging or persisted state. Compaction diagnostics remain with the
 
 | Signal | Meaning / diagnosis |
 |---|---|
+| `runtime-prompt-failed` with repeated [`home.task.inbox`](../../modules/home/README.md#signals) `admission-aborted`/claim transitions | With zero provider calls and no intervening user activation, memory resume or new source event, diagnose premature pre-append wake acceptance. `input-admission.integration.test.ts` in Home injects SDK rejection, proves retained pending input and then explicit-resume delivery. |
 | `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |
 
 ## Verify
