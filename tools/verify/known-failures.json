@@ -1,0 +1,32 @@
+[
+  {
+    "testId": "packages/gateway/src/admin/settings-three-layer.e2e.test.ts::approved three-layer settings at real Gateway boundaries refuses an invalid Project model reference instead of inheriting Global: {\"defaultModel\":\"faux-1\"}",
+    "evidence": {
+      "command": "python3 tools/verify/gateway.py --reporter=json --outputFile=test-results/approvals-log-undo/base/gateway.json",
+      "commit": "472f33d70555dc3738bd52bd242e1829c799ee71",
+      "failureDigest": "68041eaa5ff1478dfc46be6ddf754bdda9b5a0cc9ecb28cb8e39c5701133ecee"
+    },
+    "issue": 2130,
+    "expires": "2026-11-05"
+  },
+  {
+    "testId": "packages/gateway/src/sessions/home-memory-browser-scale.e2e.test.ts::Home memory browser at scale RPC marks exact live-view membership and the individual-message boundary across pages and source changes",
+    "evidence": {
+      "command": "python3 tools/verify/gateway.py --reporter=json --outputFile=test-results/approvals-log-undo/base/gateway.json",
+      "commit": "472f33d70555dc3738bd52bd242e1829c799ee71",
+      "failureDigest": "926bf697e2d973604b254680ca01983fea11ee6b9a0f133b4467cb39d8679d45"
+    },
+    "issue": 2116,
+    "expires": "2026-11-05"
+  },
+  {
+    "testId": "packages/gateway/src/modules/apps/apps-install.integration.test.ts::reviewed Swift app lifecycle through the Gateway reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps",
+    "evidence": {
+      "command": "python3 tools/verify/gateway.py --reporter=json --outputFile=test-results/approvals-log-undo/base/gateway.json",
+      "commit": "472f33d70555dc3738bd52bd242e1829c799ee71",
+      "failureDigest": "95e5f2d54eecf2e04d8db3e9f8512f82d0df6c7534fcf4b4315d133a8cf435a1"
+    },
+    "issue": 2112,
+    "expires": "2026-11-05"
+  }
+]

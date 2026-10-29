@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -415,6 +416,72 @@ class Run:
         self.on_update()
 
 
+def known_failures() -> dict[str, dict]:
+    """One exact-case registry; invalid or expired entries cannot waive any check."""
+    path = ROOT / "tools/verify/known-failures.json"
+    try:
+        if path.stat().st_size > 128 * 1024:
+            raise ValueError("registry exceeds 128 KiB")
+        entries = json.loads(path.read_text())
+        if not isinstance(entries, list) or len(entries) > 100:
+            raise ValueError("expected an array of at most 100 entries")
+        known = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"testId", "evidence", "issue", "expires"}:
+                raise ValueError("each entry needs testId, evidence, issue and expires")
+            identity, evidence = entry["testId"], entry["evidence"]
+            if not isinstance(identity, str) or "::" not in identity:
+                raise ValueError("testId must be a repository-relative test path::full case name")
+            file, case = identity.split("::", 1)
+            if not file.startswith(f"{GATEWAY}/src/") or not file.endswith(".test.ts") or ".." in Path(file).parts or not case.strip() or not (ROOT / file).is_file():
+                raise ValueError(f"invalid testId: {identity}")
+            if identity in known:
+                raise ValueError(f"duplicate testId: {identity}")
+            if type(entry["issue"]) is not int or entry["issue"] <= 0 or not isinstance(evidence, dict) or set(evidence) != {"command", "commit", "failureDigest"}:
+                raise ValueError(f"missing owner issue or failing evidence: {identity}")
+            if not isinstance(evidence["command"], str) or not evidence["command"].strip() or not isinstance(evidence["commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", evidence["commit"]):
+                raise ValueError(f"invalid failing command/commit: {identity}")
+            if not isinstance(evidence["failureDigest"], str) or not re.fullmatch(r"[0-9a-f]{64}", evidence["failureDigest"]):
+                raise ValueError(f"invalid failureDigest: {identity}")
+            git("merge-base", "--is-ancestor", evidence["commit"], "HEAD")
+            expiry = date.fromisoformat(entry["expires"])
+            if expiry.isoformat() != entry["expires"] or expiry <= datetime.now(timezone.utc).date():
+                raise ValueError(f"expired quarantine: {identity} (expiry {entry['expires']}, issue #{entry['issue']})")
+            known[identity] = entry
+        return known
+    except (OSError, ValueError, TypeError, VerifyError) as error:
+        raise VerifyError(f"known-failures: {error}") from error
+
+
+def failure_digest(messages: list[str]) -> str:
+    # Only the checkout prefix varies between base/candidate. Preserve messages,
+    # stack locations and temporary paths: a changed failure must not be waived.
+    return hashlib.sha256(json.dumps([message.replace(str(ROOT), "<repo>") for message in messages], ensure_ascii=False).encode()).hexdigest()
+
+
+def gateway_failures(report: Path, output: str) -> tuple[dict[str, str], bool]:
+    """Missing reports and suite/runtime errors never become an exact-case waiver."""
+    try:
+        data = json.loads(report.read_text())
+        # Pinned Vitest JSON omits global unhandled errors; its diagnostic is
+        # therefore also a refusal signal, never another waiver source.
+        failed, suite_error, count = {}, bool(re.search(r"unhandled (?:errors?|rejection)|uncaught exception|failed suites?", output, re.I)), 0
+        for suite in data["testResults"]:
+            cases = [test for test in suite["assertionResults"] if test["status"] == "failed"]
+            file = Path(suite["name"]).resolve().relative_to(ROOT)
+            for test in cases:
+                messages = test["failureMessages"]
+                if not isinstance(messages, list) or not messages or not all(isinstance(message, str) and message for message in messages):
+                    return {}, False
+                failed[f"{file.as_posix()}::{test['fullName']}"] = failure_digest(messages)
+                count += 1
+            suite_error |= bool(suite.get("message") or suite.get("testExecError") or suite.get("errors")) or (suite.get("status") == "failed" and not cases)
+        complete = bool(failed) and len(failed) == count == data["numFailedTests"] and not suite_error and not data.get("numRuntimeErrorTestSuites") and not data.get("unhandledErrors")
+        return failed, complete
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}, False
+
+
 def vitest_count(output_path: Path):
     def count(_output: str):
         # A missing report counts zero, which fails the group: vitest must have written it this run.
@@ -504,6 +571,11 @@ def main(argv: list[str]) -> int:
         print(f"verify: {error}", file=sys.stderr)
         return 2
 
+    try:
+        known = known_failures()
+    except VerifyError as error:
+        print(f"verify: {error}", file=sys.stderr)
+        return 1
     nested, mac_terminal = nested_files()
     groups: dict[str, list[str]] = {}
     try:
@@ -586,6 +658,10 @@ def main(argv: list[str]) -> int:
     report_path = ROOT / "test-results" / "verify" / f"{sha}.json"
 
     def finish(verdict: str, message: str, announce: bool = True) -> int:
+        quarantined = [entry for step in run.steps for entry in step.get("quarantined", [])]
+        if verdict == "passed" and quarantined:
+            verdict = "quarantined"
+            message += f"; {len(quarantined)} known failure(s), NOT an unqualified pass"
         comparable = {"commit": sha, "selection": selection, "steps": [{k: v for k, v in step.items() if k not in ("seconds", "log", "detail")} for step in run.steps], "verdict": verdict}
         report = {"schema": "tron.verify.v1", "commit": sha, "verdict": verdict, "message": message,
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
@@ -597,7 +673,7 @@ def main(argv: list[str]) -> int:
         if announce:
             print(f"verify: {verdict.upper()} — {message}", flush=True)
             print(f"verify: report {report_path.relative_to(ROOT)} (result digest {report['resultDigest'][:16]})", flush=True)
-        return 0 if verdict == "passed" else 1
+        return 0 if verdict in ("passed", "quarantined") else 1
 
     run.on_update = lambda: finish("interrupted" if any(s["status"] == "interrupted" for s in run.steps) else "running",
                                    "partial results; verification is not complete", announce=False)
@@ -644,23 +720,23 @@ def main(argv: list[str]) -> int:
             report.unlink(missing_ok=True)
             env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if group == "ios" and args.update_locks else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
-            if group in ("gateway", "gateway-nested"):
-                if result["status"] == "failed" and report.exists():
-                    try:
-                        suites = json.loads(report.read_text()).get("testResults", [])
-                    except ValueError:
-                        suites = []
-                    failed = [f"{Path(suite['name']).name} > {test['fullName']}" for suite in suites
-                              for test in suite.get("assertionResults", []) if test.get("status") == "failed"]
-                    result["failedTests"] = failed
-                    print("\n".join(f"    failed: {name}" for name in failed), flush=True)
+            if group in ("gateway", "gateway-nested") and result["status"] == "failed":
+                failed, complete = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
+                result["failedTests"] = list(failed)
+                print("\n".join(f"    failed: {identity}" for identity in failed), flush=True)
+                if result["exit"] == 1 and complete and all(identity in known and digest == known[identity]["evidence"]["failureDigest"] for identity, digest in failed.items()):
+                    result.update(status="quarantined", tests=count(""), quarantined=[
+                        {"testId": identity, "expires": known[identity]["expires"], "issue": known[identity]["issue"]} for identity in failed])
+                    for entry in result["quarantined"]:
+                        print(f"    QUARANTINED: {entry['testId']} — expires {entry['expires']}, issue #{entry['issue']}", flush=True)
+                    run.on_update()
             elif group == "ios":
                 if result["status"] == "failed":
                     result["failedTests"] = ios_failures((ROOT / result["log"]).read_text(errors="replace"))
                     print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
             if result["status"] == "failed":
                 return finish("failed", f"{label} failed")
-            if not result.get("tests"):
+            if not result.get("tests") and not result.get("quarantined"):
                 result["status"] = "failed"
                 return finish("failed", f"{label} ran zero passing tests: an empty group is not evidence")
         passing = sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))
@@ -670,7 +746,7 @@ def main(argv: list[str]) -> int:
             return finish("passed", "Empty or Markdown-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:
             return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred; full batch is not green")
-        if passing == 0:
+        if passing == 0 and not any(step.get("quarantined") for step in run.steps):
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len([step for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"])
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"

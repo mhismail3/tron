@@ -27,6 +27,7 @@ The last run's output is kept in `test-results/verify-cli/`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
@@ -65,6 +66,7 @@ class Repo:
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.path / relative)
         self.write(".gitignore", "test-results/\n")
+        self.write("tools/verify/known-failures.json", "[]\n")
         self.write("README.md", "# Fixture\n")
         self.write("AGENTS.md", AGENTS)
         # The least guidance the real agent policy accepts: a catalog naming the iOS skill it reads.
@@ -253,6 +255,109 @@ class ExternalVerificationTests(VerifyCase):
         self.assertEqual(malformed.returncode, 1, malformed.stdout + malformed.stderr)
         self.assertIn("ownership FAILED", malformed.stdout)
         self.assertNotIn("Traceback", malformed.stderr)
+
+
+class QuarantineTests(VerifyCase):
+    """Real verify CLI/process boundary consuming the Vitest JSON protocol, without skipping tests."""
+
+    def fixture(self):
+        r = self.repo
+        path = "packages/gateway/src/sample.integration.test.ts"
+        r.write(path, "// Report-protocol fixture executed by the child below.\n")
+        r.write("packages/gateway/src/sample.ts", "export const value = 1;\n")
+        r.write("packages/gateway/sample.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write("packages/gateway/package.json", json.dumps({"devDependencies": {"typescript": "7.0.2"}}))
+        r.write("packages/gateway/node_modules/typescript/package.json", '{"version":"7.0.2"}')
+        r.write("packages/gateway/node_modules/typescript/bin/tsc", "#!/bin/sh\nexit 0\n")
+        (r.path / "packages/gateway/node_modules/typescript/bin/tsc").chmod(0o755)
+        (r.path / "packages/gateway/node_modules/.bin").mkdir()
+        (r.path / "packages/gateway/node_modules/.bin/tsc").symlink_to("../typescript/bin/tsc")
+        r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\n")
+        r.write("scripts/tron-node", "#!/bin/sh\necho src/sample.ts\n")
+        (r.path / "scripts/tron-node").chmod(0o755)
+        manifest = json.loads((r.path / "tooling.module.json").read_text())
+        manifest["owns"].append("scripts/tron-node")
+        r.write("tooling.module.json", json.dumps(manifest))
+        # The spawned producer writes the actual runner's reporting protocol. It always
+        # executes; quarantine must classify the output, never suppress the invocation.
+        r.write("tools/verify/gateway.py", "import json,pathlib,sys\n"
+                "out=next(a.split('=',1)[1] for a in sys.argv if a.startswith('--outputFile.json='))\n"
+                "report=json.loads(pathlib.Path('report-input.json').read_text())\n"
+                "pathlib.Path(out).write_text(json.dumps(report))\n"
+                "pathlib.Path('test-results-executed').write_text('executed')\n"
+                "print(report.get('diagnostic', ''))\n"
+                "sys.exit(1)\n")
+        r.write("packages/gateway/report-input.json", json.dumps({"numPassedTests": 1, "numFailedTests": 1,
+            "numFailedTestSuites": 1, "testResults": [{"name": str(r.path / path), "status": "failed",
+            "assertionResults": [{"fullName": "sample known failure", "status": "failed", "failureMessages": ["Error: original defect"]},
+                                 {"fullName": "sample passes", "status": "passed"}]}]}))
+        r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\npackages/gateway/test-results-executed\n")
+        r.commit("report protocol producer")
+        entry = {"testId": path + "::sample known failure", "evidence": {"command": "scripts/tron test gateway src/sample.integration.test.ts",
+                 "commit": r.git("rev-parse", "HEAD"), "failureDigest": hashlib.sha256(json.dumps(["Error: original defect"]).encode()).hexdigest()}, "issue": 2128, "expires": "2099-01-01"}
+        return entry
+
+    def test_exact_quarantine_is_qualified_and_unknown_or_suite_errors_fail(self):
+        r = self.repo
+        entry = self.fixture()
+        r.write("tools/verify/known-failures.json", json.dumps([entry]))
+        r.commit("quarantine exact case")
+        result = r.verify("--module", "gateway/sample")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = r.report()
+        self.assertEqual(report["verdict"], "quarantined")
+        step = next(s for s in report["steps"] if s["name"] == "tests: gateway")
+        self.assertEqual(step["quarantined"], [{"testId": entry["testId"], "expires": entry["expires"], "issue": 2128}])
+        self.assertEqual(report["passingTests"], 1)
+        self.assertTrue((r.path / "packages/gateway/test-results-executed").exists())
+        self.assertIn(entry["expires"], result.stdout)
+        original = (r.path / "packages/gateway/report-input.json").read_text()
+        # All executed cases may be quarantined; zero passing is not zero executed.
+        raw = json.loads(original)
+        raw["numPassedTests"] = 0
+        raw["testResults"][0]["assertionResults"] = raw["testResults"][0]["assertionResults"][:1]
+        r.write("packages/gateway/report-input.json", json.dumps(raw))
+        r.commit("only executed case is quarantined")
+        result = r.verify("--module", "gateway/sample")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(r.report()["verdict"], "quarantined")
+        self.assertEqual(r.report()["passingTests"], 0)
+        for change in ("unknown", "same-case-new-failure", "coexisting-suite-error", "unhandled-error", "nested-hook-error", "suite-error", "missing-report"):
+            with self.subTest(change=change):
+                raw = json.loads(original)
+                if change == "unknown":
+                    raw["testResults"][0]["assertionResults"][0]["fullName"] = "different failure"
+                elif change == "same-case-new-failure":
+                    raw["testResults"][0]["assertionResults"][0]["failureMessages"] = ["Error: a new regression in this same case"]
+                elif change == "coexisting-suite-error":
+                    raw["testResults"][0]["message"] = "afterAll hook failed after the known assertion"
+                elif change == "unhandled-error":
+                    raw["diagnostic"] = "Vitest caught 1 unhandled error during the test run."
+                elif change == "nested-hook-error":
+                    raw["diagnostic"] = "Failed Suites 1"
+                elif change == "suite-error":
+                    raw["numFailedTestSuites"] = 2
+                    raw["testResults"].append({"name": "broken suite", "status": "failed", "message": "setup error", "assertionResults": []})
+                else:
+                    r.write("tools/verify/gateway.py", "import sys\nsys.exit(1)\n")
+                r.write("packages/gateway/report-input.json", json.dumps(raw))
+                r.commit(change)
+                result = r.verify("--module", "gateway/sample")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertEqual(r.report()["verdict"], "failed")
+
+    def test_expired_duplicate_and_malformed_entries_fail_loudly(self):
+        r = self.repo
+        entry = self.fixture()
+        for entries in ([{**entry, "expires": "2000-01-01"}], [entry, entry], [{**entry, "evidence": {}}],
+                        [{**entry, "evidence": {**entry["evidence"], "commit": "0" * 40}}]):
+            with self.subTest(entries=entries):
+                r.write("tools/verify/known-failures.json", json.dumps(entries))
+                r.commit("invalid registry")
+                result = r.verify("--module", "repo/alpha")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("known-failures", result.stdout + result.stderr)
+                self.assertFalse((r.path / "packages/gateway/test-results-executed").exists())
 
 
 class GatewayDependenciesTests(VerifyCase):

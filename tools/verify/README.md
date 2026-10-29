@@ -63,7 +63,6 @@ the build that stamped it). Python unittest counts exclude skipped and expected-
 cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 ## Static checks (existing tools only)
-
 1. `scripts/tron ownership`
 2. `scripts/tron budgets HEAD --base <base>` (sizes are reported; few cases fail)
 3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
@@ -77,9 +76,25 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
-A failure that also reproduces on the base commit does not block landing: cite the
-base run in the closing comment and file the failure as its own issue. V10 also
-runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
+### Known failures
+
+`tools/verify/known-failures.json` is validated on every selection, including plans.
+Each entry names an exact `<repository-relative-test-path>::<full-case-name>`,
+failing `evidence.command`, full base `evidence.commit`, SHA-256
+`evidence.failureDigest`, owner `issue` number and ISO `expires` date. The digest
+covers the full failure-message array (JSON, `ensure_ascii=False`), replacing only
+the checkout root with `<repo>`; a changed failure inside the same test refuses.
+The commit must be an ancestor of HEAD. Expiry is 00:00 UTC on the named date.
+Seed only from fresh current-main reproductions, retaining raw logs/JSON.
+
+Tests execute unchanged. Only exact, unexpired case AND digest matches allow exit 0
+with verdict `quarantined`; `failedTests`, passing counts, logs and each expiry/issue
+remain visible. This is not an unqualified pass. Unknown failures, suite/runtime
+errors, missing reports, malformed or expired entries exit 1. Expiry blocks even
+unselected cases; remove/repair entries, never silently renew without new evidence.
+No wildcard/file waiver, retries, alternate runner or legacy verdict mode.
+
+Verify runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
 counts to `test-results/measure/`; its counts and errors never fail verify.
 
 ## Selection
