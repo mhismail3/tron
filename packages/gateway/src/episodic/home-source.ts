@@ -1,10 +1,9 @@
-import { HOME_MAX_CHAPTERS } from "../modules/home/home-chapter-state.js";
 import type { HomeMemoryEvidence } from "../protocol/types.js";
 import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { abortableRead } from "../util/abortable-read.js";
 import { EpisodicMemoryError } from "../errors.js";
-import { type EpisodicChapterSourceCursor, type EpisodicLimits, type EpisodicSourceCursor } from "./episodic-contract.js";
+import { HOME_MAX_CHAPTERS, type EpisodicChapterSourceCursor, type EpisodicLimits, type EpisodicSourceCursor } from "./episodic-contract.js";
 import { COMPLETE_PREFIX_SEED, EpisodicSourceChangedError, episodicDigest, extendPrefixDigest, parseEntry, prefixLineDigest, sameSnapshot, type EpisodicCanonicalEntry } from "../kernel/session/canonical-reader.js";
 import { projectBranch, type EpisodicProjectedMessage, type EpisodicSourceDelta } from "./episodic-projection.js";
 

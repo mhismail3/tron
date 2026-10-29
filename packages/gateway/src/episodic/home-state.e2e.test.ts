@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicStore } from "./episodic-store.js";
-import { HOME_MAX_CHAPTERS } from "../modules/home/home-chapter-state.js";
+import { HOME_MAX_CHAPTERS } from "./episodic-contract.js";
 import { EPISODIC_STORE_VERSION, EPISODIC_STATE_MAX_BYTES, type EpisodicStoreState } from "./episodic-contract.js";
 
 // A state with the ledger's full chapter count must write and read back.

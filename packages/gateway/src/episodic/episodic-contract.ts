@@ -1,6 +1,5 @@
 import { EpisodicMemoryError } from "../errors.js";
 import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../kernel/resources/prompt-bounds.js";
-import { HOME_MAX_CHAPTERS } from "../modules/home/home-chapter-state.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
 /*
  * The episodic memory is the projected-summary tree of the OptChat recipe: a
@@ -73,6 +72,9 @@ export const EPISODIC_TRIES = 5;
 export const EPISODIC_CAP_CHARS = 30_000;
 /** Characters of the tail kept when a text is capped; the head keeps the rest. */
 export const EPISODIC_CAP_TAIL_CHARS = 4_000;
+
+/** Shared ledger/source bound; no second chapter-count authority. */
+export const HOME_MAX_CHAPTERS = 100_000;
 
 /** Each strict Home cursor fits 640 bytes including its nested JSON indentation.
  * This covers the pinned SDK UUID/entry IDs, two SHA-256 digests, file

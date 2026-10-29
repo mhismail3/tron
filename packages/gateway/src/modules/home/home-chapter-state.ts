@@ -1,8 +1,5 @@
 import { GatewayError } from "../../errors.js";
 
-/** Shared ledger/source bound; no second chapter-count authority. */
-export const HOME_MAX_CHAPTERS = 100_000;
-
 /** Admission, rollover, the canonical growth observer and the chapter-list read share these exact boundaries. */
 export const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
 export const HOME_HARD_ENTRIES = 100_000;

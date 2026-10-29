@@ -26,7 +26,7 @@ import type { EpisodicMemory } from "../../episodic/episodic-memory.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolDisplay, type HomeMemoryViewRequest } from "../../episodic/home-memory-browser.js";
 import { GatewayError } from "../../errors.js";
 import type { TrustService } from "../../kernel/resources/trust-service.js";
-import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import { HOME_MAX_CHAPTERS, EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { EpisodicSourceChangedError } from "../../kernel/session/canonical-reader.js";
 import { HomeSourceProofs, readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../../episodic/home-source.js";
@@ -40,7 +40,7 @@ import {
   type HomeMemoryDiagnostic, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
-import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
+import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 import { admitHomeTaskToolRequest, homeSystemPrompt } from "./tron-home-extension.js";
 import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";

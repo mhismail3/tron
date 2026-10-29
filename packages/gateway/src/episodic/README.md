@@ -16,6 +16,8 @@ caller: one memory keyed by `homeId` across chapters
 Canonical filesystem readers and digests live in [K1](../kernel/session/README.md);
 the shared refusal class lives in `errors.ts`. Projection and cursor orchestration
 remain here, and source limits derive from K4's actual prompt producer bounds.
+The contract owns the shared chapter count used by both the Home ledger and
+its memory source/cursor state; Home retains ledger and wake orchestration.
 State: `state/episodic/<sourceSessionId>/` (`initialized.json`, `catalog.jsonl`,
 `nodes.jsonl`, `state.json`, `checkpoint.current.json`, `checkpoint-*/`) and the
 workspace record `gateway/workspace-state/episodic-initialized.json`.
