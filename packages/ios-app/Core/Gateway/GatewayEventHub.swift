@@ -11,7 +11,7 @@ package enum GatewayDiagnosticTopicAdmission {
         "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
         "auth.completed", "automation.changed", "knowledge.changed", "knowledge.curation.job", "settings.changed", "trust.changed",
         "providers.changed", "packages.changed", "packages.progress", "packages.completed",
-        "models.customChanged", "models.recentChanged", "models.catalogChanged", "mcp.changed", "devices.changed", "terminal.output", "terminal.exit"
+        "models.customChanged", "models.recentChanged", "models.catalogChanged", "mcp.changed", "devices.changed"
     ]
 
     package static func admit(_ topic: String) -> String {
