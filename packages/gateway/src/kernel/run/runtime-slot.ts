@@ -11,7 +11,7 @@ import { applyModelAdmission, compactionAdmission } from "../settings/settings-a
 import { managedProviderSettingsView, type ManagedSubagents } from "../delegation/managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../../protocol/types.js";
-import { boundedSummaryText } from "../../sessions/summary-text.js";
+import { boundedSummaryText } from "../../util/bounded-text.js";
 import { catalogActivityTimestamp } from "../../sessions/catalog-metadata-index.js";
 import { historyPage, historyEntry, type HistoryCursor } from "../projection/history.js";
 import { delegatedProviderToolVersion } from "../delegation/delegated-provider.js";
@@ -58,7 +58,8 @@ import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-p
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
 import { awaitApprovalDecision } from "../settings/settings-approval-review.js";
-import { SETTINGS_OUTCOME_MESSAGE, settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
+import { settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import { visitCanonicalSessionEntries } from "../session/canonical-reader.js";
 import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 import type { Actor } from "../settings/settings-record.js";
@@ -126,12 +127,13 @@ import { currentExtensionOwner, currentInvocationContext } from "../host/extensi
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../delegation/managed-producer.js";
 import { type ExtensionArtifactRejectionReason } from "../projection/extension-run-projection.js";
 import { ChildSessionAdmission } from "../delegation/child-session-admission.js";
-import { extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../../sessions/extension-activity-history.js";
-import { makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "./invocation-receipts.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, inputMessageOrigin, type InputTrigger } from "../host/input-admission.js";
-import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "../../sessions/extension-notification-receipts.js";
-import { userFacingPromptPreview, type ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
+import { extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../receipts/extension-activity-history.js";
+import { makeContextDeliveryReceipt } from "../receipts/context-delivery-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "../receipts/invocation-receipts.js";
+import { inputMessageOrigin, type InputTrigger } from "../host/input-admission.js";
+import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "../receipts/extension-notification-receipts.js";
+import { userFacingPromptPreview } from "../resources/resource-invocation.js";
+import { type ResourceExpansionCatalog } from "../resources/resource-expansion.js";
 import { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "../projection/process-activity-recency.js";
 import { processHistoryDetail, subagentProcessId, subagentProcessesFromActivity } from "../projection/process-activity.js";

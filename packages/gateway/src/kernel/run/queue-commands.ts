@@ -2,8 +2,9 @@ import type { RunOperations } from "./run-operations.js";
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../../errors.js";
 import type { CommandInfo, QueuedMessageState, ResourceInvocation } from "../../protocol/types.js";
-import { admitPromptText, admitResourceInvocations, canonicalResourceName, composeResourcePrompt, parsePiLiteralCommand} from "../../sessions/resource-invocation.js";
-import { makeInvocationReceipt, type InvocationProjection, type InvokedResource } from "./invocation-receipts.js";
+import { admitPromptText, admitResourceInvocations, canonicalResourceName, parsePiLiteralCommand } from "../resources/resource-invocation.js";
+import { composeResourcePrompt } from "../resources/resource-expansion.js";
+import { makeInvocationReceipt, type InvocationProjection, type InvokedResource } from "../receipts/invocation-receipts.js";
 import type { QueueBehavior, RuntimeQueuedMessage } from "./queue-input.js";
 
 const MAXIMUM_QUEUED_MESSAGES = 32;

@@ -9,7 +9,7 @@
     "kernel/run/compaction-policy.ts",
     "sessions/codemode-classify-cost.integration.test.ts",
     "sessions/codemode-nested-interactive.integration.test.ts",
-    "kernel/run/context-delivery-receipts.ts",
+    "kernel/run/context-delivery.ts",
     "sessions/context-edit.integration.test.ts",
     "kernel/run/direct-bash-process-owner.integration.test.ts",
     "kernel/run/direct-bash-process-owner.ts",
@@ -25,7 +25,6 @@
     "sessions/home-provider-runtime.e2e.test.ts",
     "sessions/home-request-seam.integration.test.ts",
     "sessions/home-research-tools.integration.test.ts",
-    "kernel/run/invocation-receipts.ts",
     "sessions/locks/run-*.golden.json",
     "kernel/run/locks/store-run-markers.golden.json",
     "sessions/multi-resource-message.e2e.test.ts",
@@ -52,7 +51,6 @@
     "sessions/runtime-tool-loadout.integration.test.ts",
     "sessions/session-heap.lock.integration.test.ts",
     "sessions/session-lifecycle.lock.integration.test.ts",
-    "sessions/summary-text.ts",
     "sessions/tron-modules.integration.test.ts",
     "kernel/run/README.md",
     "kernel/run/request-pipeline.ts",
@@ -79,6 +77,7 @@
   "dependsOn": [
     "gateway/host",
     "gateway/pi",
+    "gateway/receipts",
     "gateway/settings"
   ]
 }

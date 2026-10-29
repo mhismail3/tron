@@ -5,7 +5,7 @@ import type { InputTrigger } from "../host/input-admission.js";
 import type { TrustService } from "../resources/trust-service.js";
 import type { ExtensionLifecycleCoordinator } from "../host/extension-lifecycle-coordinator.js";
 import type { CanonicalAppendContext } from "../host/canonical-append.js";
-import type { ResourceExpansionCatalog } from "../../sessions/resource-invocation.js";
+import type { ResourceExpansionCatalog } from "../resources/resource-expansion.js";
 import type { CanonicalAssistantCompletion } from "./completion-facts.js";
 import type { CommandReplacement } from "./run-invocations.js";
 import type { CompactionOperationPolicy } from "./compaction-policy.js";

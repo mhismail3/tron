@@ -9,7 +9,7 @@ import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsApprovals, APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
 import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
 import * as durability from "../util/durable-json.js";
 

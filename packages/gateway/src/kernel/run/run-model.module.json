@@ -5,5 +5,8 @@
     "task-lifecycle.reference-model.ts",
     "task-lifecycle.conformance.integration.test.ts"
   ],
-  "riskClass": ["kernel", "lifecycle"]
+  "riskClass": [
+    "kernel",
+    "lifecycle"
+  ]
 }

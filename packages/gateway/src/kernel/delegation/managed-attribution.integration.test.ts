@@ -17,10 +17,10 @@ import { withExtensionOwner } from "../host/extension-execution-context.js";
 import { AsyncResource } from "node:async_hooks";
 import { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "../run/context-delivery-receipts.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../host/input-admission.js";
-import { invocationProjection, invocationReceipts } from "../run/invocation-receipts.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "../../sessions/extension-activity-history.js";
+import { makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "../receipts/context-delivery-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
+import { invocationProjection, invocationReceipts } from "../receipts/invocation-receipts.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "../receipts/extension-activity-history.js";
 
 it("attributes real workflow completion and supervisor delivery to their managed producer", async ({ task }) => {
   const root = await mkdtemp(join(tmpdir(), "tron-managed-attribution-"));

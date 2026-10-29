@@ -22,7 +22,7 @@ import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArt
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { HOME_SOFT_BYTES } from "../modules/home/home-chapter-state.js";
 import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
-import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE } from "../kernel/receipts/invocation-receipts.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 function barrier() {

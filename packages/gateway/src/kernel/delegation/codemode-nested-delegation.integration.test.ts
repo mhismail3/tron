@@ -7,7 +7,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../resources/trust-service.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "../../sessions/extension-activity-history.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "../receipts/extension-activity-history.js";
 import { RuntimeRegistry } from "../session/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 

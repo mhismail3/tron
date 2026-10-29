@@ -4,7 +4,6 @@
     "sessions/agent-instructions.integration.test.ts",
     "sessions/agent-instructions.ts",
     "sessions/resource-distribution.ts",
-    "sessions/resource-invocation.ts",
     "resources.module.json",
     "sessions/skill-title.ts",
     "kernel/resources/**"

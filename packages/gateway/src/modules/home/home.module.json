@@ -4,10 +4,11 @@
     "**"
   ],
   "dependsOn": [
-    "gateway/host",
     "gateway/admin",
+    "gateway/episodic",
+    "gateway/host",
     "gateway/pi",
-    "gateway/settings",
-    "gateway/episodic"
+    "gateway/receipts",
+    "gateway/settings"
   ]
 }

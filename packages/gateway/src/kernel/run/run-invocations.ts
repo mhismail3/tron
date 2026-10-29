@@ -1,6 +1,6 @@
 import type { RunOperations } from "./run-operations.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
-import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "../receipts/invocation-receipts.js";
 import type { OwnedOperationTerminal } from "../delegation/owned-operation-terminal.js";
 
 /** Volatile cancellation attribution shares the invocation's receipt lifetime. */

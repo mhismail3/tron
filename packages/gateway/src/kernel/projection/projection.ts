@@ -33,10 +33,10 @@ import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../../u
 import type { BlobStore } from "../../sessions/blob-store.js";
 import { projectForkBoundary, type ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
 import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../../protocol/types.js";
-import { contextDeliveryMetadataByEntry } from "../run/context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "../run/invocation-receipts.js";
-import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "../../sessions/extension-notification-receipts.js";
-import { projectSkillInvocation, RESOURCE_NAME_MAX_BYTES } from "../../sessions/resource-invocation.js";
+import { contextDeliveryMetadataByEntry } from "../receipts/context-delivery-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "../receipts/invocation-receipts.js";
+import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "../receipts/extension-notification-receipts.js";
+import { projectSkillInvocation, RESOURCE_NAME_MAX_BYTES } from "../resources/resource-invocation.js";
 
 const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;

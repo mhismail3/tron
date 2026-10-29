@@ -32,3 +32,6 @@ The attention lock runs through the real Gateway/Pi boundary. Reconnect,
 run-event and delegation locks also protect this owner's wire projections.
 Run selected validation with `scripts/tron verify --module gateway/projection`
 (or `--changed` for a committed slice).
+
+Canonical invocation/delivery and activity/notification codecs belong to
+[Receipts](../receipts/README.md); this module projects their admitted values.

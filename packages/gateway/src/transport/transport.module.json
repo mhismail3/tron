@@ -4,11 +4,12 @@
     "**"
   ],
   "dependsOn": [
-    "gateway/integrations-contract",
     "gateway/display-contract",
+    "gateway/episodic",
     "gateway/host",
+    "gateway/integrations-contract",
     "gateway/pi",
-    "gateway/settings",
-    "gateway/episodic"
+    "gateway/receipts",
+    "gateway/settings"
   ]
 }

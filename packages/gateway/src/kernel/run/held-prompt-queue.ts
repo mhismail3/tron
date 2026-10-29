@@ -1,5 +1,5 @@
 import { admitPrompt } from "./prompt-admission.js";
-import { parsePiLiteralCommand } from "../../sessions/resource-invocation.js";
+import { parsePiLiteralCommand } from "../resources/resource-invocation.js";
 import { validateQueue } from "./queue-commands.js";
 import type { RunOperations } from "./run-operations.js";
 import { randomUUID } from "node:crypto";

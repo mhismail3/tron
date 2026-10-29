@@ -7,7 +7,7 @@ import type { HomeTaskSubagentRun } from "./task-subagents.js";
 import type { ExtensionRunActivity, ExtensionRunChild, ExtensionToolOrigin } from "../../protocol/types.js";
 import { safeJson } from "../projection/projection.js";
 import { admitExtensionRunActivity, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, projectExtensionRunActivity, usesForegroundSubagentChildIdentity, type ExtensionRunChildIdentityStrategy } from "../projection/extension-run-projection.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt } from "../../sessions/extension-activity-history.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityReceipts, extensionReceiptActivity, makeExtensionActivityReceipt } from "../receipts/extension-activity-history.js";
 import { type ActivityExpiryFrame, type ActivityVisibility } from "../../sessions/extension-activity-recency.js";
 import type { OwnedTurnOwner } from "./owned-turn-owner.js";
 

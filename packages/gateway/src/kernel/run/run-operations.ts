@@ -3,7 +3,7 @@ import { RunEventsOwner } from "./run-events.js";
 import type { SessionConfigurationBlocker } from "../../protocol/types.js";
 import { admitPrompt } from "./prompt-admission.js";
 import type { PromptOwnership } from "./prompt-input.js";
-import { boundedSummaryText } from "../../sessions/summary-text.js";
+import { boundedSummaryText } from "../../util/bounded-text.js";
 import type { ImageContent } from "../pi/ai.js";
 import type { QueuedMessageState, ResourceInvocation } from "../../protocol/types.js";
 import type { QueueBehavior, PromptQueueDisplay } from "./queue-input.js";

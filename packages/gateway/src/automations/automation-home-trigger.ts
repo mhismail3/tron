@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import type { InputDelivery, InputEnvelope, InputMessage, InputTrigger, InputTriggerInbox, InputTriggerRoute } from "../kernel/host/input-admission.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE, inputMessageOrigin } from "../kernel/host/input-admission.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
+import { inputMessageOrigin } from "../kernel/host/input-admission.js";
 import { visitCanonicalSessionEntries } from "../kernel/session/canonical-reader.js";
 import { estimateTokens } from "../kernel/pi/coding-agent.js";
 import { AutomationStore } from "./automation-store.js";

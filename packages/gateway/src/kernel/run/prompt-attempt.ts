@@ -1,6 +1,6 @@
 import type { RunOperations } from "./run-operations.js";
 import { safeJson } from "../projection/projection.js";
-import { makeInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
+import { makeInvocationReceipt, type InvocationProjection } from "../receipts/invocation-receipts.js";
 import type { QueueAdmissionDisposition } from "./queue-input.js";
 
 

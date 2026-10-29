@@ -1,4 +1,4 @@
-import type { ChatOrigin, JsonValue } from "../protocol/types.js";
+import type { ChatOrigin, JsonValue } from "../../protocol/types.js";
 import {
   MAX_ID_BYTES,
   validOrigin,

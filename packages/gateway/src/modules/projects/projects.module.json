@@ -1,6 +1,18 @@
 {
   "layer": "L3",
-  "owns": ["**"],
-  "riskClass": ["security"],
-  "dependsOn": ["gateway/foundation", "gateway/host", "gateway/pi", "gateway/protocol", "gateway/resources", "gateway/settings", "gateway/util"]
+  "owns": [
+    "**"
+  ],
+  "riskClass": [
+    "security"
+  ],
+  "dependsOn": [
+    "gateway/foundation",
+    "gateway/host",
+    "gateway/pi",
+    "gateway/protocol",
+    "gateway/resources",
+    "gateway/settings",
+    "gateway/util"
+  ]
 }

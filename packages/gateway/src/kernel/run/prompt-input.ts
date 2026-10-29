@@ -2,12 +2,13 @@ import type { RunOperations } from "./run-operations.js";
 import type { RequestPolicy } from "../host/request-policy.js";
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../../errors.js";
-import { admitResourceInvocations, composeResourcePrompt, parsePiLiteralCommand } from "../../sessions/resource-invocation.js";
+import { admitResourceInvocations, parsePiLiteralCommand } from "../resources/resource-invocation.js";
+import { composeResourcePrompt } from "../resources/resource-expansion.js";
 import { invocationResources } from "./queue-commands.js";
 import type { AgentSession} from "../pi/coding-agent.js";
 import type { ImageContent } from "../pi/ai.js";
 import type { ChatOrigin} from "../../protocol/types.js";
-import { makeInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
+import { makeInvocationReceipt, type InvocationProjection } from "../receipts/invocation-receipts.js";
 import type { OwnedOperationTerminal } from "../delegation/owned-operation-terminal.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type PromptQueueDisplay, type QueueBehavior, type RuntimeQueuedMessage } from "./queue-input.js";
 

@@ -11,7 +11,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { SessionManager } from "../kernel/pi/coding-agent.js";
 import { AutomationStore } from "./automation-store.js";
-import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../kernel/run/invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../kernel/receipts/invocation-receipts.js";
 
 const owned: LockGateway[] = [];
 const retainedRoots = new Set<string>();

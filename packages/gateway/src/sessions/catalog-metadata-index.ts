@@ -5,8 +5,8 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { syncDurably } from "../util/durable-json.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { SessionCreationOrigin } from "../protocol/types.js";
-import { userFacingPromptPreview } from "./resource-invocation.js";
-import { boundedSummaryText, MAX_SUMMARY_TEXT_BYTES } from "./summary-text.js";
+import { userFacingPromptPreview } from "../kernel/resources/resource-invocation.js";
+import { boundedSummaryText, MAX_SUMMARY_TEXT_BYTES } from "../util/bounded-text.js";
 
 const CATALOG_METADATA_INDEX_VERSION = 3 as const;
 const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;

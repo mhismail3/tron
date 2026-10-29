@@ -9,8 +9,8 @@ import { safeJson } from "../projection/projection.js";
 import type { InputTrigger } from "../host/input-admission.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import type { QueueBehavior, PromptQueueDisplay, HeldPrompt, RuntimeQueuedMessage, QueueAdmissionDisposition } from "./queue-input.js";
-import { makeInvocationReceipt } from "./invocation-receipts.js";
-import { deliverPromptInput } from "./context-delivery-receipts.js";
+import { makeInvocationReceipt } from "../receipts/invocation-receipts.js";
+import { deliverPromptInput } from "./context-delivery.js";
 import { preparePromptInput, preparePromptIntent, promptStartReceipt, type PromptOwnership } from "./prompt-input.js";
 
 export async function admitPrompt<TaskFence extends { taskId: string; operationId: string }>(

@@ -33,8 +33,9 @@
     "kernel/session/README.md"
   ],
   "dependsOn": [
+    "gateway/automations-contract",
     "gateway/pi",
-    "gateway/settings",
-    "gateway/automations-contract"
+    "gateway/receipts",
+    "gateway/settings"
   ]
 }

@@ -6,7 +6,7 @@ import { resolveTronHome } from "../tron-home.js";
 import type { ContentPart, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
-import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../kernel/run/invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../kernel/receipts/invocation-receipts.js";
 
 export interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string; completionRevision?: number }
 interface SessionMutationEnvelope { sessionId: string }

@@ -9,7 +9,7 @@ import type { GatewayWorkHandle } from "../../kernel/run/gateway-work-registry.j
 import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
 import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../../kernel/delegation/owned-operation-terminal.js";
 import type { OwnedOperationDeadline } from "../../kernel/delegation/delegation-operations.js";
-import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
 import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";

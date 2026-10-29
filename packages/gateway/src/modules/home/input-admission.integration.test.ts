@@ -7,7 +7,7 @@ import { setHomeMemoryModels } from "../../../test-support/settings-dependencies
 import { waitFor } from "../../../test-support/wait-for.js";
 import { HOME_TASK_RESULT_MESSAGE } from "./home-wake-inbox.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { invocationReceipts } from "../../kernel/run/invocation-receipts.js";
+import { invocationReceipts } from "../../kernel/receipts/invocation-receipts.js";
 
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
 

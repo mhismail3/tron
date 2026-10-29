@@ -1,0 +1,11 @@
+{
+  "layer": "L2",
+  "owns": [
+    "*.ts",
+    "receipts.module.json",
+    "README.md"
+  ],
+  "dependsOn": [
+    "gateway/resources"
+  ]
+}

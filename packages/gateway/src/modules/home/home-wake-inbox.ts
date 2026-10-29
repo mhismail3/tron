@@ -1,9 +1,10 @@
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, type InputEnvelope, type InputDelivery, type InputMessage } from "../../kernel/host/input-admission.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../../kernel/receipts/delivery-tags.js";
+import { type InputEnvelope, type InputDelivery, type InputMessage } from "../../kernel/host/input-admission.js";
 import { estimateTokens } from "../../kernel/pi/coding-agent.js";
 import { createHash } from "node:crypto";
-import { makeContextDeliveryReceipt } from "../../kernel/run/context-delivery-receipts.js";
+import { makeContextDeliveryReceipt } from "../../kernel/receipts/context-delivery-receipts.js";
 import { parseHomeTaskReport } from "../../kernel/delegation/task-report.js";
-import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
+import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
 import { GatewayError } from "../../errors.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";

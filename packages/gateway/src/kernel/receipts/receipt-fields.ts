@@ -1,4 +1,4 @@
-import type { ChatOrigin } from "../protocol/types.js";
+import type { ChatOrigin } from "../../protocol/types.js";
 
 export const MAX_ID_BYTES = 256;
 export const MAX_NAME_BYTES = 512;

@@ -70,8 +70,8 @@ actual K3 host; native frames do not select product modules or keep another list
 - `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort
   cleanup, output settlement and private-environment filtering.
 
-- `invocation-receipts.ts` and `context-delivery-receipts.ts`: canonical receipt
-  parsing, folding, owned terminal facts and canonical inbox delivery; persisted bytes remain stable.
+- `context-delivery.ts`: canonical inbox delivery; Run owns terminal decisions and writes.
+  Pure parsing/folding and encoded bounds live in [Receipts](../receipts/README.md); persisted bytes remain stable.
   Settings wakes bind the actual admitted input and use `gateway:settings` attribution.
   Home selects outcomes through its bounded, cancellable input envelope for both user
   turns and wakes; the native before-agent-start hook selects only ordinary requesters.

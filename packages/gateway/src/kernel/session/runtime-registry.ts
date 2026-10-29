@@ -72,7 +72,7 @@ import {
   invocationProjection,
   invocationReceipts,
   type InvocationProjection,
-} from "../run/invocation-receipts.js";
+} from "../receipts/invocation-receipts.js";
 import { projectTranscriptPage, type TranscriptPage } from "../projection/projection.js";
 import {
   CatalogMetadataIndex,

@@ -19,7 +19,8 @@ import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { UploadStore } from "../../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../../config.js";
 import { APPROVAL_TTL_MS } from "../../kernel/settings/settings-approvals.js";
-import { SETTINGS_OUTCOME_MESSAGE, type ChangeResult } from "../../kernel/settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
+import { type ChangeResult } from "../../kernel/settings/tool-contract.js";
 
 const exec = promisify(execFile);
 const artifact = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/project-lifecycle/report.json");

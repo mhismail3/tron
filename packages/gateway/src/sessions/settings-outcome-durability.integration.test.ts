@@ -10,10 +10,10 @@ import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { SettingsApprovals, APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
 import * as durability from "../util/durable-json.js";
-import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../kernel/host/input-admission.js";
+import { INVOCATION_RECEIPT_TYPE } from "../kernel/receipts/invocation-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../kernel/receipts/delivery-tags.js";
 
 const artifacts: unknown[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });

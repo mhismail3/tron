@@ -3,12 +3,9 @@ import type { ImageContent } from "../pi/ai.js";
 import type { RequestPolicy } from "./request-policy.js";
 import type { ExtensionToolOrigin } from "../../protocol/types.js";
 
-export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
 export type InputDelivery = "user" | "wake";
 /** Gateway-owned trigger sources, never maintainer authority. */
 export type InputTriggerSource = "automation";
-export const INPUT_TRIGGER_MESSAGE = "tron.home-trigger.v1";
-export const INPUT_TRIGGER_RESUME_MESSAGE = "tron.home-trigger-resume.v1";
 export interface InputTriggerAttribution {
   kind: InputTriggerSource; sourceId: string; eventId: string; title: string;
 }

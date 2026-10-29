@@ -5,7 +5,7 @@ import type { ExtensionRunActivity, SessionProcessActivity, SessionProcessHistor
 import type { ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
 import { GatewayError } from "../../errors.js";
 import { projectTranscriptPage, projectTranscriptPageAfter, type TranscriptPage, type ToolProjectionMetadata } from "./projection.js";
-import { listExtensionActivityHistory, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../../sessions/extension-activity-history.js";
+import { listExtensionActivityHistory, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../receipts/extension-activity-history.js";
 import { listProcessHistory, processHistoryDetail } from "./process-activity.js";
 
 export interface PageSource {

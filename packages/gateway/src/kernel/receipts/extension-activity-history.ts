@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../protocol/types.js";
+import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../../protocol/types.js";
 /** This module must stay free of runtime imports: it is loaded in a worker thread
  * under `node --experimental-strip-types`, which does not resolve the `.js`
  * specifiers the rest of the Gateway uses. The bounded page

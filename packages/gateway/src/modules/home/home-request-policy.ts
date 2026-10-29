@@ -8,8 +8,8 @@ import {
   type SessionProjection,
 } from "../../kernel/pi/coding-agent.js";
 import { markAnthropicBlocks } from "../../episodic/cache-layout.js";
-import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/host/input-admission.js";
-import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/run/invocation-receipts.js";
+import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
+import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
 
 /*

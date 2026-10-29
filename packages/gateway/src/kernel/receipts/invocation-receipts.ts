@@ -1,9 +1,9 @@
 import type { SessionEntry } from "../pi/coding-agent.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "../settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "./delivery-tags.js";
 import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../../protocol/types.js";
 import { GatewayError } from "../../errors.js";
-import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../../sessions/resource-invocation.js";
-import { MAX_ID_BYTES, MAX_NAME_BYTES, validOrigin, validText, validTimestamp } from "../../sessions/receipt-fields.js";
+import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../resources/resource-invocation.js";
+import { MAX_ID_BYTES, MAX_NAME_BYTES, validOrigin, validText, validTimestamp } from "./receipt-fields.js";
 
 /** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {
@@ -28,7 +28,6 @@ export interface InvocationProjection {
 }
 
 /** The Home task result custom message a Home wake is bound to. */
-import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../host/input-admission.js";
 
 export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
 /** Canonical, non-context receipt family for Gateway invocation causality. */

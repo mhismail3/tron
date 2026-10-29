@@ -9,7 +9,7 @@ import { TrustService } from "../kernel/resources/trust-service.js";
 import type { SessionSnapshot, ExtensionRunActivity } from "../protocol/types.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { INVOCATION_RECEIPT_TYPE } from "../kernel/run/invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE } from "../kernel/receipts/invocation-receipts.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { RunMarkerStore } from "../kernel/run/run-markers.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";

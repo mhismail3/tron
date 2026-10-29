@@ -5,8 +5,8 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { freezeHomeLedgerWriter } from "../../../test-support/home-ledger-crash-frozen-owner.js";
 import { EPISODIC_DEFAULTS } from "../../episodic/episodic-contract.js";
 import { EpisodicMemoryError } from "../../errors.js";
-import { makeContextDeliveryReceipt } from "../../kernel/run/context-delivery-receipts.js";
-import { makeInvocationReceipt } from "../../kernel/run/invocation-receipts.js";
+import { makeContextDeliveryReceipt } from "../../kernel/receipts/context-delivery-receipts.js";
+import { makeInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeTaskStore, taskIntentDigest, type HomeTaskRecord } from "./home-task-store.js";
 

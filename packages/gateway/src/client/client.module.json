@@ -4,6 +4,7 @@
     "**"
   ],
   "dependsOn": [
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/receipts"
   ]
 }

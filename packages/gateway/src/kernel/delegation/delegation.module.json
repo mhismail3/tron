@@ -43,8 +43,9 @@
     "subagent-artifact-status.ts"
   ],
   "dependsOn": [
-    "gateway/pi",
+    "gateway/extension-activity",
     "gateway/host",
-    "gateway/extension-activity"
+    "gateway/pi",
+    "gateway/receipts"
   ]
 }

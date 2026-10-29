@@ -1,3 +1,4 @@
+import { SETTINGS_OUTCOME_MESSAGE } from "../receipts/delivery-tags.js";
 import { Type } from "../pi/ai.js";
 /** The settings model's vocabulary (docs/settings-model.md section 4).
  * Every key's behaviour is data here; nothing outside the schema names a key. */
@@ -184,7 +185,6 @@ export interface ChangeResult {
 export interface ApprovalActionItem { label: string; value: string; detail?: string; exact?: string }
 export interface ApprovalActionPreview { title: string; items: ApprovalActionItem[]; target: SettingsTarget }
 
-export const SETTINGS_OUTCOME_MESSAGE = "tron.settings-outcome.v1";
 
 /** One settled approval as its requester hears it (decision 4e6e8f54). Values are
  * display text; a redacted key carries none. `approved` means approved and applied. */

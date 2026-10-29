@@ -29,7 +29,7 @@ import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { DisplayOwner } from "../display/display-modules.js";
 import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
-import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
+import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../kernel/receipts/extension-activity-history.js";
 import { SESSION_ARCHIVE_CAPABILITY } from "../sessions/session-archive-store.js";
 import {
   PROCESS_ACTIVITY_CAPABILITY,
@@ -70,7 +70,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import { AsyncMutex } from "../util/async-mutex.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { admitPromptText, admitResourceInvocations } from "../sessions/resource-invocation.js";
+import { admitPromptText, admitResourceInvocations } from "../kernel/resources/resource-invocation.js";
 import type { AutomationService } from "../automations/automation-service.js";
 import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../automations/types.js";
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";

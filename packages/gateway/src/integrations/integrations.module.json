@@ -1,6 +1,8 @@
 {
   "layer": "L3",
-  "dependsOn": ["gateway/integrations-contract"],
+  "dependsOn": [
+    "gateway/integrations-contract"
+  ],
   "owns": [
     "**"
   ]

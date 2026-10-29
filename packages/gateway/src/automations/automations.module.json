@@ -4,9 +4,10 @@
     "**"
   ],
   "dependsOn": [
+    "gateway/automations-contract",
     "gateway/host",
-    "gateway/session-catalog",
     "gateway/pi",
-    "gateway/automations-contract"
+    "gateway/receipts",
+    "gateway/session-catalog"
   ]
 }

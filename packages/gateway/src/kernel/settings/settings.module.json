@@ -1,5 +1,12 @@
 {
   "layer": "L2",
-  "owns": ["**"],
-  "riskClass": ["kernel"]
+  "owns": [
+    "**"
+  ],
+  "riskClass": [
+    "kernel"
+  ],
+  "dependsOn": [
+    "gateway/receipts"
+  ]
 }

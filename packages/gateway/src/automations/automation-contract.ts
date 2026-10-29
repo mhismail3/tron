@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { GatewayError } from "../errors.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../modules/automations/identity.js";
-import { admitPromptText, admitResourceInvocation } from "../sessions/resource-invocation.js";
+import { admitPromptText, admitResourceInvocation } from "../kernel/resources/resource-invocation.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type {
   AutomationAction,

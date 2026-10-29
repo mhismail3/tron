@@ -12,7 +12,7 @@ import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
 import type { ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";

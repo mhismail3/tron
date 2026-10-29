@@ -10,7 +10,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { expect, it } from "vitest";
 import { TrustService } from "../resources/trust-service.js";
 import { PackageService } from "../../admin/package-service.js";
-import { contextDeliveryMetadataByEntry } from "../run/context-delivery-receipts.js";
+import { contextDeliveryMetadataByEntry } from "../receipts/context-delivery-receipts.js";
 import { subagentProcessesFromActivity } from "../projection/process-activity.js";
 import { RuntimeRegistry } from "../session/runtime-registry.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";

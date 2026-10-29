@@ -32,8 +32,8 @@ import { RequestSpan, runInRequestSpan, stage } from "../util/request-span.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
-import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../kernel/run/invocation-receipts.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
+import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../kernel/receipts/invocation-receipts.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "../kernel/receipts/extension-activity-history.js";
 import {
   HEAP_REFUSAL_RETRY_AFTER_MS,
   LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
@@ -43,7 +43,7 @@ import {
 } from "../kernel/session/runtime-registry.js";
 import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import { RuntimeSlot } from "../kernel/run/runtime-slot.js";
-import { invocationReceipts } from "../kernel/run/invocation-receipts.js";
+import { invocationReceipts } from "../kernel/receipts/invocation-receipts.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "../kernel/run/run-markers.js";
 import { toolSegmentId } from "../kernel/projection/projection.js";
 import { AutomationService } from "../automations/automation-service.js";

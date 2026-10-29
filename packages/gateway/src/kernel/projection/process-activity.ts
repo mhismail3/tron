@@ -13,7 +13,7 @@ import type {
   SessionProcessOverview,
   SessionProcessState,
 } from "../../protocol/types.js";
-import { boundedHistoryPage, extensionActivityReceipts, extensionReceiptActivity } from "../../sessions/extension-activity-history.js";
+import { boundedHistoryPage, extensionActivityReceipts, extensionReceiptActivity } from "../receipts/extension-activity-history.js";
 import {
   PROCESS_ACTIVITY_RECENT_MS,
   isActiveProcessLifecycle,

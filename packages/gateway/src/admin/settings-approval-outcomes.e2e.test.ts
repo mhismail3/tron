@@ -16,7 +16,8 @@ import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
-import { SETTINGS_OUTCOME_MESSAGE, type SettingsOutcomeMessage } from "../kernel/settings/tool-contract.js";
+import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
+import { type SettingsOutcomeMessage } from "../kernel/settings/tool-contract.js";
 
 /**
  * Home asks for approval in the chat and hears every outcome (#1642, decision
