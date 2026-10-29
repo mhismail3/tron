@@ -88,6 +88,10 @@ are not settings truth, and pending approvals never apply themselves.
 - Writer grants protect core keys; agent-writable runtime keys apply at their declared effect point, not all hot-reloaded.
   Keep other guidance in rules/skills/profile notes; track shrinking rigid settings by the [schema key count](../../../docs/settings-contract.md#keys).
 - Tool access is resolved at call time, never captured before settings start.
+- Expected-value preconditions compare the canonical current layer value, including
+  Session-owned fields, inside the target stripe. A history-publication failure after
+  ordinary setting effects reports an uncertain outcome: canonical command receipts
+  retain their replay fence rather than admitting the same command again.
 
 ## Entry points
 

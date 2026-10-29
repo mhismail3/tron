@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { ModelRuntime } from "../pi/coding-agent.js";
-import { GatewayError } from "../../errors.js";
+import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { redactProcessText } from "../projection/process-activity.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "../receipts/delivery-tags.js";
@@ -932,7 +932,10 @@ export class SettingsChangePath {
       throw failure.error;
     }
     const entries = applied.filter(done => !done.plan.target).map(done => shape(this.entry(target, done.plan, context, "applied", undefined, done.git)));
-    await this.record.append(entries);
+    await this.record.append(entries).catch(error => {
+      // Store effects already landed: retain the canonical receipt's replay fence.
+      throw asUncertainOutcome(error, "Settings applied but history publication failed");
+    });
     return applied.map(done => ({ ...done, changeId: entries.find(entry => entry.changeId === done.plan.changeId || entry.refersTo === done.plan.changeId)!.changeId }));
   }
 
@@ -1046,7 +1049,7 @@ export class SettingsChangePath {
     // restores "no decision of its own" rather than copying the parent's.
     const before = binding.store === "trust" ? stores.trust[qualifiers.project!]
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
-    if (request.expected !== undefined && binding.store !== "session" && !deepEqual(request.expected, before)) {
+    if (request.expected !== undefined && !deepEqual(request.expected, before)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, { current: (before ?? null) as never });
     }
     const defaultValue = keyDefault(key, qualifiers);

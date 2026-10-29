@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -8,7 +8,7 @@ import { setModelQueue } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import type { Resolution } from "../kernel/settings/tool-contract.js";
+import type { ChangeResult, Resolution } from "../kernel/settings/tool-contract.js";
 import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
 
 // Real Registry/Pi/provider/RPC boundaries, not declaration-table assertions.
@@ -64,6 +64,82 @@ async function setup() {
 const retryValue = (resolution: Resolution) => resolution.keys.find(row => row.key === "run.retry.maxRetries")?.value;
 
 describe("approved three-layer settings at real Gateway boundaries", () => {
+  it("applies, logs and undoes through receipts, refusing a second command and allowing Undo of Undo", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    const applied = await f.retryChange(slot, "set", 3) as unknown as ChangeResult;
+    const original = applied.changes[0]!.changeId;
+    const undo = { commandId: randomUUID(), changeId: original,
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model } };
+    const reverted = await f.service.invoke(f.client, "settings.undo", undo) as unknown as ChangeResult;
+    expect(retryValue(await f.resolve(slot, ["run.retry.maxRetries"]))).toBe(1);
+    expect(await f.service.invoke(f.client, "settings.undo", undo)).toEqual(reverted);
+    await expect(f.service.invoke(f.client, "settings.undo", { ...undo, commandId: randomUUID() })).rejects.toMatchObject({ code: "conflict" });
+    const redone = await f.service.invoke(f.client, "settings.undo", { ...undo, commandId: randomUUID(), changeId: reverted.changes[0]!.changeId }) as unknown as ChangeResult;
+    expect(retryValue(await f.resolve(slot, ["run.retry.maxRetries"]))).toBe(3);
+    const entries = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+    expect(entries.find(entry => entry.changeId === reverted.changes[0]!.changeId)?.undoOf).toBe(original);
+    expect(entries.find(entry => entry.changeId === redone.changes[0]!.changeId)?.undoOf).toBe(reverted.changes[0]!.changeId);
+    expect(entries.filter(entry => entry.changeId === reverted.changes[0]!.changeId)).toHaveLength(1);
+    evidence.push({ case: "receipt-apply-log-undo-redo", original, reverted, redone });
+  });
+
+  it("serializes concurrent expected-value Session changes and never overwrites the winner", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    const results = await Promise.allSettled([2, 3].map(value => f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
+      changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value, expected: null }],
+    })));
+    const winners = results.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof f.service.invoke>>> => result.status === "fulfilled");
+    expect(winners).toHaveLength(1);
+    const refusal = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(["busy", "conflict"]).toContain(refusal?.reason.code);
+    const winner = winners[0]!.value as unknown as ChangeResult;
+    await expect(f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
+      changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value: 4, expected: null }],
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect(retryValue(await f.resolve(slot, ["run.retry.maxRetries"]))).toBe(winner.changes[0]!.after);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries.filter(entry => entry.status === "applied")).toHaveLength(1);
+    evidence.push({ case: "expected-session-winner", winner });
+  });
+  it("refuses a stale expected value for a Session-owned field without changing its effective value", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    const before = (await f.resolve(slot, ["model.contextWindow"])).keys[0]!.value;
+    await expect(f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model, revision: slot.snapshot().revision },
+      changes: [{ key: "model.contextWindow", layer: "session", op: "set", value: 65536, expected: 1024,
+        qualifiers: { model: `${slot.snapshot().model!.provider}/${slot.snapshot().model!.id}` } }],
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect((await f.resolve(slot, ["model.contextWindow"])).keys[0]!.value).toEqual(before);
+  });
+
+  it("retains an uncertain receipt after a post-effect history publication failure and never replays the effect", async () => {
+    const f = await setup();
+    const history = f.settings.settingsChanges.record.path;
+    const settingsPath = join(f.agentDir, "settings.json");
+    expect(JSON.parse(await readFile(settingsPath, "utf8")).retry.maxRetries).toBe(1);
+    await mkdir(history, { recursive: true });
+    await chmod(history, 0o500);
+    const command = { commandId: randomUUID(), target: { kind: "global" },
+      changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 }] };
+    let failure: unknown;
+    try {
+      failure = await f.service.invoke(f.client, "settings.change", command).then(() => undefined, error => error);
+      expect(failure).toMatchObject({ message: expect.stringContaining(history) });
+      expect(JSON.parse(await readFile(settingsPath, "utf8")).retry.maxRetries).toBe(3);
+    } finally {
+      await chmod(history, 0o700);
+    }
+    await expect(f.service.invoke(f.client, "settings.change", command)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+    expect(failure).toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+  });
+
   it("Project beats a stored Session override in both RPC resolution and actual provider retries", async () => {
     const f = await setup();
     const slot = await f.create();
