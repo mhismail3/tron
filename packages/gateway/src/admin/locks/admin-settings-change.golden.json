@@ -519,6 +519,10 @@
               "before": 4,
               "changeId": "<id>",
               "commandId": "lock-command-0002",
+              "group": {
+                "id": "<id>",
+                "size": 1
+              },
               "key": "run.retry.maxRetries",
               "layer": "global",
               "op": "set",

@@ -41,6 +41,10 @@
         "decidedBy": {
           "kind": "ui",
           "id": "device:corpus-phone"
+        },
+        "group": {
+          "id": "476d9f60cfef2ec95233a7d7b3522c27a581074af96563bfdea5e07be808245e",
+          "size": 1
         }
       },
       {
@@ -69,7 +73,11 @@
           "risk": null
         },
         "status": "pending",
-        "requestId": "00000008-0000-4000-8000-000000000000"
+        "requestId": "00000008-0000-4000-8000-000000000000",
+        "group": {
+          "id": "f6952f368ad373f9425926a37d20dde00ccec026e55318112a4833e891dec6f9",
+          "size": 1
+        }
       },
       {
         "changeId": "00000005-0000-4000-8000-000000000000",
@@ -97,7 +105,11 @@
           "risk": null
         },
         "status": "pending",
-        "requestId": "00000006-0000-4000-8000-000000000000"
+        "requestId": "00000006-0000-4000-8000-000000000000",
+        "group": {
+          "id": "d56d27aec0b730126e47270d6083db9b8a47b6414217a8cf6fb827c8efe43492",
+          "size": 1
+        }
       },
       {
         "changeId": "00000004-0000-4000-8000-000000000000",
@@ -126,7 +138,11 @@
           "web": false,
           "risk": null
         },
-        "status": "applied"
+        "status": "applied",
+        "group": {
+          "id": "a1c6c1933b4eb248a2b582262e14d4c27f05ce49074c58ef3aeb3ce7e1f5bf3c",
+          "size": 1
+        }
       },
       {
         "changeId": "00000003-0000-4000-8000-000000000000",
@@ -154,7 +170,11 @@
           "web": false,
           "risk": null
         },
-        "status": "applied"
+        "status": "applied",
+        "group": {
+          "id": "d1624ea8cded69ba8ad9ff1db43365979598d9e8df8ac96a7f7694d5020f3d2c",
+          "size": 1
+        }
       },
       {
         "changeId": "00000002-0000-4000-8000-000000000000",
@@ -179,7 +199,11 @@
           "web": false,
           "risk": null
         },
-        "status": "applied"
+        "status": "applied",
+        "group": {
+          "id": "ac86b273ae98bf0726005b732719c742764c89921a716f044016125aed545858",
+          "size": 1
+        }
       },
       {
         "changeId": "00000001-0000-4000-8000-000000000000",
@@ -204,7 +228,11 @@
           "web": false,
           "risk": null
         },
-        "status": "applied"
+        "status": "applied",
+        "group": {
+          "id": "dd322f43d35ea16ed1d5291408d43de094d6d2790e4c1a4b2d50afaf193a49cd",
+          "size": 1
+        }
       }
     ],
     "resolved": {

@@ -15,12 +15,13 @@ registerHooks({
 });
 const [root] = process.argv.slice(2);
 const tronHome = join(root, "tron"), agentDir = join(tronHome, "agent");
-const request = JSON.parse(await fs.readFile(join(root, "history-crash-request.json"), "utf8"));
+const { command, segmentEntries, cutSegment } = JSON.parse(await fs.readFile(join(root, "history-crash-request.json"), "utf8"));
+if (![2, 4].includes(segmentEntries) || !["000000.jsonl", "000001.jsonl"].includes(cutSegment)) throw new Error("Invalid history crash fixture");
 let registry;
 const rename = fs.rename;
 fs.rename = async (from, to) => {
   await rename(from, to);
-  if (String(to) === join(tronHome, "gateway", "settings", "changes", "000001.jsonl")) {
+  if (String(to) === join(tronHome, "gateway", "settings", "changes", cutSegment)) {
     // The segment replacement is visible, but its directory/index transaction
     // is not complete. Release only this fixture's workspace lease; never age a
     // foreign lease, freeze the process, or let the mutation finish.
@@ -53,7 +54,7 @@ registry = await createTestRegistry({ agentDir, tronHome, trust, modelRuntimeFac
   broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
 await registry.initialize();
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime }));
-const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome, 2), new SettingsApprovals(tronHome), {});
+const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome, segmentEntries), new SettingsApprovals(tronHome), {});
 registry.setSettings(settingsModel, settingsChanges);
 await settingsChanges.start();
 const service = new GatewayService({ display: displayOwnerOf(registry),
@@ -61,5 +62,5 @@ const service = new GatewayService({ display: displayOwnerOf(registry),
   modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
   globalProviderResources: { withStableSnapshot: async operation => operation(), requestReload: () => {} },
 });
-await service.invoke({ id: "phone", identity: "device:phone", isLocal: false }, "settings.change", request);
+await service.invoke({ id: "phone", identity: "device:phone", isLocal: false }, "settings.change", command);
 throw new Error("The settings history crash cut was not reached");
