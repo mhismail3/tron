@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
@@ -13,13 +13,13 @@ import { readIOSBuildsFeed } from "./ios-builds-feed.js";
 
 interface Grant { version: 1; executableDigest: string; identity: string; permissions: AppPermissions; revision: string; device: string }
 interface Consent { id: string; contentRevision: string; executableDigest: string; identity: string; device: string; expires: number }
-/** One mutation lane owns data admission with file/grant changes. Signed prompt
+/** One mutation lane owns data admission with file/grant changes. One-use prompt
  * tokens are process-local, bounded, expiring and never an agent capability. */
 export class AppsFolderStore {
   readonly index: AppsFolderIndex;
   private readonly data: AppDataStore;
   private readonly mutex = new AsyncMutex();
-  private readonly signingKey = randomBytes(32);
+  private readonly prompts = new Map<string, Consent>();
   constructor(private readonly workspace: TronWorkspace, private readonly tronHome: string, changed?: (revision: string) => void) {
     this.index = new AppsFolderIndex(workspace, changed); this.data = new AppDataStore(workspace);
   }
@@ -55,18 +55,21 @@ export class AppsFolderStore {
     return entry.permissions.data !== "none" || entry.permissions.feeds.length > 0 || entry.permissions.network.length > 0;
   }
   private token(consent: Consent): string {
-    const payload = Buffer.from(JSON.stringify(consent)).toString("base64url");
-    return `${payload}.${createHmac("sha256", this.signingKey).update(payload).digest("base64url")}`;
+    for (const [token, prompt] of this.prompts) if (prompt.expires < Date.now()) this.prompts.delete(token);
+    if (this.prompts.size >= 256) throw new GatewayError("busy", "Too many access prompts are pending; close them or wait for expiry", true);
+    const token = randomBytes(32).toString("base64url");
+    this.prompts.set(token, consent);
+    return token;
+  }
+  private invalidatePrompts(id: string): void {
+    for (const [token, prompt] of this.prompts) if (prompt.id === id) this.prompts.delete(token);
   }
   private readToken(token: string, device: string): Consent {
-    if (token.length > 4096) throw new GatewayError("invalid_request", "Invalid access prompt");
-    const [payload, signature, extra] = token.split(".");
-    if (!payload || !signature || extra) throw new GatewayError("invalid_request", "Invalid access prompt");
-    const expected = createHmac("sha256", this.signingKey).update(payload).digest();
-    const supplied = Buffer.from(signature, "base64url");
-    if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) throw new GatewayError("auth_required", "Access prompt expired; open again");
-    const consent = JSON.parse(Buffer.from(payload, "base64url").toString()) as Consent;
-    if (consent.device !== device || consent.expires < Date.now()) throw new GatewayError("auth_required", "Access prompt expired; open again");
+    const consent = this.prompts.get(token);
+    if (!consent || consent.device !== device || consent.expires < Date.now()) throw new GatewayError("auth_required", "Access prompt expired; open again");
+    // Consume before any await. A new command ID is not a new consent tap;
+    // transport replay of the accepted command returns its original receipt.
+    this.invalidatePrompts(consent.id);
     return consent;
   }
   async open(id: string, contentRevision: string, device: string) {
@@ -95,6 +98,7 @@ export class AppsFolderStore {
     });
   }
   private async removeGrant(id: string): Promise<void> {
+    this.invalidatePrompts(id);
     const path = await this.permissionPath(id);
     await rm(path, { force: true });
     let directory;
@@ -152,5 +156,7 @@ export class AppsFolderStore {
       return { rowKey, deleted: true };
     });
   }
-  async dispose(): Promise<void> { await this.index.dispose(); }
+  async dispose(): Promise<void> {
+    await this.mutex.run(async () => { this.prompts.clear(); await this.index.dispose(); });
+  }
 }

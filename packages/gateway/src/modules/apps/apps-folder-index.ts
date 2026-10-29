@@ -2,7 +2,7 @@ import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { backgroundWork } from "../../background-work.js";
 import { GatewayError } from "../../errors.js";
-import { watchFolder, type FolderWatchHandle } from "../../util/folder-watch.js";
+import { watchFolder, FOLDER_WATCH_RETRY_MS, FOLDER_RECONCILE_INTERVAL_MS, type FolderWatchHandle } from "../../util/folder-watch.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { APP_ID, hash, readAppEntry, type AppEntry, type AppRow } from "./apps-folder-format.js";
 
@@ -17,38 +17,59 @@ export class AppsFolderIndex {
   private pending = new Set<string>();
   private full = true;
   private scheduled: NodeJS.Timeout | undefined;
+  private watchRetry: NodeJS.Timeout | undefined;
   private unregister?: () => void;
   private closed = false;
   private started = false;
   private generation = 0;
   private unavailable?: unknown;
-  constructor(private readonly workspace: TronWorkspace, private readonly changed: (revision: string) => void = () => {}) {}
+  constructor(private readonly workspace: TronWorkspace, private readonly changed: (revision: string) => void = () => {},
+    private readonly observe: typeof watchFolder = watchFolder) {}
 
   private async root(): Promise<string> {
-    const files = await this.workspace.filesRoot();
+    const files = await this.workspace.filesRoot().catch(error => {
+      this.watcher?.close(); this.watcher = undefined; this.watchedIdentity = undefined;
+      this.full = true; this.retryObservation(); throw error;
+    });
     const info = await lstat(files), identity = `${info.dev}:${info.ino}`;
     if (identity !== this.watchedIdentity) {
       this.watcher?.close(); this.watcher = undefined; this.watchedIdentity = undefined; this.full = true;
     }
-    if (!this.watcher && !this.closed) {
-      this.watcher = watchFolder({ root: files, onEvent: path => {
-        if (path !== null && path !== "apps" && !path.startsWith("apps/")) return;
-        const entry = path?.split("/")[1];
-        if (!entry || this.pending.size >= 256) { this.full = true; this.pending.clear(); }
-        else this.pending.add(entry);
-        this.schedule();
-      }, onReset: () => {
-        this.watcher?.close(); this.watcher = undefined; this.watchedIdentity = undefined;
-        this.full = true; this.schedule();
-      } });
-      this.watchedIdentity = identity;
+    if (!this.watcher && !this.closed && !this.watchRetry) {
+      const registration: { handle?: FolderWatchHandle } = {};
+      try {
+        const handle = this.observe({ root: files, onEvent: path => {
+          if (this.closed || this.watcher !== registration.handle) return;
+          if (path !== null && path !== "apps" && !path.startsWith("apps/")) return;
+          const entry = path?.split("/")[1];
+          if (!entry || this.pending.size >= 256) { this.full = true; this.pending.clear(); }
+          else this.pending.add(entry);
+          this.schedule();
+        }, onReset: () => {
+          if (this.closed || this.watcher !== registration.handle) return;
+          registration.handle?.close(); this.watcher = undefined; this.watchedIdentity = undefined;
+          this.full = true; this.retryObservation();
+        } });
+        registration.handle = handle; this.watcher = handle; this.watchedIdentity = identity;
+      } catch { this.full = true; this.retryObservation(); }
     }
+    // The watch backend being down does not make an inspected filesystem cut
+    // empty/unavailable. Reads scan while the owner repairs observation.
+    if (!this.watcher) this.full = true;
     const root = join(files, "apps");
     try {
       const info = await lstat(root);
       if (!info.isDirectory() || info.isSymbolicLink()) throw new GatewayError("conflict", "Apps folder is not a safe directory");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     return root;
+  }
+  private retryObservation(): void {
+    if (this.closed || this.watchRetry) return;
+    this.watchRetry = setTimeout(() => {
+      this.watchRetry = undefined; this.full = true;
+      void this.reconcile().catch(() => { /* root() owns the next observation attempt. */ });
+    }, FOLDER_WATCH_RETRY_MS);
+    this.watchRetry.unref();
   }
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.lane.then(operation); this.lane = result.then(() => {}, () => {}); return result;
@@ -65,7 +86,7 @@ export class AppsFolderIndex {
     if (this.closed) throw new GatewayError("conflict", "Apps index is closed");
     if (this.started) return;
     this.started = true;
-    this.unregister = backgroundWork.register({ name: "apps.reconcile", intervalMs: 30 * 60_000,
+    this.unregister = backgroundWork.register({ name: "apps.reconcile", intervalMs: FOLDER_RECONCILE_INTERVAL_MS,
       slice: async () => { this.full = true; await this.reconcile(); } });
     await this.reconcile();
   }
@@ -147,6 +168,7 @@ export class AppsFolderIndex {
     this.closed = true; this.generation++;
     this.watcher?.close(); this.watcher = undefined; this.unregister?.();
     if (this.scheduled) clearTimeout(this.scheduled);
+    if (this.watchRetry) clearTimeout(this.watchRetry);
     await this.lane; this.entries.clear(); this.pending.clear();
   }
 }

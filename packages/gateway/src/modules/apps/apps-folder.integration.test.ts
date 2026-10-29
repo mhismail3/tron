@@ -1,5 +1,9 @@
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import { watch, type FSWatcher } from "node:fs";
+import { TronWorkspace } from "../../workspace/tron-workspace.js";
+import { AppsFolderIndex } from "./apps-folder-index.js";
+import type { FolderWatchRequest } from "../../util/folder-watch.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -135,6 +139,19 @@ it("never opens a FIFO or executes an unsupported web/network entry and observes
   expect((await f.rpc("apps.open", { id: replaced.id, expectedContentRevision: replaced.contentRevision })).source).toContain("replacement");
 });
 
+it("does not restore revoked access when an old consent token is replayed with a fresh command id", async () => {
+  const f = await fixture();
+  await mkdir(join(f.apps, "replay"));
+  await writeFile(join(f.apps, "replay/Main.swift"), "import SwiftUI");
+  await writeFile(join(f.apps, "replay/app.json"), JSON.stringify({ permissions: { data: "readWrite" } }));
+  const row = (await f.rpc("apps.catalog")).rows[0], request = { id: row.id, expectedContentRevision: row.contentRevision };
+  const prompt = await f.rpc("apps.open", request);
+  await f.rpc("apps.permissions.grant", { commandId: "replay-original-grant", token: prompt.token });
+  await f.rpc("apps.permissions.revoke", { commandId: "replay-revoke-grant", id: row.id });
+  await expect(f.rpc("apps.permissions.grant", { commandId: "replay-new-command", token: prompt.token })).rejects.toMatchObject({ code: "auth_required" });
+  expect((await f.rpc("apps.open", request)).kind).toBe("permissionRequired");
+});
+
 it("initializes only the named app data directory even when its id matches an ancestor name", async () => {
   const f = await fixture();
   for (const id of ["state", "apps"]) {
@@ -206,6 +223,65 @@ it("does not silently truncate 1,001 folders and rejects a cursor across a chang
   await rm(join(f.apps, "entry-0"), { recursive: true });
   await waitFor(async () => (await f.rpc("apps.catalog")).revision !== first.revision ? true : undefined, "catalog revision after external deletion");
   await expect(f.rpc("apps.catalog", { cursor: first.nextCursor })).rejects.toMatchObject({ diagnosticReason: "catalog_changed" });
+});
+
+it("keeps the replacement real watcher alive when a retired watch reports a delayed reset", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-watch-"))); roots.push(root);
+  const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
+  const apps = join(root, "tron/workspace/files/apps");
+  const requests: FolderWatchRequest[] = [], watchers: FSWatcher[] = [], active = new Set<FSWatcher>();
+  let secondClosed = false, secondChanged = false;
+  const index = new AppsFolderIndex(workspace, () => {}, request => {
+    requests.push(request);
+    const watcher = watch(request.root, { recursive: true, persistent: false }, (_event, filename) => {
+      request.onEvent(typeof filename === "string" ? filename : null);
+      if (watchers[1] === watcher) secondChanged = true;
+    });
+    watcher.on("error", () => request.onReset("error"));
+    watcher.on("close", () => { active.delete(watcher); if (watchers[1] === watcher) secondClosed = true; });
+    watchers.push(watcher); active.add(watcher);
+    return { close: () => watcher.close() };
+  });
+  try {
+    await mkdir(apps, { recursive: true, mode: 0o700 });
+    await index.catalog();
+    requests[0]!.onReset("error");
+    await waitFor(() => watchers.length >= 2 ? true : undefined, "replacement watch attached");
+    requests[0]!.onReset("error");
+    await mkdir(join(apps, "new-entry"));
+    await waitFor(() => secondClosed || secondChanged ? true : undefined, "real watcher closes or observes new entry");
+    expect(secondClosed).toBe(false);
+    await writeFile(join(apps, "new-entry/note.txt"), "new content");
+    await waitFor(async () => (await index.catalog()).rows.some(row => row.id === "new-entry" && row.status.kind === "ready") ? true : undefined, "replacement watcher membership");
+    await index.dispose();
+    await waitFor(() => active.size === 0 ? true : undefined, "all real watch handles closed");
+  } finally { await index.dispose(); for (const watcher of active) watcher.close(); await workspace.dispose(); }
+});
+
+it("serves the real filesystem cut and recovers observation after the first watcher construction fails", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-watch-start-"))); roots.push(root);
+  const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
+  const apps = join(root, "tron/workspace/files/apps");
+  let attempts = 0, observed = false;
+  const watchers: FSWatcher[] = [];
+  const index = new AppsFolderIndex(workspace, () => {}, request => {
+    if (++attempts === 1) throw new Error("Injected backend construction failure");
+    const watcher = watch(request.root, { recursive: true, persistent: false }, (_event, filename) => {
+      observed = true; request.onEvent(typeof filename === "string" ? filename : null);
+    });
+    watcher.on("error", () => request.onReset("error")); watchers.push(watcher);
+    return { close: () => watcher.close() };
+  });
+  try {
+    await mkdir(join(apps, "note"), { recursive: true, mode: 0o700 });
+    await writeFile(join(apps, "note/note.txt"), "before recovery");
+    expect((await index.catalog()).rows).toHaveLength(1);
+    await waitFor(() => watchers.length ? true : undefined, "watch construction recovers without a read");
+    await writeFile(join(apps, "note/note.txt"), "after recovery");
+    await waitFor(() => observed ? true : undefined, "recovered OS watcher observes external edit");
+    const row = (await index.catalog()).rows[0]!;
+    expect((await index.requireEntry("note", row.contentRevision)).files.get("note.txt")!.toString()).toBe("after recovery");
+  } finally { await index.dispose(); for (const watcher of watchers) watcher.close(); await workspace.dispose(); }
 });
 
 it("keeps unsafe names and entry links as isolated broken rows, and watches a repair without restarting", async () => {

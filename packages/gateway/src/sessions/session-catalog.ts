@@ -1,4 +1,4 @@
-import { watchFolder } from "../util/folder-watch.js";
+import { watchFolder, FOLDER_WATCH_RETRY_MS, FOLDER_RECONCILE_INTERVAL_MS } from "../util/folder-watch.js";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { backgroundWork, type BackgroundWorkRegistration } from "../background-work.js";
@@ -73,7 +73,7 @@ const CATALOG_EVENT_PENDING_PATH_LIMIT = 256;
 /** The backstop for every change the watcher cannot see: an event the platform
  * coalesced, dropped or reported while the watcher was restarting is repaired
  * by reading the folder's own cut this often. */
-export const CATALOG_RECONCILE_INTERVAL_MS = 30 * 60_000;
+export const CATALOG_RECONCILE_INTERVAL_MS = FOLDER_RECONCILE_INTERVAL_MS;
 
 /** An incomplete pass publishes nothing, so every read refuses retryably until a
  * pass publishes. A transient reason (a transcript mid-append, a file being
@@ -87,7 +87,7 @@ const CATALOG_INCOMPLETE_RETRY_ATTEMPTS = 3;
 /** How soon a watcher that could not start is tried again: a root that is
  * missing now (a fresh installation, a folder being moved back) is watched as
  * soon as it exists instead of at the next reconciliation. */
-const CATALOG_WATCH_RETRY_MS = 5_000;
+const CATALOG_WATCH_RETRY_MS = FOLDER_WATCH_RETRY_MS;
 
 /** How many tail reads one change costs before its row is re-derived from the
  * whole file. A Pi append that lands inside the read is the transient this

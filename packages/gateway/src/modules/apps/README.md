@@ -14,7 +14,9 @@ retired source owners remain incomplete.
   `files/apps/`. Entry errors are row values; loose files never create rows.
   It watches the files parent so removing/replacing the apps root is visible.
   Filesystem events are hints, reconciled on one serial lane. The shared
-  background scheduler owns the reconciliation backstop. Disposal closes the
+  background scheduler owns the reconciliation backstop. Backend outages retain
+  inspected membership, retry observation at the shared five-second cadence and
+  fence delayed callbacks to their original watcher handle. Disposal closes the
   watcher and joins reads. The index retains metadata, not source/assets.
 - `apps-folder-format.ts` reads bounded regular files without following links,
   infers the optional manifest and computes content/executable identities.
@@ -22,7 +24,9 @@ retired source owners remain incomplete.
 - `AppsFolderStore` serializes grant and content admission with Gateway file
   deletion and data writes. An open revalidates bytes instead of trusting the
   index. Prompt tokens bind exact content, folder identity, device and expiry.
-  Gateway-only grants live under `state/app-permissions/`; no grant tool exists.
+  Tokens are one-use, expire after ten minutes, are bounded to 256 live prompts,
+  and are invalidated on grant/revoke. Gateway-only grants live under
+  `state/app-permissions/`; no grant tool exists.
 - `AppDataStore` keeps the existing `data.sqlite` schema, revision/CAS, JSON/key/
   whole-state bounds and short-lived SQLite connections. Files never determine
   data lifetime. Losing an established database is not revision zero.
@@ -55,6 +59,10 @@ composition name, `tron-swift-apps`.
   deletion through staging outside the catalog. It preserves `state/apps/<id>/`.
   Broken names are identified by opaque row keys, not unchecked executable ids.
   After a committed rename, uncertain cleanup is a receipt uncertainty fence.
+  An external replacement between validation and rename can still move the newer
+  directory into staging before identity mismatch is detected. Exact no-clobber
+  restoration is unresolved: do not deploy or enable client deletion from this
+  checkpoint.
 
 There are no list/pending/review/install/legacy RPC aliases. State management,
 metadata editing, agent `app_data`, Apps change broadcasting and paired protocol

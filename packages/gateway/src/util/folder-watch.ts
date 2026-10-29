@@ -1,5 +1,8 @@
 import { watch } from "node:fs";
 
+export const FOLDER_WATCH_RETRY_MS = 5_000;
+export const FOLDER_RECONCILE_INTERVAL_MS = 30 * 60_000;
+
 export interface FolderWatchRequest {
   root: string;
   onEvent(filename: string | null): void;
