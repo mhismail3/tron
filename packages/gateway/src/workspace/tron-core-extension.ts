@@ -6,6 +6,8 @@ import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import { createJevExtension } from "../knowledge/jev-extension.js";
 import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
+const APPS_FOLDER_INSTRUCTION = "Write reusable apps and artifacts under files/apps/<id>/ in Tron's internal workspace. app.json is optional. Files determine Apps membership; deleting files preserves saved app data. Ask separately before clearing data. Runtime access is granted only through the native first-open prompt, never by agents or app-authored grants.";
+
 const CONNECTIONS_TOOL_PARAMETERS = Type.Object({ action: Type.Literal("list") }, { additionalProperties: false });
 
 export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, tools: readonly string[]): string {
@@ -17,6 +19,7 @@ export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, too
     workspace.available
       ? "Use files/ under the internal workspace for ordinary durable documents. state/<owner>/ is reserved for capability-owned data; use its owning interface rather than editing managed state directly. Create subdirectories only when needed."
       : "Do not recreate or substitute for the unavailable internal workspace. Explain the limitation and continue unrelated work in the current directory when safe.",
+    ...(workspace.available ? [APPS_FOLDER_INSTRUCTION] : []),
     "Keep canonical sessions, settings, credentials, installed resources, and existing extension stores with their current owners. Do not store secrets here, automatically collect project contents, or load the internal workspace as global instructions. It is not a sandbox or extra authorization.",
     "Perform authorized routine Mac work with available tools, and communicate results in chat. Explicit authorization and existing safety restrictions still apply. Rebuilds, restarts, updates, rollbacks, promotions, and deployments of the Gateway hosting this session, or of any Stable or production Gateway, remain manual user actions; never initiate them yourself. A repository's own instructions may permit managing an isolated development Gateway.",
   ];
@@ -38,7 +41,7 @@ function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor):
     const end = task.indexOf(HANDOFF_END);
     if (end >= 0) task = task.slice(end + HANDOFF_END.length);
   }
-  const handoff = `${HANDOFF_START}You are a delegated worker for Tron. Keep the working directory supplied by your launcher. Tron's separate internal workspace is ${JSON.stringify(workspace.root)} (${workspace.available ? "available" : "unavailable; do not recreate or substitute for it"}). Ordinary durable global documents belong in files/; state/<owner>/ is capability-owned. Do not copy projects, sessions, settings, credentials, or existing extension stores here. Read-only tasks remain read-only. Use only tools actually supplied; report to your parent rather than assuming iOS presentation tools. Pass these workspace facts to any further delegated tasks. Lifecycle transitions of the hosting or any Stable/production Gateway remain manual user actions; follow repository instructions for an isolated development Gateway.${HANDOFF_END}`;
+  const handoff = `${HANDOFF_START}You are a delegated worker for Tron. Keep the working directory supplied by your launcher. Tron's separate internal workspace is ${JSON.stringify(workspace.root)} (${workspace.available ? "available" : "unavailable; do not recreate or substitute for it"}). Ordinary durable global documents belong in files/; state/<owner>/ is capability-owned.${workspace.available ? ` ${APPS_FOLDER_INSTRUCTION}` : ""} Do not copy projects, sessions, settings, credentials, or existing extension stores here. Read-only tasks remain read-only. Use only tools actually supplied; report to your parent rather than assuming iOS presentation tools. Pass these workspace facts to any further delegated tasks. Lifecycle transitions of the hosting or any Stable/production Gateway remain manual user actions; follow repository instructions for an isolated development Gateway.${HANDOFF_END}`;
   if (Buffer.byteLength(handoff, "utf8") > 2_048) throw new Error("Tron workspace handoff exceeds its 2 KiB bound; supply explicit child context instead");
   return handoff + task;
 }

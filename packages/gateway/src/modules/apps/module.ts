@@ -3,18 +3,20 @@ import type { JsonValue } from "../../protocol/types.js";
 import { integer, rejectUnknownFields, string } from "../../util/validation.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { AppsFolderStore } from "./apps-folder-store.js";
+import { createAppDataExtension } from "./app-data-extension.js";
 import type { AppDataCommit } from "./app-data-store.js";
 
 /** Files are the only membership authority. No offer or install admission. */
 export function createAppsModule(): ModuleDescriptor { return {
   name: "tron-swift-apps",
   purpose: "Indexes folder-backed apps and artifacts; owns scoped access and saved data.",
-  tools: [], commands: [], dependsOn: [workspaceModule],
+  tools: ["app_data"], commands: [], dependsOn: [workspaceModule],
   start: host => {
     const store = new AppsFolderStore(host.contract(workspaceModule), host.tronHome);
     const id = (params: Record<string, unknown>) => string(params.id, "id", { max: 80 });
     const revision = (params: Record<string, unknown>) => string(params.expectedContentRevision, "expectedContentRevision", { max: 64 });
     return {
+      extension: () => createAppDataExtension(store),
       stop: () => store.dispose(),
       capabilities: ["apps-folder.v1"],
       rpc: {
@@ -38,6 +40,14 @@ export function createAppsModule(): ModuleDescriptor { return {
         "apps.deleteFiles": { kind: "mutation", handle: async params => {
           rejectUnknownFields(params, ["commandId", "rowKey", "expectedContentRevision"], "apps.deleteFiles");
           return await store.deleteFiles(string(params.rowKey, "rowKey", { max: 64 }), revision(params)) as unknown as JsonValue;
+        } },
+        "apps.state": { kind: "read", handle: async params => {
+          rejectUnknownFields(params, ["id"], "apps.state");
+          return await store.managedState(id(params)) as unknown as JsonValue;
+        } },
+        "apps.reset": { kind: "mutation", handle: async params => {
+          rejectUnknownFields(params, ["commandId", "id", "expectedRevision", "confirmed"], "apps.reset");
+          return await store.clearData(id(params), integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER), params.confirmed) as unknown as JsonValue;
         } },
         "apps.commit": { kind: "mutation", handle: async params => {
           rejectUnknownFields(params, ["commandId", "id", "expectedContentRevision", "grantRevision", "expectedRevision", "set", "remove"], "apps.commit");

@@ -1,5 +1,5 @@
 import { lstatSync } from "node:fs";
-import { lstat, mkdir, open } from "node:fs/promises";
+import { lstat, mkdir, open, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { syncDurably } from "../../util/durable-json.js";
 import { DatabaseSync } from "node:sqlite";
@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { GatewayError } from "../../errors.js";
 import type { JsonValue } from "../../protocol/types.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
-import { APP_ID } from "./apps-folder-format.js";
+import { APP_ID, hash } from "./apps-folder-format.js";
 
 const SWIFT_APP_LIMITS = {
   keyBytes: 256,
@@ -87,6 +87,44 @@ export class AppDataStore {
       if (depth === 2 && created) this.withDatabase(path, () => {}, true);
     }
     return path;
+  }
+  async list(cursor?: string) {
+    let expectedInventory: string | undefined, afterId: string | undefined;
+    if (cursor !== undefined) {
+      let cut: unknown;
+      try { cut = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")); } catch { throw new GatewayError("invalid_request", "Invalid state cursor"); }
+      if (!Array.isArray(cut) || cut.length !== 2 || typeof cut[0] !== "string" || !/^[a-f0-9]{64}$/.test(cut[0]) || typeof cut[1] !== "string" || !APP_ID.test(cut[1])) throw new GatewayError("invalid_request", "Invalid state cursor");
+      [expectedInventory, afterId] = cut as [string, string];
+    }
+    const descriptor = await this.workspace.describe();
+    if (!descriptor.available) throw new GatewayError("conflict", "Tron workspace is unavailable");
+    let root = descriptor.root;
+    for (const part of ["state", "apps"]) {
+      root = join(root, part);
+      try {
+        const info = await lstat(root);
+        if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o700) throw new GatewayError("conflict", "Unsafe app data root");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (await this.workspace.featureInitialized("apps")) throw new GatewayError("conflict", "Established app data root is missing");
+        return { states: [] as Array<{ id: string; bytes: number | null; error?: string }> };
+      }
+    }
+    const allIds = (await readdir(root)).filter(id => APP_ID.test(id)).sort();
+    const inventory = hash(JSON.stringify(allIds));
+    if (expectedInventory !== undefined && expectedInventory !== inventory) throw new GatewayError("conflict", "Saved-data inventory changed; start again without a cursor", true, { reason: "state_inventory_changed" });
+    const ids = allIds.filter(id => afterId === undefined || id > afterId);
+    const states: Array<{ id: string; bytes: number | null; error?: string }> = [];
+    for (const id of ids.slice(0, 50)) {
+      try {
+        const directory = await lstat(join(root, id));
+        if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid?.() || (directory.mode & 0o777) !== 0o700) throw new Error("Unsafe data directory");
+        const database = await lstat(join(root, id, "data.sqlite"));
+        if (!database.isFile() || database.isSymbolicLink() || database.uid !== process.getuid?.()) throw new Error("Unsafe data file");
+        states.push({ id, bytes: database.size });
+      } catch { states.push({ id, bytes: null, error: "Saved data is missing or unsafe; it was left unchanged" }); }
+    }
+    return { states, ...(ids.length > 50 ? { nextCursor: Buffer.from(JSON.stringify([inventory, ids[49]!])).toString("base64url") } : {}) };
   }
   async state(appId: string): Promise<SwiftAppStateSnapshot> {
     return this.withDatabase(await this.directory(appId), database => this.snapshot(database, appId));

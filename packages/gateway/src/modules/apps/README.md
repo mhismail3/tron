@@ -21,8 +21,7 @@ retired source owners remain incomplete.
 - `apps-folder-format.ts` reads bounded regular files without following links,
   infers the optional manifest and computes content/executable identities.
   Unsupported web/network entries are visible but blocked, never unsandboxed.
-- `AppsFolderStore` serializes grant and content admission with Gateway file
-  deletion and data writes. An open revalidates bytes instead of trusting the
+- `AppsFolderStore` serializes grant/content admission and saved-data management. An open revalidates bytes instead of trusting the
   index. Prompt tokens bind exact content, folder identity, device and expiry.
   Tokens are one-use, expire after ten minutes, are bounded to 256 live prompts,
   and are invalidated on grant/revoke. Gateway-only grants live under
@@ -55,18 +54,25 @@ composition name, `tron-swift-apps`.
 - `apps.commit {commandId, id, expectedContentRevision, grantRevision,
   expectedRevision, set?, remove?}`: checks live write authority before the SQLite
   transaction. Accepted duplicates return the original durable receipt.
-- `apps.deleteFiles {commandId, rowKey, expectedContentRevision}`: CAS file-only
-  deletion through staging outside the catalog. It preserves `state/apps/<id>/`.
-  Broken names are identified by opaque row keys, not unchecked executable ids.
-  After a committed rename, uncertain cleanup is a receipt uncertainty fence.
-  An external replacement between validation and rename can still move the newer
-  directory into staging before identity mismatch is detected. Exact no-clobber
-  restoration is unresolved: do not deploy or enable client deletion from this
-  checkpoint.
+- `apps.deleteFiles {commandId, rowKey, expectedContentRevision}`: validates the
+  current row without mutation, then returns `unsupported`. Client deletion is
+  disabled: Node's pathname rename cannot safely restore a raced external
+  replacement without a native no-replace transaction. No directory is moved.
+- `apps.state {id}` reads saved values separately from membership.
+  `apps.reset {commandId, id, expectedRevision, confirmed:true}` clears only those
+  saved values with revision CAS and separate explicit authorization. Neither
+  operation creates an Apps row or grants executable access.
+- The built-in `app_data` tool lists at most 50 saved-data ids/byte counts/orphan
+  flags per page. Inventory cursors bind saved-data id membership and refuse
+  changed inventories; byte counts/orphan flags are live observations. It reads
+  one state, seeds values using revision CAS, and clears values only with separate
+  explicit confirmation. Unsafe state remains intact.
+  It does not grant access or manage files. Built-in operating context and
+  delegated workspace handoff point writers to `files/apps/<id>/`, not a profile.
 
-There are no list/pending/review/install/legacy RPC aliases. State management,
-metadata editing, agent `app_data`, Apps change broadcasting and paired protocol
-advancement are incomplete and must land atomically with their consumers.
+There are no list/pending/review/install/legacy RPC aliases. Metadata editing,
+Apps change broadcasting and paired protocol advancement are incomplete and must
+land atomically with their consumers.
 The current bundle reader uses a conservative 32 MiB bound; preserving larger
 existing display-artifact limits requires the streaming materialization boundary.
 
@@ -89,6 +95,6 @@ scripts/tron-node exec npm --prefix packages/gateway run lint
 ```
 
 The folder suite crosses a real RuntimeRegistry, GatewayService, receipt store,
-filesystem watchers and SQLite. It does not prove display publication, the native
+filesystem watchers, a real Pi tool turn and SQLite. It does not prove display publication, the native
 interpreter, migration, UI, watcher overflow recovery or runner shutdown on revoke.
 Do not remove the old feed/interpreter/crash oracles before their replacements pass.

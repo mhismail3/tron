@@ -157,6 +157,10 @@ export class AppsFolderIndex {
       return entry;
     });
   }
+  async membership(ids: readonly string[]): Promise<ReadonlySet<string>> {
+    await this.initialize(); await this.reconcile();
+    return new Set(ids.filter(id => this.entries.has(id)));
+  }
   async refreshAll(): Promise<void> { this.full = true; await this.reconcile(); }
   async entryForDeletion(rowKey: string): Promise<AppEntry> {
     await this.initialize();

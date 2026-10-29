@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
@@ -125,35 +125,34 @@ export class AppsFolderStore {
       });
     });
   }
-  async deleteFiles(rowKey: string, expectedContentRevision: string) {
+  async listData(cursor?: string) {
     return this.mutex.run(async () => {
-      // Row keys bind directory identity, including broken foreign basenames.
+      const page = await this.data.list(cursor), ids = await this.index.membership(page.states.map(state => state.id));
+      return { ...page, states: page.states.map(state => ({ ...state, orphan: !ids.has(state.id) })) };
+    });
+  }
+  async managedState(id: string) { return this.mutex.run(() => this.data.state(id)); }
+  async seedData(input: AppDataCommit) {
+    // Agent data management is not app execution and confers no runtime grant.
+    return this.mutex.run(() => this.data.commit(input, async () => {}));
+  }
+  async clearData(id: string, expectedRevision: number, confirmed: unknown) {
+    if (confirmed !== true) throw new GatewayError("invalid_request", "Clearing saved app data requires separate explicit authorization");
+    return this.mutex.run(() => this.data.reset(id, expectedRevision));
+  }
+  async deleteFiles(rowKey: string, expectedContentRevision: string): Promise<never> {
+    return this.mutex.run(async () => {
       await this.index.reconcile();
-      const files = await this.workspace.filesRoot(), root = join(files, "apps");
       const entry = await this.index.entryForDeletion(rowKey);
-      const current = await readAppEntry(root, entry.name);
-      if (current.row.rowKey !== rowKey || current.row.contentRevision !== expectedContentRevision) throw new GatewayError("conflict", "Entry changed; refresh before deleting", true, { reason: "entry_changed" });
-      const staging = join(files, ".apps-staging");
-      try { await mkdir(staging, { mode: 0o700 }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-      const info = await lstat(staging);
-      if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o700) throw new GatewayError("conflict", "Unsafe Apps staging directory");
-      const retired = join(staging, randomUUID());
-      await rename(join(root, entry.name), retired);
-      try {
-        const renamed = await lstat(retired);
-        if (`${renamed.dev}:${renamed.ino}:${renamed.birthtimeMs}` !== entry.identity) {
-          throw new GatewayError("conflict", "An external replacement raced deletion; its files are retained in Apps staging");
-        }
-        // Renaming a symlink never follows or deletes its target.
-        if (APP_ID.test(entry.name)) await this.removeGrant(entry.name);
-        for (const path of [root, staging]) {
-          const directory = await open(path, "r");
-          try { await syncDurably(directory); } finally { await directory.close(); }
-        }
-        await rm(retired, { recursive: true, force: true });
-        await this.index.refreshAll();
-      } catch (error) { throw asUncertainOutcome(error, "App file deletion could not be verified"); }
-      return { rowKey, deleted: true };
+      const current = await readAppEntry(join(await this.workspace.filesRoot(), "apps"), entry.name);
+      if (current.row.rowKey !== rowKey || current.row.contentRevision !== expectedContentRevision) {
+        throw new GatewayError("conflict", "Entry changed; refresh before deleting", true, { reason: "entry_changed" });
+      }
+      // Node's pathname rename has no compare-and-rename or no-replace restore.
+      // Admission may refuse a stale request, but never moves any directory.
+      // Keep the receipt-backed endpoint inert until its filesystem owner can
+      // provide an atomic native transaction; do not mislabel relocation as CAS.
+      throw new GatewayError("unsupported", "Delete Files is disabled until Apps has a race-safe filesystem transaction. No files or saved data were changed.");
     });
   }
   async dispose(): Promise<void> {
