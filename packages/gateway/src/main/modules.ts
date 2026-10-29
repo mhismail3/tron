@@ -46,8 +46,9 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
   const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, signal => home.owner().activeTaskTargets(signal)), projectOptions));
+  const apps = createAppsModule();
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
-  return { home: home.owner, projects, providers, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
+  return { home: home.owner, projects, providers, apps, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,
     settlementModule,
     providers,
@@ -58,7 +59,7 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     projects,
     askUserModule,
     createDisplayModule(() => owners().display),
-    createAppsModule(),
+    apps,
     createNativeCaptureModule(() => owners().display),
     computerModule,
     createScheduleModule(() => owners().scheduleToolOperations),
@@ -73,5 +74,5 @@ export async function startGatewayModules(platform: Omit<GatewayHost, "contract"
   initTheme();
   const composition = gatewayModules(owners, projectOptions);
   const modules = await ModuleHost.start(composition.modules, platform, composition.runtimeOrder);
-  return { modules, home: composition.home, projects: modules.contract(composition.projects), recentModels: modules.contract(composition.providers) };
+  return { modules, home: composition.home, apps: modules.contract(composition.apps), projects: modules.contract(composition.projects), recentModels: modules.contract(composition.providers) };
 }

@@ -54,9 +54,16 @@ an app or feed neither installs a build nor claims the OS completed installation
 scripts/tron test gateway src/modules/apps/apps-folder.integration.test.ts
 scripts/tron test gateway src/modules/apps/apps-folder-runtime.integration.test.ts
 scripts/tron test gateway src/modules/apps/apps.store.lock.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps-preview.integration.test.ts src/transport/apps-artifacts.integration.test.ts
 ```
 
 The runtime suite crosses real Gateway, SQLite, receipt-process crash cuts and
 compiled Swift interpreter boundaries. The store lock reads the preserved legacy
 SQLite corpus without mutating any recorded file; source/registry projections
-are not membership. UI, converter and paired protocol validation are separate.
+are not membership. Typed artifact opens carry media metadata and a ranged HTTP
+resource, never binary bytes decoded as source. Preview tests use real files,
+stream leases and device-authenticated sockets. UI and paired protocol validation
+remain separate. The maintainer confirmed the old app-data store was empty and
+removed conversion from scope; no converter or migration is shipped. Validate the
+changed Gateway/iOS journeys and run one full verify before merge, not the broad
+Gateway shard plan.

@@ -6,6 +6,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GatewayError } from "../errors.js";
 import { abortableRead } from "../util/abortable-read.js";
+import type { ByteLease, ByteRange } from "../util/byte-stream.js";
 
 interface BlobValueBase {
   mimeType: string;
@@ -28,21 +29,7 @@ interface FileBlobValue extends BlobValueBase {
 
 type BlobValue = MemoryBlobValue | FileBlobValue;
 
-export interface BlobLease {
-  mimeType: string;
-  /** Bytes exposed by this lease (the full item when rangeStart is zero). */
-  size: number;
-  totalSize: number;
-  rangeStart: number;
-  rangeEnd: number;
-  stream: Readable;
-  release(): Promise<void>;
-}
 
-export interface BlobByteRange {
-  start: number;
-  end?: number;
-}
 
 const BLOB_MAX_ITEM_BYTES = 25 * 1_048_576;
 const BLOB_MAX_ITEMS = 128;
@@ -300,11 +287,11 @@ export class BlobStore {
     }
   }
 
-  acquire(id: string, requestedRange?: BlobByteRange, signal?: AbortSignal): Promise<BlobLease> {
+  acquire(id: string, requestedRange?: ByteRange, signal?: AbortSignal): Promise<ByteLease> {
     return abortableRead(signal, () => this.acquireOwned(id, requestedRange), lease => lease.release());
   }
 
-  private async acquireOwned(id: string, requestedRange?: BlobByteRange): Promise<BlobLease> {
+  private async acquireOwned(id: string, requestedRange?: ByteRange): Promise<ByteLease> {
     if (this.disposed) throw new GatewayError("not_found", "Blob is not available; refresh the session snapshot");
     const value = this.available(id);
     const rangeStart = requestedRange?.start ?? 0;

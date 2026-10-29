@@ -5,13 +5,23 @@ import { GatewayError } from "../../errors.js";
 import { watchFolder, FOLDER_WATCH_RETRY_MS, FOLDER_RECONCILE_INTERVAL_MS, type FolderWatchHandle } from "../../util/folder-watch.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { APP_ID, hash, isReadyAppEntry, readAppEntry, type AppEntry, type AppRow, type ReadyAppEntry } from "./apps-folder-format.js";
+import type { ByteLease, ByteRange } from "../../util/byte-stream.js";
+import { AppPreviewLeases } from "./apps-preview-leases.js";
+import { abortableRead } from "../../util/abortable-read.js";
+import type { StreamedAppFile } from "./apps-folder-files.js";
 
-type IndexedEntry = Pick<AppEntry, "name" | "row" | "changedAt">;
+interface PreviewCut { identity: string; path: string; file: StreamedAppFile; mimeType: string }
+type IndexedEntry = Pick<AppEntry, "name" | "row" | "changedAt"> & { preview: PreviewCut | undefined };
+function previewCut(entry: AppEntry): PreviewCut | undefined {
+  return isReadyAppEntry(entry) && entry.payload.kind === "artifact" && !Buffer.isBuffer(entry.file)
+    ? { identity: entry.identity, path: entry.entry, file: entry.file, mimeType: entry.payload.artifact.mimeType } : undefined;
+}
 
 /** Disposable membership, never a registry. Every publication is a filesystem
  * cut; events bound the pending set and enqueue work on the same serial lane. */
 export class AppsFolderIndex {
   private entries = new Map<string, IndexedEntry>();
+  private readonly previews = new AppPreviewLeases();
   private revision = hash("empty");
   private lane: Promise<void> = Promise.resolve();
   private watcher: FolderWatchHandle | undefined;
@@ -124,19 +134,23 @@ export class AppsFolderIndex {
               const entry = await readAppEntry(root, name);
               // Keep only the catalog projection; admission owns a fresh typed
               // byte snapshot, never a cleared or incomplete execution object.
-              next.set(name, { name: entry.name, row: entry.row, changedAt: entry.changedAt });
+              next.set(name, { name: entry.name, row: entry.row, changedAt: entry.changedAt, preview: previewCut(entry) });
             } else next.delete(name); // Loose regular/special files are not entries.
           } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; next.delete(name); }
           if (++count % 50 === 0) await backgroundWork.yieldToLoop();
           if (this.closed || generation !== this.generation) return;
         }
+        await this.previews.retireStale(id => next.get(id)?.row.contentRevision);
         await this.workspace.filesRoot();
         if (this.closed || generation !== this.generation) return;
         const revision = hash(JSON.stringify([...next.values()].sort((a, b) => a.name.localeCompare(b.name)).map(entry => entry.row)));
         const changed = revision !== this.revision;
         this.entries = next; this.revision = revision; this.unavailable = undefined;
         if (changed) this.changed(revision);
-      } catch (error) { this.full = true; this.unavailable = error; throw error; }
+      } catch (error) {
+        this.full = true; this.unavailable = error;
+        await this.previews.retireStale(() => undefined); throw error;
+      }
     });
   }
   async catalog(cursor?: string, limit = 50): Promise<{ revision: string; rows: AppRow[]; nextCursor?: string }> {
@@ -157,24 +171,29 @@ export class AppsFolderIndex {
       ...(offset + limit < rows.length ? { nextCursor: Buffer.from(JSON.stringify([this.revision, offset + limit])).toString("base64url") } : {}) };
   }
   /** One edge read for every admission path, including opaque broken-row keys. */
-  private async current(name: string, expectedContentRevision: string): Promise<AppEntry> {
+  private async withRoot<T>(name: string, accept: (root: string) => Promise<T>): Promise<T> {
+    if (this.closed) throw new GatewayError("conflict", "Apps index is closed");
     const root = await this.root();
-    let entry: AppEntry;
-    try { entry = await readAppEntry(root, name); }
+    try { return await accept(root); }
     catch (error) {
+      if (error instanceof GatewayError && error.code === "conflict") this.invalidate(name);
       if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
       this.invalidate(name);
-      // Verify the parent availability, never retry the entry read. Losing the
-      // workspace is unavailable, not a missing row or an empty Apps catalog.
+      // Verify parent availability, never retry the read or lease admission.
       await this.root();
       throw new GatewayError("not_found", "Entry no longer exists", true, { reason: "entry_changed" });
     }
-    if (entry.row.contentRevision !== expectedContentRevision) {
-      // A rejected admission also invalidates a known-stale cut if its OS hint
-      // was lost. It does not publish another membership authority.
-      this.entryChanged(name);
-    }
+  }
+  private async snapshot(root: string, name: string, expected: string, signal?: AbortSignal): Promise<AppEntry> {
+    const entry = await readAppEntry(root, name, signal);
+    if (this.closed) throw new GatewayError("conflict", "Apps index is closed");
+    if (entry.row.contentRevision !== expected) this.entryChanged(name);
+    const indexed = this.entries.get(name);
+    if (indexed?.row.contentRevision === expected) indexed.preview = previewCut(entry);
     return entry;
+  }
+  private admit<T>(name: string, expected: string, accept: (entry: AppEntry, root: string) => Promise<T>): Promise<T> {
+    return this.withRoot(name, async root => accept(await this.snapshot(root, name, expected), root));
   }
   private entryChanged(name: string): never {
     this.invalidate(name);
@@ -184,20 +203,38 @@ export class AppsFolderIndex {
   async requireEntry(id: string, expectedContentRevision: string): Promise<ReadyAppEntry> {
     if (!APP_ID.test(id)) throw new GatewayError("invalid_request", "Invalid app id");
     await this.initialize();
-    return this.enqueue(async () => {
-      const entry = await this.current(id, expectedContentRevision);
+    return this.enqueue(() => this.admit(id, expectedContentRevision, async entry => {
       if (!isReadyAppEntry(entry)) throw new GatewayError("unsupported", entry.row.status.reason);
       return entry;
-    });
+    }));
   }
   async validateRow(rowKey: string, expectedContentRevision: string): Promise<void> {
     await this.initialize();
     return this.enqueue(async () => {
       const indexed = [...this.entries.values()].find(entry => entry.row.rowKey === rowKey);
       if (!indexed) throw new GatewayError("not_found", "Entry no longer exists");
-      const entry = await this.current(indexed.name, expectedContentRevision);
-      if (entry.row.rowKey !== rowKey) this.entryChanged(indexed.name);
+      await this.admit(indexed.name, expectedContentRevision, async entry => {
+        if (entry.row.rowKey !== rowKey) this.entryChanged(indexed.name);
+      });
     });
+  }
+  async acquireArtifact(id: string, expectedContentRevision: string, range?: ByteRange, signal?: AbortSignal): Promise<ByteLease> {
+    if (!APP_ID.test(id)) throw new GatewayError("invalid_request", "Invalid app id");
+    await abortableRead(signal, () => this.initialize());
+    return this.enqueue(() => this.withRoot(id, async root => {
+      signal?.throwIfAborted();
+      const indexed = this.entries.get(id);
+      const cached = indexed?.row.contentRevision === expectedContentRevision ? indexed.preview : undefined;
+      // A readonly byte range pins an already admitted primary-file cut. Reopen
+      // and fence its inode/size/mtime/ctime, not a multi-GiB rehash per AVPlayer
+      // range. Executable open/grant/write admission always hashes fresh bytes.
+      if (cached) return this.previews.acquire({ ...cached, id, revision: expectedContentRevision, root: join(root, id) }, range, signal);
+      const entry = await this.snapshot(root, id, expectedContentRevision, signal);
+      if (!isReadyAppEntry(entry)) throw new GatewayError("unsupported", entry.row.status.reason);
+      if (entry.payload.kind !== "artifact") throw new GatewayError("unsupported", "Executable source is not an artifact preview");
+      return this.previews.acquire({ id, revision: expectedContentRevision, root: join(root, id), identity: entry.identity,
+        path: entry.entry, file: entry.file, mimeType: entry.payload.artifact.mimeType }, range, signal);
+    }));
   }
   async membership(ids: readonly string[]): Promise<ReadonlySet<string>> {
     await this.initialize(); await this.reconcile();
@@ -209,6 +246,6 @@ export class AppsFolderIndex {
     this.watcher?.close(); this.watcher = undefined; this.unregister?.();
     if (this.scheduled) clearTimeout(this.scheduled);
     if (this.watchRetry) clearTimeout(this.watchRetry);
-    await this.lane; this.entries.clear(); this.pending.clear();
+    await Promise.all([this.lane, this.previews.dispose()]); this.entries.clear(); this.pending.clear();
   }
 }

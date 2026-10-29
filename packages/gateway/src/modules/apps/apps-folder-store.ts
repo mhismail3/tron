@@ -3,6 +3,8 @@ import { lstat, mkdir, open, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
+import type { ByteRange } from "../../util/byte-stream.js";
+import type { AppOpenProjection } from "./apps-open-projection.js";
 import { durableAtomicWriteJson, syncDurably } from "../../util/durable-json.js";
 import { readSecureJson } from "../../util/secure-json.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
@@ -72,20 +74,24 @@ export class AppsFolderStore {
     this.invalidatePrompts(consent.id);
     return consent;
   }
-  async open(id: string, contentRevision: string, device: string) {
+  async open(id: string, contentRevision: string, device: string): Promise<AppOpenProjection> {
     return this.mutex.run(async () => {
       const entry = await this.index.requireEntry(id, contentRevision), grant = await this.grantFor(entry);
       if (this.needsAccess(entry) && !grant) {
         return { kind: "permissionRequired", row: entry.row, permissions: entry.permissions, token: this.token({ id, contentRevision,
           executableDigest: entry.executableDigest, identity: entry.identity, device, expires: Date.now() + 10 * 60_000 }) };
       }
+      if (entry.payload.kind === "artifact") return { kind: "artifact", row: entry.row, artifact: entry.payload.artifact };
       const state = entry.permissions.data === "none" ? { appId: id, revision: 0, entries: [] } : await this.data.state(id);
       const feeds = entry.permissions.feeds.includes("ios-builds") ? { "ios-builds": await readIOSBuildsFeed(this.tronHome) } : {};
       // Feed/data awaits cannot extend authority across an external replacement.
       await this.index.requireEntry(id, contentRevision);
-      return { kind: entry.row.kind, row: entry.row, source: entry.source.toString("utf8"), permissions: entry.permissions,
+      return { kind: "swift", row: entry.row, source: entry.payload.source.toString("utf8"), permissions: entry.permissions,
         state, feeds, grantRevision: grant?.revision ?? null };
     });
+  }
+  acquireArtifact(id: string, contentRevision: string, range?: ByteRange, signal?: AbortSignal) {
+    return this.index.acquireArtifact(id, contentRevision, range, signal);
   }
   async grant(token: string, device: string) {
     return this.mutex.run(async () => {

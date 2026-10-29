@@ -11,7 +11,7 @@ and diagnostic exports.
 
 `server.ts`, `gateway-service.ts` (the RPC switch; `scripts/tron docs rpc` lists it),
 `command-receipts.ts`, `session-sync.ts`, `ordered-outbound-queue.ts`,
-`connection-policy.ts`, `lan-endpoint.ts`, `tailscale-peer.ts`, `upload-http.ts`,
+`connection-policy.ts`, `lan-endpoint.ts`, `tailscale-peer.ts`, `upload-http.ts`, `byte-http.ts`,
 `stall-diagnostics.ts`, `logger.ts` (`GatewayLogger`) and
 `diagnostic-export.ts`.
 
@@ -33,6 +33,13 @@ has no older runtime path: the deployed update helper cannot promote a strictly 
 candidate, so it goes through the manual local Mac Release reinstall (Mac first, then
 the iPhone app). Never widen the advertised minimum or allow a mixed pair to bypass
 that handoff. Same-major updates use the owned Gateway update flow.
+
+**Ranged bytes.** `byte-http.ts` is the shared transport for blobs, retained display
+artifacts and folder artifact `resourcePath`s. Authentication, revocation, HTTP
+capacity and cancellation stay with `GatewayServer`; resource owners pin/release
+`util/byte-stream.ts` leases. The adapter owns range responses, immutable ETags,
+304/416 and pipeline cleanup, not discovery, manifests or source authority. Folder
+resources route only to the same Apps module contract used by RPC.
 
 **Logging.** `GatewayLogger` is the one writer. `system.logs` serves the newest 1,000
 persisted records (info and above); debug lives only in a bounded memory buffer that
@@ -125,6 +132,7 @@ heartbeat-refreshed memory reading with its age.
 scripts/tron verify --module gateway/transport
 scripts/tron test gateway src/transport/sync-protocol.integration.test.ts \
   src/transport/server-capacity.integration.test.ts
+scripts/tron test gateway src/transport/apps-artifacts.integration.test.ts src/transport/server-blob.integration.test.ts
 ```
 
 `sync-protocol.integration.test.ts` covers the barrier and the retiring mobile open;

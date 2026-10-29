@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type Server as HTTPServer, type ServerResponse } from "node:http";
 import { GATEWAY_JSON_MAXIMUM_NODES, jsonNodeCount } from "../protocol/json-budget.js";
 import type { Duplex } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { abortableRead } from "../util/abortable-read.js";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket, type PerMessageDeflateOptions } from "ws";
@@ -11,8 +10,7 @@ import type { DeviceIdentity, DeviceStore } from "../security/device-store.js";
 import { RateLimiter } from "../security/rate-limiter.js";
 import type { UploadStore } from "../machine/upload-store.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import type { DisplayOwner } from "../display/display-modules.js";
-import type { BlobByteRange } from "../sessions/blob-store.js";
+import { handleByteHttp, type ByteHttpReaders } from "./byte-http.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger, LogLevel } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
@@ -262,20 +260,6 @@ function progressAge(at: number | null, now: number): string {
 
 function heartbeatTimerDelay(elapsedMs: number, intervalMs = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs): number {
   return Math.max(0, Math.round(elapsedMs - intervalMs));
-}
-
-function parseBlobByteRange(value: string | string[] | undefined): BlobByteRange | undefined {
-  if (value === undefined) return undefined;
-  if (Array.isArray(value)) throw new GatewayError("invalid_request", "Only one blob byte range may be requested");
-  const match = /^bytes=(\d+)-(\d*)$/.exec(value.trim());
-  if (!match) throw new GatewayError("invalid_request", "Blob byte range must use bytes=start-end syntax");
-  const start = Number(match[1]);
-  const end = match[2] ? Number(match[2]) : undefined;
-  if (!Number.isSafeInteger(start) || start < 0
-    || (end !== undefined && (!Number.isSafeInteger(end) || end < start))) {
-    throw new GatewayError("invalid_request", "Blob byte range is not satisfiable");
-  }
-  return end === undefined ? { start } : { start, end };
 }
 
 export interface ActiveSessionSynchronization {
@@ -791,7 +775,8 @@ export class GatewayServer {
       devices: DeviceStore;
       uploads: UploadStore;
       sessions: RuntimeRegistry;
-      display: Pick<DisplayOwner, "acquireArtifact">;
+      display: ByteHttpReaders["display"];
+      apps?: NonNullable<ByteHttpReaders["apps"]>;
       auth: AuthBroker;
       service: GatewayService;
       logger: GatewayLogger;
@@ -1553,76 +1538,8 @@ export class GatewayServer {
         return;
       }
     }
-    const displayRoute = /^\/v1\/sessions\/([^/]+)\/display-artifacts\/([^/]+)$/.exec(url.pathname);
-    if (request.method === "GET" && displayRoute) {
-      const sessionID = decodeURIComponent(displayRoute[1]!);
-      const artifactID = decodeURIComponent(displayRoute[2]!);
-      let requestedRange: BlobByteRange | undefined;
-      try {
-        requestedRange = parseBlobByteRange(request.headers.range);
-      } catch (error) {
-        if (!(error instanceof GatewayError) || error.code !== "invalid_request") throw error;
-        sendJson(response, 416, { error: publicError(error) });
-        return;
-      }
-      let lease: Awaited<ReturnType<DisplayOwner["acquireArtifact"]>>;
-      try {
-        lease = await this.options.display.acquireArtifact(sessionID, artifactID, requestedRange, signal);
-      } catch (error) {
-        const details = error instanceof GatewayError && error.details && typeof error.details === "object"
-          ? error.details as { rangeUnsatisfiable?: unknown; totalSize?: unknown }
-          : undefined;
-        if (error instanceof GatewayError && error.code === "invalid_request"
-          && details?.rangeUnsatisfiable === true && Number.isSafeInteger(details.totalSize)) {
-          response.setHeader("content-range", `bytes */${details.totalSize}`);
-          sendJson(response, 416, { error: publicError(error) });
-          return;
-        }
-        throw error;
-      }
-      const etag = `\"display-${artifactID}\"`;
-      try {
-        if (request.headers["if-none-match"] === etag) {
-          response.writeHead(304, { etag, "cache-control": "private, immutable, max-age=31536000" });
-          response.end();
-          return;
-        }
-        response.writeHead(requestedRange ? 206 : 200, {
-          "content-type": lease.mimeType,
-          "content-length": lease.size,
-          "accept-ranges": "bytes",
-          etag,
-          ...(requestedRange ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` } : {}),
-          "cache-control": "private, immutable, max-age=31536000",
-          "x-content-type-options": "nosniff",
-        });
-        response.flushHeaders();
-        await pipeline(lease.stream, response);
-      } finally {
-        await lease.release();
-      }
-      return;
-    }
-    if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
-      const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
-      const requestedRange = parseBlobByteRange(request.headers.range);
-      const lease = await this.options.sessions.acquireBlob(id, requestedRange, signal);
-      try {
-        response.writeHead(requestedRange ? 206 : 200, {
-          "content-type": lease.mimeType,
-          "content-length": lease.size,
-          "accept-ranges": "bytes",
-          ...(requestedRange ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` } : {}),
-          "cache-control": "private, max-age=300",
-          "x-content-type-options": "nosniff",
-        });
-        response.flushHeaders();
-        await pipeline(lease.stream, response);
-      } finally {
-        await lease.release();
-      }
-      return;
-    }
+    const byteWork = handleByteHttp(request, response, url, signal, this.options, sendJson);
+    if (byteWork !== undefined) { await byteWork; return; }
     sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
   }
 

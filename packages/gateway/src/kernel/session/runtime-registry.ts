@@ -4431,7 +4431,7 @@ export class RuntimeRegistry implements SessionOperations {
     return this.blobs.registerData(data, mimeType);
   }
 
-  async acquireBlob(id: string, range?: import("../../sessions/blob-store.js").BlobByteRange, signal?: AbortSignal) {
+  async acquireBlob(id: string, range?: import("../../util/byte-stream.js").ByteRange, signal?: AbortSignal) {
     try {
       return await this.blobs.acquire(id, range, signal);
     } catch (error) {

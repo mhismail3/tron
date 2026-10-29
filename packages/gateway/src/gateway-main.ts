@@ -312,7 +312,7 @@ const homeComposition: HomeComposition = {
   },
   homeTaskDiagnostic,
 };
-const { modules, home, projects } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
+const { modules, home, projects, apps } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
   () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
     display,
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
@@ -908,7 +908,7 @@ transport = new GatewayServer({
   lanEndpoint: config.lanEndpoint,
   devices,
   uploads,
-  sessions, display,
+  sessions, display, apps,
   liveViews: browserLiveViews,
   auth,
   service,

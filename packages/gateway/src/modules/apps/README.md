@@ -5,8 +5,9 @@
 Own folder-backed Apps membership and scoped access separately from saved SQLite
 data. The target design is pinned at `b4d1a8ce21ed9bfcfa3f09b6bd36e0b09af7d8e6`
 on branch `design/2108-apps-folders`. This checkpoint is not a paired-client
-release: display materialization, the paired iOS consumer and conversion remain
-incomplete.
+release: display materialization and the paired iOS consumer remain incomplete.
+The maintainer removed conversion from scope: there is no converter or live
+migration. The excluded retained offer remains untouched.
 
 ## Owners
 
@@ -21,13 +22,23 @@ incomplete.
   metadata cut, so a lost OS hint cannot strand the next refresh on known stale
   bytes. Reads also compare the Apps root inode/mtime/ctime cut to catch missing
   startup membership hints. The index retains only row metadata, never cleared
-  execution objects or source/assets. All fresh entry and opaque-row admission
+  execution objects or source/assets. Binary preview cuts retain only primary-file
+  identity/stat/hash metadata; ranged reads reopen and fence that descriptor instead
+  of rehashing a multi-GiB file for each playback range. Native open/grant/write
+  admission still hashes fresh bytes. All fresh entry and opaque-row admission
   routes through this owner. A vanished entry returns `not_found`; losing the
   whole workspace during admission remains unavailable, not an empty catalog.
 - `apps-folder-format.ts` is the index-internal filesystem edge: one private
-  manifest decoder, bounded regular-file reads without following links, and
-  typed ready/broken snapshots. Only ready snapshots carry exact source bytes,
-  permissions and executable identity; downstream code never parses app.json.
+  manifest decoder and typed ready/broken snapshots. `apps-folder-files.ts`
+  admits regular descriptors without following any parent/leaf link and hashes
+  with a 64 KiB buffer. Only bounded text retains immutable bytes; binary files
+  carry stamped/hash descriptors, never empty stand-in Buffers. The ready type
+  requires its primary file and discriminated Swift/artifact payload; downstream
+  code never parses app.json or decodes binary files as UTF-8.
+- `AppPreviewLeases` is the index's disposable-reader owner: at most four active
+  descriptors, 64 KiB stream chunks, range validation, stat checks before/after
+  reads, abort/release/disposal and retirement on a changed catalog cut. It has
+  no discovery, membership or grant authority.
   Unsupported web/network entries are visible but blocked, never unsandboxed.
 - `AppsFolderStore` serializes grant/content admission and saved-data management. An open revalidates bytes instead of trusting the
   index. Prompt tokens bind exact content, folder identity, device and expiry.
@@ -52,8 +63,14 @@ composition name, `tron-swift-apps`.
   Apps before Artifacts, then content-change time and id. A stale cursor returns
   `conflict` with diagnostic reason `catalog_changed`, never a mixed cut.
 - `apps.open {id, expectedContentRevision}`: reopens safe bytes; either returns
-  a runner snapshot or a device-bound `permissionRequired` prompt. A changed
-  entry refuses. Preview payload/renderer integration is incomplete.
+  the closed `swift | artifact | permissionRequired` projection. Only Swift has
+  source/state/feeds; artifacts carry media/MIME/size/digest and `resourcePath`.
+  A changed entry refuses. The paired iOS renderer remains incomplete.
+- Authenticated `GET` of an artifact's `resourcePath` supports byte ranges,
+  immutable ETags/304 and 416 with total size. One shared byte HTTP adapter serves
+  Apps, retained display artifacts and blobs; every outcome releases its lease.
+  The module contract supplies the same index-owned store to HTTP and RPC. This
+  route cannot serve executable source and confers no data or runtime grant.
 - `apps.permissions.grant {commandId, token}` and
   `apps.permissions.revoke {commandId, id}`: authenticated receipt-backed device
   actions. Code/assets/scopes/folder identity invalidate old grants; title/icon
@@ -80,8 +97,11 @@ composition name, `tron-swift-apps`.
 There are no list/pending/review/install/legacy RPC aliases. Metadata editing,
 Apps change broadcasting and paired protocol advancement are incomplete and must
 land atomically with their consumers.
-The current bundle reader uses a conservative 32 MiB bound; preserving larger
-existing display-artifact limits requires the streaming materialization boundary.
+Text is limited to 5 MiB/file, images/documents to 25 MiB/file, streamed
+video/audio to 2 GiB/file. Swift remains 320,000 bytes, manifests 32 KiB and
+executable bundles 32 MiB/1,000 files. All bundles cap retained text at 32 MiB
+and aggregate streamed bytes at 2 GiB. Signature/type mismatches become broken
+rows. Display publication/copy and dependency materialization are not yet wired.
 
 ## Signals
 
@@ -99,6 +119,8 @@ Apps subfolder is empty; a missing/unsafe workspace files root is unavailable.
 scripts/tron test gateway src/modules/apps/apps-folder.integration.test.ts
 scripts/tron test gateway src/modules/apps/apps-folder-runtime.integration.test.ts
 scripts/tron test gateway src/modules/apps/apps.store.lock.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps-preview.integration.test.ts src/transport/apps-artifacts.integration.test.ts
+scripts/tron test gateway src/transport/server-blob.integration.test.ts src/sessions/blob-store.lock.integration.test.ts
 scripts/tron-node exec npm --prefix packages/gateway run check
 scripts/tron-node exec npm --prefix packages/gateway run lint
 ```
@@ -107,5 +129,8 @@ The folder suites cross a real RuntimeRegistry, GatewayService, receipt store,
 filesystem watchers, a real Pi turn and SQLite. Runtime coverage compiles the Swift
 engine, persists actions and dictionaries, checks retained/current feeds and URL
 consent gates, kills fixture writers at three receipt cuts, and checks drain,
-JSON bounds and damaged databases. Display publication, migration, UI, watcher
-overflow recovery and runner shutdown on revoke require separate validation.
+JSON bounds and damaged databases. Preview coverage crosses real files, binary
+range streams, disposal and a real HTTP listener with the real device credential
+owner. Display publication, UI, watcher overflow recovery and runner shutdown on
+revoke require separate validation. Run changed-code Gateway/iOS journeys and one
+full verify before merge; the broad shard plan and converter suite are out of scope.

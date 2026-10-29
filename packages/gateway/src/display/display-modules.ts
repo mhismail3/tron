@@ -1,7 +1,7 @@
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
-import type { BlobByteRange } from "../sessions/blob-store.js";
+import type { ByteRange } from "../util/byte-stream.js";
 import { GatewayError } from "../errors.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { RequestSpanLane } from "../util/request-span.js";
@@ -78,7 +78,7 @@ export class DisplayOwner {
   async acquireArtifact(
     sessionID: string,
     artifactID: string,
-    requestedRange?: BlobByteRange,
+    requestedRange?: ByteRange,
     signal?: AbortSignal,
   ) {
     return abortableRead(signal, () => this.lane.run(async () => {

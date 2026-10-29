@@ -9,7 +9,7 @@ import { pipeline } from "node:stream/promises";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import { readJson } from "../util/json.js";
-import type { BlobByteRange, BlobLease } from "../sessions/blob-store.js";
+import type { ByteRange, ByteLease } from "../util/byte-stream.js";
 import { DISPLAY_ARTIFACT_KINDS, type DisplayArtifactDescriptor, type DisplayArtifactKind } from "../modules/display/contract.js";
 
 const METADATA_MAX_BYTES = 64 * 1_024;
@@ -463,7 +463,7 @@ export class DisplayArtifactStore {
     return this.index.get(id)?.owners.includes(sessionID) === true;
   }
 
-  async acquire(id: string, sessionID: string, requestedRange?: BlobByteRange): Promise<BlobLease> {
+  async acquire(id: string, sessionID: string, requestedRange?: ByteRange): Promise<ByteLease> {
     this.validateID(id);
     const metadata = this.index.get(id);
     if (this.unavailableArtifacts.has(id)) {

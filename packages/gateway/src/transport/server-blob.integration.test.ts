@@ -8,7 +8,8 @@ import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { GatewayError } from "../errors.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
-import { BlobStore, type BlobByteRange, type BlobLease } from "../sessions/blob-store.js";
+import { BlobStore } from "../sessions/blob-store.js";
+import type { ByteRange, ByteLease } from "../util/byte-stream.js";
 import { GatewayServer } from "./server.js";
 
 const roots: string[] = [];
@@ -19,7 +20,7 @@ afterEach(async () => {
 });
 
 function makeServer(
-  acquireBlob: (id: string, range?: BlobByteRange) => Promise<BlobLease>,
+  acquireBlob: (id: string, range?: ByteRange) => Promise<ByteLease>,
   port = 0,
   acquireUpload: (id: string) => Promise<unknown> = async () => { throw new GatewayError("not_found", "missing"); },
 ): GatewayServer {
@@ -37,7 +38,7 @@ function makeServer(
   });
 }
 
-async function server(acquireBlob: (id: string, range?: BlobByteRange) => Promise<BlobLease>): Promise<number> {
+async function server(acquireBlob: (id: string, range?: ByteRange) => Promise<ByteLease>): Promise<number> {
   const gateway = makeServer(acquireBlob);
   servers.push(gateway);
   await gateway.listen();
@@ -213,7 +214,7 @@ describe("Gateway blob HTTP leases", () => {
     (gateway as any).options.display.acquireArtifact = async (
       sessionID: string,
       id: string,
-      range?: BlobByteRange,
+      range?: ByteRange,
     ) => {
       expect(id).toBe(artifactID);
       expect(sessionID).toBe("session-1");

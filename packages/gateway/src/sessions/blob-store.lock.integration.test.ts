@@ -4,7 +4,8 @@ import { it, onTestFinished } from "vitest";
 import { countRandomUUID } from "../../test-support/fixed-recording.js";
 import { storePathLock } from "../../test-support/store-path-lock.js";
 import type { GatewayError } from "../errors.js";
-import { BlobStore, type BlobByteRange } from "./blob-store.js";
+import { BlobStore } from "./blob-store.js";
+import type { ByteRange } from "../util/byte-stream.js";
 
 /**
  * `gateway/session-catalog` mutation-path lock for the blob store behind
@@ -57,7 +58,7 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   await log.step("file registration before initialization is refused", async () => store.registerFile(await source("early.txt", "early"), "text/plain"), "refused");
   await log.step("initialization replaces a leftover directory", () => store.initialize(), "result");
   await log.step("initialization again is unchanged", () => store.initialize(), "result");
-  const read = async (id: string, range?: BlobByteRange) => {
+  const read = async (id: string, range?: ByteRange) => {
     const lease = await store.acquire(id, range);
     const chunks: Buffer[] = [];
     for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk as Buffer));
