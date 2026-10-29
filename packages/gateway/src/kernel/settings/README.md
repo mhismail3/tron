@@ -92,10 +92,6 @@ are not settings truth, and pending approvals never apply themselves.
   Session-owned fields, inside the target stripe. A history-publication failure after
   ordinary setting effects reports an uncertain outcome: canonical command receipts
   retain their replay fence rather than admitting the same command again.
-- Undo checks the logged `after` value and the audit's committed Undo fact inside
-  that same mutation stripe. A fresh command cannot consume an entry twice, even
-  after Undo of Undo restores its value; the latest reversal has its own identity.
-  Canonical receipt replay returns the original result without another mutation.
 
 ## Entry points
 

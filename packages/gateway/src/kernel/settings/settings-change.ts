@@ -340,9 +340,6 @@ export class SettingsChangePath {
     if (context.request && context.actor.kind === "ui") throw new GatewayError("invalid_request", "The maintainer applies his own changes directly");
     await this.expireDue({ target });
     return this.mutexFor(target).run(async () => {
-      if (context.undoOf && (await this.record.entry(context.undoOf))?.undone) {
-        throw new GatewayError("conflict", "This change was already undone; undo its latest reversal instead");
-      }
       const stores = await this.model.owner.stores(target, context.session);
       const runtime = context.session?.modelRuntime ?? this.model.owner.modelRuntime;
       const planned: Planned[] = [];
@@ -477,11 +474,20 @@ export class SettingsChangePath {
     // A pending entry's outcome is its latest decision fact.
     const status = entry.status === "pending" ? [...found.facts].reverse().find(fact => DECIDED.has(fact.status))?.status ?? "pending" : entry.status;
     if (status !== "applied" && status !== "approved") throw new GatewayError("conflict", "Only an applied change can be undone");
+    const key = this.model.schema.schemaKey(entry.key);
+    const stores = await this.model.owner.stores(entry.target, session);
+    const store = storeForScope(entry.layer, stores.layers);
+    const binding = key.layers[store];
+    if (!binding) throw new GatewayError("conflict", "The historical setting has no surviving store");
+    const current = readBinding(stores, store, binding, entry.qualifiers ?? {}, qualifiedWrite(binding, entry.qualifiers ?? {}), entry.key);
+    if (!deepEqual(current, entry.after)) {
+      throw new GatewayError("conflict", "The setting changed since; undo would overwrite a newer value", false,
+        { current: (current ?? null) as never, after: (entry.after ?? null) as never,
+          display: { current: formatStoredSetting(key.type, current), after: formatStoredSetting(key.type, entry.after) } });
+    }
     return this.change(entry.target, [{
       key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}), layer: entry.layer,
       op: entry.before === undefined ? "unset" : "set", ...(entry.before === undefined ? {} : { value: entry.before }),
-      // Compare the logged value while planning inside the actual mutation stripe.
-      expected: entry.after === undefined ? null : entry.after,
     }], { ...context, undoOf: changeId, ...(session ? { session } : {}) });
   }
 
@@ -954,10 +960,7 @@ export class SettingsChangePath {
     }
     const store = storeForScope(request.layer, stores.layers);
     const binding = scopeAdmitted(key, store) || (request.layer === "project" && context.undoOf) ? key.layers[store] : undefined;
-    if (!binding) {
-      if (context.undoOf && !key.layers[store]) throw new GatewayError("conflict", "The historical setting has no surviving store");
-      throw new GatewayError("invalid_request", `${key.label} cannot be set at the ${LAYER_LABELS[request.layer]} layer`);
-    }
+    if (!binding) throw new GatewayError("invalid_request", `${key.label} cannot be set at the ${LAYER_LABELS[request.layer]} layer`);
     if (!stores.layers.includes(store)) throw new GatewayError("invalid_request", `This target has no ${LAYER_LABELS[request.layer]} layer`);
     const writer = context.actor.kind === "outside" ? undefined : context.actor.kind;
     if (!writer || !key.writers.includes(writer)) throw new GatewayError("invalid_request", `${key.label} cannot be changed by ${context.actor.kind}`);
@@ -1050,9 +1053,6 @@ export class SettingsChangePath {
     const before = binding.store === "trust" ? stores.trust[qualifiers.project!]
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && !deepEqual(request.expected, before)) {
-      if (context.undoOf) throw new GatewayError("conflict", "The setting changed since; undo would overwrite a newer value", false,
-        { current: (before ?? null) as never, after: request.expected as never,
-          display: { current: formatStoredSetting(key.type, before), after: formatStoredSetting(key.type, request.expected ?? undefined) } });
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, { current: (before ?? null) as never });
     }
     const defaultValue = keyDefault(key, qualifiers);
