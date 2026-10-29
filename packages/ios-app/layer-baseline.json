@@ -8,7 +8,6 @@
     "two-way ios-app/chat <-> ios-app/settings",
     "two-way ios-app/chat <-> ios-app/state",
     "two-way ios-app/chat <-> ios-app/swift-apps",
-    "two-way ios-app/chat <-> ios-app/terminal",
     "two-way ios-app/hosted-fixtures <-> ios-app/settings",
     "two-way ios-app/onboarding <-> ios-app/settings",
     "two-way ios-app/presentation <-> ios-app/settings",
@@ -24,7 +23,7 @@
   ],
   "unindexed": {
     "ios-app/e2e-tests": 2,
-    "ios-app/mac-terminal-ssh": 4,
+    "ios-app/mac-terminal-ssh": 3,
     "ios-app/profiling": 12
   }
 }
