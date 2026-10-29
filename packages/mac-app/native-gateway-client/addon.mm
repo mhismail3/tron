@@ -1,6 +1,7 @@
 #define NAPI_VERSION 8
 #include <node_api.h>
 #include "transport.h"
+#include "directory-publish.h"
 #include <array>
 #include <atomic>
 #include <limits>
@@ -345,6 +346,7 @@ NAPI_MODULE_INIT() {
         auto registry = std::make_unique<Environment>();
         check(napi_set_instance_data(env, registry.get(), [](napi_env, void *p, void *) { delete static_cast<Environment *>(p); }, nullptr)); registry.release();
         napi_property_descriptor methods[] = {{"open", nullptr, open, nullptr, nullptr, nullptr, napi_default, nullptr},
+            {"publishDirectoryExclusive", nullptr, publishDirectoryExclusive, nullptr, nullptr, nullptr, napi_default, nullptr},
         };
         check(napi_define_properties(env, exports, sizeof(methods)/sizeof(methods[0]), methods));
         napi_value version; check(napi_create_uint32(env, 4, &version));

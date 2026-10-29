@@ -25,7 +25,7 @@ its validated base's configuration; when a newer contract invalidates the select
 may use only the configured artifact, the launcher's bundled root or the checkout's prepared
 bundle, in that order. Notification state lives outside payload versions.
 
-The build also compiles the universal Node-API capture client into
+The build also compiles the universal Node-API native client into
 `Contents/Library/Native/tron-native-capture.node` (`native-gateway-client/build.py` checks
 the Node header pins that `scripts/tron-node pin` writes; see
 [capture client](computer-control.md#direct-gateway-capture-client)), embeds the native host
@@ -35,6 +35,15 @@ the exact signed artifact (`MYGKXH6TY4`, hardened runtime, real path) after a sy
 qualification (512 dimensions, paraphrase similarity, a negative control, stable revision);
 `TRON_SEARCH_EMBEDDING_HELPER` is honored only with `NODE_ENV=development`. Otherwise search
 stays lexical. Qualify with synthetic JSONL frames, never private transcripts.
+
+The native client also exports `publishDirectoryExclusive`: it duplicates two borrowed
+parent directory descriptors before queuing work, then uses Darwin `RENAME_EXCL` to
+publish an owned mode-0700 staging directory without replacing any destination.
+Its callback reports published, destination-exists, or an operational error; it never
+copies across filesystems or retries. The caller owns the private staging namespace
+and must revalidate its canonical namespace after completion. This is not an
+expected-source-identity move, deletion or restore primitive. Source-only Gateway
+updates cannot add native exports to the installed app; Mac replacement stays manual.
 
 ## Generate and build
 
@@ -89,6 +98,9 @@ scripts/gateway-payload-deploy.test.mjs`, `node --test scripts/gateway-install-i
 `python3 scripts/test-verify-mac-install.py` (fixture app and real TLS listeners, report in
 `test-results/mac-verify/report.json`) and `python3 scripts/test-tron-mac-replace.py`.
 Pi SDK rollback: `cd packages/gateway && npm run test:pi-sdk-rollback`.
+The real compiled directory-publication boundary runs with `scripts/tron test gateway
+src/machine/native-directory-publish.integration.test.ts`; its disposable universal
+binary never replaces or loads the installed app's client.
 
 ## Permission identity and stale listings
 

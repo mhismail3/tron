@@ -19,6 +19,8 @@ OWNER = "packages/mac-app/native-gateway-client"
 INPUTS = (
     ".node-version",
     f"{OWNER}/addon.mm",
+    f"{OWNER}/directory-publish.h",
+    f"{OWNER}/directory-publish.mm",
     f"{OWNER}/transport.h",
     f"{OWNER}/transport.mm",
     f"{OWNER}/build.py",
@@ -113,7 +115,8 @@ def build(output, headers=None):
             "-arch", "arm64", "-arch", "x86_64", "-mmacosx-version-min=15.0",
             "-Wall", "-Wextra", "-Werror", "-O2", "-fvisibility=hidden",
             "-bundle", "-undefined", "dynamic_lookup", "-framework", "Foundation", "-framework", "Security",
-            str(frozen / OWNER / "addon.mm"), str(frozen / OWNER / "transport.mm"), "-o", str(artifact),
+            str(frozen / OWNER / "addon.mm"), str(frozen / OWNER / "transport.mm"),
+            str(frozen / OWNER / "directory-publish.mm"), "-o", str(artifact),
         ]
         print(" ".join(command), flush=True)
         subprocess.run(command, check=True)
