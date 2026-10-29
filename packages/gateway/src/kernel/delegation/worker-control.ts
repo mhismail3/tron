@@ -14,13 +14,6 @@ export function taskWorkerSteeringInput(control: TaskWorkerControl, text: string
   }] as const;
 }
 
-/** Retain the control operation's async adoption of native admission, so its
- * caller observes the same boundary as the former native control operation. */
-export async function steerTaskWorker<Result>(control: TaskWorkerControl, text: string,
-  submit: (input: ReturnType<typeof taskWorkerSteeringInput>) => Promise<Result>): Promise<Result> {
-  return submit(taskWorkerSteeringInput(control, text));
-}
-
 export async function stopTaskWorker(worker: HomeTaskReportOwner | undefined, control: TaskWorkerControl): Promise<void> {
   if (!worker || worker.identity.taskId !== control.taskId
     || worker.identity.operationId !== control.operationId) {

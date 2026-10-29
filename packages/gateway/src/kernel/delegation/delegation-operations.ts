@@ -2,7 +2,7 @@ import type { HomeTaskReportOwner } from "./task-report.js";
 import type { OwnedTurnOwner } from "./owned-turn-owner.js";
 import { homeTaskSubagentRunsSettled } from "./task-subagents.js";
 import type { TaskWorkerControl } from "./worker-contract.js";
-import { interruptTaskWorker, stopTaskWorker, steerTaskWorker, taskWorkerSteeringInput } from "./worker-control.js";
+import { interruptTaskWorker, stopTaskWorker, taskWorkerSteeringInput } from "./worker-control.js";
 
 /** Internal runaway ceiling for callers that explicitly opt into deadline ownership. */
 export const OWNED_OPERATION_DEADLINE_MS = 24 * 60 * 60 * 1_000;
@@ -61,7 +61,7 @@ export class DelegationOperations<Session extends OwnedSession> {
 
   async steerWorker(sessionId: string, control: TaskWorkerControl, text: string): Promise<void> {
     const slot = await this.sessions.acquire(sessionId);
-    await steerTaskWorker(control, text, input => slot.prompt(...input));
+    await slot.prompt(...taskWorkerSteeringInput(control, text));
   }
 
   async interruptWorker(sessionId: string, control: TaskWorkerControl, by: string, text?: string): Promise<string[]> {
@@ -69,7 +69,7 @@ export class DelegationOperations<Session extends OwnedSession> {
     // K5 validates the exact operation before native I/O fixes its tool targets.
     return await interruptTaskWorker(slot.ownedTurns.worker, control,
       () => this.interruptTools(slot, by,
-        text === undefined ? undefined : async () => { await steerTaskWorker(control, text, input => slot.prompt(...input)); }));
+        text === undefined ? undefined : async () => { await slot.prompt(...taskWorkerSteeringInput(control, text)); }));
   }
 
   async stopWorker(sessionId: string, control: TaskWorkerControl): Promise<void> {

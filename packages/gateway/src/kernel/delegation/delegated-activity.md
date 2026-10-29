@@ -18,8 +18,9 @@ controller against the actual SDK session, retaining the provider's rejection se
 
 `DelegationOperations` is the one registry-owned service shared by Home and
 automations. It acquires the actual worker for steer/stop/interrupt and uses
-`worker-control.ts` for the exact operation fences and steering input. Native prompt
-admission stays K2; one native interruption operation is bound in kernel composition,
+`worker-control.ts` for the exact operation fences and steering input. Steering submits
+that input directly to the acquired native prompt, without a submission adapter.
+Native prompt admission stays K2; one native interruption operation is bound in kernel composition,
 so target capture precedes steering and abort. Home retains no native control binding.
 
 The service also owns worker creation, resume leases, deadline races, settlement
