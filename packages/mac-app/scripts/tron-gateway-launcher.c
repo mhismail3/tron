@@ -598,7 +598,6 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
         required_document(root, "app/package-lock.json", MAX_PACKAGE_LOCK_BYTES) != 0 ||
         required_path(root, "app/PushService.xcconfig", node, PATH_MAX, 0, 1, 0) != 0 ||
         validate_push_config(root, identity.channel) != 0 ||
-        required_path(root, "app/scripts/ensure-node-pty-helper.mjs", node, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/scripts/gateway-payload-deploy.mjs", helper, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/node_modules", node, PATH_MAX, 0, 0, 1) != 0 ||
         required_path(root, "runtime/xcodegen/bin/xcodegen", node, PATH_MAX, 1, 1024 * 1024, 0) != 0 ||

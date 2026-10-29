@@ -334,7 +334,7 @@ function stateIdentity(raw: Record<string, unknown>, name: string): GatewayUpdat
  * deploy a Gateway payload. */
 const SOURCE_ROOT_MARKERS = [
   "packages/gateway/package.json", "packages/gateway/package-lock.json",
-  "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+  "scripts/gateway-payload-deploy.mjs",
 ];
 
 function configDocument(value: unknown): GatewayUpdateConfig {

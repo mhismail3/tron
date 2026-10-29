@@ -77,7 +77,7 @@ owns skill routing and the policy-fixture validation commands.
   `scripts/tron-node install` and the directly relevant tests.
 - **Major:** Adopt a new LTS major within six months of its LTS date, as its own
   change. The same `pin` also needs `engines.node` and `@types/node` in
-  `packages/gateway/package.json`, and evidence that native modules (`node-pty`)
+  `packages/gateway/package.json`, and evidence that remaining native modules
   and `node:sqlite` load under the new runtime. Don't combine it with unrelated
   dependency upgrades.
 - **Packages:** A Pi package whose `engines.node` needs a newer major is a

@@ -23,7 +23,7 @@
 # a development toolchain rather than a signed Gateway runtime. A shell spawned
 # by a Gateway has that Gateway's payload runtime first on PATH; it answers the
 # pinned version and has an npm alias, but its hardened runtime refuses the
-# unsigned native add-ons development loads (Vitest's Rolldown, node-pty) and it
+# unsigned native add-ons development loads (Vitest's Rolldown) and it
 # ships no npx, so it is never chosen here.
 #
 # `status` and `pin` never run as part of a build: `status` only reports, and

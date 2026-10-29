@@ -3741,11 +3741,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
     24. The harness takes the fixture's Node from the caller's `PATH`, where a
         Gateway-spawned shell finds the parent's bundled runtime. That runtime
         has the pinned version and a sibling npm, so a version check accepts it,
-        and its Team ID cannot dlopen the ad hoc-signed node-pty prebuild.
-    25. The incompatible Node is only discovered when node-pty fails inside the
-        fixture (`Failed to load native module`, which hides the dlopen cause),
-        so the toolchain failure is attributed to the fixture and no signal
-        names the real error.
+        but its Team ID cannot load unsigned development add-ons.
     26. A fault proxy that exits during startup is reported only as a generic
         message, without its process status or the tail of its stderr.
 
@@ -3939,7 +3935,7 @@ exec "{real_node}" "$@"
 
         A test process started from a Gateway-spawned shell has that Gateway's
         bundled runtime first on `PATH`: the very runtime #445 keeps out of a
-        fixture, and one that cannot load this checkout's node-pty prebuild. So
+        fixture, and one that cannot load unsigned development add-ons. So
         use the repository's pinned resolver, retaining the host NVM location
         while every writable fixture path stays inside the isolated environment.
         """
@@ -4432,8 +4428,8 @@ exec "{real_node}" "$@"
         # fixture's Node from it.
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
         # Installed dependencies are not source: the checkout ignores them the
-        # way the repository does, so a case can install a node-pty tree without
-        # changing this worktree's build identity.
+        # way the repository does, so installed fixtures do not affect
+        # this worktree's build identity.
         (worktree / ".gitignore").write_text("node_modules/\n")
 
         subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
@@ -4668,49 +4664,6 @@ exit 1
                 self.fail("the fixture ran under the first node on the caller's PATH: " + invoked.read_text())
         finally:
             self.e2e("stop", harness=harness, environment=environment)
-
-    def test_a_node_that_cannot_load_the_gateways_native_modules_is_refused_by_name(self) -> None:
-        """Failure mode 25: the toolchain failure is named before the fixture starts.
-
-        The Gateway's Node must load the installed node-pty prebuild. The prebuild
-        here is not a native module, so the load fails the way the bundled
-        runtime's Team ID fails it; the harness must report the loader's own error
-        and start nothing.
-        """
-        worktree = self.clean_runner_checkout()
-        harness = worktree / "scripts/ios-gateway-e2e-test"
-        self.runnable_products(worktree)
-        prebuild = worktree / "packages/gateway/node_modules/node-pty/build/Release/pty.node"
-        prebuild.parent.mkdir(parents=True)
-        prebuild.write_text("not a native module\n")
-        environment = self.readiness_node_environment(self.environment)
-        # The platform's own loader text (`dlopen` on macOS, `invalid ELF header`
-        # on Linux), produced by the same Node and the same file.
-        loader = subprocess.run(
-            [environment["TRON_NODE_BIN"], "-e",
-             "try { require(process.argv[1]); } catch (error) { process.stdout.write(String(error.message)); }",
-             str(prebuild)],
-            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        self.assertTrue(
-            loader.stdout.strip(),
-            f"the fixture Node reported no loader error for {prebuild}: {loader.stderr}",
-        )
-
-        try:
-            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
-            self.assertNotEqual(result.returncode, 0, result.stdout)
-            self.assertIn("cannot load the Gateway's node-pty native module", result.stderr)
-            self.assertIn(environment["TRON_NODE_BIN"], result.stderr)
-            self.assertIn(str(prebuild), result.stderr)
-            self.assertIn(loader.stdout.strip(), result.stderr, "the loader's own error is not what the harness reported")
-        finally:
-            self.e2e("stop", harness=harness, environment=environment)
-        self.assertFalse((self.root / "e2e-state/gateway.pid").exists(), "the refused run started a fixture")
-        self.assertFalse(
-            (Path(environment["TRON_NODE_BIN"]).parent / "record/gateway.env").exists(),
-            "the refusal still started the fixture Gateway",
-        )
 
     def test_run_refuses_products_not_built_from_this_worktree(self) -> None:
         """Failure mode 10: every unproven product set is refused before the

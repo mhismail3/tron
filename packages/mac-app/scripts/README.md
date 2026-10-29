@@ -21,8 +21,8 @@ promotion: `scripts/gateway-payload-deploy.mjs` ([host control](../../gateway/sr
   (`scripts/gateway-install-inputs.mjs`), builds, makes an independent `npm ci --omit=dev` tree,
   downloads and checks both Node archives, compiles the universal launcher, creates
   `runtime/bin-{arm64,x64}` aliases (`node`, `npm`, `pi` → `../../app/node_modules/.bin/pi`),
-  stages the Login Item, the `pi-subagents` pin and installers (`stage-gateway-app.sh`), deletes
-  `node-pty`'s unreachable `win32-*` prebuilds, writes `app/build-inputs.json`, fingerprints
+  stages the Login Item, the `pi-subagents` pin and installers (`stage-gateway-app.sh`),
+  writes `app/build-inputs.json`, fingerprints
   `app/**` and `runtime/**`, and stamps a runtime epoch. Writers hold a lock and publish payload,
   launcher and icon from a private staging root by backup renames; failure restores the prior
   projection. macOS tools are used by absolute path (`/usr/bin/find`, `/usr/bin/stat`,

@@ -10,7 +10,6 @@ mkdir -p "$APP_DIR/scripts"
 cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
 cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
-cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
 cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm ci installs the Tron-patched pi-coding-agent from its declared tarball,
 # so the declaration and tarball are staged before installation. third_party/ is not

@@ -76,7 +76,6 @@ const REQUIREMENTS = [
   ["app/package.json", 1, false],
   ["app/package-lock.json", 1, false],
   ["app/PushService.xcconfig", 1, false],
-  ["app/scripts/ensure-node-pty-helper.mjs", 1, false],
   ["app/scripts/gateway-payload-deploy.mjs", 1, false],
   ["app/node_modules", 0, true],
   ["runtime/node-arm64", 1_048_576, false, true],
@@ -681,7 +680,7 @@ async function readUpdateConfig(paths) {
   if (value === undefined || !validateUpdateConfigDocument(value)) throw new Error("trusted Gateway update config is missing or malformed");
   const sourceRoot = await noSymlinkDirectory(value.sourceRoot, [
     "packages/gateway/package.json", "packages/gateway/package-lock.json",
-    "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+    "scripts/gateway-payload-deploy.mjs",
     "scripts/gateway-install-inputs.mjs",
   ]);
   const artifactRoot = value.artifactRoot === undefined ? undefined : await noSymlinkDirectory(value.artifactRoot);
@@ -1294,7 +1293,6 @@ async function gitRevision(cwd) {
 async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
   const files = [
     [join(sourceRoot, "scripts", "gateway-payload-deploy.mjs"), join(candidateRoot, "app", "scripts", "gateway-payload-deploy.mjs")],
-    [join(sourceRoot, "packages", "gateway", "scripts", "ensure-node-pty-helper.mjs"), join(candidateRoot, "app", "scripts", "ensure-node-pty-helper.mjs")],
   ];
   for (const [source, destination] of files) {
     const info = await lstat(source).catch(() => undefined);
@@ -1818,10 +1816,6 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
     .map((entry) => entry.path)
     .filter((path) => path.includes(`darwin-${process.arch}`) || path.includes("darwin-universal"))
     .sort();
-  if (!nativeModules.some((path) => path.endsWith(`/node-pty/prebuilds/darwin-${process.arch}/pty.node`)
-      || path.endsWith(`node-pty/prebuilds/darwin-${process.arch}/pty.node`))) {
-    throw new Error(`candidate Gateway is missing the ${process.arch} node-pty native module`);
-  }
   const nativeProbe = "const path = require('node:path'); const root = process.env.TRON_CANDIDATE_ROOT; for (const file of JSON.parse(process.env.TRON_CANDIDATE_NATIVE_MODULES)) require(path.join(root, file));";
   await runCommand(runtime, ["-e", nativeProbe], {
     timeoutMs, maxOutputBytes: 64 * 1024,
