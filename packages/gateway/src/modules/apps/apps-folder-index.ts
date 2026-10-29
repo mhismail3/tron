@@ -14,6 +14,7 @@ export class AppsFolderIndex {
   private lane: Promise<void> = Promise.resolve();
   private watcher: FolderWatchHandle | undefined;
   private watchedIdentity: string | undefined;
+  private rootCut: string | undefined;
   private pending = new Set<string>();
   private full = true;
   private scheduled: NodeJS.Timeout | undefined;
@@ -54,10 +55,16 @@ export class AppsFolderIndex {
     // empty/unavailable. Reads scan while the owner repairs observation.
     if (!this.watcher) this.full = true;
     const root = join(files, "apps");
+    let cut = "missing";
     try {
       const info = await lstat(root);
       if (!info.isDirectory() || info.isSymbolicLink()) throw new GatewayError("conflict", "Apps folder is not a safe directory");
+      cut = `${info.dev}:${info.ino}:${info.mtimeMs}:${info.ctimeMs}`;
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    // The first recursive OS hint can be lost while observation starts. A
+    // changed root cut proves membership needs reconciliation, without adding
+    // a polling loop or walking every unchanged bundle on each read.
+    if (cut !== this.rootCut) { this.rootCut = cut; this.full = true; }
     return root;
   }
   private retryObservation(): void {

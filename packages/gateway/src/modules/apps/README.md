@@ -19,7 +19,8 @@ incomplete.
   fence delayed callbacks to their original watcher handle. Disposal closes the
   watcher and joins reads. A rejected content admission also invalidates its
   metadata cut, so a lost OS hint cannot strand the next refresh on known stale
-  bytes. The index retains metadata, not source/assets.
+  bytes. Reads also compare the Apps root inode/mtime/ctime cut to catch missing
+  startup membership hints. The index retains metadata, not source/assets.
 - `apps-folder-format.ts` reads bounded regular files without following links,
   infers the optional manifest and computes content/executable identities.
   Unsupported web/network entries are visible but blocked, never unsandboxed.

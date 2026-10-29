@@ -343,6 +343,18 @@ it("refuses disabled deletion with unsupported while leaving an external replace
   }
 });
 
+it("observes a newly published directory through the real root cut when its first OS hint is lost", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-root-cut-"))); roots.push(root);
+  const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
+  const apps = join(root, "tron/workspace/files/apps"); await mkdir(apps, { recursive: true, mode: 0o700 });
+  const index = new AppsFolderIndex(workspace, () => {}, () => ({ close() {} }));
+  try {
+    expect((await index.catalog()).rows).toHaveLength(0);
+    await mkdir(join(apps, "note")); await writeFile(join(apps, "note/note.txt"), "published bytes");
+    expect((await index.catalog()).rows.map(row => row.id)).toEqual(["note"]);
+  } finally { await index.dispose(); await workspace.dispose(); }
+});
+
 it("invalidates a stale catalog after a rejected real admission even when its filesystem hint was lost", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-admission-cut-"))); roots.push(root);
   const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
