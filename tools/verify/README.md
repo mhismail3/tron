@@ -140,10 +140,9 @@ including changed tests already run before landing: later integration may affect
 them too. It is not limited to the one nested lock. Explicit `--module` baselines still run
 the complete scoped set. A serial-only selection may pass its affected static checks
 while explicitly reporting deferred tests; it is not a test pass or a green batch. `ios-ui` risk alone does not widen beyond the affected UI build
-and journeys. Renames include both paths; deleted paths use base ownership. A retired
-module still selects surviving consumers and full-batch risk, but cannot declare
-commands after its manifest is gone. Risk is
-read from each changed producer's manifest, not inferred from every reverse consumer.
+and journeys. Renames include both paths; deleted paths use base ownership. Retired
+owners retain consumer closure and risk, but cannot declare commands. Risk is read
+from each changed producer's manifest, not inferred from every reverse consumer.
 An unowned tracked path still fails ownership, not a green partial run. A new module
 without executable evidence still fails; a tier never turns missing evidence into a pass.
 
