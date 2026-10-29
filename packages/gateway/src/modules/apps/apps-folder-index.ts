@@ -41,10 +41,7 @@ export class AppsFolderIndex {
         const handle = this.observe({ root: files, onEvent: path => {
           if (this.closed || this.watcher !== registration.handle) return;
           if (path !== null && path !== "apps" && !path.startsWith("apps/")) return;
-          const entry = path?.split("/")[1];
-          if (!entry || this.pending.size >= 256) { this.full = true; this.pending.clear(); }
-          else this.pending.add(entry);
-          this.schedule();
+          this.invalidate(path?.split("/")[1]);
         }, onReset: () => {
           if (this.closed || this.watcher !== registration.handle) return;
           registration.handle?.close(); this.watcher = undefined; this.watchedIdentity = undefined;
@@ -73,6 +70,11 @@ export class AppsFolderIndex {
   }
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.lane.then(operation); this.lane = result.then(() => {}, () => {}); return result;
+  }
+  private invalidate(entry?: string): void {
+    if (!entry || this.pending.size >= 256) { this.full = true; this.pending.clear(); }
+    else this.pending.add(entry);
+    this.schedule();
   }
   private schedule(): void {
     if (this.scheduled || this.closed) return;
@@ -152,7 +154,12 @@ export class AppsFolderIndex {
     await this.initialize();
     return this.enqueue(async () => {
       const entry = await readAppEntry(await this.root(), id);
-      if (entry.row.contentRevision !== expectedContentRevision) throw new GatewayError("conflict", "Entry changed; open its current version", true, { reason: "entry_changed" });
+      if (entry.row.contentRevision !== expectedContentRevision) {
+        // A rejected admission is also an authoritative invalidation hint. Do
+        // not leave callers refreshing a stale cut if the OS hint was lost.
+        this.invalidate(id);
+        throw new GatewayError("conflict", "Entry changed; open its current version", true, { reason: "entry_changed" });
+      }
       if (entry.row.status.kind !== "ready") throw new GatewayError("unsupported", entry.row.status.reason);
       return entry;
     });

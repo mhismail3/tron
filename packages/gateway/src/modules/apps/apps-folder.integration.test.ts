@@ -343,6 +343,22 @@ it("refuses disabled deletion with unsupported while leaving an external replace
   }
 });
 
+it("invalidates a stale catalog after a rejected real admission even when its filesystem hint was lost", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-admission-cut-"))); roots.push(root);
+  const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
+  const directory = join(root, "tron/workspace/files/apps/probe"); await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, "Main.swift"), "import SwiftUI\n// first");
+  // Simulate a lost OS hint, not filesystem facts. Admission still reads the
+  // actual changed file; that observation must invalidate the owning index.
+  const index = new AppsFolderIndex(workspace, () => {}, () => ({ close() {} }));
+  try {
+    const before = (await index.catalog()).rows[0]!;
+    await writeFile(join(directory, "Main.swift"), "import SwiftUI\n// replacement");
+    await expect(index.requireEntry("probe", before.contentRevision)).rejects.toMatchObject({ code: "conflict" });
+    expect((await index.catalog()).rows[0]!.contentRevision).not.toBe(before.contentRevision);
+  } finally { await index.dispose(); await workspace.dispose(); }
+});
+
 it("keeps the replacement real watcher alive when a retired watch reports a delayed reset", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-watch-"))); roots.push(root);
   const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
