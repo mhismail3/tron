@@ -113,19 +113,6 @@ group. Home owns its opaque envelope, validation and forget/privacy handling;
 Knowledge remains the sole snapshot/backup/cleanup owner. This API creates no
 backup, migration journal or domain recovery engine.
 
-## Ordinary audit publication
-
-An ordinary append adds one complete group without crossing a segment boundary.
-It atomically replaces the bounded segment (at most 500 rows / 1 MiB), fsyncs its
-bytes and parent directory, then durably replaces the bounded index (16 MiB).
-Startup and subsequent append share the record mutex to reconcile only a replaced
-numeric tail or its one new successor, proving complete groups before publishing
-their index visibility. Recovery never repeats setting or domain effects; the
-accepted command's uncertain receipt remains fenced until explicit reconciliation.
-Missing indexed segments, incomplete groups and malformed/oversized files refuse
-with a typed conflict rather than silently truncating history. The committed Home
-publication path retains its existing immutable group identity and domain recovery.
-
 ## Signals
 
 Callers own persistence failure diagnostics; these stores propagate write failures.

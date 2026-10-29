@@ -35,8 +35,7 @@ export type QualifierName = typeof QUALIFIER_NAMES[number];
 
 export type Qualifiers = Partial<Record<QualifierName, string>>;
 
-export const CHANGE_STATUSES = ["applied", "pending", "approved", "declined", "expired", "superseded", "failed", "outside", "committed"] as const;
-export type ChangeStatus = typeof CHANGE_STATUSES[number];
+export type ChangeStatus = "applied" | "pending" | "approved" | "declined" | "expired" | "superseded" | "failed" | "outside" | "committed";
 
 export interface GitResult {
   root: string | null;

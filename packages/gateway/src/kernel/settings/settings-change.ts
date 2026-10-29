@@ -249,10 +249,7 @@ export class SettingsChangePath {
   private armExpiry(recoverInterruptedActions?: true): Promise<void> {
     this.armWork = this.armWork.catch(() => undefined).then(async () => {
       if (this.disposed || !this.started) return;
-      if (recoverInterruptedActions) {
-        await this.record.recover();
-        await this.expireDue({ interruptedActions: true });
-      }
+      if (recoverInterruptedActions) await this.expireDue({ interruptedActions: true });
       if (this.disposed) return;
       const pending = await this.approvals.pending();
       if (this.disposed) return;
