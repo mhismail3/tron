@@ -5,10 +5,21 @@
   ],
   "dependsOn": [
     "gateway/admin",
+    "gateway/delegation",
     "gateway/episodic",
+    "gateway/extensions",
     "gateway/host",
+    "gateway/knowledge",
+    "gateway/notifications",
     "gateway/pi",
+    "gateway/projection",
+    "gateway/providers",
     "gateway/receipts",
-    "gateway/settings"
+    "gateway/resources",
+    "gateway/run",
+    "gateway/session-catalog",
+    "gateway/session-search",
+    "gateway/settings",
+    "gateway/workspace"
   ]
 }
