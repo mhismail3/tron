@@ -100,7 +100,12 @@ cross-home fallback or live-data copy.
 The system Python reader shares the publisher's POSIX `.publish.lock`. It opens
 bounded regular files descriptor-relatively without following links, ignores
 dot/staging entries, and validates committed metadata, IPA size/type, manifest
-bundle identity and exact HTTPS artifact path. It reads no network, creates no
+bundle identity and exact HTTPS artifact path. Committed directory identities may
+be `YYYYMMDDTHHMMSSZ-<7–9 hex commit>` or
+`YYYYMMDDTHHMMSSZ-<32 hex UUID>-<7–9 hex commit>`: the publisher retains both
+shapes in place. Record id and manifest paths must exactly match that directory;
+retained releases have the same bounds and link-free checks as new releases.
+It reads no network, creates no
 second catalog and changes neither the publisher nor the static `:8443` page.
 A read is bounded to five seconds, 20 builds and 256,000 output bytes.
 `ready`, `empty` and `unavailable` are distinct; missing, unsafe, malformed or
@@ -154,6 +159,10 @@ exercise real RuntimeRegistry/Gateway/SQLite restoration, bounds and named v1
 behavior. `apps-install.integration.test.ts` adds canonical display grants,
 cross-session same-source refusal, reviewed updates, opt-in backups, real
 publisher reads, native engine feed/link admission and receipt restart cuts.
+Its mixed-publication journey proves retained timestamp/commit and UUID releases
+list together and the compiled native engine admits the exact RPC snapshot and
+explicit retained-build install action. Linked files/directories, malformed names, mismatched record
+ids, inconsistent IPA sizes and wrong manifest paths still refuse the whole feed.
 Its pending-list journey additionally proves valid offers appear, installed and
 orphaned/invalid offers do not, and explicit installation removes the pending row.
 Its artifacts are under `test-results/apps-install/`.

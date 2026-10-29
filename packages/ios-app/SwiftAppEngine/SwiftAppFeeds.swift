@@ -42,7 +42,8 @@ package struct SwiftAppIOSBuildRecord: Codable, Sendable {
     package let installURL: String
 
     func admit() throws {
-        guard id.range(of: #"^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{32}-[a-f0-9]{7,9}$"#, options: .regularExpression) != nil,
+        // The publisher retains timestamp/commit releases alongside UUID releases.
+        guard id.range(of: #"^[0-9]{8}T[0-9]{6}Z-(?:[a-f0-9]{32}-)?[a-f0-9]{7,9}$"#, options: .regularExpression) != nil,
               !title.isEmpty, title.utf8.count <= 256, notes.utf8.count <= 4_096,
               !branch.isEmpty, branch.utf8.count <= 256, time.utf8.count <= 64,
               ["optimized", "fast-debug"].contains(mode),

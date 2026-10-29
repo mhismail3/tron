@@ -50,7 +50,9 @@ try:
                 for entry in entries:
                     if entry.name.startswith('.'): continue
                     if len(names) == 20: raise ValueError('too many published builds')
-                    if not re.fullmatch(r'[0-9]{8}T[0-9]{6}Z-[a-f0-9]{32}-[a-f0-9]{7,9}', entry.name): raise ValueError('build identity')
+                    # Retained timestamp/commit releases coexist with UUID publications.
+                    # Neither shape grants access outside the descriptor-relative tree.
+                    if not re.fullmatch(r'[0-9]{8}T[0-9]{6}Z-(?:[a-f0-9]{32}-)?[a-f0-9]{7,9}', entry.name): raise ValueError('build identity')
                     names.append(entry.name)
             records = []
             for name in names:

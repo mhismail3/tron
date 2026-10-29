@@ -67,9 +67,12 @@ The [iOS runner](../../../../ios-app/docs/swift-apps.md) owns execution and link
 
 `GatewayError` distinguishes invalid input, missing grants/apps and conflicting
 or unsafe state. `details.outcomeUnknown` identifies an interrupted receipt,
-not replay permission. Feed `unavailable` is distinct from `empty`; check the
-selected Gateway home and publisher lock/records before retrying a read.
+not replay permission. Feed `unavailable` is distinct from `empty`.
 Missing/unsafe SQLite is a restoration problem, never permission for revision zero.
+
+| Signal | One-step diagnosis / boundary |
+| --- | --- |
+| `ios-builds` unavailable | `ls -1 <configured-Gateway-home>/ios-builds/builds` identifies committed candidates. Both timestamp/commit and timestamp/UUID/commit names are valid; a retained release must not make the whole feed unavailable. Check the publisher lock and bounded record/IPA/manifest identity, not app state or reinstall. The mixed-publication RPC journey covers both names and unsafe-input refusal. |
 
 ## Verify
 

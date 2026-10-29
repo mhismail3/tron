@@ -357,6 +357,88 @@ struct ContentView: View {
     expect(run(null, false, { feeds: {} })).toMatchObject({ succeeded: false, error: expect.stringContaining("does not declare") });
     results.push("real Gateway to fresh native interpreter; exact manifest/port/path/query/host and user-action gates");
   });
+  it("lists retained timestamp/commit publications alongside UUID publications without relaxing safe reads", async () => {
+    const f = await fixture(); publish(f, "Retained build");
+    // The publisher retains pre-UUID releases in place. Recreate that committed
+    // on-disk shape, including its exact manifest path, using only fixture data.
+    const publisher = join(f.root, "tron/ios-builds/builds");
+    const retainedId = "20261024T013208Z-aaaaaaaaa";
+    execFileSync("/usr/bin/python3", ["-c", `import json, pathlib, plistlib, sys
+root = pathlib.Path(sys.argv[1])
+child = next(p for p in root.iterdir() if not p.name.startswith('.'))
+record = json.loads((child / 'build.json').read_text())
+record.update(id=sys.argv[2], time='2026-10-24T01:32:08+00:00')
+(child / 'build.json').write_text(json.dumps(record))
+manifest = plistlib.loads((child / 'manifest.plist').read_bytes())
+manifest['items'][0]['assets'][0]['url'] = 'https://mac.example.ts.net:8443/builds/' + sys.argv[2] + '/TronMobile.ipa'
+(child / 'manifest.plist').write_bytes(plistlib.dumps(manifest))
+child.rename(root / sys.argv[2])`, publisher, retainedId]);
+    publish(f, "Current build");
+    await tool(f, offerArgs(["ios-builds"]));
+    await rpc(f, "apps.install", installParams(await rpc(f, "apps.review", f.displayReference!), "retained-feed-install"));
+    const feed = (await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"];
+    expect(feed.status).toBe("ready");
+    expect(feed.builds.map((build: Record<string, unknown>) => build.title)).toEqual(["Current build", "Retained build"]);
+    const manifestURL = `https://mac.example.ts.net:8443/builds/${retainedId}/manifest.plist`;
+    expect(feed.builds[1]).toMatchObject({ id: retainedId, manifestURL,
+      installURL: `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestURL)}` });
+
+    if (process.platform === "darwin") {
+      const program = `import SwiftUI
+let feed = AppFeed.iosBuilds()
+let build = feed.builds[1]
+struct ContentView: View {
+  @Environment(\\.openURL) var openURL
+  var report: String { build.title + ":" + build.id }
+  var body: some View { Text(report) }
+  func install() { openURL(URL(string: build.installURL)!) }
+}`;
+      const engine = fileURLToPath(new URL("../../../../ios-app/SwiftAppEngine/", import.meta.url));
+      const probe = fileURLToPath(new URL("./fixtures/FeedsBoundaryMain.swift", import.meta.url));
+      const binary = join(f.root, "retained-feeds-boundary");
+      const swift = (await readdir(engine)).filter(name => name.endsWith(".swift")).map(name => join(engine, name));
+      execFileSync("/usr/bin/xcrun", ["swiftc", "-swift-version", "6", "-package-name", "TronIOSApp", "-parse-as-library", "-D", "SWIFT_APP_FEEDS_BOUNDARY", "-o", binary, ...swift, probe],
+        { env: { ...process.env, CLANG_MODULE_CACHE_PATH: join(f.root, "clang-cache") } });
+      const output = execFileSync(binary, { input: JSON.stringify({ source: program, feeds: { "ios-builds": feed }, host: "mac.example.ts.net", action: "install", userInitiated: true }), encoding: "utf8" });
+      results.push(`native retained feed: ${output}`);
+      expect(JSON.parse(output)).toMatchObject({ report: `Retained build:${retainedId}`, succeeded: true,
+        link: `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestURL)}` });
+    }
+
+    const retained = join(publisher, retainedId);
+    const originals = new Map(await Promise.all(["build.json", "manifest.plist", "TronMobile.ipa"].map(async name => [name, await readFile(join(retained, name))] as const)));
+    const unavailable = async () => expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"]).toMatchObject({ status: "unavailable", builds: [] });
+    // Accepting a retained name must not admit a linked file/directory, a
+    // mismatched record, a wrong manifest path or an inconsistent IPA size.
+    for (const name of originals.keys()) {
+      const file = join(retained, name), target = join(f.root, `outside-${name}`);
+      await rename(file, target); await symlink(target, file);
+      await unavailable(); await rm(file); await rename(target, file);
+    }
+    const target = join(f.root, "outside-build");
+    await rename(retained, target); await symlink(target, retained, "dir");
+    await unavailable(); await rm(retained); await rename(target, retained);
+    const record = JSON.parse(originals.get("build.json")!.toString());
+    for (const change of [{ id: "20261024T013208Z-bbbbbbbbb" }, { bytes: record.bytes + 1 }]) {
+      await writeFile(join(retained, "build.json"), JSON.stringify({ ...record, ...change }));
+      await unavailable();
+    }
+    await writeFile(join(retained, "build.json"), originals.get("build.json")!);
+    await writeFile(join(retained, "manifest.plist"), originals.get("manifest.plist")!.toString().replace(`/builds/${retainedId}/`, "/builds/20261024T013208Z-bbbbbbbbb/"));
+    await unavailable();
+    await writeFile(join(retained, "manifest.plist"), originals.get("manifest.plist")!);
+    for (const name of ["20261024T013208Z-aaaaaaaaaa", "20261024T013208Z-" + "b".repeat(31) + "-aaaaaaaaa", "20261024T013208Z-%2faaaaaaaaa"]) {
+      const invalid = join(publisher, name);
+      // Keep record/path identity consistent so only name admission can refuse.
+      await writeFile(join(retained, "build.json"), JSON.stringify({ ...record, id: name }));
+      await writeFile(join(retained, "manifest.plist"), originals.get("manifest.plist")!.toString().replace(`/builds/${retainedId}/`, `/builds/${name}/`));
+      await rename(retained, invalid); await unavailable(); await rename(invalid, retained);
+    }
+    await writeFile(join(retained, "build.json"), originals.get("build.json")!);
+    await writeFile(join(retained, "manifest.plist"), originals.get("manifest.plist")!);
+    expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"].status).toBe("ready");
+    results.push("mixed retained/current publisher records; retained file/directory links, identity, IPA size, manifest path and malformed-name refusals");
+  });
   it("delivers only declared bounded live publisher records and sees new builds without reinstall", async () => {
     const f = await fixture(); publish(f, "First build");
     await tool(f, offerArgs());

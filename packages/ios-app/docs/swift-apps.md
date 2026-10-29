@@ -81,6 +81,10 @@ v2 opt-in. SQLite stays v1. No read or reconnect migrates an app.
 [`Builds.swift`](../../../tools/web/apps/builds/README.md) consumes only its declared
 `AppFeed.iosBuilds()` snapshot. Opens and native pull-to-refresh read the selected
 Gateway's existing publisher; there is no app networking or background polling.
+Feed admission accepts both retained timestamp/commit and current
+timestamp/UUID/commit publication identities under the same metadata/link bounds.
+The Gateway's mixed-publication integration journey compiles the native engine
+and consumes the exact RPC feed to prove retained builds remain usable.
 Refresh preserves committed AppStorage values, admits a new runtime before
 publication and resets the old interpreter's view scopes. Dirty/failed writers
 remain owned rather than being silently replaced. Install Build is distinct from
