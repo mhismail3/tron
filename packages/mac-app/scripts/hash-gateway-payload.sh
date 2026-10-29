@@ -30,7 +30,7 @@ done < <(/usr/bin/find "$ROOT/app" "$ROOT/runtime" -print0))"
 
 for required in \
     app/dist/index.js app/package.json app/package-lock.json app/PushService.xcconfig \
-    app/scripts/ensure-node-pty-helper.mjs app/scripts/gateway-payload-deploy.mjs \
+    app/scripts/gateway-payload-deploy.mjs \
     app/node_modules runtime/node-arm64 runtime/node-x64 \
     runtime/npm-arm64/bin/npm-cli.js runtime/npm-x64/bin/npm-cli.js \
     runtime/xcodegen/bin/xcodegen \

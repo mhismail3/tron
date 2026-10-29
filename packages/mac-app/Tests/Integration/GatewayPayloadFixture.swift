@@ -27,7 +27,6 @@ func makeGatewayPayload(
         ("app/PushService.xcconfig", Data((pushConfiguration ?? (channel == "dev"
             ? "TRON_PUSH_SERVICE_ORIGIN =\n"
             : "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n")).utf8)),
-        ("app/scripts/ensure-node-pty-helper.mjs", Data("// helper".utf8)),
         ("app/scripts/gateway-payload-deploy.mjs", Data("// update helper".utf8)),
     ] + additionalFiles
     for (relative, data) in files {

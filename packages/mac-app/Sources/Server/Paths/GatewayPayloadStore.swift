@@ -352,7 +352,6 @@ enum GatewayPayloadValidator {
             ("app/dist/index.js", minimumEntrypointBytes),
             ("app/package.json", 1),
             ("app/package-lock.json", 1),
-            ("app/scripts/ensure-node-pty-helper.mjs", 1),
             ("app/scripts/gateway-payload-deploy.mjs", 1),
             ("runtime/npm-arm64/bin/npm-cli.js", 1),
             ("runtime/npm-x64/bin/npm-cli.js", 1),

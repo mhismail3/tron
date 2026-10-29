@@ -483,11 +483,6 @@ bash "$SCRIPT_DIR/stage-gateway-app.sh" "$GATEWAY_DIR" "$APP_DIR"
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
 "$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" check "$APP_DIR" production
-# node-pty loads only prebuilds/${process.platform}-${process.arch}, so the
-# Windows prebuilds npm ci installs can never load from this signed payload.
-for windows_prebuild in win32-arm64 win32-x64; do
-    safe_remove_tree "$APP_DIR/node_modules/node-pty/prebuilds/$windows_prebuild"
-done
 "$NODE_BIN" "$GATEWAY_DIR/scripts/check-pi-sdk.mjs" --runtime-tree "$APP_DIR"
 
 stage_node arm64 "$TRON_NODE_ARM64_RUNTIME_SHA256"
@@ -521,7 +516,7 @@ rm -rf "$(dirname "$launcher_temp")"
 
 for required_payload in \
     "$APP_DIR/dist/index.js" "$APP_DIR/dist/version.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
-    "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
+    "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
     "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64" \
     "$RUNTIME_DIR/npm-arm64/bin/npm-cli.js" "$RUNTIME_DIR/npm-x64/bin/npm-cli.js" \
     "$RUNTIME_DIR/xcodegen/bin/xcodegen" "$RUNTIME_DIR/xcodegen/share/xcodegen/SettingPresets/base.yml"; do

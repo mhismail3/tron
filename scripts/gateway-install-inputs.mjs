@@ -22,7 +22,6 @@ const BUILD_INPUT_FILES = [
   "packages/gateway/tsconfig.json",
   "packages/gateway/scripts/check-pi-sdk.mjs",
   "packages/gateway/scripts/check-pi-subagents.mjs",
-  "packages/gateway/scripts/ensure-node-pty-helper.mjs",
   "packages/gateway/scripts/install-pi-subagents.mjs",
   "packages/gateway/pi-subagents-pin.json",
   "packages/gateway/pi-coding-agent-patch.json",
@@ -203,7 +202,7 @@ function runNpmCi(root, runtimeBin, timeoutMs) {
     const keep = (chunk) => { output = (output + chunk.toString()).slice(-REPAIR_OUTPUT_TAIL); };
     const child = spawn(join(runtimeBin, "node"), [join(runtimeBin, "npm"), "ci", "--no-audit", "--no-fund", "--prefer-offline"], {
       cwd: root,
-      // Lifecycle scripts (the node-pty helper postinstall) resolve `node` from
+      // Lifecycle scripts resolve `node` from
       // PATH; put the pinned runtime first so they never pick an ambient Node.
       env: { ...process.env, PATH: `${runtimeBin}:${process.env.PATH ?? "/usr/bin:/bin"}` },
       stdio: ["ignore", "pipe", "pipe"],

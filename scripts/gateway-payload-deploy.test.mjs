@@ -158,16 +158,15 @@ async function buildPreflightFixture(root) {
   await mkdir(join(payload, "app", "dist"), { recursive: true });
   await mkdir(join(payload, "app", "scripts"), { recursive: true });
   await mkdir(join(payload, "app", "node_modules"), { recursive: true });
-  await mkdir(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`), { recursive: true });
+  await mkdir(join(payload, "app", "node_modules", "native-probe", "prebuilds", `darwin-${process.arch}`), { recursive: true });
   await mkdir(join(payload, "runtime"), { recursive: true });
   await writeFile(join(payload, "app", "dist", "index.js"), "x".repeat(1_024));
   await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 8; export const MIN_PROTOCOL_VERSION = 8;\n");
   await writeFile(join(payload, "app", "package.json"), "{}\n");
   await writeFile(join(payload, "app", "package-lock.json"), "{}\n");
   await writeFile(join(payload, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
-  await writeFile(join(payload, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
   await writeFile(join(payload, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
-  await writeFile(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`, "pty.node"), "native-fixture\n");
+  await writeFile(join(payload, "app", "node_modules", "native-probe", "prebuilds", `darwin-${process.arch}`, "probe.node"), "native-fixture\n");
   await writeFile(join(payload, "runtime", "node-arm64"), "n".repeat(1_048_576));
   await writeFile(join(payload, "runtime", "node-x64"), "n".repeat(1_048_576));
   await chmod(join(payload, "runtime", "node-arm64"), 0o755);
@@ -236,7 +235,7 @@ test("source apply uses the trusted checkout builder and retains installed promo
     const deploy = fileURLToPath(new URL("./gateway-payload-deploy.mjs", import.meta.url));
     await mkdir(scratch);
     for (const marker of ["packages/gateway/package.json", "packages/gateway/package-lock.json",
-      "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-install-inputs.mjs"]) {
+      "scripts/gateway-install-inputs.mjs"]) {
       await mkdir(dirname(join(checkout, marker)), { recursive: true });
       await writeFile(join(checkout, marker), "{}\n");
     }
