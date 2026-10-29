@@ -1,10 +1,10 @@
-import { type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier, type Direction } from "./tool-contract.js";
-import { appendFile, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { CHANGE_STATUSES, LAYERS, QUALIFIER_NAMES, TIERS, type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type LayerId, type Qualifiers, type Tier, type Direction } from "./tool-contract.js";
+import { mkdir, open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { createHash, randomUUID } from "node:crypto";
-import { durablePublishBoundedJson, syncDurably } from "../../foundation/durable-json.js";
+import { durableAtomicWriteText, durablePublishBoundedJson, syncDurably } from "../../foundation/durable-json.js";
 
 /**
  * The settings change record (docs/settings-model.md 5.2, foundation F2).
@@ -14,10 +14,12 @@ import { durablePublishBoundedJson, syncDurably } from "../../foundation/durable
  * `SEGMENT_ENTRIES` lines named in `index.json`, so `settings.history` reads one
  * bounded segment per page (plus the newer segments' settling references). A
  * later fact about an entry (approved, expired, committed, outside) is a new
- * entry that refers to it; no line is rewritten.
+ * entry that refers to it. Facts are immutable; ordinary append atomically
+ * replaces a bounded segment with its unchanged prefix and one complete group.
  */
 
-export type ActorKind = "ui" | "home" | "worker" | "agent" | "outside";
+const ACTOR_KINDS = ["ui", "home", "worker", "agent", "outside"] as const;
+export type ActorKind = typeof ACTOR_KINDS[number];
 export interface Actor {
   kind: ActorKind;
   /** Paired device id, session id, or the file for an outside change. */
@@ -80,6 +82,55 @@ export interface ChangeEntry {
   group?: { id: string; size: number };
 }
 
+const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const text = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 4096;
+const timestamp = (value: unknown): boolean => text(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+const member = (values: readonly string[], value: unknown): boolean => typeof value === "string" && values.includes(value);
+function actor(value: unknown): boolean {
+  return object(value) && member(ACTOR_KINDS, value.kind) && text(value.id)
+    && Object.keys(value).every(key => ["kind", "id", "sessionId", "toolCallId", "taskId"].includes(key))
+    && ["sessionId", "toolCallId", "taskId"].every(key => value[key] === undefined || text(value[key]));
+}
+function target(value: unknown): boolean {
+  if (!object(value)) return false;
+  if (value.kind === "global" || value.kind === "home") return Object.keys(value).length === 1;
+  return Object.keys(value).length === 2 && (value.kind === "session" && text(value.sessionId) || value.kind === "project" && text(value.cwd));
+}
+function qualifiers(value: unknown): boolean {
+  return object(value) && Object.entries(value).every(([key, value]) => member(QUALIFIER_NAMES, key) && text(value));
+}
+function validEntry(entry: unknown): entry is ChangeEntry {
+  if (!object(entry) || !text(entry.changeId) || !timestamp(entry.at) || !actor(entry.actor) || !target(entry.target)
+    || !text(entry.key) || !member(LAYERS, entry.layer) || !member(["set", "unset"], entry.op) || !member(CHANGE_STATUSES, entry.status)
+    || !member(TIERS, entry.tier) || !object(entry.tierBasis)) return false;
+  const basis = entry.tierBasis;
+  if (!member(["widen", "narrow"], basis.direction) || !member(TIERS, basis.floor) || !member(["code", "override"], basis.floorSource)
+    || typeof basis.web !== "boolean" || !(basis.risk === null || member(TIERS, basis.risk))) return false;
+  if (basis.requested !== undefined && basis.requested !== true) return false;
+  if (basis.riskEvaluation !== undefined && (!object(basis.riskEvaluation)
+    || !member(["assessed", "failed", "timeout"], basis.riskEvaluation.status) || typeof basis.riskEvaluation.rationale !== "string")) return false;
+  if (["commandId", "reason", "failure", "undoOf", "applyAgainOf", "refersTo", "requestId"].some(key => entry[key] !== undefined && typeof entry[key] !== "string")) return false;
+  if (["changed", "redacted", "added", "action"].some(key => entry[key] !== undefined && entry[key] !== true)) return false;
+  if (entry.redacted && (entry.before !== undefined || entry.after !== undefined)) return false;
+  if (entry.decidedBy !== undefined && !actor(entry.decidedBy)) return false;
+  if (entry.qualifiers !== undefined && !qualifiers(entry.qualifiers)) return false;
+  if (entry.group !== undefined && (!object(entry.group) || !text(entry.group.id)
+    || !Number.isSafeInteger(entry.group.size) || Number(entry.group.size) < 1 || Number(entry.group.size) > 500)) return false;
+  if (entry.fixedAt !== undefined) {
+    const fixed = entry.fixedAt;
+    if (!object(fixed) || !member([...LAYERS, "delegate"], fixed.from) || !timestamp(fixed.at) || !text(fixed.ref)
+      || fixed.qualifiers !== undefined && !qualifiers(fixed.qualifiers)
+      || fixed.reason !== undefined && typeof fixed.reason !== "string"
+      || fixed.via !== undefined && !member(["home-profile:sameAs:home", "home-profile", "home-explicit", "home-fallback"], fixed.via)) return false;
+  }
+  if (entry.git !== undefined) {
+    const git = entry.git;
+    if (!object(git) || !(git.root === null || typeof git.root === "string") || typeof git.path !== "string" || typeof git.staged !== "boolean"
+      || ["reason", "blob", "warning", "head", "branch"].some(key => git[key] !== undefined && typeof git[key] !== "string")) return false;
+  }
+  return true;
+}
+
 const SEGMENT_ENTRIES = 500;
 interface RecordIndex { version: 1; segments: Array<{ name: string; count: number; closed?: true }> }
 
@@ -109,19 +160,27 @@ export class SettingsChangeRecord {
     if (entries.length === 0) return;
     await this.mutex.run(async () => {
       await mkdir(this.directory, { recursive: true });
-      const index = await this.index();
-      for (const entry of entries) {
-        let segment = index.segments[index.segments.length - 1];
-        if (!segment || segment.closed || segment.count >= this.segmentEntries) {
-          segment = { name: String(index.segments.length).padStart(6, "0"), count: 0 };
-          index.segments.push(segment);
-        }
-        await appendFile(join(this.directory, `${segment.name}.jsonl`), `${JSON.stringify(entry)}\n`, "utf8");
-        segment.count += 1;
+      const index = await this.recoveredIndex();
+      const group = entries[0]!.group ?? { id: createHash("sha256").update(JSON.stringify(entries.map(entry => entry.changeId))).digest("hex"), size: entries.length };
+      const batch = entries.map(entry => ({ ...entry, group: entry.group ?? group }));
+      this.completeGroups(batch);
+      const encoded = batch.map(entry => `${JSON.stringify(entry)}\n`).join("");
+      if (batch.length > this.segmentEntries || Buffer.byteLength(encoded) > 1024 * 1024) {
+        throw new GatewayError("conflict", "The settings audit publication exceeds its bound");
       }
-      const temporary = join(this.directory, "index.json.tmp");
-      await writeFile(temporary, `${JSON.stringify(index)}\n`, "utf8");
-      await rename(temporary, join(this.directory, "index.json"));
+      let segment = index.segments[index.segments.length - 1];
+      let previous = segment && !segment.closed ? await this.segmentLines(segment.name) : [];
+      if (!segment || segment.closed || previous.length + batch.length > this.segmentEntries
+        || Buffer.byteLength(previous.map(entry => `${JSON.stringify(entry)}\n`).join("") + encoded) > 1024 * 1024) {
+        segment = { name: String(index.segments.length).padStart(6, "0"), count: 0 };
+        index.segments.push(segment);
+        previous = [];
+      }
+      // The whole group replaces the segment in one cut. The segment is durable
+      // before its index projection; recovery never replays a setting effect.
+      await durableAtomicWriteText(join(this.directory, `${segment.name}.jsonl`), previous.map(entry => `${JSON.stringify(entry)}\n`).join("") + encoded);
+      segment.count = previous.length + batch.length;
+      await durablePublishBoundedJson(join(this.directory, "index.json"), index, 16 * 1024 * 1024);
     });
   }
 
@@ -237,23 +296,107 @@ export class SettingsChangeRecord {
     return (await this.index()).segments.length;
   }
 
-  private async segmentLines(name: string): Promise<ChangeEntry[]> {
-    const text = await readFile(join(this.directory, `${name}.jsonl`), "utf8").catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return "";
-      throw error;
+  /** Startup and ordinary append share the record mutex. Only the numeric tail
+   * can have been replaced before its index cut; earlier immutable groups retain
+   * their existing domain publication/recovery owner. */
+  async recover(): Promise<void> { await this.mutex.run(async () => { await this.recoveredIndex(); }); }
+
+  private completeGroups(entries: readonly ChangeEntry[]): void {
+    const groups = new Map<string, ChangeEntry[]>();
+    for (const entry of entries) {
+      if (!entry.group || !text(entry.group.id) || !Number.isSafeInteger(entry.group.size) || entry.group.size < 1) {
+        throw new GatewayError("conflict", "An unpublished settings audit has no complete group");
+      }
+      const found = groups.get(entry.group.id) ?? [];
+      found.push(entry); groups.set(entry.group.id, found);
+    }
+    for (const entries of groups.values()) {
+      if (entries.some(entry => entry.group!.size !== entries.length) || new Set(entries.map(entry => entry.changeId)).size !== entries.length) {
+        throw new GatewayError("conflict", "An unpublished settings audit group is incomplete");
+      }
+    }
+  }
+
+  private async recoveredIndex(): Promise<RecordIndex> {
+    const index = await this.index();
+    let changed = false;
+    const tail = index.segments[index.segments.length - 1];
+    if (tail && !tail.closed) {
+      const entries = await this.segmentLines(tail.name);
+      if (entries.length < tail.count) throw new GatewayError("conflict", "The settings audit tail lost indexed entries");
+      if (entries.length > tail.count) {
+        this.completeGroups(entries.slice(tail.count));
+        tail.count = entries.length; changed = true;
+      }
+    }
+    const name = String(index.segments.length).padStart(6, "0");
+    const path = join(this.directory, `${name}.jsonl`);
+    const orphan = await this.boundedText(path, 1024 * 1024, true);
+    if (orphan !== undefined) {
+      const entries = this.decodeEntries(orphan);
+      if (!entries.length) throw new GatewayError("conflict", "The unpublished settings audit is empty");
+      this.completeGroups(entries);
+      index.segments.push({ name, count: entries.length }); changed = true;
+    }
+    if (changed) {
+      // Re-prove both bytes and namespace durability before publishing visibility.
+      for (const segment of index.segments.slice(-2)) {
+        const file = await open(join(this.directory, `${segment.name}.jsonl`), "r");
+        try { await syncDurably(file); } finally { await file.close(); }
+      }
+      const directory = await open(this.directory, "r");
+      try { await syncDurably(directory); } finally { await directory.close(); }
+      await durablePublishBoundedJson(join(this.directory, "index.json"), index, 16 * 1024 * 1024);
+    }
+    return index;
+  }
+
+  private decodeEntries(text: string): ChangeEntry[] {
+    try {
+      if (text && !text.endsWith("\n")) throw new Error("incomplete line");
+      const entries = text.split("\n").filter(Boolean).map(line => JSON.parse(line) as ChangeEntry);
+      if (entries.length > 500 || new Set(entries.map(entry => entry?.changeId)).size !== entries.length || entries.some(entry => !validEntry(entry))) throw new Error("invalid entries");
+      return entries;
+    } catch { throw new GatewayError("conflict", "The settings audit segment is malformed or exceeds its bound"); }
+  }
+
+  private async boundedText(path: string, bound: number, missing = false): Promise<string | undefined> {
+    const file = await open(path, "r").catch((error: NodeJS.ErrnoException) => {
+      if (missing && error.code === "ENOENT") return undefined;
+      throw new GatewayError("conflict", "The settings audit file is unavailable");
     });
-    return text.split("\n").filter(Boolean).map(line => JSON.parse(line) as ChangeEntry);
+    if (!file) return undefined;
+    try {
+      const info = await file.stat();
+      if (!info.isFile() || info.size > bound) throw new Error("file bound");
+      const buffer = Buffer.alloc(bound + 1);
+      let bytes = 0;
+      while (bytes < buffer.length) {
+        const read = await file.read(buffer, bytes, buffer.length - bytes, bytes);
+        if (!read.bytesRead) break;
+        bytes += read.bytesRead;
+      }
+      if (bytes > bound) throw new Error("file grew beyond bound");
+      return buffer.toString("utf8", 0, bytes);
+    } catch { throw new GatewayError("conflict", "The settings audit file could not be read within its bound"); }
+    finally { await file.close(); }
+  }
+
+  private async segmentLines(name: string): Promise<ChangeEntry[]> {
+    return this.decodeEntries((await this.boundedText(join(this.directory, `${name}.jsonl`), 1024 * 1024))!);
   }
 
   private async index(): Promise<RecordIndex> {
     try {
-      const value = JSON.parse(await readFile(join(this.directory, "index.json"), "utf8")) as RecordIndex;
-      if (value.version !== 1 || !Array.isArray(value.segments)) throw new Error("bad index");
+      const text = await this.boundedText(join(this.directory, "index.json"), 16 * 1024 * 1024, true);
+      if (text === undefined) return { version: 1, segments: [] };
+      const value = JSON.parse(text) as RecordIndex;
+      if (value.version !== 1 || !Array.isArray(value.segments) || new Set(value.segments.map(segment => segment.name)).size !== value.segments.length
+        || value.segments.some(segment => !/^(?:[0-9]{6,9}|once-[a-f0-9]{64})$/.test(segment.name)
+          || !Number.isSafeInteger(segment.count) || segment.count < 0 || segment.count > 500
+          || segment.closed !== undefined && segment.closed !== true)) throw new Error("bad index");
       return value;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, segments: [] };
-      throw new GatewayError("conflict", "The settings change record index could not be read");
-    }
+    } catch { throw new GatewayError("conflict", "The settings change record index could not be read"); }
   }
 }
 
