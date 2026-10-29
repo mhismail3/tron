@@ -25,7 +25,7 @@ deployment, Gateway lifecycle command, Stable install or restart is part of this
 lockfile and installed tree against that cohort and requires `node_modules/.bin/pi` to link to
 `pi-coding-agent`'s `bin.pi`; staged payloads use `node scripts/check-pi-sdk.mjs --runtime-tree <app>`. The updater preflights each package (version, revision, integrity, engine), resolves
 all four in one `npm install --package-lock-only --save-exact --engine-strict`, installs with
-`npm ci` (keeping node-pty's `spawn-helper` postinstall), runs `npm audit signatures`, restores
+`npm ci`, runs `npm audit signatures`, restores
 on failure, and writes the upstream changelog delta to `<git-dir>/work/issue-<N>/` (no delta
 fails). `pi-sdk-baseline.json` records the prior runtime and accepted `knownOneWayDeltas`
 (exact entries; unobserved ones fail as stale). `test:pi-sdk-rollback` seeds and rereads, both

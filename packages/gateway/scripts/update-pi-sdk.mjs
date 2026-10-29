@@ -27,9 +27,7 @@ function updateCommand(version, patchedArtifact) {
   return ["install", "--package-lock-only", "--save-exact", "--engine-strict", ...REGISTRY_ARGS, ...DIRECT_PI_PACKAGES.map(spec)];
 }
 
-// `npm install <specs>` never runs the root lifecycle scripts, so the tree it
-// reifies keeps node-pty's spawn-helper non-executable (#1505). The updater only
-// resolves the lock with it; `npm ci` is the one install, and it runs postinstall.
+// Resolve the lock separately; npm ci is the one reproducible cohort install.
 function installCommand() {
   return ["ci", "--engine-strict", ...REGISTRY_ARGS];
 }

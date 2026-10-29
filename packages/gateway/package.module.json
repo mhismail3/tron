@@ -7,7 +7,6 @@
     "package-lock.json",
     "package.json",
     "package.module.json",
-    "scripts/ensure-node-pty-helper.mjs",
     "scripts/measure-projection.mjs",
     "scripts/oxlint-rules.integration.test.mjs",
     "scripts/typescript-build.integration.test.mjs",

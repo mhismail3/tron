@@ -37,7 +37,6 @@ make_payload() {
   printf '{"name":"fixture"}\n' > "$root/app/package.json"
   printf '{"name":"fixture","lockfileVersion":3}\n' > "$root/app/package-lock.json"
   printf '%s\n' 'TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test' > "$root/app/PushService.xcconfig"
-  printf '%s\n' '// fixture helper' > "$root/app/scripts/ensure-node-pty-helper.mjs"
   printf '%s\n' '// fixture updater' > "$root/app/scripts/gateway-payload-deploy.mjs"
   mkdir -p "$root/app/node_modules/@earendil-works/pi-coding-agent/dist" "$root/app/node_modules/.bin"
   printf '%s\n' '{"name":"@earendil-works/pi-coding-agent","bin":{"pi":"dist/cli.js"}}' > "$root/app/node_modules/@earendil-works/pi-coding-agent/package.json"

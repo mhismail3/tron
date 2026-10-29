@@ -35,7 +35,7 @@ class GeneratedPayloadPrecondition(unittest.TestCase):
                          "runtime/bin-x64", "runtime/xcodegen/bin", "runtime/xcodegen/share/xcodegen/SettingPresets"):
                 (payload / name).mkdir(parents=True, exist_ok=True)
             for name in ("app/dist/index.js", "app/package.json", "app/package-lock.json",
-                         "app/PushService.xcconfig", "app/scripts/ensure-node-pty-helper.mjs",
+                         "app/PushService.xcconfig",
                          "app/scripts/gateway-payload-deploy.mjs", "app/pi-subagents-pin.json",
                          "app/scripts/check-pi-subagents.mjs", "app/scripts/install-pi-subagents.mjs",
                          "runtime/node-arm64", "runtime/node-x64", "runtime/npm-arm64/bin/npm-cli.js",
