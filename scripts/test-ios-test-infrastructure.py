@@ -3982,7 +3982,7 @@ exec "{real_node}" "$@"
         Failure mode 27: the path is the one input that differs between a fixture
         that starts and one that is refused, so this makes it long on purpose. Only
         what `prepare` reads is copied: the scripts, the pinned toolchain files and
-        the Gateway's manifests, not the Gateway or its dependencies.
+        the Gateway's manifests and staged Swift fixtures, not the Gateway or its dependencies.
         """
         worktree = self.root / ("long-" + "w" * 120) / ("tree-" + "x" * 120)
         ignore = shutil.ignore_patterns("__pycache__")
@@ -3997,7 +3997,9 @@ exec "{real_node}" "$@"
             shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
         # The compiled-in Node pins `verify-ci-toolchain.sh` checks (scripts/node-pin-mirrors.py, #1119).
         for name in ("packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
-                     "packages/mac-app/native-gateway-client/node-headers.json"):
+                     "packages/mac-app/native-gateway-client/node-headers.json",
+                     "packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",
+                     "tools/web/apps/builds/Builds.swift"):
             (worktree / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, worktree / name)
         return worktree
@@ -4424,6 +4426,12 @@ exec "{real_node}" "$@"
         gateway.mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, gateway / name)
+        # The real harness stages these existing sources before fixture startup.
+        for fixture in ("packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",
+                        "tools/web/apps/builds/Builds.swift"):
+            destination = worktree / fixture
+            destination.parent.mkdir(parents=True)
+            shutil.copy2(ROOT / fixture, destination)
         # The canonical Node pin is part of a checkout: the harness resolves the
         # fixture's Node from it.
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
