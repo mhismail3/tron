@@ -3248,6 +3248,93 @@ describe("Tron Home activations end to end", () => {
     expect(row.blocked).toBe("permanent-failure");
   }, 60_000);
 
+  it("keeps the exact summarized view and navigable source across a Gateway socket restart", async () => {
+    const f = await fixture("memory-continuity");
+    let server: GatewayServer | undefined;
+    let socket: WebSocket | undefined;
+    disposals.push(async () => {
+      socket?.terminate();
+      await server?.close();
+      f.service.dispose();
+      await f.receipts.dispose();
+      await f.registry.dispose();
+      await rm(f.root, { recursive: true, force: true });
+    });
+    const slot = await designateHome(f, "continuity-designate");
+    const devices = new DeviceStore(join(f.root, "continuity-devices"), "continuity-fixture");
+    await devices.initialize();
+    const enrollment = await devices.ensureEnrollment();
+    const paired = await devices.pair(enrollment.code, "continuity fixture");
+    let sequence = 0;
+    const connect = async () => {
+      server = new GatewayServer({ display: displayOwnerOf(f.registry),
+        host: "127.0.0.1", port: 0, maxFrameBytes: 1024 * 1024,
+        devices, sessions: f.registry, service: f.service, uploads: {} as never,
+        auth: { detachClient: () => {}, cancelOwner: () => {} } as never,
+        logger: { log: () => {} } as never,
+      });
+      await server.listen();
+      const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+      socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
+      const frames: Array<Record<string, unknown>> = [];
+      socket.on("message", raw => { frames.push(JSON.parse(raw.toString())); });
+      await awaitsWithin(once(socket, "open"), "continuity socket open");
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: (f.service.info() as unknown as { protocolVersion: number }).protocolVersion }));
+      await waitUntil(() => frames.some(frame => frame.type === "hello"));
+      return async (method: string, params: Record<string, unknown>) => {
+        const id = `continuity-${++sequence}`;
+        socket!.send(JSON.stringify({ type: "request", id, method, params }));
+        await waitUntil(() => frames.some(frame => frame.id === id));
+        const frame = frames.find(frame => frame.id === id)!;
+        expect(frame.error).toBeUndefined();
+        return frame.result;
+      };
+    };
+    const requests: CapturedRequest[] = [];
+    let rpc = await connect();
+    f.faux.setResponses([responsesOf(f, requests)(longInput("continuity first reply"))]);
+    await rpc("home.prompt", { commandId: "continuity-first", text: longInput("CONTINUITY-ANCHOR") });
+    await waitUntil(() => requests.length === 1 && slot.snapshot().configurationBlocker === null);
+    await waitUntil(async () => ((await homeOwnerOf(f.registry).memoryStatus()).episodic?.coverage.summarized ?? 0) >= 2);
+    f.faux.setResponses([
+      async (context) => { requests.push(record(context)); return fauxAssistantMessage(fauxToolCall("zoom", { id: 0, n: 1 })); },
+      async (context) => { requests.push(record(context)); return fauxAssistantMessage(fauxToolCall("memory_search", { query: "CONTINUITY-ANCHOR" })); },
+      responsesOf(f, requests)("continuity tools complete"),
+    ]);
+    await rpc("home.prompt", { commandId: "continuity-tools", text: "Navigate to the earlier anchor" });
+    await waitUntil(() => requests.length === 4 && slot.snapshot().configurationBlocker === null);
+    const results = (await canonicalMessages(slot)).filter(message => message.role === "toolResult");
+    for (const name of ["zoom", "memory_search"]) {
+      const result = results.find(message => message.toolName === name);
+      expect(result).toBeDefined();
+      expect(result!.isError).not.toBe(true);
+      expect(JSON.stringify(result!.content)).toContain("CONTINUITY-ANCHOR");
+    }
+    await waitUntil(async () => {
+      const memory = (await homeOwnerOf(f.registry).memoryStatus()).episodic;
+      return memory !== undefined && memory.pump.busy === 0 && memory.view.unbuilt === 0;
+    });
+    const before = await rpc("home.memory.view", { limit: 50 }) as HomeMemoryView;
+    const chapters = await rpc("home.chapterList", {});
+    const calls = f.compactor.calls;
+    expect(calls).toBeGreaterThan(0);
+    expect(JSON.stringify(before)).toContain(SUMMARY_MARKER);
+    socket!.terminate();
+    await server!.close();
+    await restart(f);
+    rpc = await connect();
+    const after = await rpc("home.memory.view", { limit: 50 });
+    expect(after).toEqual(before);
+    expect(await rpc("home.chapterList", {})).toEqual(chapters);
+    expect(f.compactor.calls).toBe(calls);
+    const navigation = homeOwnerOf(f.registry).memoryToolsFor(slot.id)!;
+    expect(await navigation.zoom(0, 1)).toMatchObject({ outcome: "ok" });
+    expect((await navigation.search("CONTINUITY-ANCHOR")).text).toContain("CONTINUITY-ANCHOR");
+    expect(f.faux.state.callCount).toBe(4);
+    report.cases.push({ case: "socket-memory-continuity", viewBefore: before, viewAfter: after,
+      compactorCalls: calls, chatCalls: f.faux.state.callCount, chapterListUnchanged: true });
+  });
+
   it("keeps Home's token spend across a Gateway restart", async () => {
     const f = await fixture("restart");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
