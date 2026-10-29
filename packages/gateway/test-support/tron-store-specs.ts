@@ -9,7 +9,7 @@ import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
 import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
-import { SwiftAppStore } from "../src/modules/apps/swift-app-store.js";
+import { AppDataStore } from "../src/modules/apps/app-data-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { HomeOwner } from "../src/modules/home/home-owner.js";
 import { homeTaskPolicy } from "../src/modules/home/home-task-worker-choice.js";
@@ -376,13 +376,12 @@ export const STORES: readonly StoreSpec[] = [
     module: "gateway/apps", name: "store-swift-apps",
     paths: ["workspace/state/apps"],
     record: (home) => withWorkspace(home, async (workspace) => {
-      const apps = new SwiftAppStore(workspace, () => { throw new Error("The v1 corpus has no display offers"); });
-      await apps.install({ appId: CORPUS_IDS.app, name: "Corpus counter", source: "import SwiftUI\nstruct CounterApp: View { var body: some View { Text(\"0\") } }\n" });
-      await apps.commit({ appId: CORPUS_IDS.app, expectedRevision: 0, set: [{ key: "count", value: 3 }], remove: [] });
+      const apps = new AppDataStore(workspace);
+      await apps.commit({ appId: CORPUS_IDS.app, expectedRevision: 0, set: [{ key: "count", value: 3 }], remove: [] }, async () => {});
     }),
     read: (home) => withWorkspace(home, async (workspace) => {
-      const apps = new SwiftAppStore(workspace, () => { throw new Error("The v1 corpus has no display offers"); });
-      return { list: await apps.list(), app: await apps.get(CORPUS_IDS.app), state: await apps.state(CORPUS_IDS.app) };
+      const apps = new AppDataStore(workspace);
+      return { state: await apps.state(CORPUS_IDS.app) };
     }),
   },
   {

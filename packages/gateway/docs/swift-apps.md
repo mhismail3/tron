@@ -1,178 +1,62 @@
-# Installed Swift apps
+# Folder-backed Apps and saved values
 
-The Gateway owns installed single-file SwiftUI apps and their data. The iPhone
-interprets bounded source/state/feed projections; it does not execute native Swift
-or acquire files, networking or credentials. See the
-[iPhone runner](../../ios-app/docs/swift-apps.md).
+Immediate directories under `workspace/files/apps/<id>/` determine membership.
+An optional `app.json` supplies title/icon/entry/kind and requested permissions.
+No registry, source-history store, offer, pending list or install review owns
+membership. Loose files are not entries; unsafe or malformed entries remain
+isolated broken rows. Source and values have independent lifetimes.
 
-## Store and versions
+## Owners and access
 
-`SwiftAppStore` is the sole writer of
-`<tronHome>/workspace/state/apps/`, under the
-[internal workspace](internal-workspace.md). The apps descriptor constructs it
-over the workspace contract. Directories are owner-only; app ids match
-`^[a-z0-9][a-z0-9-]{0,62}$`. At most 200 apps and 200 pending offers are admitted.
+[`modules/apps`](../src/modules/apps/README.md) owns catalog paging, filesystem
+observation, content identities, permission grants and data admission. Its module
+descriptor advertises `apps-folder.v1`. `apps.catalog` replaces both registry
+list reads; `apps.open` revalidates exact content and returns a snapshot or a
+native first-open permission request. An agent cannot grant its own app access.
+Unsupported web/network execution is blocked, not run with ambient authority.
 
-| File | Authority |
-| --- | --- |
-| `app.json` | Explicit manifest version 1 or 2; the current source/configuration head |
-| `App.swift` | Named v1 source; at most 320,000 UTF-8 bytes |
-| `sources/<sha256>.swift` | Immutable v2 source, addressed by the manifest |
-| `data.sqlite` | State table and state revision; SQLite `user_version` remains 1 |
-| `backups/v1-<revision>[-<uuid>]/` | Explicit upgrade snapshots of v1 manifest, source and byte-identical SQLite |
-| `.offers/<reference-key>/` | Bounded pending source/configuration bound to its producing session/artifact |
+Native consent binds executable bytes/assets, folder identity and permission
+scopes. Metadata-only title/icon edits do not request access again. Code/scope
+changes and revoke invalidate subsequent data writes. A prompt token is bounded,
+expiring, device-bound and one-use; durable receipt replay is not a second tap.
 
-Pending offers are reconciled under the Apps mutex on first root access, catalog
-reads and before refusing a full offer store. DisplayOwner first proves canonical
-session membership, including live-only runtimes; offers without their exact
-producing artifact owner are then erased with their source/configuration. This
-reclaims deleted-session capacity without a second session catalog or timer.
-Unreadable metadata is not authority to delete it; installed apps and live offers
-are unaffected. `apps.pending` projects only uninstalled app ids with intact offered
-source and a currently authorized producing session/artifact whose bytes match.
-It excludes installed app ids (including update offers), orphaned grants and invalid
-offers without creating another index. Listing never installs; review and install
-re-acquire the exact grant. The bounded list is sorted by app id, then offer id.
+## Saved values
 
-`swift-app-format.ts` owns the manifest/offer values and their admission.
-`readSwiftAppManifestV1` is the named existing reader. V1 has
-`version,id,name,icon?,revision,sourceSha256,sourceBytes,updatedAt`.
-V2 adds an immutable `instanceId`, declared `feeds`, and at most 20
-source/configuration history entries with session actor attribution. Historical
-v1 attribution is unknown, not invented. Source revision and state revision are
-independent; rename changes the label, not the source fence.
+`AppDataStore` owns `workspace/state/apps/<id>/data.sqlite`, preserving the
+existing SQLite schema, revision/CAS and bounds. It never makes a membership row.
+A missing, linked, uninitialized or newer established database is refused without
+recreating state. File removal does not clear values or migrate another id's data.
 
-V1 is never upgraded on read, restart or reconnect. Its explicit reviewed update
-requires `upgradeToV2: true` and a durable backup before publishing v2. Failed
-attempts keep their backups; a later attempt snapshots current bytes rather than
-reusing a potentially stale backup. At most 20 upgrade backups are retained;
-reaching the bound refuses without overwriting them. No SQLite migration occurs.
+The built-in `app_data` tool lists bounded saved-data inventory with byte counts
+and orphan flags, reads one state and seeds values with revision CAS. Clear needs
+separate explicit authorization. Native reset is likewise a receipt-backed CAS
+mutation. Management is not an app-runtime bridge and creates no grant.
 
-## Review and publication
-
-1. `swift_app offer` reads a complete, bounded, visible, link-free source under
-   the session directory or internal `files/`. It creates a canonical code display
-   and an offer; it does not install, change app state or grant a feed to a preview.
-2. `apps.review` acquires that display owner's session/artifact grant and verifies
-   the exact bytes against the offer and returns that complete source for review
-   from Apps as well as chat. Source SHA alone is not authority: another
-   session's display of identical bytes cannot review or replace its configuration.
-3. `apps.install` re-acquires the same grant and checks offer/config identity,
-   source SHA and the reviewed existing revision/source/instance. A changed or
-   removed target refuses; an old instance cannot overwrite a reinstall.
-4. New apps publish through an owner-controlled staging directory. Updates write
-   immutable source before atomically publishing the single manifest head. Data
-   stays in place. Startup/next-root cleanup removes only recognized unreachable
-   staging, retired directories, temporary files and sources outside retained history.
-   Cleanup after publication cannot turn its committed result into a failed receipt.
-
-The existing named tool `install` remains a v1-only contract. It can create or
-replace v1 source while keeping its data, but cannot update/downgrade v2.
-Reviewed Install App is the v2 install/update path.
-
-## State and removal
-
-Keys are 1–256 bytes without controls; values are plain finite JSON nested at
-most 32 levels and encoded to at most 256 KiB. One app holds at most 1,000 keys
-and 512 KiB of keys plus encoded values. A transaction carries 1–256 writes.
-Stale revisions and bound violations change nothing. Interpreter commits also
-fence the source revision and, for v2, instance id. Agent seeding keeps its
-state-revision contract.
-
-Only first installation may initialize SQLite. Missing, linked, unsafe or
-unsupported established storage refuses; it is not permission to reset state
-or retry revision zero. The initialized-container marker also detects loss of
-the entire apps directory. Connections close within the store mutex.
-
-Remove durably renames the app to the exact owner-controlled
-`.removed-<appId>-<hex12>` retirement name before deleting source/data. Restart
-cleanup reclaims a recognized interrupted retirement without relisting the app.
+Phone file deletion is outside this release. The retained server stale-row check
+only refuses; it cannot move or remove a directory. Ordinary authorized filesystem
+changes are observed independently of saved data.
 
 ## Declared `ios-builds` feed
 
-Only v2 may declare `feeds: ["ios-builds"]` (or `[]`). A v2 open reads a new,
-immutable snapshot; v1's response stays unchanged. The feed reads
-`<configured Gateway home>/ios-builds`, not an arbitrary client path. The trusted
-home is canonicalized; linked publisher roots and children refuse. Debug's
-`~/.tron-dev` is separate from Stable's publisher home; there is no implicit
-cross-home fallback or live-data copy.
+Only an app declaring `permissions.feeds: ["ios-builds"]` receives that read-only
+snapshot after native access approval. The reader uses the existing publisher's
+POSIX lock, safe regular-file reads and record/IPA/manifest identity checks. Both
+retained timestamp/commit and current timestamp/UUID/commit publications are valid.
+Staging is excluded; corrupt committed data is unavailable, never empty-success.
 
-The system Python reader shares the publisher's POSIX `.publish.lock`. It opens
-bounded regular files descriptor-relatively without following links, ignores
-dot/staging entries, and validates committed metadata, IPA size/type, manifest
-bundle identity and exact HTTPS artifact path. Committed directory identities may
-be `YYYYMMDDTHHMMSSZ-<7–9 hex commit>` or
-`YYYYMMDDTHHMMSSZ-<32 hex UUID>-<7–9 hex commit>`: the publisher retains both
-shapes in place. Record id and manifest paths must exactly match that directory;
-retained releases have the same bounds and link-free checks as new releases.
-It reads no network, creates no
-second catalog and changes neither the publisher nor the static `:8443` page.
-A read is bounded to five seconds, 20 builds and 256,000 output bytes.
-`ready`, `empty` and `unavailable` are distinct; missing, unsafe, malformed or
-contended input never masquerades as a successful empty feed.
-
-The native interpreter receives only declared snapshots through
-`AppFeed.iosBuilds()`. V2 OS-install links require an explicit native user action,
-the paired host and an exact manifest URL from that snapshot. It hands the link
-to iOS; neither Gateway nor phone claims that iOS completed an installation.
-
-## RPCs (`swift-apps.v1` capability)
-
-The descriptor advertises the existing capability; paired Gateway/iPhone
-versions own wire admission. Reads remain available while draining.
-
-| Method | Params / result |
-| --- | --- |
-| `apps.list` | none → `{apps}`, sorted by id |
-| `apps.pending` | none → `{offers}`, valid uninstalled offers, sorted by app id/offer id |
-| `apps.get` | `appId` → `{app,source}` |
-| `apps.open` | `appId` → coherent `{app,source,state}`; v2 also `feeds` |
-| `apps.review` | `sessionId,artifactId` → `{offer,installed,reference,source}` |
-| `apps.install` | `commandId,sessionId,artifactId,offerId,expectedRevision,expectedSourceSha256,expectedInstanceId,upgradeToV2` → `{app,created}` |
-| `apps.rename` | `commandId,appId,name` → `{app}` |
-| `apps.reset` | `commandId,appId,expectedRevision` → `{appId,revision}` |
-| `apps.remove` | `commandId,appId,expectedInstanceId?` → `{appId,removed:true}`; v2 requires the instance fence |
-| `apps.state` | `appId` → `{appId,revision,entries:[{key,value}]}` |
-| `apps.commit` | `commandId,appId,expectedRevision,expectedSourceRevision?,expectedInstanceId?,set?,remove?` → `{appId,revision}` |
-
-Mutations use the existing transport receipt coordinator, not a second Apps
-ledger. Completed commands replay their result. Interrupted pending/effects
-receipts remain conflicts with `details.outcomeUnknown: true`; reconnect is
-not permission to apply again. Source/state/feed results bypass transcript
-clipping; transport's aggregate frame ceiling still applies and an oversized
-composed response refuses rather than silently clipping executable data.
-No change broadcast, scheduling, HTML backend or background feed polling exists.
-
-## Tool
-
-Ordinary sessions, not Home's curated profile, expose `swift_app`:
-`list`, `offer {appId,name,icon?,source,feeds}`,
-`discardOffer {artifactId}` (producing session only),
-the named v1 `install {appId,name,icon?,source}`, `state {appId}`,
-`commit {appId,expectedRevision,set?,remove?}`, and `remove {appId}`.
-Source kinds are `path` and `internal_file`, relative to their existing owners.
+The snapshot grants no publish/build/restart privilege. The interpreter admits an
+exact paired-host installation URL only on an explicit native user action. Opening
+an app or feed neither installs a build nor claims the OS completed installation.
 
 ## Verification
 
-`swift-app-store.integration.test.ts` and `apps.store.lock.integration.test.ts`
-exercise real RuntimeRegistry/Gateway/SQLite restoration, bounds and named v1
-behavior. `apps-install.integration.test.ts` adds canonical display grants,
-cross-session same-source refusal, reviewed updates, opt-in backups, real
-publisher reads, native engine feed/link admission and receipt restart cuts.
-Its mixed-publication journey proves retained timestamp/commit and UUID releases
-list together and the compiled native engine admits the exact RPC snapshot and
-explicit retained-build install action. Linked files/directories, malformed names, mismatched record
-ids, inconsistent IPA sizes and wrong manifest paths still refuse the whole feed.
-Its pending-list journey additionally proves valid offers appear, installed and
-orphaned/invalid offers do not, and explicit installation removes the pending row.
-Its artifacts are under `test-results/apps-install/`.
-
-Crash cuts kill a fixture process **after releasing its RuntimeRegistry/workspace
-lease** at the held Apps/receipt cut. They prove Apps restart state and receipt
-replay fencing, not an ungraceful whole-Gateway crash, stale-lock recovery,
-power-loss/page-cache durability or physical-device installation.
-
-```bash
-scripts/tron verify --module gateway/apps
-scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
+```sh
+scripts/tron test gateway src/modules/apps/apps-folder.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps-folder-runtime.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps.store.lock.integration.test.ts
 ```
+
+The runtime suite crosses real Gateway, SQLite, receipt-process crash cuts and
+compiled Swift interpreter boundaries. The store lock reads the preserved legacy
+SQLite corpus without mutating any recorded file; source/registry projections
+are not membership. UI, converter and paired protocol validation are separate.

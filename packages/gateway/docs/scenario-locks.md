@@ -158,7 +158,7 @@ Knowledge lock.
 | Learned profile (tagged Knowledge notes, their record entries) | profile change path | `gateway/home` store-home-profile (live) |
 | `workspace/state/episodic/<session>/` | `EpisodicStore` | `gateway/episodic` |
 | `gateway/display-artifacts/` | `DisplayArtifactStore` | `gateway/display` (live) |
-| `workspace/state/apps/` (manifest, source, SQLite state) | `SwiftAppStore` | `gateway/apps` |
+| `workspace/state/apps/` (saved SQLite state; legacy corpus files retained) | `AppDataStore` | `gateway/apps` |
 | `gateway/session-search.sqlite` (contentless postings, reuse stamps) | `SessionSearchIndex` | `gateway/session-search` |
 | `gateway/model-queue.json`, `model-queue-sessions/` (children's projection) | `ModelQueueOwner`, read by `projectionSource` | `gateway/providers` store-model-queue |
 | `gateway/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |

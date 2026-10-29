@@ -454,15 +454,14 @@ package struct MessageTranscriptItem: TranscriptPayload {
         details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
         display = try values.decodeIfPresent(DisplayProjection.self, forKey: .display)
         if let display {
-            // Gateway admits provider-bound browser results before projection;
-            // raw extension details are never native display authority.
+            // Raw extension details are not native display authority. Retired
+            // producers remain ordinary tool values in new Gateway snapshots.
             guard role == .toolResult,
-                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive)
-                    || (toolName == "swift_app" && display.kind == .code && display.artifact?.name.lowercased().hasSuffix(".swift") == true) else {
+                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive) else {
                 throw DecodingError.dataCorruptedError(
                     forKey: .display,
                     in: values,
-                    debugDescription: "Display metadata requires a display result, a Swift app source offer or a live-browser result"
+                    debugDescription: "Display metadata requires a tool result"
                 )
             }
         }

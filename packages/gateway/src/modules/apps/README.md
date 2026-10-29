@@ -5,8 +5,8 @@
 Own folder-backed Apps membership and scoped access separately from saved SQLite
 data. The approved target contract is in `docs/design/apps-folder/DESIGN.md` on
 `design/2108-apps-folders`. This implementation checkpoint is not a paired-client
-release: display materialization, the iOS consumer, conversion and removal of
-retired source owners remain incomplete.
+release: display materialization, the paired iOS consumer and conversion remain
+incomplete.
 
 ## Owners
 
@@ -32,9 +32,8 @@ retired source owners remain incomplete.
 - `ios-builds-feed.ts` reads the existing publisher under its POSIX lock; it
   neither publishes nor runs source, fetches network, or indexes Apps.
 
-The old Swift registry/offer files and their surviving boundary oracles are
-retained until replacement feed/interpreter/conversion coverage is complete.
-They are not registered as runtime RPCs or agent tools by `module.ts`.
+There is no registry/offer/install source owner. Legacy corpus source/manifest
+files are inert retained bytes; the recorded lock reads saved values only.
 
 ## Gateway contract
 
@@ -90,11 +89,15 @@ Apps subfolder is empty; a missing/unsafe workspace files root is unavailable.
 
 ```bash
 scripts/tron test gateway src/modules/apps/apps-folder.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps-folder-runtime.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps.store.lock.integration.test.ts
 scripts/tron-node exec npm --prefix packages/gateway run check
 scripts/tron-node exec npm --prefix packages/gateway run lint
 ```
 
-The folder suite crosses a real RuntimeRegistry, GatewayService, receipt store,
-filesystem watchers, a real Pi tool turn and SQLite. It does not prove display publication, the native
-interpreter, migration, UI, watcher overflow recovery or runner shutdown on revoke.
-Do not remove the old feed/interpreter/crash oracles before their replacements pass.
+The folder suites cross a real RuntimeRegistry, GatewayService, receipt store,
+filesystem watchers, a real Pi turn and SQLite. Runtime coverage compiles the Swift
+engine, persists actions and dictionaries, checks retained/current feeds and URL
+consent gates, kills fixture writers at three receipt cuts, and checks drain,
+JSON bounds and damaged databases. Display publication, migration, UI, watcher
+overflow recovery and runner shutdown on revoke require separate validation.

@@ -8,9 +8,7 @@ import TronMobileCore
 @MainActor @Observable
 final class InstalledSwiftApps {
     struct Ports {
-        let review: @MainActor (String, SwiftAppDisplayReference) async throws -> SwiftAppInstallReview
-        let install: @MainActor (String, SwiftAppInstallCommand) async throws -> SwiftAppInstallResult
-        let list: @MainActor (String) async throws -> InstalledSwiftAppCatalog
+        let list: @MainActor (String) async throws -> InstalledSwiftAppList
         let open: @MainActor (String, String) async throws -> InstalledSwiftAppSnapshot
         let commit: @MainActor (String, InstalledSwiftAppCommit) async throws -> InstalledSwiftAppAcknowledgement
         let rename: @MainActor (String, String, String) async throws -> InstalledSwiftAppManifest
@@ -22,63 +20,17 @@ final class InstalledSwiftApps {
     enum Phase: Equatable { case idle, loading, loaded, failed(String) }
 
     private(set) var apps: [InstalledSwiftAppManifest] = []
-    private(set) var pending: [SwiftAppInstallOffer] = []
-    var isEmpty: Bool { apps.isEmpty && pending.isEmpty }
+    var isEmpty: Bool { apps.isEmpty }
     private(set) var phase: Phase = .idle
     /// Bumped when a retained session is dropped, so rows showing its status refresh.
     private(set) var revision = 0
     @ObservationIgnored private let ports: Ports
     @ObservationIgnored private var sessions: [UUID: InstalledSwiftAppSession] = [:]
     @ObservationIgnored private var requests: [String: UUID] = [:]
-    @ObservationIgnored private var installations: [String: SwiftAppInstallation] = [:]
     @ObservationIgnored private var listRequest: UUID?
     @ObservationIgnored var onFailure: ((Error) -> Void)?
 
     init(ports: Ports) { self.ports = ports }
-
-    func review(reference: SwiftAppDisplayReference, source: String, profileID: String) async throws -> SwiftAppInstallReview {
-        let value = try await ports.review(profileID, reference)
-        try Task.checkCancellation()
-        return try value.admitted(source: source, reference: reference)
-    }
-
-    func review(reference: SwiftAppDisplayReference, profileID: String) async throws -> SwiftAppInstallReview {
-        let value = try await ports.review(profileID, reference)
-        try Task.checkCancellation()
-        return try value.admitted(source: value.source, reference: reference)
-    }
-
-    /// The catalog owns accepted installation work, not the review sheet. A
-    /// repeated tap or presentation reuses the immutable command and its result.
-    func installation(review: SwiftAppInstallReview, profileID: String) throws -> SwiftAppInstallation {
-        let identity = "\(profileID)/\(review.offer.id)/\(review.installed?.instanceId ?? "v1")/\(review.installed?.revision ?? 0)"
-        if let retained = installations[identity], !(retained.installed != nil && review.installed == nil) { return retained }
-        // A fresh authoritative review can observe removal by another client.
-        // A settled success is not permission to present Open for a missing app.
-        if installations[identity] == nil, installations.count >= 200 {
-            installations = installations.filter { $0.value.installed == nil }
-        }
-        guard installations[identity] != nil || installations.count < 200 else { throw InstalledSwiftAppFailure("Too many app reviews are retained. Resolve pending installations first.") }
-        let value = SwiftAppInstallation(review: review, install: { [ports] command in
-            try await ports.install(profileID, command)
-        }, didInstall: { [weak self] manifest in
-            guard let self else { return }
-            self.retireClean(appID: manifest.id, profileID: profileID)
-            // A pre-install catalog read cannot republish this offer as pending.
-            self.listRequest = nil
-            self.pending.removeAll { $0.appId == manifest.id }
-            self.phase = .loaded
-            if let index = self.apps.firstIndex(where: { $0.id == manifest.id }) { self.apps[index] = manifest }
-            else { self.apps.append(manifest) }
-            self.revision &+= 1
-        })
-        installations[identity] = value
-        return value
-    }
-
-    func requireInstallCanStart(appID: String, profileID: String) throws {
-        try requireNoUnsaved(appID: appID, profileID: profileID)
-    }
 
     /// A disposable read of the Gateway's catalog. A later request or sheet
     /// dismissal supersedes it; a failure keeps the last list visible.
@@ -89,12 +41,10 @@ final class InstalledSwiftApps {
         do {
             let loaded = try await ports.list(profileID)
             guard listRequest == request else { return }
-            guard loaded.apps.count <= 200, Set(loaded.apps.map(\.id)).count == loaded.apps.count,
-                  loaded.pending.count <= 200, Set(loaded.pending.map(\.id)).count == loaded.pending.count else {
+            guard loaded.apps.count <= 200, Set(loaded.apps.map(\.id)).count == loaded.apps.count else {
                 throw InstalledSwiftAppFailure("The Gateway returned an invalid app list.")
             }
             apps = loaded.apps
-            pending = loaded.pending.filter { offer in !loaded.apps.contains { $0.id == offer.appId } }
             phase = .loaded
         } catch is CancellationError {
             if listRequest == request, isEmpty { phase = .idle }
@@ -171,9 +121,6 @@ final class InstalledSwiftApps {
         try requireNoUnsaved(appID: appID, profileID: profileID)
         try await ports.remove(profileID, appID, apps.first(where: { $0.id == appID })?.instanceId)
         retireClean(appID: appID, profileID: profileID)
-        installations = installations.filter { identity, installation in
-            !(identity.hasPrefix("\(profileID)/") && installation.review.offer.appId == appID && installation.installed != nil)
-        }
         apps.removeAll { $0.id == appID }
     }
 
@@ -198,9 +145,6 @@ final class InstalledSwiftApps {
     }
 
     private func requireNoUnsaved(appID: String, profileID: String) throws {
-        guard !installations.contains(where: { identity, installation in
-            identity.hasPrefix("\(profileID)/") && installation.review.offer.appId == appID && installation.isInstalling
-        }) else { throw InstalledSwiftAppFailure("This app has an installation in progress. Wait for its receipt before changing it.") }
         guard !hasUnsavedChanges(appID: appID, profileID: profileID) else {
             throw InstalledSwiftAppFailure("This app has changes that are not saved yet. Open it and resolve them first.")
         }

@@ -810,7 +810,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
         "native_capture": ("View Mac screen", "macwindow"),
         "computer": ("Use Mac", "desktopcomputer"),
         "schedule": ("Schedule", "calendar.badge.clock"),
-        "swift_app": ("Swift apps", "swift"),
         "settings": ("Settings", "gearshape"),
         "agent_browser": ("Browse web", "globe"),
         "subagent": ("Subagents", "person.2"),

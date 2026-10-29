@@ -21,9 +21,8 @@ async function barrier(): Promise<never> {
   process.stdin.resume(); writeFileSync(marker, cut);
   return new Promise<never>(() => {});
 }
-(globalThis as unknown as Record<symbol, unknown>)[Symbol.for("tron.apps.crashCut")] = barrier;
 const agentDir = join(root, "agent"), tronHome = join(root, "tron");
-const faux = fauxProvider({ provider: "apps-install-fixture", tokensPerSecond: 100_000 });
+const faux = fauxProvider({ provider: "apps-folder-runtime-fixture", tokensPerSecond: 100_000 });
 const registry = await createTestRegistry({ agentDir, tronHome, trust: new TrustService(agentDir), idleRuntimeMs: 60_000,
   modelRuntimeFactory: async () => {
     const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
@@ -44,6 +43,6 @@ const service = new GatewayService({ display: displayOwnerOf(registry),
   globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
 } as unknown as GatewayServiceDependencies);
 try {
-  await service.invoke({ id: "phone", identity: "device:apps-install", isLocal: false } as ClientContext, request.method, request.params);
+  await service.invoke({ id: "phone", identity: "device:apps-folder-runtime", isLocal: false } as ClientContext, request.method, request.params);
   throw new Error(`The crash fixture passed ${cut} without being killed`);
 } finally { await registry.dispose(); await receipts.dispose(); }

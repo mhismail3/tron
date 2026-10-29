@@ -40,69 +40,18 @@ hide their scroll background and carry `tronScrollEdgeChrome`; presented sheets 
 stacks. Theme values are environment defaults, so a program's own `font`, `tint`,
 `foregroundStyle` and similar modifiers win.
 
-## Installed apps (#1156)
+## Folder-backed apps
 
-Installed apps with their own Mac-side data are the Gateway's (`swift-apps.v1`, the
-`swift_app` tool; [Gateway Swift apps](../../gateway/docs/swift-apps.md)). The Tron
-menu's Apps sheet opens a coherent source/state snapshot in this runner through
-`InstalledSwiftApps`; accepted writes stay with that receipt-backed owner across
-runner dismissal. Manage supports confirmed rename, clear data and removal.
-Ordinary `display` source still runs a disposable preview; it does not make an
-installation or obtain feed authority.
+Gateway membership is `files/apps/<id>/`, with optional app.json and separate
+SQLite values under `state/apps/<id>/`. The folder protocol and permission owner
+are documented in [Gateway Apps](../../gateway/docs/swift-apps.md).
+There is no offer, install review or pending catalog. File removal never clears
+saved values. Code/data/feed access belongs to the Gateway's native first-open
+consent, not a model-created grant. Unsupported web/network programs are blocked.
 
-## Reviewed Install App and Builds (#1162)
-
-With Run Swift files on, `swift_app offer` renders an inline Swift card whose
-native producer intent opens Install App review, not a disposable preview.
-Preparation and review share one Settings-style navigation shell and medium/large
-detents. The main review shows the app, where it runs and declared access, with
-plain section footers. Its trailing Install (or Update) is the only install action;
-swiping away cancels review, not an already accepted command. The leading info
-action opens App Details: app id/current installation, artifact, hash, byte size
-and a View Source row opening the shared source reader. Nested sheets inherit
-the opening sheet's theme.
-
-The Apps sheet also lists pending offers, independently of the chat-only flag.
-A pending row re-acquires its exact session/artifact through `apps.review`, admits
-the returned complete source/hash and opens the same Install App review. The source
-is labelled `App.swift` (the canonical offered snapshot), not an inferred original
-filename. Listing/opening never installs; only the explicit review action does.
-The canonical session/artifact grant binds the exact offered bytes and config;
-another display of identical source does not inherit permission to install it.
-Install/update uses one Apps-owned command across dismissal/reconnect, never an
-automatic replay. A failed command remains terminal for that review identity;
-prepare a fresh offer for another explicit attempt. Successful removal permits
-fresh consent/reinstallation of the same offer, with fresh app data.
-
-New reviewed installs use manifest v2. Explicit source updates retain data and
-instance identity. V1 stays readable; upgrading it needs the review's backed-up
-v2 opt-in. SQLite stays v1. No read or reconnect migrates an app.
-
-[`Builds.swift`](../../../tools/web/apps/builds/README.md) consumes only its declared
-`AppFeed.iosBuilds()` snapshot. Opens and native pull-to-refresh read the selected
-Gateway's existing publisher; there is no app networking or background polling.
-Feed admission accepts both retained timestamp/commit and current
-timestamp/UUID/commit publication identities under the same metadata/link bounds.
-The Gateway's mixed-publication integration journey compiles the native engine
-and consumes the exact RPC feed to prove retained builds remain usable.
-Refresh preserves committed AppStorage values, admits a new runtime before
-publication and resets the old interpreter's view scopes. Dirty/failed writers
-remain owned rather than being silently replaced. Install Build is distinct from
-Install App: only its explicit native action can hand an exact snapshot manifest
-on the paired host to iOS. The host does not claim OS installation completed.
-
-The hosted-only `-tron-apps-install-design-fixture` composes an Install App
-review using shared settings/document components; it does not register an
-installation or contact a Gateway. Both Apps design fixture roots inherit the
-existing in-memory `AppModel` from `TronMobileApp`: the shared runner requires that
-environment for installed-app refresh, even when presenting ephemeral source.
-They do not construct the production scene owner. `TronAppsInstallDesignUITests` capture the
-unchanged historical Builds source beside the
-[Builds visual proposal](../../../tools/web/apps/builds-preview/README.md#installation-design-review-1162) in the actual
-interpreter (light/dark/default/XXXL). Both disable build installation. The
-proposal is synthetic. The real-Gateway `testBuildsInstallLight/Dark/LightXXXL/DarkXXXL`
-journeys separately exercise the production offer/review/Apps paths with the canonical
-interpreted source and synthetic publisher files; they never tap Install Build.
+The shared Swift interpreter and retained receipt-backed write owner remain the
+execution/state boundary; no ambient filesystem, network or native APIs are added.
+The Apps catalog UI and paired protocol must be updated together before release.
 
 ## Flag
 
@@ -241,34 +190,18 @@ Clean reopens read the Gateway afresh. Presented program versions remain owned u
 closed, so another clean reader cannot orphan a writer. Manage rechecks unresolved
 writes after awaits; accepted install work also blocks conflicting management.
 
-## Apps menu and Manage
+## Apps catalog
 
-The Tron menu's **Apps** item (always offered beside Automations and Knowledge; not gated by the
-"Run Swift files" experiment, which only controls chat Run buttons) opens `InstalledAppsSheet`:
-the selected Gateway's `apps.pending` and `apps.list`, refreshed on open, pull and
-after review or runner closes; Manage updates the same catalog. Valid, uninstalled offers appear in a **Pending**
-section above installed apps, using the shared list rows and primary theme. Installed
-app ids and missing session/artifact grants do not appear as pending. Successful
-installation immediately removes all offers for that app id from Pending and adds
-the installed row; a pre-install disposable read cannot overwrite that receipt.
-With neither pending nor installed apps, the existing empty state is unchanged.
-An installed row opens the app through `apps.open` in the shared runner; touch and hold offers Open and
-Manage. Manage renames, clears data and removes the app (each confirmed, receipts-backed), and
-offers Discard Unsaved Changes when a save was refused. Rows with unsaved work carry an
-Unsaved tag. V2 declared feeds and reviewed source updates are implemented above;
-full history/provenance browsing and HTML remain separate scope. The hosted design
-fixture is not evidence that those remaining surfaces are implemented.
+The Tron menu opens `InstalledAppsSheet`. Folder membership is independent of
+saved values and of the chat Run Swift files setting. Native accesses must use
+`apps.catalog`, exact-content `apps.open` and the Gateway's permission result.
+The old registry list and install-review flows are not available. Client file
+deletion is outside this release; saved-value clearing requires separate approval.
 
-The real-Gateway `testPendingAppReviewInstallLight/Dark` journeys leave the producing
-chat without using its inline card, open Apps with the chat experiment off, review
-access/source without installation, explicitly install and verify the row stays
-installed across a catalog reopen. Kept simulator attachments capture the pending
-sheet, review, source and installed result; no pixel goldens or OS build installation.
-
-The Gateway app-store boundary journey compiles its
+The Gateway runtime suite compiles
 [`PersistenceBoundaryMain.swift`](../../gateway/src/modules/apps/fixtures/PersistenceBoundaryMain.swift)
-with the real engine on macOS, applies its committed batches through real Gateway RPC receipts,
-and restores a fresh native process and Gateway. It is not an iPhone UI persistence proof.
+with the real engine, applies batches through Gateway receipts and restores a
+fresh native process/Gateway. This is not an iPhone UI persistence proof.
 
 ## Recovered Builds preview (#1319)
 
@@ -303,15 +236,6 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/TronAppsDesignUITests
 ```
 
 ## Validation
-
-`TronInstallReviewUITests` drives production chat cards, review admission and
-receipt-backed installation through a scripted Gateway socket in the readonly
-attachment fixture (`display-swift-install-review-inline-light/dark`). It checks
-container/play entry without transient runner chrome, toolbar consent, details
-and source navigation, and captures light/dark/default/XXXL simulator images.
-A hosted-only passive mounted-title observer retains transient chrome evidence
-that a post-load accessibility query would miss. The fixture never installs on
-the Mac or opens an iOS build.
 
 Hosted journeys in `TronSwiftAppUITests` run the programs in `HostedSwiftAppFixtureSource`
 through the read-only attachment fixture (`-readonly-preview-scenario display-swift…`):

@@ -363,7 +363,6 @@ package enum DisplayPresentationPolicy {
 
     package static func invocationSurface(toolName: String?, request: JSONValue?) -> DisplaySurface? {
         guard let object = request?.objectValue else { return nil }
-        if toolName == "swift_app", object["action"]?.stringValue == "offer" { return .inline }
         guard toolName == "display" else { return nil }
         guard let presentation = object["presentation"]?.objectValue,
               let raw = presentation["surface"]?.stringValue else {

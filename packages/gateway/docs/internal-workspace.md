@@ -14,8 +14,9 @@ inferred from pairing identity, browser preferences, or the current project.
   immutable content objects, coverage, suppression and cleanup evidence must be
   accessed through that owner, not arbitrary edits. Other namespaces have no
   generic state API. Use the capability's owning interface when one exists.
-  Installed Swift apps are owned by `SwiftAppStore` under `state/apps/`
-  ([swift-apps.md](swift-apps.md)); agents use the `swift_app` tool.
+  Apps membership is ordinary `files/apps/<id>/` content. `AppDataStore` owns
+  separate `state/apps/<id>/data.sqlite`; agents manage saved values through
+  `app_data`, not direct SQLite edits ([swift-apps.md](swift-apps.md)).
 - `internal/machine-group-id`: one shared Stable/Debug physical-machine
   identity. The retired `~/.tron-machine-group-id` is never read on startup and
   is never a fallback: while it exists, startup refuses and asks the operator to

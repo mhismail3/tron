@@ -8,7 +8,7 @@ sheet and the node views that turn interpreter values into SwiftUI.
 ## Owns
 
 `SwiftAppDisplayCard`, `SwiftAppRunnerSheet`, `SwiftAppViews`, `SwiftAppNodeViews`,
-`InstalledAppsSheet` and `SwiftAppInstallReviewSheet` (including its pending-offer loader).
+`InstalledAppsSheet`. Gateway native access admission replaces install review.
 
 ## Contract
 

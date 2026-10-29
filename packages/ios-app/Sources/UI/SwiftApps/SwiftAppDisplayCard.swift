@@ -222,28 +222,9 @@ struct SwiftAppDisplayRunner: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var launch: SwiftAppLaunch?
     @PresentationState private var problem: String?
-    @PresentationState private var review: Review?
-    @PresentationState private var openRequest = UUID()
-
-    private struct Review {
-        let installation: SwiftAppInstallation
-        let source: String
-        let profileID: String
-    }
-
     var body: some View {
         if let launch {
             SwiftAppRunnerSheet(launch: launch)
-        } else if route.installsSwiftApp {
-            SwiftAppInstallReviewSheet(installation: review?.installation, source: review?.source ?? "",
-                artifactName: route.display.artifact?.name ?? "App.swift", profileID: review?.profileID ?? "", openProblem: problem) { app in
-                    if let review { open(app, review: review) }
-                }
-                .onDisappear { openRequest = UUID() }
-                .task(id: PresentationActivityTaskID(
-                    source: mediaIdentity,
-                    presentationActive: presentationActivity.allowsPresentationPublication
-                )) { await load() }
         } else {
             TronDocumentSheet(title: route.display.title) {
                 if let problem {
@@ -269,7 +250,7 @@ struct SwiftAppDisplayRunner: View {
     }
 
     private func load() async {
-        guard presentationActivity.allowsPresentationPublication, launch == nil, review == nil, problem == nil else { return }
+        guard presentationActivity.allowsPresentationPublication, launch == nil, problem == nil else { return }
         guard let artifact = route.display.artifact, let identity = mediaIdentity else {
             problem = route.display.fallbackText
             return
@@ -280,20 +261,7 @@ struct SwiftAppDisplayRunner: View {
                   mediaIdentity == identity else { return }
             switch SwiftAppDisplay.readiness(of: preview) {
             case .runnable(let source):
-                guard route.installsSwiftApp else {
-                    launch = SwiftAppLaunch(name: artifact.name, source: source, linkHost: model.profiles.selected?.host)
-                    return
-                }
-                do {
-                    let reference = SwiftAppDisplayReference(sessionId: route.sessionID, artifactId: artifact.id)
-                    let offered = try await model.installedApps.review(reference: reference, source: source, profileID: identity.profileID)
-                    guard !Task.isCancelled, presentationActivity.allowsPresentationPublication, mediaIdentity == identity else { return }
-                    let installation = try model.installedApps.installation(review: offered, profileID: identity.profileID)
-                    review = Review(installation: installation, source: source, profileID: identity.profileID)
-                } catch let failure as GatewayFailure where failure.code == "not_found" {
-                    guard !Task.isCancelled, presentationActivity.allowsPresentationPublication, mediaIdentity == identity else { return }
-                    problem = "This exact app offer is no longer available. Ask Tron to prepare a fresh Install App review."
-                }
+                launch = SwiftAppLaunch(name: artifact.name, source: source, linkHost: model.profiles.selected?.host)
             case .tooLarge:
                 problem = SwiftAppDisplay.tooLargeMessage
             case .notSource:
@@ -308,21 +276,5 @@ struct SwiftAppDisplayRunner: View {
         }
     }
 
-    private func open(_ app: InstalledSwiftAppManifest, review: Review) {
-        let request = UUID()
-        openRequest = request
-        Task {
-            do {
-                let session = try await model.installedApps.open(appID: app.id, profileID: review.profileID)
-                guard openRequest == request, presentationActivity.allowsPresentationPublication,
-                      model.selectedGatewayProfileID() == review.profileID else { return }
-                launch = SwiftAppLaunch(name: session.snapshot.app.name, source: session.snapshot.source,
-                    linkHost: model.profiles.selected?.host, installed: session)
-            } catch is CancellationError {
-            } catch {
-                guard openRequest == request, presentationActivity.allowsPresentationPublication else { return }
-                problem = error.localizedDescription
-            }
-        }
-    }
+
 }

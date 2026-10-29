@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Installed via swift_app offer with feeds: ["ios-builds"]. The Gateway supplies
+// Folder app permissions declare feeds: ["ios-builds"]. The Gateway supplies
 // a fresh immutable publisher snapshot on open/refresh; this app has no network.
 @main
 struct BuildsApp: App {

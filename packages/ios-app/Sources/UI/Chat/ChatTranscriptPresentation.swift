@@ -1045,12 +1045,7 @@ struct ChatToolPayloadIndex: Hashable, Sendable {
 }
 
 struct ChatToolPresentation: Hashable, Identifiable, Sendable {
-    /// The display owner admits completed source offers; the invocation's
-    /// explicit action reserves the same row before its artifact is available.
-    var isDisplayTool: Bool {
-        toolName == "display" || (toolName == "swift_app" && (display != nil
-            || DisplayPresentationPolicy.invocationSurface(toolName: toolName, request: request) != nil))
-    }
+    var isDisplayTool: Bool { toolName == "display" || display != nil }
     let id: String
     /// Raw protocol tool name. The title remains the user-facing label.
     let toolName: String?
