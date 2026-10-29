@@ -3795,9 +3795,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
   public startHomeWake(session: AgentSession, operationId: string, trigger: InputTrigger | undefined,
     accept: (accepted: boolean) => void, inputCancellation: RequestPolicy["inputCancellation"], cancellationEpoch: number, delivered?: (value: boolean) => void): Promise<void> {
-    // New trigger sources acknowledge admission only after the SDK appends their message.
-    // Keep the existing task-result ordering unchanged for #1620.
-    const appended = trigger?.message.details.trigger ? () => { delivered?.(true); accept(true); } : undefined;
+    // Every wake acknowledges delivery at the same canonical-message boundary.
+    const appended = trigger ? () => { delivered?.(true); accept(true); } : undefined;
     if (!appended) accept(true);
     return trigger ? this.sendHomeWake(session, operationId, trigger, inputCancellation, cancellationEpoch, appended) : Promise.resolve();
   }
