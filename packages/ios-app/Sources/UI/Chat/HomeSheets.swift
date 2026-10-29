@@ -143,7 +143,6 @@ struct HomeSheet: View {
     /// Manage Home's open child only reads (Context, Memory, Chapters), so its return
     /// keeps the installed page instead of re-reading every row.
     @PresentationState private var returnsFromBrowsing = false
-    @PresentationState private var showsTerminal = false
     @PresentationState var mutationFailure: String?
     @PresentationState var confirmingDisable = false
     @PresentationState var disableAdmission: HomeControlAdmission?
@@ -217,16 +216,6 @@ struct HomeSheet: View {
         .environment(\.tronSettingsSecondaryTextSizeAdjustment, SessionSummaryTypography.metadataSizeAdjustment)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if case .manage = destination {
-                ToolbarItem(placement: .topBarLeading) {
-                    SessionTerminalToolbarButton(
-                        enabled: active && sessionID != nil
-                            && model.gatewayInfo?.capabilities.contains("terminal.v1") == true,
-                        identifier: "manage-home-terminal",
-                        accent: accent
-                    ) { showsTerminal = true }
-                }
-            }
             if memoryMetadata != nil {
                 ToolbarItem(placement: .topBarLeading) {
                     TronSheetInfoButton(accessibilityLabel: "Technical details", accent: accent) {
@@ -273,9 +262,6 @@ struct HomeSheet: View {
                              isCurrent: { self.identity == identity && self.request.id == requestID }) {
                 try await fetch(query: query, identity: identity, requestID: requestID)
             }
-        }
-        .tronManagedSheet(isPresented: $showsTerminal, identity: "home.\(profileID).terminal") {
-            if let sessionID { TerminalSheet(sessionID: sessionID) }
         }
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
             HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession,

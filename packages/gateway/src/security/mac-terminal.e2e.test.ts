@@ -7,7 +7,7 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
 import { SettingsStoreAdapter } from "../admin/settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
@@ -38,43 +38,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT = join(HERE, "../../test-results/mac-terminal.json");
 const PACKAGE = join(HERE, "../../../ios-app/MacTerminalSSH");
 const transcript: Array<{ case: string; detail: unknown }> = [];
+const sessionName = `tron-fixture-${process.pid}`;
 const registries: RuntimeRegistry[] = [];
 let probe = "";
 let root = "";
 let tailnetIPv4 = "";
 
-interface HostResult { outcome: "ok" | "error"; results?: Array<Record<string, unknown>>; error?: string; message?: string }
-
-/** One shell-host link from the app's own client: the steps run in order, then
- * the link closes, which is what a dismissed sheet or a suspended app does. */
-async function hostLink(endpoint: { hosts: string[]; port: number; username: string; hostKeys: string[] }, privateKeyPEM: string,
-  command: string[], steps: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
-  const result = JSON.parse(await run(probe, ["host"], JSON.stringify({ endpoint, privateKeyPEM, command, steps }))) as HostResult;
-  if (result.outcome !== "ok") throw new Error(`host link failed: ${result.error}: ${result.message}`);
-  return result.results!;
-}
-
-function alive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
-
-/** The shell host a journey started, as the host itself logged it. */
-async function loggedHostPid(tronHome: string): Promise<number | undefined> {
-  const log = await readFile(join(tronHome, "gateway", "mac-terminal", "host.log"), "utf8").catch(() => "");
-  const match = /"event":"host.started","pid":(\d+)/u.exec(log);
-  return match ? Number(match[1]) : undefined;
-}
-
-/** Live hosts serving this home, from the process table rather than the
- * host's own log, so a host that outlives its journey is caught (#1507). */
-function servingHosts(tronHome: string): string[] {
-  return execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).split("\n")
-    .filter(line => line.includes(`mac-terminal-host.js serve --home ${tronHome}`)).map(line => line.trim());
-}
-
-async function until(condition: () => boolean, what: string): Promise<void> {
+async function until(condition: () => boolean | Promise<boolean>, what: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (condition()) return;
+    if (await condition()) return;
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   throw new Error(`timed out waiting for ${what}`);
@@ -94,7 +66,7 @@ function run(command: string, args: string[], input?: string): Promise<string> {
 
 async function connect(endpoint: { hosts: string[]; port: number; username: string; hostKeys: string[] }, privateKeyPEM: string,
   input = "echo TRON_MAC_TERMINAL_$((40+2)); stty size; exit\n"): Promise<ProbeResult> {
-  return JSON.parse(await run(probe, ["connect"], JSON.stringify({ endpoint, privateKeyPEM, input, resize: [100, 30] }))) as ProbeResult;
+  return JSON.parse(await run(probe, ["connect"], JSON.stringify({ endpoint, privateKeyPEM, sessionName, input, resize: [100, 30] }))) as ProbeResult;
 }
 
 async function freePort(): Promise<number> {
@@ -107,18 +79,23 @@ async function freePort(): Promise<number> {
 
 /** A real OpenSSH sshd as this user: its own host key, the fixture's
  * authorized_keys, public-key authentication only, and Apple's crypto policy. */
-async function startSshd(directory: string, sshDirectory: string, port: number) {
+async function startSshd(directory: string, sshDirectory: string, port: number, withoutTmux = false) {
   await mkdir(directory, { recursive: true });
   execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "fixture-host", "-f", join(directory, "ssh_host_ed25519_key")]);
   const config = join(directory, "sshd_config");
+  const policy = '(version 1) (allow default) (deny file-read* (literal "/opt/homebrew/bin/tmux") (subpath "/opt/homebrew/Cellar/tmux") (literal "/usr/local/bin/tmux") (subpath "/usr/local/Cellar/tmux"))';
   await writeFile(config, [
     `Port ${port}`, `ListenAddress 127.0.0.1`, `ListenAddress ${tailnetIPv4}`,
     `HostKey ${join(directory, "ssh_host_ed25519_key")}`,
     `AuthorizedKeysFile ${join(sshDirectory, "authorized_keys")}`,
     "PasswordAuthentication no", "KbdInteractiveAuthentication no", "UsePAM no", "StrictModes no",
-    `PidFile ${join(directory, "sshd.pid")}`, "Include /etc/ssh/crypto.conf", "",
+    `PidFile ${join(directory, "sshd.pid")}`, "Include /etc/ssh/crypto.conf",
+    ...(withoutTmux ? [`ForceCommand /usr/bin/sandbox-exec -p '${policy}' /bin/sh -c "$SSH_ORIGINAL_COMMAND"`] : []), "",
   ].join("\n"));
-  const child = spawn("/usr/sbin/sshd", ["-D", "-f", config, "-E", join(directory, "sshd.log")], { stdio: "ignore" });
+  const args = ["-D", "-f", config, "-E", join(directory, "sshd.log")];
+  // Sandbox only the post-auth shell for the missing-binary case. It executes
+  // SSH_ORIGINAL_COMMAND unchanged; there is no canned response or host change.
+  const child = spawn("/usr/sbin/sshd", args, { stdio: "ignore" });
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const listening = await new Promise<boolean>(resolve => {
       const socket = new Socket();
@@ -142,7 +119,7 @@ const commandId = () => `mac-terminal-${String(++command).padStart(4, "0")}`;
 
 /** A Gateway with the production Mac Terminal wiring (gateway-main.ts) over
  * the fixture's ~/.ssh and host keys. */
-async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory: string, port: number, hostCommand?: string[]) {
+async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory: string, port: number) {
   const agentDir = join(tronHome, "agent");
   await mkdir(agentDir, { recursive: true });
   const runtimeFactory = () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -165,7 +142,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   const service = new GatewayService({ display: displayOwnerOf(sessions),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, devices, sessions, receipts: new CommandReceiptStore(tronHome),
-    macTerminal: new MacTerminalHost(keys, { hostKeyDirectory, port, hostCommand: () => hostCommand }),
+    macTerminal: new MacTerminalHost(keys, { hostKeyDirectory, port }),
     broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
@@ -243,9 +220,25 @@ describe("Mac Terminal", () => {
       expect(login.output).toContain("30 100");
       transcript.push({ case: "login", detail: { exitStatus: login.exitStatus } });
 
-      // The from= restriction: the same key from the loopback is refused.
+      // Preserve the server-side source restriction oracle separately: the
+      // app now rejects loopback before dialing, so it cannot prove this boundary.
+      const identity = join(root, "source-restriction-key.pem");
+      const knownHosts = join(root, "source-restriction-known-hosts");
+      await writeFile(identity, key.privateKeyPEM, { mode: 0o600 });
+      await writeFile(knownHosts, [tailnetIPv4, "127.0.0.1"].map(host =>
+        `[${host}]:${port} ${before.hostKeys[0]}\n`).join(""));
+      const ssh = ["-F", "/dev/null", "-p", String(port), "-i", identity,
+        "-o", "IdentityAgent=none", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile=${knownHosts}`];
+      expect(await run("/usr/bin/ssh", [...ssh, "-b", tailnetIPv4,
+        `${before.username}@${tailnetIPv4}`, "printf SOURCE_ALLOWED_42"])).toBe("SOURCE_ALLOWED_42");
+      await expect(run("/usr/bin/ssh", [...ssh,
+        `${before.username}@127.0.0.1`, "printf MUST_NOT_RUN"])).rejects.toThrow(/Permission denied \(publickey\)/);
+      transcript.push({ case: "real-sshd-source-restriction", detail: { tailnet: "allowed", loopback: "refused" } });
+
+      // The client refuses a non-tailnet destination before dialing it.
       expect(await connect({ ...endpoint, hosts: ["127.0.0.1"] }, key.privateKeyPEM))
-        .toMatchObject({ outcome: "error", error: "authenticationRefused" });
+        .toMatchObject({ outcome: "error", error: "invalidEndpoint" });
 
       // The Gateway gone: nothing in the connection path needs it.
       service = undefined as never;
@@ -319,111 +312,119 @@ describe("Mac Terminal", () => {
     transcript.push({ case: "remote-login-off", detail: off });
   }, 180_000);
 
-  it("keeps each shell in the Mac's shell host across disconnects until it exits or is quit (#1075)", async () => {
-    // The host as the Gateway payload ships it: this package compiled, run by
-    // this node, beside the real node_modules (node-pty). A short home keeps
-    // the host's socket path under the Unix limit.
-    const build = await mkdtemp(join(tmpdir(), "tron-mac-terminal-host-build-"));
-    const tronHome = await mkdtemp("/tmp/tmt-");
-    const sshDirectory = join(root, "host-home", ".ssh");
-    const hostDirectory = join(root, "host-sshd");
+  it("reattaches the same shell after a deliberate background transport close", async () => {
+    const sshDirectory = join(root, "persistent-home", ".ssh");
+    const hostDirectory = join(root, "persistent-sshd");
     await mkdir(sshDirectory, { recursive: true });
-    await writeFile(join(sshDirectory, "authorized_keys"), "");
+    const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
+    await new MacTerminalKeys(sshDirectory).set("persistent-phone", key.publicKey);
     const port = await freePort();
     const sshd = await startSshd(hostDirectory, sshDirectory, port);
-    let hostPid: number | undefined;
-    onTestFinished(() => { expect(servingHosts(tronHome), "the journey's shell host outlived it").toEqual([]); });
+    const endpoint = { hosts: [tailnetIPv4], port, username: userInfo().username,
+      hostKeys: [(await readFile(join(hostDirectory, "ssh_host_ed25519_key.pub"), "utf8")).trim()] };
+    const marker = join(root, "shell-pids");
+    const link = async (label: string) => JSON.parse(await run(probe, ["connect"], JSON.stringify({
+      endpoint, privateKeyPEM: key.privateKeyPEM, sessionName,
+      input: `echo "${label}=$$" >> ${marker}; echo READY_${label}_$((6*7))\n`, detachWhen: `READY_${label}_42`,
+    }))) as ProbeResult;
     try {
-      await run(process.execPath, [join(HERE, "../../node_modules/typescript/bin/tsc"), "-p", join(HERE, "../../tsconfig.json"),
-        "--outDir", build, "--declaration", "false", "--sourceMap", "false", "--declarationMap", "false"]);
-      await writeFile(join(build, "package.json"), JSON.stringify({ type: "module" }));
-      await symlink(join(HERE, "../../node_modules"), join(build, "node_modules"));
-      const hostCommand = [process.execPath, join(build, "modules", "mac-terminal", "mac-terminal-host.js"), "connect", "--home", tronHome];
-
-      const { service, pair } = await gateway(join(root, "host-tron"), sshDirectory, hostDirectory, port, hostCommand);
-      const phone = await pair("Fixture iPhone");
-      const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
-      await service.invoke(client(phone), "settings.change", {
-        commandId: commandId(), target: { kind: "global" },
-        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
-      });
-      const status = await service.invoke(client(phone), "macTerminal.status", {}) as unknown as MacTerminalStatus;
-      expect(status.hostCommand).toEqual(hostCommand);
-      const endpoint = { hosts: status.hosts, port, username: status.username, hostKeys: status.hostKeys };
-      const link = (steps: Array<Record<string, unknown>>) => hostLink(endpoint, key.privateKeyPEM, status.hostCommand!, steps);
-      const pidOf = (text: unknown, label: string) => Number(new RegExp(`${label}=(\\d+)`, "u").exec(String(text))?.[1]);
-
-      // First link starts the host and opens a shell, then closes: a dismissed sheet.
-      const first = await link([{ do: "open" }]);
-      const shell = first[0]!.shell as string;
-      const opened = await link([
-        { do: "attach", shell, after: 0 },
-        { do: "write", shell, data: "echo pid=$$; echo DONE_$((40+2))\n" },
-        { do: "await", shell, text: "DONE_42" },
-      ]);
-      const pid = pidOf(opened[2]!.text, "pid");
-      expect(pid).toBeGreaterThan(1);
-      hostPid = await loggedHostPid(tronHome);
-      expect(hostPid).toBeDefined();
-      expect(alive(hostPid!)).toBe(true);
-      // The links are gone; the shell is not.
-      expect(alive(pid)).toBe(true);
-      transcript.push({ case: "host-shell-survives-disconnect", detail: { shellAlive: alive(pid) } });
-
-      // Reattaching replays what it printed and reaches the same shell.
-      const again = await link([
-        { do: "list" },
-        { do: "attach", shell, after: 0 },
-        { do: "write", shell, data: "echo again=$$; echo DONE_$((50+2))\n" },
-        { do: "await", shell, text: "DONE_52" },
-      ]);
-      expect(again[0]!.shells).toEqual([expect.objectContaining({ id: shell })]);
-      expect((again[0]!.shells as Array<Record<string, unknown>>)[0]).not.toHaveProperty("exitedAt");
-      expect(String(again[1]!.text)).toContain(`pid=${pid}`);
-      expect(pidOf(again[3]!.text, "again")).toBe(pid);
-
-      // A second shell is its own process; `exit` ends only it, and its output
-      // and exit stay listed.
-      const second = await link([
-        { do: "open" },
-      ]);
-      const other = second[0]!.shell as string;
-      const both = await link([
-        { do: "attach", shell: other, after: 0 },
-        { do: "write", shell: other, data: "echo other=$$; echo DONE_$((60+2))\n" },
-        { do: "await", shell: other, text: "DONE_62" },
-        { do: "write", shell: other, data: "exit 3\n" },
-        { do: "awaitExit", shell: other },
-        { do: "list" },
-      ]);
-      const otherPid = pidOf(both[2]!.text, "other");
-      expect(otherPid).toBeGreaterThan(1);
-      expect(otherPid).not.toBe(pid);
-      expect(both[4]).toMatchObject({ exitCode: 3 });
-      const listed = both[5]!.shells as Array<Record<string, unknown>>;
-      expect(listed.find(entry => entry.id === shell)).not.toHaveProperty("exitedAt");
-      expect(listed.find(entry => entry.id === other)).toMatchObject({ exitCode: 3, exitedAt: expect.any(String) });
-      await until(() => !alive(otherPid), "the exited shell's process to end");
-      expect(alive(pid)).toBe(true);
-      transcript.push({ case: "host-two-shells-exit-one", detail: { listed: listed.map(({ id, exitCode }) => ({ same: id === shell, exitCode })) } });
-
-      // Quit ends the shell and its process group; the host stays for the next one.
-      const quit = await link([{ do: "attach", shell, after: 0 }, { do: "terminate", shell }, { do: "list" }]);
-      await until(() => !alive(pid), "the quit shell's process to end");
-      expect((quit[2]!.shells as Array<Record<string, unknown>>).every(entry => typeof entry.exitedAt === "string")).toBe(true);
-      expect(alive(hostPid!)).toBe(true);
-      transcript.push({ case: "host-quit", detail: { shellAlive: alive(pid), hostAlive: alive(hostPid!) } });
+      expect((await link("before")).outcome).toBe("ok");
+      expect((await link("foreground")).outcome).toBe("ok");
+      const pids = (await readFile(marker, "utf8")).trim().split("\n").map(line => Number(line.split("=")[1]));
+      expect(pids).toHaveLength(2);
+      expect(pids[0]).toBeGreaterThan(1);
+      expect(pids[1]).toBe(pids[0]);
+      transcript.push({ case: "same-shell-after-transport-close", detail: { pids } });
     } finally {
-      // The first link starts the detached host before it opens a shell, so the
-      // host is this journey's even when that open fails (#1507).
-      const host = hostPid ?? await loggedHostPid(tronHome);
-      if (host && alive(host)) {
-        process.kill(host, "SIGTERM");
-        await until(() => !alive(host), "the shell host to stop");
-      }
+      execFileSync("/opt/homebrew/bin/tmux", ["-L", "tron-mobile", "kill-session", "-t", sessionName]);
       await sshd.stop();
-      await rm(build, { recursive: true, force: true });
-      await rm(tronHome, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("refuses a real sshd environment without tmux, with no plain-shell fallback", async () => {
+    const directory = join(root, "missing-tmux");
+    const sshDirectory = join(directory, ".ssh");
+    await mkdir(sshDirectory, { recursive: true });
+    const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
+    await new MacTerminalKeys(sshDirectory).set("missing-tmux-phone", key.publicKey);
+    const port = await freePort();
+    const sshd = await startSshd(directory, sshDirectory, port, true);
+    try {
+      const endpoint = { hosts: [tailnetIPv4], port, username: userInfo().username,
+        hostKeys: [(await readFile(join(directory, "ssh_host_ed25519_key.pub"), "utf8")).trim()] };
+      const result = JSON.parse(await run(probe, ["connect"], JSON.stringify({
+        endpoint, privateKeyPEM: key.privateKeyPEM, sessionName,
+        input: "echo MUST_NOT_OPEN_A_PLAIN_SHELL\n",
+      }))) as ProbeResult;
+      expect(result, JSON.stringify({ result, sshd: await readFile(join(directory, "sshd.log"), "utf8") })).toMatchObject({ outcome: "error", error: "tmuxMissing" });
+      transcript.push({ case: "real-sshd-tmux-unavailable", detail: result });
+    } finally { await sshd.stop(); }
+  }, 180_000);
+
+  it("keeps the shell PID across an abrupt network proxy disconnect", async () => {
+    const directory = join(root, "network-drop");
+    const sshDirectory = join(directory, ".ssh");
+    await mkdir(sshDirectory, { recursive: true });
+    const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
+    await new MacTerminalKeys(sshDirectory).set("network-drop-phone", key.publicKey);
+    const port = await freePort();
+    const sshd = await startSshd(directory, sshDirectory, port);
+    const sockets = new Set<Socket>();
+    const backends = new Set<ReturnType<typeof spawn>>();
+    const proxy = createServer(downstream => {
+      // Like the Swift client, a fixture-owned process dials this Mac's
+      // tailnet. Keep the default Node test network-isolation guard intact.
+      const upstream = spawn("/usr/bin/nc", ["-s", tailnetIPv4, tailnetIPv4, String(port)]);
+      backends.add(upstream);
+      sockets.add(downstream);
+      downstream.once("close", () => { sockets.delete(downstream); upstream.kill("SIGTERM"); });
+      downstream.on("error", () => upstream.kill("SIGTERM"));
+      upstream.on("error", () => downstream.destroy());
+      upstream.once("exit", () => { backends.delete(upstream); downstream.destroy(); });
+      downstream.pipe(upstream.stdin!);
+      upstream.stdout!.pipe(downstream);
+      upstream.stderr!.resume();
+    });
+    await new Promise<void>((resolve, reject) => { proxy.once("error", reject); proxy.listen(0, tailnetIPv4, resolve); });
+    const proxyPort = (proxy.address() as { port: number }).port;
+    const endpoint = { hosts: [tailnetIPv4], port: proxyPort, username: userInfo().username,
+      hostKeys: [(await readFile(join(directory, "ssh_host_ed25519_key.pub"), "utf8")).trim()] };
+    const marker = join(directory, "pids");
+    let first: Promise<string> | undefined;
+    let firstResult: ProbeResult | undefined;
+    try {
+      first = run(probe, ["connect"], JSON.stringify({
+        endpoint, privateKeyPEM: key.privateKeyPEM, sessionName,
+        input: `echo "before=$$" > ${marker}\n`,
+      })).then(raw => { firstResult = JSON.parse(raw); return raw; });
+      await until(async () => {
+        if (firstResult) throw new Error(JSON.stringify({ firstResult, sshd: await readFile(join(directory, "sshd.log"), "utf8") }));
+        return (await readFile(marker, "utf8").catch(() => "")).startsWith("before=");
+      }, "shell PID before network drop");
+      // Tear down real TCP streams, not the client's close/detach method.
+      for (const socket of sockets) socket.destroy();
+      expect(JSON.parse(await first)).toMatchObject({ outcome: "ok" });
+      const second = JSON.parse(await run(probe, ["connect"], JSON.stringify({
+        endpoint, privateKeyPEM: key.privateKeyPEM, sessionName,
+        input: `echo "after=$$" >> ${marker}; echo NETWORK_AFTER_$((6*7))\n`,
+        detachWhen: "NETWORK_AFTER_42",
+      }))) as ProbeResult;
+      expect(second.outcome).toBe("ok");
+      const pids = (await readFile(marker, "utf8")).trim().split("\n").map(line => Number(line.split("=")[1]));
+      expect(pids).toHaveLength(2);
+      expect(pids[0]).toBeGreaterThan(1);
+      expect(pids[1]).toBe(pids[0]);
+      transcript.push({ case: "same-shell-after-network-drop", detail: { pids } });
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await Promise.all([...backends].map(child => new Promise<void>(resolve => {
+        child.once("exit", () => resolve()); child.kill("SIGTERM");
+      })));
+      await new Promise<void>(resolve => proxy.close(() => resolve()));
+      await first?.catch(() => {});
+      try { execFileSync("/opt/homebrew/bin/tmux", ["-L", "tron-mobile", "kill-session", "-t", sessionName], { stdio: "ignore" }); }
+      catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
+      finally { await sshd.stop(); }
     }
   }, 180_000);
 });

@@ -51,7 +51,7 @@ describe("WebSocket connection and outbound capacity", () => {
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ protocolVersion: PROTOCOL_VERSION }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn(),
+        info: () => ({ protocolVersion: PROTOCOL_VERSION }), releaseClient: vi.fn(), invoke: vi.fn(),
       } as any,
       logger: logger as any,
     });
@@ -169,7 +169,7 @@ describe("WebSocket connection and outbound capacity", () => {
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
         info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-        terminalBelongsToSession: () => false,
+
         releaseClient: vi.fn(),
         invoke: vi.fn(),
       } as any,
@@ -255,7 +255,7 @@ describe("WebSocket connection and outbound capacity", () => {
       uploads: {} as any, auth: { detachClient: vi.fn() } as any,
       service: {
         info: () => ({ protocolVersion: 8 }), invoke, releaseClient: vi.fn(),
-        terminalBelongsToSession: () => false,
+
       } as any,
     });
     await gateway.listen();
@@ -497,7 +497,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const logger = { log: vi.fn() };
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       invoke: vi.fn(async (_client: unknown, method: string) => ({ method })),
     };
@@ -640,7 +640,7 @@ describe("WebSocket connection and outbound capacity", () => {
       service: {
         info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8,
           machineId: "machine", machineName: "test", capabilities: [] }),
-        terminalBelongsToSession: () => false, releaseClient: vi.fn(),
+        releaseClient: vi.fn(),
         invoke: async (context: any, method: string, params: any) => {
           if (method === "session.open") {
             const syncToken = context.beginSynchronization(params.sessionId);
@@ -781,7 +781,7 @@ describe("WebSocket connection and outbound capacity", () => {
       host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnections: 8, maximumConnectionsPerIdentity: 2,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
-      service: { info: () => ({ protocolVersion: 8 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
+      service: { info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn(), invoke: vi.fn() } as any,
       logger: logger as any,
     });
     await gateway.listen();
@@ -976,7 +976,7 @@ describe("WebSocket connection and outbound capacity", () => {
       devices, uploads: {} as never, sessions: { unsubscribeClient: vi.fn() } as never,
       auth: { detachClient: vi.fn() } as never, service: {
         info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn(),
-        terminalBelongsToSession: () => false, invoke: async () => ({ ok: true }),
+        invoke: async () => ({ ok: true }),
       } as never,
       logger: logger as never, resourceSampler: sampler,
     });
@@ -1242,7 +1242,7 @@ describe("WebSocket connection and outbound capacity", () => {
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
         info: () => ({ protocolVersion: 8 }),
-        terminalBelongsToSession: () => false,
+
         releaseClient: vi.fn(),
         invoke: async () => ({ ok: true }),
       } as any,
@@ -1301,7 +1301,7 @@ describe("WebSocket connection and outbound capacity", () => {
       host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnectionsPerIdentity: 1,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
-      service: { info: () => ({ protocolVersion: 8 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
+      service: { info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn(), invoke: vi.fn() } as any,
       logger: logger as any,
     });
     await gateway.listen();
@@ -1340,7 +1340,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const logger = { log: vi.fn() };
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false,
+
       releaseClient: vi.fn(),
       invoke: vi.fn(),
     };
@@ -1474,7 +1474,7 @@ describe("WebSocket connection and outbound capacity", () => {
       service: {
         info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8,
           machineId: "machine", machineName: "test", capabilities: [] }),
-        terminalBelongsToSession: () => false, releaseClient: vi.fn(),
+        releaseClient: vi.fn(),
         invoke: async (context: any, method: string, params: any) => {
           const gate = held(method).promise;
           if (method === "session.open") {

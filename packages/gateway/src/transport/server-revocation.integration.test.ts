@@ -92,16 +92,9 @@ async function fixture() {
     materialize: vi.fn(async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 })),
   };
   const install = { isUsable: false, removeDevice: vi.fn(async () => {}) };
-  let terminal: { id: string; sessionId: string; state: string } | undefined;
-  // Only the PTY effect is synthetic; transport ownership and receipts are real.
-  const terminals = {
-    open: vi.fn((sessionId: string) => (terminal = { id: "fixture-terminal", sessionId, state: "running" })),
-    attach: () => ({ terminal, chunks: [], reset: false }),
-    belongsToSession: (id: string, sessionId: string) => terminal?.id === id && terminal.sessionId === sessionId,
-  };
   const logs: Array<{ level: string; message: string; fields?: Record<string, unknown> }> = [];
   const service = new GatewayService({ display: displayOwnerOf(registry),
-    config: { tronHome: root }, devices, sessions: registry, receipts, uploads, terminals,
+    config: { tronHome: root }, devices, sessions: registry, receipts, uploads,
     logger: { log: (level: string, message: string, fields?: Record<string, unknown>) => logs.push({ level, message, fields }) }, iosDeviceInstallService: install,
   } as never);
   const invoke = service.invoke.bind(service);
@@ -144,7 +137,7 @@ async function fixture() {
     };
   };
   const hold = () => { const value = gate(); releases.push(value.release); return value; };
-  return { root, cwd, registry, devices, paired, pair, receipts, uploads, install, terminals, service, server, port, connect, hold, sockets, http, pending, faux, logs };
+  return { root, cwd, registry, devices, paired, pair, receipts, uploads, install, service, server, port, connect, hold, sockets, http, pending, faux, logs };
 }
 
 describe("device revocation at real ownership boundaries", () => {
@@ -326,42 +319,6 @@ describe("device revocation at real ownership boundaries", () => {
     await expect(new CommandReceiptStore(f.root).execute(f.paired.deviceId, "session.prompt", "failed-receipt-command", async () => ({}), {
       respondBeforeCompletion: true,
     })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
-  });
-
-  it.each(["receipt", "acquisition"] as const)("preserves terminal creation without attaching a revoked observer during %s", async (stage) => {
-    const f = await fixture();
-    const slot = await f.registry.create(f.cwd);
-    const peer = await f.connect();
-    peer.send("open", "session.open", { sessionId: slot.id });
-    const opened = await peer.response("open");
-    peer.send("sync", "session.sync", { sessionId: slot.id, syncToken: opened.result.syncToken });
-    await peer.response("sync");
-    const connection = [...(f.server as any).clients.values()][0] as any;
-    const entered = gate();
-    const resume = f.hold();
-    const execute = f.receipts.execute.bind(f.receipts);
-    const acquire = f.registry.acquire.bind(f.registry);
-    if (stage === "receipt") vi.spyOn(f.receipts, "execute").mockImplementation(async (...args) => {
-      if (args[1] === "terminal.open") { entered.release(); await resume.promise; }
-      return execute(...args);
-    });
-    else vi.spyOn(f.registry, "acquire").mockImplementation(async (...args) => {
-      entered.release(); await resume.promise; return acquire(...args);
-    });
-    peer.send("terminal", "terminal.open", { sessionId: slot.id, commandId: "retired-terminal-command" });
-    await waitFor(() => entered.released, "the entry barrier to release");
-    await f.devices.revoke(f.paired.deviceId, () => f.server.disconnectDevice(f.paired.deviceId));
-    await waitFor(() => peer.closed() !== undefined, "the peer to close");
-    (slot as any).lastTouchedAt = 0;
-    await (f.registry as any).evictIdle();
-    expect(slot.isDisposed).toBe(false);
-    resume.release();
-    await waitFor(() => f.pending.size === 0, "the pending work to drain");
-    expect(f.terminals.open).toHaveBeenCalledOnce();
-    expect(connection.terminals.size).toBe(0);
-    expect(slot.isBusy).toBe(false);
-    expect(await f.receipts.status(f.paired.deviceId, "terminal.open", "retired-terminal-command")).toMatchObject({ status: "completed" });
-    expect(peer.frames.some((frame) => frame.id === "terminal")).toBe(false);
   });
 
   it("releases prompt retention when validation rejects before an effect", async () => {

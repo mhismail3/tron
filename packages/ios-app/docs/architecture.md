@@ -20,7 +20,7 @@ and the two cross-module contracts live in this directory.
 | `Sources/UI/Settings/` | settings, renderer, providers, integrations | [Settings](../Sources/UI/Settings/README.md) |
 | `Sources/UI/Automations/` | dashboard selector, Automations, Knowledge | [Automations](../Sources/UI/Automations/README.md) |
 | `Sources/UI/Onboarding/` | pairing, setup, workspace and model pickers | [Onboarding](../Sources/UI/Onboarding/README.md) |
-| `Sources/UI/Terminal/` | session terminal and Mac Terminal | [Terminal](../Sources/UI/Terminal/README.md) |
+| `Sources/UI/Terminal/` | SSH/tmux Mac Terminal | [Terminal](../Sources/UI/Terminal/README.md) |
 | `Sources/UI/SwiftApps/` | Swift-app runner and card | [Swift apps](../Sources/UI/SwiftApps/README.md) |
 | `MacTerminalSSH/` | Mac Terminal's SSH client package | [Terminal](../Sources/UI/Terminal/README.md) |
 | `ShareExtension/` | app-group share handoff | [Core](../Core/README.md#contract) |
@@ -105,7 +105,7 @@ and extension interactions render directly from snapshot contracts.
 ### Home display identity and terminal
 
 [Chat › Home](../Sources/UI/Chat/README.md#contract) and
-[Terminal](../Sources/UI/Terminal/README.md#invariants).
+[Terminal](../Sources/UI/Terminal/README.md#contract).
 
 ### Home task sheets
 

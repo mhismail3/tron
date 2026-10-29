@@ -100,7 +100,7 @@ const CLIENT = {
   id: "corpus-device", identity: "device:corpus", isLocal: true,
   beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
   setPresentationVisibility: () => ({ visible: true, revision: 0 }), unsubscribe: () => true,
-  attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+
   isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 } as never;
 

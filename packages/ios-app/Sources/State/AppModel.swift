@@ -210,7 +210,6 @@ final class AppModel {
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
     private let sessionImports: SessionImportCoordinator
-    private let terminal: TerminalCoordinator
     let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
@@ -610,15 +609,6 @@ final class AppModel {
             performanceSignposts: appLogSignposts,
             clock: clock
         )
-        let terminal = TerminalCoordinator(
-            client: client,
-            lifecycle: lifecycle,
-            mutationExecutor: mutationExecutor,
-            uuidSource: uuidSource,
-            clock: clock,
-            performanceSignposts: appLogSignposts,
-            installedSubscriptionToken: { sessionPresentation.installedSubscriptionToken(for: $0) }
-        )
         let composerDrafts = ComposerDraftCoordinator(
             upload: composerUpload ?? { name, mimeType, data in
                 try await client.upload(name: name, mimeType: mimeType, data: data)
@@ -763,7 +753,6 @@ final class AppModel {
             fileAccess: sessionImportFileAccess,
             upload: resolvedSessionImportUpload
         )
-        self.terminal = terminal
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
         self.packageConfiguration = packageConfiguration
@@ -4423,78 +4412,6 @@ extension AppModel {
         )
     }
 
-    func beginTerminalPresentation(sessionID: String) -> TerminalPresentationTarget {
-        terminal.beginPresentation(sessionID: sessionID)
-    }
-
-    func beginTerminalIntent(
-        for target: TerminalPresentationTarget
-    ) -> TerminalPresentationIntent? {
-        terminal.beginIntent(for: target)
-    }
-
-    func closeTerminalPresentation(_ target: TerminalPresentationTarget) {
-        terminal.closePresentation(target)
-    }
-
-    func ownsTerminalIntent(_ intent: TerminalPresentationIntent) -> Bool {
-        terminal.owns(intent)
-    }
-
-    func terminalReplay(for terminalID: String) -> TerminalReplayProjection {
-        terminal.replay(for: terminalID)
-    }
-
-    func terminalHasExited(_ terminalID: String) -> Bool {
-        terminal.hasExited(terminalID)
-    }
-
-    func listTerminals(intent: TerminalPresentationIntent) async throws -> [TerminalSummary] {
-        try await terminal.list(intent: intent)
-    }
-
-    func openTerminal(
-        intent: TerminalPresentationIntent,
-        columns: Int,
-        rows: Int
-    ) async throws -> TerminalSummary {
-        try await terminal.open(intent: intent, columns: columns, rows: rows)
-    }
-
-    func attachTerminal(
-        _ id: String,
-        after: Int,
-        intent: TerminalPresentationIntent
-    ) async throws -> TerminalSummary {
-        try await terminal.attach(id, after: after, intent: intent)
-    }
-
-    func writeTerminal(
-        _ id: String,
-        data: String,
-        intent: TerminalPresentationIntent
-    ) async throws {
-        try await terminal.write(id, data: data, intent: intent)
-    }
-
-    func resizeTerminal(
-        _ id: String,
-        columns: Int,
-        rows: Int,
-        intent: TerminalPresentationIntent
-    ) async throws {
-        try await terminal.resize(
-            id,
-            columns: columns,
-            rows: rows,
-            intent: intent
-        )
-    }
-
-    func terminateTerminal(_ id: String, intent: TerminalPresentationIntent) async throws {
-        try await terminal.terminate(id, intent: intent)
-    }
-
     /// The visible Home owner registers only authenticated focused-Gateway
     /// status reads. This is disposable presentation work, never a mutation.
     func mountHomeStatus(surfaceToken: PresentationSurfaceToken, activityCoordinator: PresentationActivityCoordinator) {
@@ -4949,14 +4866,6 @@ extension AppModel {
             if case .processTranscriptChanged(let changed) = event.preparation {
                 for sink in processTranscriptInvalidationSinks.values { sink(changed) }
             }
-        case "terminal.output", "terminal.exit":
-            guard let connectionID = gatewayConnectionID,
-                  case .terminalEvent(let terminalEvent) = event.preparation else { break }
-            terminal.admit(
-                terminalEvent,
-                connectionID: connectionID,
-                exitedAt: GatewayTimestamp.string(from: .now)
-            )
         default:
             break
         }
@@ -5609,12 +5518,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         return true
     }
 
-    func lifecycleReattachTerminals(
-        admission: GatewayLifecycleCoordinator.Admission
-    ) async {
-        await terminal.reattach(admission: admission)
-    }
-
     private func scheduleMountedOptionalReads(admission: GatewayLifecycleCoordinator.Admission) {
         guard mountedOptionalRefreshLifecycleGeneration != admission.generation
                 || mountedOptionalRefreshConnectionID != admission.connectionID else { return }
@@ -5660,7 +5563,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             }
             return
         }
-        await terminal.reattach(admission: admission)
         scheduleMountedOptionalReads(admission: admission)
         reconcileDashboardConnections()
         try requireLifecycle(admission)
@@ -5690,7 +5592,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         let catalog = catalogRefreshTask
         let cacheCheckpoint = retireCacheCheckpoints()
         let events = final ? eventTask : nil
-        let terminalRetirement = terminal.beginRetirement()
         cancelCatalogRefresh()
         if final {
             events?.cancel()
@@ -5708,7 +5609,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
         _ = await catalog?.value
         await cacheCheckpoint?.value
-        await terminal.finishRetirement(terminalRetirement)
         await events?.value
     }
 

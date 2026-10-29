@@ -237,7 +237,7 @@ async function gatewayFixture(options: { enabled?: boolean } = {}): Promise<Gate
     uploads: {} as never,
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
-    service: { info: () => ({ protocolVersion: PROTOCOL_VERSION }), releaseClient: vi.fn(), terminalBelongsToSession: () => false } as never,
+    service: { info: () => ({ protocolVersion: PROTOCOL_VERSION }), releaseClient: vi.fn() } as never,
     logger: log as never,
     lanEndpoint: {
       enabled: options.enabled ?? true,

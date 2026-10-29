@@ -169,7 +169,7 @@ custom-model changes publish bounded global invalidations.
   1,000 entries or 768 KiB, and register file previews in the blob store. Git runs with
   no shell, pager, external diff or textconv, a fixed locale and a killed process
   group on timeout; history cursors are authenticated and pinned to the tip.
-- Accepted `session.prompt` and `terminal.open` retain their runtime before receipt
+- Accepted `session.prompt` retains its runtime before receipt
   I/O. A prompt starts its run-marker write before answering; settlement awaits it.
 - `session.commands`: runtime order, ≤ 1,000 rows and 700 KiB, unique `source:name`;
   a skill row carries its SKILL.md frontmatter `title` when set (display only);

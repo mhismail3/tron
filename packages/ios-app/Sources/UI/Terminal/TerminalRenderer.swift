@@ -3,6 +3,19 @@ import SwiftUI
 import UIKit
 import TronMobileCore
 
+extension Array where Element == TerminalChunk {
+    /// Chunks are ordered within one emulator generation; locate the unread suffix.
+    func replaySuffix(after lastSequence: Int) -> ArraySlice<TerminalChunk> {
+        var low = startIndex
+        var high = endIndex
+        while low < high {
+            let middle = low + (high - low) / 2
+            if self[middle].sequence > lastSequence { high = middle } else { low = middle + 1 }
+        }
+        return self[low...]
+    }
+}
+
 @MainActor
 @Observable
 final class TerminalKeyboardController {
@@ -158,6 +171,7 @@ final class TerminalEmulatorHost {
 }
 
 struct NativeTerminal: UIViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     let chunks: [TerminalChunk]
     let isInteractive: Bool
     let keyboard: TerminalKeyboardController
@@ -193,8 +207,7 @@ struct NativeTerminal: UIViewRepresentable {
         terminal.backgroundColor = .clear
         terminal.layer.backgroundColor = UIColor.clear.cgColor
         terminal.nativeBackgroundColor = .clear
-        terminal.nativeForegroundColor = .label
-        terminal.caretColor = .label
+        applyColors(to: terminal)
         terminal.inputAccessoryView = nil
         connect(terminal, coordinator: context.coordinator)
         applySoftEdges(to: terminal)
@@ -217,7 +230,17 @@ struct NativeTerminal: UIViewRepresentable {
         if terminal.bounds.width > 0, terminal.bounds.height > 0 { coordinator.isLaidOut = true }
     }
 
+    private func applyColors(to view: TronNativeTerminalView) {
+        // SwiftTerm converts UIColor to RGB; resolve against the sheet's
+        // scheme, not UIKit's pre-attachment trait collection.
+        let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
+        let foreground = UIColor.label.resolvedColor(with: traits)
+        if view.nativeForegroundColor != foreground { view.nativeForegroundColor = foreground }
+        view.caretColor = foreground
+    }
+
     func updateUIView(_ view: TronNativeTerminalView, context: Context) {
+        applyColors(to: view)
         context.coordinator.keyboard = keyboard
         context.coordinator.onSend = onSend
         context.coordinator.onResize = onResize
@@ -279,10 +302,10 @@ struct NativeTerminal: UIViewRepresentable {
                 emulator.lastSequence = chunk.sequence
             }
             #if HOSTED_TEST
-            // Journeys read what the emulator shows (its normal buffer's text),
+            // Journeys read the displayed buffer, including tmux's alternate screen,
             // so a test proves output survived, not only that a shell answered.
             view.accessibilityIdentifier = "terminal-emulator"
-            view.accessibilityValue = String(String(decoding: view.getTerminal().getBufferAsData(kind: .normal), as: UTF8.self).suffix(4_000))
+            view.accessibilityValue = String(String(decoding: view.getTerminal().getBufferAsData(kind: .active), as: UTF8.self).suffix(4_000))
             #endif
         }
 

@@ -12,9 +12,6 @@ import { DeviceStore } from "./security/device-store.js";
 import { TrustService } from "./kernel/resources/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
-import { TerminalService } from "./machine/terminal-service.js";
-import { macTerminalHostCommand } from "./modules/mac-terminal/mac-terminal-host.js";
-import { terminalIdleLimitMs } from "./kernel/settings/settings-schema.js";
 import { createGatewaySettingsSchema } from "./main/settings-schema.js";
 import { SettingsStoreAdapter } from "./admin/settings-model.js";
 import { SettingsChangePath } from "./kernel/settings/settings-change.js";
@@ -372,7 +369,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
   sessionClosed: (sessionId) => {
     auth.cancelSession(sessionId);
-    transport?.revokeSessionTerminals(sessionId);
   },
   persistenceDiagnostic,
   archiveDiagnostic: (diagnostic) => diagnostic.outcome === "failure"
@@ -536,19 +532,6 @@ const knowledge = new KnowledgeService(
   knowledgeTagging,
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
-const terminal = new TerminalService(
-  config.terminalReplayBytes,
-  (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
-  {
-    // The Global setting is read at every idle pass, so a change applies
-    // without a restart (#479, docs/settings-model.md).
-    idle: {
-      idleLimitMs: () => terminalIdleLimitMs(settingsModel),
-      isAttached: (terminalId) => transport?.terminalAttached(terminalId) ?? false,
-    },
-    log: (level, message, metadata) => logger.log(level, message, { ...metadata, source: "terminal" }),
-  },
-);
 const packages = new PackageService(
   config.agentDir,
   trust,
@@ -667,7 +650,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     // Accepted mutation owners settle above. Retire file-event admission and
     // join comparisons/observers before their runtime and notification targets.
     await shutdownStep("outside-settings-dispose", () => outsideSettings.dispose(), recordShutdownStep);
-    await shutdownStep("terminal-dispose", async () => { terminal.dispose(); }, recordShutdownStep);
     await shutdownStep("notifications-dispose", async () => { notifications.dispose(); }, recordShutdownStep);
     await shutdownStep("knowledge-dispose", async () => { knowledge.dispose(); }, recordShutdownStep);
     await shutdownStep("automations-dispose", () => automations.dispose(), recordShutdownStep);
@@ -860,13 +842,10 @@ const service = new GatewayService({
   sessions, modules, display,
   filesystem,
   uploads,
-  terminals: terminal,
   trust,
   settingsModel,
   settingsChanges,
-  // The shell host runs beside this Gateway's own node and dist, but as its own
-  // process, so Mac Terminal's shells survive this Gateway (#1075).
-  macTerminal: new MacTerminalHost(macTerminalKeys, { hostCommand: () => macTerminalHostCommand(config.tronHome) }),
+  macTerminal: new MacTerminalHost(macTerminalKeys),
   modelConfig,
   packages,
   hookResources,
@@ -878,7 +857,6 @@ const service = new GatewayService({
   // restart drains accepted agent work before using the deliberate restart code.
   requestRestart,
   requestStop,
-  sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
   notifications,
   workRegistry,

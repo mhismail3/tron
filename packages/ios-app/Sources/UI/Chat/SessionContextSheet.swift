@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentInstructions, projectResources, history, processHistory, terminal, workspace
+    case agentInstructions, projectResources, history, processHistory, workspace
     var id: String { rawValue }
 }
 
@@ -311,8 +311,6 @@ struct SessionContextSheet: View {
                         )
                     case .processHistory:
                         ProcessHistorySheet(sessionID: sessionID)
-                    case .terminal:
-                        TerminalSheet(sessionID: sessionID)
                     case .workspace:
                         WorkspaceInspectorSheet(sessionID: sessionID)
                     }
@@ -493,10 +491,6 @@ struct SessionContextSheet: View {
     private var exportSection: some View {
         TronGlassCard(accent: exportRowAccent) {
             VStack(spacing: 0) {
-                manageRow(icon: "terminal", title: TerminalSheet.title, subtitle: "A shell in this session's workspace",
-                          accent: exportRowAccent) { destination = .terminal }
-                    .accessibilityIdentifier("manage-session-terminal")
-                TronSettingsDivider(accent: exportRowAccent)
                 exportRow(
                     format: "html",
                     icon: "doc.richtext",

@@ -237,8 +237,7 @@ struct HostedHomeDashboardFixture: View {
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
             emptyContext: arguments.contains("-home-context-empty"),
             sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""),
-            settingsApprovals: arguments.contains("-home-settings-approvals"),
-            terminalEnabled: !arguments.contains("-home-terminal-unsupported"))
+            settingsApprovals: arguments.contains("-home-settings-approvals"))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -429,7 +428,6 @@ struct HostedHomeDashboardFixture: View {
 
 private actor HostedHomeShellGateway {
     private let capabilityEnabled: Bool
-    private let terminalEnabled: Bool
     private let initialState: String
     private var designated: Bool
     private var homeStatusCount = 0
@@ -524,8 +522,7 @@ private actor HostedHomeShellGateway {
         profileEntries.append(.object(entry))
         profileUndo[changeID] = (retired, profileItems)
     }
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false, terminalEnabled: Bool = true) {
-        self.terminalEnabled = terminalEnabled
+    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false) {
         self.sheetState = sheetState
         // Home's and a task worker's requests show in Manage Home; a chat agent's does not.
         approvals = settingsApprovals ? [
@@ -605,7 +602,7 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
+    func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
 
     private var homeReads: [String: Int] = [:]
     /// Publishes each count before the read is answered, so the label is current
@@ -706,26 +703,6 @@ private actor HostedHomeShellGateway {
             if let onHomeRead { await onHomeRead(homeReadSummary()) }
         }
         switch method {
-        // #479: one terminal the Gateway closed after its idle period, so the
-        // sheet opens a fresh live one and lists the closed one under Recent.
-        case "terminal.list" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
-            return (.object(["terminals": .array([HostedClosedTerminal.closed])]), nil)
-        case "terminal.open" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
-            return (.object(["terminal": HostedClosedTerminal.live, "replay": .object(["terminal": HostedClosedTerminal.live,
-                "chunks": .array([HostedClosedTerminal.chunk(1, "home % ")]), "reset": .bool(false)])]), nil)
-        case "terminal.attach" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
-            let closed = params["terminalId"]?.stringValue == "closed-terminal"
-            return (.object(["terminal": closed ? HostedClosedTerminal.closed : HostedClosedTerminal.live,
-                "chunks": .array(closed ? [HostedClosedTerminal.chunk(1, "home % "), HostedClosedTerminal.chunk(2, "\r\n[Closed after 60 minutes idle]\r\n")]
-                    : [HostedClosedTerminal.chunk(1, "home % ")]), "reset": .bool(false)]), nil)
-        case "terminal.detach" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
-            return (.object(["detached": .bool(true)]), nil)
-        case "terminal.resize" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
-            return (.object(["resized": .bool(true)]), nil)
-        case "terminal.list":
-            return (nil, .object(["code": .string("unavailable"),
-                "message": .string("Fixture terminal unavailable for \(params["sessionId"]?.stringValue ?? "missing")"),
-                "retryable": .bool(false)]))
         case "session.list" where ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior"):
             return (dashboardPage(params), nil)
         case "session.list":
@@ -1689,20 +1666,4 @@ enum HostedHomeDashboardWorkers {
     }
 }
 
-/// The #479 terminal fixture: a closed terminal with the Gateway's reason, and
-/// the live terminal the sheet opens beside it.
-private enum HostedClosedTerminal {
-    static let closed: JSONValue = .object([
-        "id": .string("closed-terminal"), "sessionId": .string("home-session"), "cwd": .string("/workspace"),
-        "createdAt": .string("2026-01-01T09:00:00Z"), "exitedAt": .string("2026-01-01T10:01:00Z"), "exitCode": .number(0),
-        "sequence": .number(2), "closedReason": .string("Closed after 60 minutes idle"),
-    ])
-    static let live: JSONValue = .object([
-        "id": .string("live-terminal"), "sessionId": .string("home-session"), "cwd": .string("/workspace"),
-        "createdAt": .string("2026-01-01T11:00:00Z"), "sequence": .number(1),
-    ])
-    static func chunk(_ sequence: Int, _ data: String) -> JSONValue {
-        .object(["sequence": .number(Double(sequence)), "data": .string(data)])
-    }
-}
 #endif

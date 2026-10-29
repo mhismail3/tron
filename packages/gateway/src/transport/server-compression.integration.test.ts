@@ -69,7 +69,7 @@ async function startGateway() {
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
     service: {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
-      terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke,
+      releaseClient: vi.fn(), invoke,
     } as any,
   });
   await gateway.listen();

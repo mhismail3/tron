@@ -350,24 +350,6 @@ function existingSessionOpenOwner(
     ?? synchronizations.get(sessionId)?.requestId;
 }
 
-function releaseSessionTerminals(
-  terminals: Set<string>,
-  sessionId: string,
-  belongsToSession: (terminalId: string, sessionId: string) => boolean,
-): void {
-  for (const terminalId of terminals) {
-    if (belongsToSession(terminalId, sessionId)) terminals.delete(terminalId);
-  }
-}
-
-function canAttachTerminal(
-  subscriptionTokens: ReadonlyMap<string, string>,
-  terminalId: string,
-  belongsToSession: (terminalId: string, sessionId: string) => boolean,
-): boolean {
-  return [...subscriptionTokens.keys()].some((sessionId) => belongsToSession(terminalId, sessionId));
-}
-
 function clearRequestSynchronizations(
   synchronizations: Map<string, ActiveSessionSynchronization>,
   requestId: string,
@@ -514,7 +496,6 @@ interface Connection {
   pingOutstandingSince: number | null;
   ready: boolean;
   presentationOnly: boolean;
-  terminals: Set<string>;
   inFlight: Set<string>;
   requestControllers: Map<string, InFlightRpc>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
@@ -1094,19 +1075,9 @@ export class GatewayServer {
         connection.synchronizations.delete(nextSessionId);
       }
       connection.subscriptionTokens.delete(nextSessionId);
-      releaseSessionTerminals(
-        connection.terminals,
-        nextSessionId,
-        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-      );
 
       connection.subscriptionTokens.delete(previousSessionId);
       connection.synchronizations.delete(previousSessionId);
-      releaseSessionTerminals(
-        connection.terminals,
-        previousSessionId,
-        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-      );
       if (sourceToken !== undefined) connection.subscriptionTokens.set(nextSessionId, sourceToken);
       // session.open reserves its requested ID before the asynchronous acquire.
       // A fork can rekey that slot before beginSynchronization runs; retain the
@@ -1165,11 +1136,6 @@ export class GatewayServer {
     }
     connection.subscriptionTokens.delete(sessionId);
     this.clearRekeyedSessionIds(connection, sessionId);
-    releaseSessionTerminals(
-      connection.terminals,
-      sessionId,
-      (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-    );
     this.options.sessions.unsubscribe(connection.id, sessionId);
     this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
     return true;
@@ -1243,31 +1209,6 @@ export class GatewayServer {
     if (client?.ready) this.send(client, { type: "event", topic, payload });
   }
 
-  broadcastTerminal(terminalId: string, topic: string, payload: JsonValue): void {
-    for (const client of this.clients.values()) {
-      if (client.ready && client.terminals.has(terminalId)) this.send(client, { type: "event", topic, payload });
-    }
-  }
-
-  /** Whether any connected client has the terminal open: such a terminal is
-   * in use and never idle-closed (#479). */
-  terminalAttached(terminalId: string): boolean {
-    for (const client of this.clients.values()) {
-      if (client.terminals.has(terminalId)) return true;
-    }
-    return false;
-  }
-
-  revokeSessionTerminals(sessionId: string): void {
-    for (const client of this.clients.values()) {
-      releaseSessionTerminals(
-        client.terminals,
-        sessionId,
-        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-      );
-    }
-  }
-
   notifySessionListChanged(): void {
     this.broadcast("session.listChanged", {});
   }
@@ -1287,7 +1228,6 @@ export class GatewayServer {
       }
       client.synchronizations.clear();
       client.subscriptionTokens.clear();
-      client.terminals.clear();
       client.pendingSessionOpens.clear();
       this.options.sessions.unsubscribeClient(client.id);
       const isInitiatingRequest = origin?.connectionId === client.id
@@ -1867,7 +1807,6 @@ export class GatewayServer {
       unansweredHeartbeats: 0,
       ready: false,
       presentationOnly: false,
-      terminals: new Set(),
       inFlight: new Set(),
       requestControllers: new Map(),
       synchronizations: new Map(),
@@ -2041,7 +1980,6 @@ export class GatewayServer {
     connection.inFlight.add(frame.id);
     const requestController = new AbortController();
     const admittedSubscriptionIds = new Set(connection.subscriptionTokens.keys());
-    const admittedTerminalIds = new Set(connection.terminals);
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
@@ -2100,11 +2038,6 @@ export class GatewayServer {
       if (connection.subscriptionTokens.get(sessionId) !== token) return false;
       connection.subscriptionTokens.delete(sessionId);
       clearRekeyedSessionIds(sessionId);
-      releaseSessionTerminals(
-        connection.terminals,
-        sessionId,
-        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-      );
       this.options.sessions.unsubscribe(connection.id, sessionId);
       this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
       return true;
@@ -2261,20 +2194,6 @@ export class GatewayServer {
           this.options.sessions.unsubscribe(connection.id, sessionId);
           return true;
         },
-        attachTerminal: (terminalId) => {
-          if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
-          if (connection.workRetired) throw new GatewayError("busy", "Connection is closed", true);
-          if (!canAttachTerminal(
-            connection.subscriptionTokens,
-            terminalId,
-            (id, sessionId) => this.options.service.terminalBelongsToSession(id, sessionId),
-          )) {
-            throw new GatewayError("invalid_request", "Open the terminal's session before attaching", false);
-          }
-          connection.terminals.add(terminalId);
-        },
-        detachTerminal: (terminalId) => connection.terminals.delete(terminalId),
-        ownsTerminal: (terminalId) => connection.terminals.has(terminalId) || admittedTerminalIds.has(terminalId),
         isSubscribed: (sessionId) => connection.subscriptionTokens.has(sessionId) || admittedSubscriptionIds.has(sessionId),
         subscriptionToken: (sessionId) => connection.subscriptionTokens.get(resolveSessionId(sessionId)),
         isRevoked: () => connection.revoked,
@@ -2922,7 +2841,6 @@ export class GatewayServer {
     }
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
-    connection.terminals.clear();
     // A retiring socket has no request left to receive a shared session-open
     // answer, so its attempts stop here instead of running for nobody.
     for (const flight of connection.pendingSessionOpens.values()) {
