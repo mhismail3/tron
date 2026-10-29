@@ -23,7 +23,7 @@ import { readHomeProfileIndex } from "./home-profile.js";
 import { estimateTokens, type SessionEntry } from "../../kernel/pi/coding-agent.js";
 import { historyEntry } from "../../kernel/projection/history.js";
 import type { EpisodicMemory } from "../../episodic/episodic-memory.js";
-import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolDisplay, type HomeMemoryViewRequest } from "./home-memory-browser.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, homeMemoryToolDisplay, type HomeMemoryViewRequest } from "../../episodic/home-memory-browser.js";
 import { GatewayError } from "../../errors.js";
 import type { TrustService } from "../../kernel/resources/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import type { HomeMemoryEvidence, HomeMemoryView, HomeMemoryViewLine } from "../protocol/types.js";
-import { HOME_MEMORY_PAGE_BYTES, HOME_MEMORY_DISPLAY_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../modules/home/home-memory-browser.js";
+import { HOME_MEMORY_PAGE_BYTES, HOME_MEMORY_DISPLAY_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { EpisodicMemoryError } from "../errors.js";

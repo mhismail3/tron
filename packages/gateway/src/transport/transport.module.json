@@ -8,6 +8,7 @@
     "gateway/display-contract",
     "gateway/host",
     "gateway/pi",
-    "gateway/settings"
+    "gateway/settings",
+    "gateway/episodic"
   ]
 }

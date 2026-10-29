@@ -1,10 +1,10 @@
-import { GatewayError } from "../../errors.js";
+import { GatewayError } from "../errors.js";
 import { basename } from "node:path";
-import type { EpisodicCanonicalEntry } from "../../kernel/session/canonical-reader.js";
-import { redactCredentials } from "../../util/credential-redaction.js";
-import type { EpisodicMessageRecord, EpisodicNodeRecord } from "../../episodic/episodic-contract.js";
-import type { EpisodicViewPart } from "../../episodic/episodic-tree.js";
-import type { HomeMemoryEvidence, HomeMemoryItem, HomeMemoryViewLine } from "../../protocol/types.js";
+import type { EpisodicCanonicalEntry } from "../kernel/session/canonical-reader.js";
+import { redactCredentials } from "../util/credential-redaction.js";
+import type { EpisodicMessageRecord, EpisodicNodeRecord } from "./episodic-contract.js";
+import type { EpisodicViewPart } from "./episodic-tree.js";
+import type { HomeMemoryEvidence, HomeMemoryItem, HomeMemoryViewLine } from "../protocol/types.js";
 
 export const HOME_MEMORY_PAGE_BYTES = 128 * 1024;
 /** Two 100-character strings even at JSON's worst-case escaping, plus field names. */

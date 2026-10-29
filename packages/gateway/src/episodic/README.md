@@ -12,6 +12,7 @@ caller: one memory keyed by `homeId` across chapters
 
 `episodic-memory.ts`, `episodic-store.ts`, `episodic-tree.ts`, `episodic-compactor.ts`,
 `episodic-projection.ts`, `episodic-contract.ts`, `cache-layout.ts`, `home-source.ts`.
+`home-memory-browser.ts` owns memory-browser admission, cursors and display projection.
 Canonical filesystem readers and digests live in [K1](../kernel/session/README.md);
 the shared refusal class lives in `errors.ts`. Projection and cursor orchestration
 remain here, and source limits derive from K4's actual prompt producer bounds.

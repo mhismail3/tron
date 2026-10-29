@@ -4,7 +4,7 @@ import { EpisodicMemoryError } from "../../errors.js";
 import { EPISODIC_SEARCH_QUERY_CHARS, type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "../../episodic/episodic-memory.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
-import { homeMemoryRevisionChanged, homeMemorySourceUnavailable } from "./home-memory-browser.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable } from "../../episodic/home-memory-browser.js";
 import { localTimestampText } from "../../util/timestamp.js";
 import type { HomeMemoryStatus } from "../../protocol/types.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
