@@ -4,6 +4,10 @@
     "**"
   ],
   "dependsOn": [
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/providers",
+    "gateway/resources",
+    "gateway/session-catalog",
+    "gateway/workspace"
   ]
 }
