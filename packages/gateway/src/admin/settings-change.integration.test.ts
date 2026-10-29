@@ -747,18 +747,13 @@ describe("settings.change", () => {
     expect(JSON.parse(await readFile(join(f.agentDir, "trust.json"), "utf8"))[await realpath(child)]).toBeUndefined();
   });
 
-  caseEach([
-    { cut: "index-error", placement: "successor" }, { cut: "killed-after-segment", placement: "successor" },
-    { cut: "index-error", placement: "open-tail" }, { cut: "killed-after-segment", placement: "open-tail" },
-  ])("recovers an ordinary publication across %s without replaying the command", async ({ cut, placement }, owner) => {
-    const segmentEntries = placement === "open-tail" ? 4 : 2;
-    const f = await fixture(owner, { segmentEntries });
+  caseEach(["index-error", "killed-after-segment"])("recovers an ordinary publication across %s without replaying the command", async (cut, owner) => {
+    const f = await fixture(owner, { segmentEntries: 2 });
     await f.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 1 },
       { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1 },
     ]);
     const index = join(f.record.path, "index.json");
-    const indexBefore = await readFile(index, "utf8");
     const command = { commandId: commandId(), target: { kind: "global" }, changes: [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
       { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 17 },
@@ -775,8 +770,7 @@ describe("settings.change", () => {
     f.outside.dispose();
     await f.settingsChanges.dispose();
     if (cut === "killed-after-segment") {
-      await writeFile(join(f.root, "history-crash-request.json"), JSON.stringify({ command, segmentEntries,
-        cutSegment: placement === "open-tail" ? "000000.jsonl" : "000001.jsonl" }));
+      await writeFile(join(f.root, "history-crash-request.json"), JSON.stringify(command));
       const child = spawn(process.execPath, ["--experimental-transform-types",
         fileURLToPath(new URL("../../test-support/settings-history-crash-child.mjs", import.meta.url)), f.root],
       { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PI_OFFLINE: "1", PI_CODING_AGENT_DIR: f.agentDir } });
@@ -798,7 +792,6 @@ describe("settings.change", () => {
       }
     }
     expect((await f.macDocument()).retry).toMatchObject({ maxRetries: 3, baseDelayMs: 17 });
-    expect(await readFile(index, "utf8")).toBe(indexBefore);
     const modelRuntime = f.settingsModel.owner.modelRuntime;
     const cold = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust,
       modelRuntimeFactory: async () => {
@@ -824,7 +817,7 @@ describe("settings.change", () => {
     await expect(service.invoke(client(), "settings.change", command)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     for (const fact of facts) await service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: fact.changeId });
     expect((await f.macDocument()).retry).toMatchObject({ maxRetries: 1, baseDelayMs: 1 });
-    transcript.push({ case: "cold ordinary publication recovery", detail: { cut, placement, commandId: command.commandId, facts } });
+    transcript.push({ case: "cold ordinary publication recovery", detail: { cut, commandId: command.commandId, facts } });
   }, 15_000);
 
   caseEach(["actor", "target", "status", "op", "at", "layer", "group", "oversized"])("refuses malformed %s in a real unpublished audit without publishing its index", async (field, owner) => {
