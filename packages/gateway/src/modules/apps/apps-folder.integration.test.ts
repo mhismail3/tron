@@ -61,7 +61,7 @@ it("isolates a malformed entry while a good Swift sibling opens through GatewayS
   expect(await f.rpc("apps.open", { id: good.id, expectedContentRevision: good.contentRevision })).toMatchObject({ kind: "swift", source });
 });
 
-it("requires exact-code consent, persists state separately, and refuses a stale runner after deletion/recreation", async () => {
+it("requires exact-code consent, retains state after external file deletion, and refuses a stale runner after recreation", async () => {
   const f = await fixture();
   await mkdir(join(f.apps, "counter"));
   const path = join(f.apps, "counter/Main.swift");
@@ -80,7 +80,10 @@ it("requires exact-code consent, persists state separately, and refuses a stale 
   expect(await f.rpc("apps.commit", commit)).toMatchObject({ revision: 1 });
   expect(await f.rpc("apps.commit", commit)).toMatchObject({ revision: 1 });
   const database = join(f.root, "tron/workspace/state/apps/counter/data.sqlite"), before = await readFile(database);
-  await f.rpc("apps.deleteFiles", { commandId: "counter-delete", rowKey: row.rowKey, expectedContentRevision: row.contentRevision });
+  // Phone deletion is not shipped. An external filesystem writer owns this
+  // membership change; the data/old-runner oracles are unchanged.
+  await rm(join(f.apps, "counter"), { recursive: true });
+  await waitFor(async () => (await f.rpc("apps.catalog")).rows.length === 0, "external deletion observed");
   expect(await readFile(database)).toEqual(before);
   expect((await f.rpc("apps.catalog")).rows).toHaveLength(0);
   await expect(f.rpc("apps.commit", { ...commit, commandId: "stale-write", expectedRevision: 1 })).rejects.toThrow();
@@ -305,7 +308,7 @@ it("manages orphan saved data with explicit clear authorization and revision CAS
   await expect(readFile(join(f.root, "tron/workspace/state/app-permissions/orphan.json"))).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-it("never removes the live directory when an external writer replaces it after validation", async () => {
+it("refuses disabled deletion with unsupported while leaving an external replacement untouched", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-apps-delete-race-"))); roots.push(root);
   const workspace = new TronWorkspace(join(root, "tron")); await workspace.initialize();
   const apps = join(root, "tron/workspace/files/apps"), directory = join(apps, "victim");
@@ -317,8 +320,9 @@ it("never removes the live directory when an external writer replaces it after v
     const entry = await originalResolve(key); validated = true; return entry;
   });
   // Wrap the real filesystem reader, without fabricating its returned facts.
-  // The external writer runs exactly after the last validation read and before
-  // the store resumes at rename; no production test hook or timing race is used.
+  // The external writer runs after the last validation read. The fail-before
+  // version at 07ab9992 resumed at unsafe rename; the disabled release must not.
+  // No production test hook or timing race is used.
   const validationHook = vi.spyOn(folderFormat, "readAppEntry").mockImplementation(async (path, name) => {
     const entry = await originalRead(path, name);
     if (validated && !replaced && path === apps && name === "victim") {
@@ -331,7 +335,7 @@ it("never removes the live directory when an external writer replaces it after v
   try {
     await mkdir(directory, { recursive: true, mode: 0o700 }); await writeFile(join(directory, "note.txt"), "original");
     const row = (await store.index.catalog()).rows[0]!;
-    await expect(store.deleteFiles(row.rowKey, row.contentRevision)).rejects.toMatchObject({ code: expect.stringMatching(/conflict|unsupported/) });
+    await expect(store.deleteFiles(row.rowKey, row.contentRevision)).rejects.toMatchObject({ code: "unsupported" });
     expect(replaced).toBe(true);
     expect(await readFile(join(directory, "note.txt"), "utf8")).toBe(replaced ? "replacement" : "original");
   } finally {

@@ -13,7 +13,6 @@ final class InstalledSwiftApps {
         let commit: @MainActor (String, InstalledSwiftAppCommit) async throws -> InstalledSwiftAppAcknowledgement
         let rename: @MainActor (String, String, String) async throws -> InstalledSwiftAppManifest
         let reset: @MainActor (String, String, Int) async throws -> Void
-        let remove: @MainActor (String, String, String?) async throws -> Void
         let state: @MainActor (String, String) async throws -> Int
     }
 
@@ -115,13 +114,6 @@ final class InstalledSwiftApps {
         try await ports.reset(profileID, appID, revision)
         try requireNoUnsaved(appID: appID, profileID: profileID)
         retireClean(appID: appID, profileID: profileID)
-    }
-
-    func remove(appID: String, profileID: String) async throws {
-        try requireNoUnsaved(appID: appID, profileID: profileID)
-        try await ports.remove(profileID, appID, apps.first(where: { $0.id == appID })?.instanceId)
-        retireClean(appID: appID, profileID: profileID)
-        apps.removeAll { $0.id == appID }
     }
 
     private func matches(_ session: InstalledSwiftAppSession, appID: String, profileID: String) -> Bool {

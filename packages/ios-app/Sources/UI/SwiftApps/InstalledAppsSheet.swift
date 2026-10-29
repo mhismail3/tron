@@ -45,7 +45,7 @@ struct InstalledAppsSheet: View {
             .refreshable { await reload() }
             .task { await reload() }
             .tronManagedSheet(item: $managed, identity: { "apps.manage.\($0.id)" }) { app in
-                InstalledAppManageSheet(appID: app.id) { managed = nil }
+                InstalledAppManageSheet(appID: app.id)
             }
             .tronManagedSheet(item: $launch, identity: { "apps.run.\($0.id)" }) { launch in
                 SwiftAppRunnerSheet(launch: launch)
@@ -99,17 +99,15 @@ struct InstalledAppsSheet: View {
 
 extension InstalledSwiftAppManifest: Identifiable {}
 
-/// Rename, clear data and remove an installed app. Destructive actions confirm
+/// Rename and clear saved values. Destructive actions confirm
 /// first; failures stay visible instead of being dropped.
 private struct Notice: Equatable { let message: String; let failed: Bool }
 
 private struct InstalledAppManageSheet: View {
     let appID: String
-    let onRemoved: () -> Void
     @Environment(AppModel.self) private var model
     @PresentationState private var renaming = false
     @PresentationState private var confirmingReset = false
-    @PresentationState private var confirmingRemove = false
     @PresentationState private var confirmingDiscard = false
     @PresentationState private var name = ""
     @PresentationState private var notice: Notice?
@@ -147,10 +145,6 @@ private struct InstalledAppManageSheet: View {
                                 action("arrow.counterclockwise", "Clear Data", "Delete this app's saved values. Its source stays.", id: "reset") {
                                     confirmingReset = true
                                 }
-                                TronSettingsDivider(accent: .tronPrimary)
-                                action("trash", "Remove App", "Delete the app and all of its data from your Mac.", id: "remove") {
-                                    confirmingRemove = true
-                                }
                             }
                         }
                     } else {
@@ -178,13 +172,6 @@ private struct InstalledAppManageSheet: View {
         } message: {
             Text("Saved values are deleted from your Mac and cannot be restored. The app and its source stay installed.")
         }
-        .tronConfirmation("Remove this app?", isPresented: $confirmingRemove) {
-            Button("Remove App", role: .destructive) {
-                run(then: onRemoved) { try await $0.remove(appID: appID, profileID: $1) }
-            }
-        } message: {
-            Text("The app, its source and all of its saved values are deleted from your Mac and cannot be restored.")
-        }
     }
 
     private func action(_ icon: String, _ title: String, _ subtitle: String, id: String, perform: @escaping () -> Void) -> some View {
@@ -196,7 +183,7 @@ private struct InstalledAppManageSheet: View {
         .accessibilityIdentifier("installed-app-manage-\(id)")
     }
 
-    private func run(done: String? = nil, then: (() -> Void)? = nil,
+    private func run(done: String? = nil,
                      _ work: @escaping @MainActor (InstalledSwiftApps, String) async throws -> Void) {
         guard let profileID, !working else { return }
         working = true
@@ -206,7 +193,6 @@ private struct InstalledAppManageSheet: View {
             do {
                 try await work(model.installedApps, profileID)
                 notice = done.map { Notice(message: $0, failed: false) }
-                then?()
             } catch is CancellationError {
             } catch {
                 notice = Notice(message: error.localizedDescription, failed: true)
