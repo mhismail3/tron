@@ -9,12 +9,7 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     let sessionID: String
     let display: DisplayProjection
     var technicalTool: ChatToolPresentation? = nil
-    /// Runs a displayed `.swift` file as a mini-app instead of showing its
-    /// source (#1339). A distinct sheet identity from the same file's source.
-    var runsSwiftApp = false
-    /// Native producer intent, not source text or a model-authored caption.
-
-    var id: String { "\(sessionID):\(display.presentationIdentity)\(runsSwiftApp ? ":app" : "")" }
+    var id: String { "\(sessionID):\(display.presentationIdentity)" }
     var sheetPresentationID: String { "chat.display.\(id)" }
 }
 
@@ -123,15 +118,6 @@ struct DisplayToolView: View {
                         accessibilityLabel: DisplayThumbnailButton.imageLabel(display.title),
                         action: inlineSheetAction(for: display)
                     )
-                } else if SwiftAppDisplay.runs(display) {
-                    // An app card's tap is the app itself; its source stays in
-                    // the menu below and in the card's non-runnable states.
-                    SwiftAppDisplayCard(
-                        sessionID: sessionID,
-                        display: display,
-                        onOpenApp: sheetAction(for: display, runsSwiftApp: true),
-                        onOpenSource: sheetAction(for: display, runsSwiftApp: false)
-                    )
                 } else {
                     DisplayInlineContainer(
                         sessionID: sessionID,
@@ -141,9 +127,6 @@ struct DisplayToolView: View {
                 }
             }
             .contextMenu {
-                if SwiftAppDisplay.runs(display), let viewSource = sheetAction(for: display, runsSwiftApp: false) {
-                    Button("View Source", systemImage: "doc.text", action: viewSource)
-                }
                 Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
             }
         } else {
@@ -153,12 +136,12 @@ struct DisplayToolView: View {
 
     private func inlineSheetAction(for display: DisplayProjection) -> (() -> Void)? {
         guard display.kind == .image || display.presentation.inlineTapAction == .sheet else { return nil }
-        return sheetAction(for: display, runsSwiftApp: false)
+        return sheetAction(for: display)
     }
 
-    private func sheetAction(for display: DisplayProjection, runsSwiftApp: Bool) -> (() -> Void)? {
+    private func sheetAction(for display: DisplayProjection) -> (() -> Void)? {
         guard let sessionID else { return nil }
-        return { present?(.showSheet(DisplayRoute(sessionID: sessionID, display: display, runsSwiftApp: runsSwiftApp))) }
+        return { present?(.showSheet(DisplayRoute(sessionID: sessionID, display: display))) }
     }
 
     private var completedInlineDisplay: Bool {
@@ -1355,9 +1338,7 @@ struct DisplaySheet: View {
 
     @ViewBuilder
     var body: some View {
-        if route.runsSwiftApp, SwiftAppDisplay.runs(route.display) {
-            SwiftAppDisplayRunner(route: route)
-        } else if route.display.kind.isLive {
+        if route.display.kind.isLive {
             NavigationStack {
                 LiveDisplayView(sessionID: route.sessionID, display: route.display)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

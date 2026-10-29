@@ -12,13 +12,15 @@ consumer is the remote iOS development-build page.
 | OTA page markup, escaped metadata and install links | [`scripts/ios-share-publish.py`](../../scripts/ios-share-publish.py), `render_index`; do not copy its template into an app directory |
 | Fixture preview and publisher/server journey | [`scripts/test-tron-ios-device-share.py`](../../scripts/test-tron-ios-device-share.py) |
 | Real-browser delivery/layout and keyboard/zoom journeys | [`scripts/test-ios-share-browser.js`](../../scripts/test-ios-share-browser.js), run through `agent_browser` below |
-| Maintained mini apps (plain HTML or single-file SwiftUI) | `tools/web/apps/<app-id>/` (create only for a real app); keep its source and concise purpose/update/preview/validation instructions version-controlled here. First Swift app: [`apps/builds-preview/`](apps/builds-preview/README.md), presented in chat as an inline app card ([Swift apps](../../packages/ios-app/docs/swift-apps.md#inline-mini-app-card-1339)) |
-| Artifact/discovery root (default Stable installation) | `~/.tron/workspace/files/mini-apps/README.md`: small index linking back to these repository owners, not a second source tree |
+| Maintained mini apps (plain HTML or single-file SwiftUI) | `tools/web/apps/<app-id>/` (create only for a real app); keep its source and concise purpose/update/preview/validation instructions version-controlled here. First Swift app: [`apps/builds-preview/`](apps/builds-preview/README.md), with native admission defined by [folder-backed apps](../../packages/ios-app/docs/swift-apps.md#folder-backed-apps) |
+| Maintained-source index, not runtime membership (default Stable installation) | `~/.tron/workspace/files/mini-apps/README.md`: small index linking back to these repository owners, not a second source tree |
 | App-specific review artifacts | `~/.tron/workspace/files/mini-apps/<app-id>/previews/<review-id>/` for generated pages; `evidence/<review-id>/` for labeled screenshots/results |
 
 Debug/custom installations have their own resolved workspace root. Internal
-files are deliberately retained outputs, not an installed runtime. Never keep an
-editable stylesheet, copied publisher or maintained app source in that tree.
+mini-apps documentation and review files are retained outputs, not Apps membership.
+Executable publication belongs to the separate [Apps folder owner](../../packages/gateway/docs/swift-apps.md).
+Never keep an editable stylesheet, copied publisher or maintained app source in the
+mini-apps review subtree.
 No generic private-state namespace or API is established by this design system.
 Any future mutable state needs a separately approved owner; never put credentials
 or live databases in pages, previews, repositories or a publicly served tree.

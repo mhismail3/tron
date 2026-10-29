@@ -11,13 +11,13 @@ struct ExperimentalSettingsContent: View {
                     TronToggleRow(
                         icon: "play.rectangle",
                         title: "Run Swift files",
-                        detail: "Adds a Run button to .swift previews. Sandboxed; simulator-tested only.",
+                        detail: "Source previews stay read-only. Apps runner pairing is incomplete.",
                         isOn: $swiftApps.isEnabled
                     )
                     .accessibilityIdentifier("settings-experimental-swift-apps")
                 }
                 .tronSettingsVisualTheme(inheriting: .tronPrimary)
-                .tronSettingsCaption("Run opens a single-file SwiftUI app shown in chat as a native app, with no file, network or system access. Applies only to this iPhone.")
+                .tronSettingsCaption("Saved on this iPhone. This preference does not currently enable a production runner or authorize app access.")
         }
     }
 }

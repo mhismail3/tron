@@ -1,33 +1,19 @@
-# Experimental: running single-file SwiftUI apps (#889)
+# Restricted single-file SwiftUI apps
 
-Off by default behind **Settings › System › Setup › Run Swift files**. The agent writes a
-single-file SwiftUI app and presents it with `display`; the phone shows the source in the shared
-document sheet and, with the flag on, a play control runs it as a native SwiftUI app in a large
-sheet (idea: <https://x.com/ronithhh/status/2102163666422702538>).
+The legacy **Settings › System › Setup › Run Swift files** preference is stored locally
+but currently has no production launch consumer. A displayed or attached `.swift` snapshot
+is ordinary readable code, never a program merely because of its filename or the flag.
+Neither inline display nor the generic source sheet promotes preview bytes to a runtime.
 
-## End to end
+Production `SwiftAppLaunch` construction requires an admitted session and derives source
+and state from that session. Only `HOSTED_TEST` design/engine fixtures have a source-only
+constructor. `SwiftAppRunnerSheet` retains the interpreter and accepted-write owner;
+ordinary [display artifacts](display-artifacts.md) retain immutable historical reading.
 
-1. The agent calls `display` with a `.swift` `path` or `internal_file`; the Gateway already
-   classifies it as `code` ([display artifacts](display-artifacts.md)).
-2. `AttachmentFilePreviewSheet` opens it; with `SwiftAppExperiment` on, `TronDocumentSheet`
-   shows a leading **Run <file>** control. Truncated previews never run.
-3. `SwiftAppRunnerSheet` parses once (`SwiftAppParser`) and renders through
-   `SwiftAppRenderer`; dismissal discards the program and its state.
-
-## Inline mini-app card (#1339)
-
-An **inline** `.swift` display with the flag on shows `SwiftAppDisplayCard` instead of source:
-Swift logo, title, caption (else "Swift app") and a play control in the inline card's lavender
-glass (`DisplayInlineLayoutPolicy`, `DisplayInlineControlFace`). The card is one button; its
-menu keeps **View Source** (with its own Run) and **Tool Details**. It loads through the same
-bounded `inlineArtifact(for:)` and `AttachmentFilePreviewPolicy`; a tap presents a `DisplayRoute`
-with `runsSwiftApp` (`SwiftAppDisplayRunner` hosts the unchanged runner with the selected
-profile's link host). Past the 320,000-byte preview bound it reads "Too large to run · View
-Source", a failed load "Unavailable · View Source"; both open the source and never run. Done
-discards the program; cards never auto-open, so cache install, reconnect and relaunch replay
-nothing; turning the flag off swaps an open runner for the source sheet. No new authority,
-feed or storage in source-only previews. Offers use the explicit review below. Canonical mini-app source lives in
-[`tools/web/apps/<app-id>/`](../../../tools/web/README.md).
+Folder DTO/UI, canonical chat open and inert cold-reference presentation remain unpaired;
+the feature branch is not a deployable product until those consumers and protocol agree.
+The legacy raw-run UI journeys require canonical-folder fixture porting before they can
+serve as current acceptance; their assertions have not been changed or waived.
 
 ## Tron styling (#909)
 
@@ -56,8 +42,8 @@ The Apps catalog UI and paired protocol must be updated together before release.
 ## Flag
 
 An iPhone-only preference (`ExperimentalSettingsContent`, UserDefaults key
-`tron.experimental.swiftApps`) read through the observable `SwiftAppExperiment.shared`, so open
-sheets gain or lose the control at once. The launch argument
+`tron.experimental.swiftApps`) read through the observable `SwiftAppExperiment.shared`.
+It does not make a source preview executable. The launch argument
 `-tron.experimental.swiftApps YES|NO` sets the same stored choice:
 
 Use the [iOS development helpers](../../../.agents/skills/tron-ios/SKILL.md) for
@@ -78,9 +64,9 @@ dynamic values, a tree-walking evaluator, the bounded library and value-to-Swift
 - **Links (#1160)** via `SwiftAppLinkPolicy`, only on the host of the profile selected at Run:
   an `itms-services://?action=download-manifest&url=…` whose manifest is `https` on that host
   (straight to the system prompt), or an `https` page there after an **Open link?** alert.
-  V2 additionally requires an exact manifest from the installed feed and an explicit
+  Admitted feed-backed sessions require an exact declared manifest and an explicit
   native user action; lifecycle/timer/change callbacks cannot open an OS install.
-  Source-only/v1 previews retain their named host policy. Refused links diagnose or
+  Refused links diagnose or
   roll back; admitted links open only after action commit. Other environment keys diagnose.
 - **Diagnostics.** Unsupported syntax is collected per construct with its line, stopping at 10
   (saying more may remain); no partial program runs; lexer, delimiter and nesting errors are

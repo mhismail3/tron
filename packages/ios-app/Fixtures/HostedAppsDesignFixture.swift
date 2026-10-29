@@ -222,4 +222,14 @@ private struct AppsDesignBrowser: View {
                 Entry(id: "editor", content: .init(title: "Refine daily goals", subtext: "Updated · Source revision 4"))]
     }
 }
+/// Synthetic design/engine fixtures exercise the renderer without granting a
+/// production source-preview route executable admission.
+extension SwiftAppLaunch {
+    init(name: String, source: String, linkHost: String?) {
+        self.name = name
+        self.source = source
+        self.linkHost = linkHost
+        installed = nil
+    }
+}
 #endif

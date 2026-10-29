@@ -13,16 +13,17 @@ This historical preview does not consume the Gateway's live `ios-builds` feed.
 Copy the file into the session directory and call `display` with
 `presentation.surface: "inline"`, an app title and an honest caption, for
 example title `Tron builds`, caption `Historical preview · Oct 16 snapshot, not
-live`. With **Settings › System › Setup › Run Swift files**
-on, the iPhone shows a small app card; tapping it runs the app in the managed
-runner sheet. Without the switch it stays an ordinary source card. See
-[Swift apps](../../../../packages/ios-app/docs/swift-apps.md#inline-mini-app-card-1339).
+live`. A source snapshot remains readable code, even with the Swift experiment
+on; its filename never authorizes execution. Native execution requires an admitted
+folder session. The folder DTO/UI pairing is not yet release-ready; see
+[Swift apps](../../../../packages/ios-app/docs/swift-apps.md#folder-backed-apps).
 
 ## Edit and validate
 
 Edit this file directly; it must stay within the
 [supported subset](../../../../packages/ios-app/docs/swift-apps.md#supported-subset).
-The `TronSwiftAppUITests` bundle carries this folder and runs these exact bytes
-(`testInlineSwiftAppCardOpensRunnerAndReplays`,
-`testRecoveredBuildsPreviewFiltersSearchesAndReopens`). Review screenshots go to
+The `TronSwiftAppUITests` bundle carries these exact bytes. Its legacy raw-run
+journeys (`testInlineSwiftAppCardOpensRunnerAndReplays`,
+`testRecoveredBuildsPreviewFiltersSearchesAndReopens`) still require canonical-folder
+fixture wiring; they are not current acceptance evidence. Review screenshots go to
 `~/.tron/workspace/files/mini-apps/swift-apps/evidence/<review-id>/`, never here.

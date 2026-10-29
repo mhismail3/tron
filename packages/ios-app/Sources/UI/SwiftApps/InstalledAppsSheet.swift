@@ -86,8 +86,7 @@ struct InstalledAppsSheet: View {
         Task {
             do {
                 let session = try await apps.open(appID: app.id, profileID: profileID)
-                launch = SwiftAppLaunch(name: session.snapshot.app.name, source: session.snapshot.source,
-                                        linkHost: model.profiles.selected?.host, installed: session)
+                launch = SwiftAppLaunch(session: session, linkHost: model.profiles.selected?.host)
             } catch is CancellationError {
             } catch {
                 openError = "\(app.name) could not be opened. \(error.localizedDescription)"

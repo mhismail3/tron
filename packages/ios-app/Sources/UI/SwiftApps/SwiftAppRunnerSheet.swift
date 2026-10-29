@@ -1,17 +1,9 @@
 import SwiftUI
 import TronSwiftAppEngine
 
-/// Experimental gate for running displayed `.swift` files (#889), an
-/// iPhone-only preference. Off by default, so normal use never shows the
-/// control. Settings › System › Experimental owns the switch; launching
-/// with `-tron.experimental.swiftApps YES|NO` sets the same stored choice, so
-/// a device launched through `devicectl`/`simctl` keeps it across later normal
-/// launches.
-///
-/// Reads go through this observable owner, never straight to `UserDefaults`:
-/// a launch argument shadows the stored value for the whole process, which
-/// would hide a later Settings change, and observation lets an open document
-/// sheet gain or lose its run control as soon as the switch changes.
+/// Reserved iPhone-only preference while folder runner pairing is incomplete.
+/// It has no production launch consumer and never admits source bytes.
+/// Settings and launch arguments share this observable preference owner.
 @MainActor
 @Observable
 final class SwiftAppExperiment {
@@ -35,9 +27,6 @@ final class SwiftAppExperiment {
         }
     }
 
-    func canRun(fileNamed name: String) -> Bool {
-        isEnabled && name.lowercased().hasSuffix(".swift")
-    }
 }
 
 struct SwiftAppLaunch: Identifiable {
@@ -46,14 +35,14 @@ struct SwiftAppLaunch: Identifiable {
     let source: String
     /// The paired Gateway's host: the only host the program's links may open (#1160).
     let linkHost: String?
-    /// Only an installed launch supplies this Gateway-owned state projection.
+    /// Production launches obtain source and state only from the admitted session.
     let installed: InstalledSwiftAppSession?
 
-    init(name: String, source: String, linkHost: String?, installed: InstalledSwiftAppSession? = nil) {
-        self.name = name
-        self.source = source
+    init(session: InstalledSwiftAppSession, linkHost: String?) {
+        name = session.snapshot.app.name
+        source = session.snapshot.source
         self.linkHost = linkHost
-        self.installed = installed
+        installed = session
     }
 }
 
@@ -150,8 +139,7 @@ struct SwiftAppRunnerSheet: View {
                 guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
                       model.selectedGatewayProfileID() == session.profileID,
                       case .success(let current) = runtime, current === previous else { throw CancellationError() }
-                let candidate = SwiftAppLaunch(name: fresh.snapshot.app.name, source: fresh.snapshot.source,
-                    linkHost: model.profiles.selected?.host, installed: fresh)
+                let candidate = SwiftAppLaunch(session: fresh, linkHost: model.profiles.selected?.host)
                 prepared = try Self.makeRuntime(candidate)
             })
             guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
