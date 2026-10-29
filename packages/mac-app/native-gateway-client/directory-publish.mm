@@ -15,6 +15,7 @@ namespace {
 void check(napi_status status) { if (status != napi_ok) throw std::runtime_error("Directory publication Node-API failure"); }
 struct Publication {
     int source = -1, destination = -1, error = 0;
+    bool manifest = false, visible = false;
     std::string sourceName, destinationName;
     napi_ref callback = nullptr;
     napi_async_work work = nullptr;
@@ -47,6 +48,18 @@ std::string leaf(napi_env env, napi_value value) {
 void execute(napi_env, void *data) {
     auto &operation = *static_cast<Publication *>(data);
     struct stat info;
+    if (operation.manifest) {
+        if (fstat(operation.source, &info)) { operation.error = errno; return; }
+        if (info.st_uid != geteuid() || (info.st_mode & 0777) != 0700) { operation.error = EINVAL; return; }
+        if (fstatat(operation.source, "app.json", &info, AT_SYMLINK_NOFOLLOW)) { operation.error = errno; return; }
+        if (!S_ISREG(info.st_mode) || info.st_uid != geteuid() || (info.st_mode & 0777) != 0600 || info.st_nlink != 1 || info.st_size > 32768) { operation.error = EINVAL; return; }
+        // Source is the owner's private stage. Destination is a pinned original
+        // incarnation, not a pathname that could follow a replaced ancestor.
+        if (renameat(operation.source, "app.json", operation.destination, "app.json")) { operation.error = errno; return; }
+        operation.visible = true;
+        if (fsync(operation.destination) || fsync(operation.source)) operation.error = errno;
+        return;
+    }
     if (fstatat(operation.source, operation.sourceName.c_str(), &info, AT_SYMLINK_NOFOLLOW)) { operation.error = errno; return; }
     // The caller owns the private staging namespace. This is deliberately not
     // an expected-inode move of an externally editable directory (see #2109).
@@ -59,7 +72,7 @@ void complete(napi_env env, napi_status status, void *data) {
     napi_value callback, receiver, args[2];
     if (status != napi_ok && !operation->error) operation->error = ECANCELED;
     if (napi_get_reference_value(env, operation->callback, &callback) == napi_ok && napi_get_undefined(env, &receiver) == napi_ok) {
-        const bool exists = operation->error == EEXIST || operation->error == ENOTEMPTY;
+        const bool exists = !operation->manifest && (operation->error == EEXIST || operation->error == ENOTEMPTY);
         bool ready;
         if (!operation->error || exists) {
             ready = napi_get_null(env, &args[0]) == napi_ok && napi_get_boolean(env, !exists, &args[1]) == napi_ok;
@@ -70,6 +83,11 @@ void complete(napi_env env, napi_status status, void *data) {
                 && napi_create_int32(env, operation->error, &code) == napi_ok
                 && napi_set_named_property(env, args[0], "errno", code) == napi_ok
                 && napi_get_undefined(env, &args[1]) == napi_ok;
+        }
+        if (ready && operation->error && operation->visible) {
+            napi_value visible;
+            ready = napi_get_boolean(env, true, &visible) == napi_ok
+                && napi_set_named_property(env, args[0], "publicationVisible", visible) == napi_ok;
         }
         // Allocation refusal or environment teardown must not pass uninitialized
         // handles to JS. Native resources still retire on every completion path.
@@ -93,6 +111,32 @@ napi_value publishDirectoryExclusive(napi_env env, napi_callback_info info) {
         if (type != napi_function) throw std::runtime_error("Publication requires a callback");
         check(napi_create_reference(env, args[4], 1, &operation->callback));
         napi_value name; check(napi_create_string_utf8(env, "tron.directory.publish", NAPI_AUTO_LENGTH, &name));
+        check(napi_create_async_work(env, nullptr, name, execute, complete, operation.get(), &operation->work));
+        check(napi_queue_async_work(env, operation->work));
+        operation.release(); napi_value result; check(napi_get_undefined(env, &result)); return result;
+    } catch (const std::exception &error) {
+        if (operation) {
+            if (operation->callback) (void)napi_delete_reference(env, operation->callback);
+            if (operation->work) (void)napi_delete_async_work(env, operation->work);
+        }
+        bool pending = false; (void)napi_is_exception_pending(env, &pending);
+        if (!pending) (void)napi_throw_error(env, nullptr, error.what());
+        return nullptr;
+    }
+}
+
+napi_value replaceAppManifest(napi_env env, napi_callback_info info) {
+    std::unique_ptr<Publication> operation;
+    try {
+        operation = std::make_unique<Publication>(); operation->manifest = true;
+        napi_value args[4], receiver; size_t count = 4;
+        check(napi_get_cb_info(env, info, &count, args, &receiver, nullptr));
+        if (count != 3) throw std::runtime_error("Manifest replacement requires private source and entry descriptors and a callback");
+        operation->source = pin(env, args[0]); operation->destination = pin(env, args[1]);
+        napi_valuetype type; check(napi_typeof(env, args[2], &type));
+        if (type != napi_function) throw std::runtime_error("Manifest replacement requires a callback");
+        check(napi_create_reference(env, args[2], 1, &operation->callback));
+        napi_value name; check(napi_create_string_utf8(env, "tron.manifest.replace", NAPI_AUTO_LENGTH, &name));
         check(napi_create_async_work(env, nullptr, name, execute, complete, operation.get(), &operation->work));
         check(napi_queue_async_work(env, operation->work));
         operation.release(); napi_value result; check(napi_get_undefined(env, &result)); return result;

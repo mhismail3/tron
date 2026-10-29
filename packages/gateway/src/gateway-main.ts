@@ -314,7 +314,7 @@ const homeComposition: HomeComposition = {
 };
 const { modules, home, projects, apps } = await startGatewayModules({ tronHome: config.tronHome, log: logger },
   () => ({ registry: sessions, home: homeComposition, openAIModelEligibility, connections, scheduleToolOperations, sessionSearch,
-    display,
+    display, appsChanged: revision => transport?.broadcast("apps.changed", { revision }),
     recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}), persistenceDiagnostic }));
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),

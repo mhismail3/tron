@@ -10,7 +10,7 @@ import { durableAtomicWriteJson, syncDurably } from "../../util/durable-json.js"
 import { readSecureJson } from "../../util/secure-json.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { AppDataStore, type AppDataCommit } from "./app-data-store.js";
-import type { DirectoryPublisher } from "../../machine/directory-publication.js";
+import type { DirectoryPublisher, ManifestReplacer } from "../../machine/directory-publication.js";
 import { AppsFolderIndex } from "./apps-folder-index.js";
 import { APP_ID, type ReadyAppEntry, type AppPermissions } from "./apps-folder-format.js";
 import { readIOSBuildsFeed } from "./ios-builds-feed.js";
@@ -25,8 +25,8 @@ export class AppsFolderStore {
   private readonly mutex = new AsyncMutex();
   private readonly prompts = new Map<string, Consent>();
   constructor(private readonly workspace: TronWorkspace, private readonly tronHome: string, changed?: (revision: string) => void, publisher?: DirectoryPublisher,
-    private readonly admitLive?: (reference: Extract<AppReference, { kind: "live" }>) => void) {
-    this.index = new AppsFolderIndex(workspace, changed, undefined, publisher); this.data = new AppDataStore(workspace);
+    private readonly admitLive?: (reference: Extract<AppReference, { kind: "live" }>) => void, replaceManifest?: ManifestReplacer) {
+    this.index = new AppsFolderIndex(workspace, changed, undefined, publisher, replaceManifest); this.data = new AppDataStore(workspace);
   }
   private async permissionPath(id: string, create = false): Promise<string> {
     if (!APP_ID.test(id)) throw new GatewayError("invalid_request", "Invalid app id");
@@ -110,6 +110,7 @@ export class AppsFolderStore {
       const grant: Grant = { version: 1, executableDigest: entry.executableDigest, identity: entry.identity,
         permissions: entry.permissions, revision: randomUUID(), device };
       await durableAtomicWriteJson(await this.permissionPath(entry.name, true), grant);
+      this.index.accessChanged();
       return { id: entry.name, grantRevision: grant.revision };
     });
   }
@@ -124,9 +125,13 @@ export class AppsFolderStore {
     catch (error) { throw asUncertainOutcome(error, "Access revocation could not be verified"); }
     finally { await directory.close(); }
   }
+  async setMetadata(id: string, expected: string, edits: { title?: unknown; icon?: unknown }) {
+    return this.mutex.run(async () => ({ row: await this.index.setMetadata(id, expected, edits) }));
+  }
   async revoke(id: string) {
     return this.mutex.run(async () => {
       await this.removeGrant(id);
+      this.index.accessChanged();
       return { id, revoked: true };
     });
   }
@@ -154,7 +159,9 @@ export class AppsFolderStore {
   }
   async clearData(id: string, expectedRevision: number, confirmed: unknown) {
     if (confirmed !== true) throw new GatewayError("invalid_request", "Clearing saved app data requires separate explicit authorization");
-    return this.mutex.run(() => this.data.reset(id, expectedRevision));
+    return this.mutex.run(async () => {
+      const state = await this.data.reset(id, expectedRevision); this.index.accessChanged(); return state;
+    });
   }
   async deleteFiles(rowKey: string, expectedContentRevision: string): Promise<never> {
     return this.mutex.run(async () => {

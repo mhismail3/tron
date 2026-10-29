@@ -111,6 +111,18 @@ composition name, `tron-swift-apps`.
   `apps.permissions.revoke {commandId, id}`: authenticated receipt-backed device
   actions. Code/assets/scopes/folder identity invalidate old grants; title/icon
   changes alone do not. Revocation invalidates subsequent data operations.
+- `apps.setMetadata {commandId, id, expectedContentRevision, title?, icon?}`:
+  receipt/CAS-backed label edits under the store mutex and index lane. Null removes
+  an override; other manifest fields, code, scopes and saved data are unchanged.
+  The existing private staging owner prepares a bounded manifest; the native
+  owner replaces only app.json through pinned directory descriptors and syncs
+  both parents. External editors do not participate in Gateway CAS. A changed
+  incarnation or unverifiable publication returns an uncertain receipt, never
+  a directory replacement or retry against a newer path.
+- `apps.changed {revision}` invalidates projections on file/access changes and
+  unavailable/recovered cuts. Repeated failing reads do not create event loops;
+  access-only invalidation can carry the same catalog revision. A hint is not
+  membership or execution authority; clients revalidate the pinned open cut.
 - `apps.commit {commandId, id, expectedContentRevision, grantRevision,
   expectedRevision, set?, remove?}`: checks live write authority before the SQLite
   transaction. Accepted duplicates return the original durable receipt.
@@ -130,9 +142,8 @@ composition name, `tron-swift-apps`.
   It does not grant access or manage files. Built-in operating context and
   delegated workspace handoff point writers to `files/apps/<id>/`, not a profile.
 
-There are no list/pending/review/install/legacy RPC aliases. Metadata editing,
-Apps change broadcasting and paired protocol advancement are incomplete and must
-land atomically with their consumers.
+There are no list/pending/review/install/legacy RPC aliases. Paired iOS consumers
+and protocol advancement remain incomplete; source-only deployment is not ready.
 Text is limited to 5 MiB/file, images/documents to 25 MiB/file, streamed
 video/audio to 2 GiB/file. Swift remains 320,000 bytes, manifests 32 KiB and
 executable bundles 32 MiB/1,000 files. All bundles cap retained text at 32 MiB
@@ -157,6 +168,7 @@ Apps subfolder is empty; a missing/unsafe workspace files root is unavailable.
 
 ```bash
 scripts/tron test gateway src/modules/apps/apps-folder.integration.test.ts
+scripts/tron test gateway src/modules/apps/apps-metadata.integration.test.ts src/machine/native-app-metadata.integration.test.ts
 scripts/tron test gateway src/modules/apps/apps-folder-runtime.integration.test.ts
 scripts/tron test gateway src/modules/apps/apps.store.lock.integration.test.ts
 scripts/tron test gateway src/modules/apps/apps-preview.integration.test.ts src/transport/apps-artifacts.integration.test.ts

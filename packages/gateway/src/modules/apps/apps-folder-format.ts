@@ -47,7 +47,7 @@ function stringList(value: unknown, maximum: number): string[] {
   if (new Set(value).size !== value.length) fail("Duplicate permission scope");
   return [...value].sort();
 }
-function readAppManifest(bytes: Buffer | undefined): AppManifest {
+export function readAppManifest(bytes: Buffer | undefined): AppManifest {
   if (!bytes) return {};
   if (bytes.length > 32 * 1024) fail("Manifest exceeds 32 KiB");
   let value: unknown;

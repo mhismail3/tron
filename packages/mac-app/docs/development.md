@@ -44,6 +44,12 @@ copies across filesystems or retries. The caller owns the private staging namesp
 and must revalidate its canonical namespace after completion. This is not an
 expected-source-identity move, deletion or restore primitive. Source-only Gateway
 updates cannot add native exports to the installed app; Mac replacement stays manual.
+`replaceAppManifest` uses the same callback/descriptor owner to rename only
+`app.json` from an owned private stage into a pinned entry directory and synchronize
+both parents. A post-rename sync failure reports `publicationVisible`; the Gateway
+keeps an uncertain receipt rather than retrying. It neither follows the manifest's
+symlink target nor conditionally replaces/deletes an entry directory. Native
+metadata boundary proof: `scripts/tron test gateway src/machine/native-app-metadata.integration.test.ts`.
 
 ## Generate and build
 

@@ -1,4 +1,4 @@
-import { directoryPublisher } from "../machine/directory-publication.js";
+import { directoryPublisher, manifestReplacer } from "../machine/directory-publication.js";
 import { ProjectLifecycle } from "../modules/projects/project-lifecycle.js";
 import { projectsModule } from "../modules/projects/module.js";
 import { projectRuntimePort } from "../modules/projects/runtime-admission.js";
@@ -30,6 +30,8 @@ import type { SessionSearchService } from "../sessions/session-search-service.js
  * composition's, which never pass through the registry. */
 export interface ModuleOwners extends RecentModelSignals {
   directoryPublisher?: import("../machine/directory-publication.js").DirectoryPublisher;
+  manifestReplacer?: import("../machine/directory-publication.js").ManifestReplacer;
+  appsChanged?: ((revision: string) => void) | undefined;
   registry: RuntimeRegistry;
   home: HomeComposition;
   display: DisplayOwner;
@@ -48,8 +50,11 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
     return owner ? (request: Parameters<SessionSearchService["search"]>[0], signal?: AbortSignal) => owner.search(request, signal) : undefined;
   } }));
   const projects = projectsModule(new ProjectLifecycle(() => owners().home.trust, projectRuntimePort(registry, signal => home.owner().activeTaskTargets(signal)), projectOptions));
-  const publishDirectory = directoryPublisher();
-  const apps = createAppsModule((...args) => (owners().directoryPublisher ?? publishDirectory)(...args), reference => owners().display.admitLiveReference(reference));
+  const publishDirectory = directoryPublisher(), replaceManifest = manifestReplacer();
+  const apps = createAppsModule((...args) => (owners().directoryPublisher ?? publishDirectory)(...args),
+    reference => owners().display.admitLiveReference(reference),
+    (source, destination) => (owners().manifestReplacer ?? replaceManifest)(source, destination),
+    revision => owners().appsChanged?.(revision));
   const providers = createContextWindowModule(() => owners().openAIModelEligibility, owners, () => owners().home.modelQueue);
   return { home: home.owner, projects, providers, apps, runtimeOrder: ORDINARY_MODULE_NAMES, modules: [
     workspaceModule,

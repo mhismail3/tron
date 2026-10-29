@@ -4,8 +4,8 @@ import { macTerminalTestFiles } from "./vitest.mac-terminal.config.js";
 import { nestedTestFiles } from "./vitest.nested.config.js";
 
 const nativePublication = [
-  "src/machine/native-directory-publish.integration.test.ts", "src/modules/apps/apps-publication.integration.test.ts",
-  "src/modules/apps/apps-canonical-display.integration.test.ts", "src/modules/apps/apps-reference-publication.integration.test.ts",
+  "src/machine/native-app-metadata.integration.test.ts", "src/machine/native-directory-publish.integration.test.ts", "src/modules/apps/apps-publication.integration.test.ts",
+  "src/modules/apps/apps-metadata.integration.test.ts", "src/modules/apps/apps-canonical-display.integration.test.ts", "src/modules/apps/apps-reference-publication.integration.test.ts",
   "src/display/display-image-lifetime.integration.test.ts", "src/kernel/projection/tool-result.integration.test.ts",
   "src/kernel/projection/codemode-nested-presentation.integration.test.ts",
   "src/workspace/tron-workspace.integration.test.ts", "src/sessions/runtime-registry.integration.test.ts",

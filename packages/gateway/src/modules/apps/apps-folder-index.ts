@@ -1,21 +1,27 @@
-import { lstat, readdir } from "node:fs/promises";
-import { directoryPublisher, type DirectoryPublisher } from "../../machine/directory-publication.js";
+import { constants } from "node:fs";
+import { lstat, open, readdir } from "node:fs/promises";
+import { directoryPublisher, manifestReplacer, type DirectoryPublisher, type ManifestReplacer } from "../../machine/directory-publication.js";
 import { publishApp, type AppPublication } from "./apps-publication.js";
 import { AppPublicationStaging, publicationFilesystemMismatch } from "./apps-publication-staging.js";
 import { constants as osConstants } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { backgroundWork } from "../../background-work.js";
-import { GatewayError } from "../../errors.js";
+import { asUncertainOutcome, GatewayError } from "../../errors.js";
+import { isDurablePublicationUncertain, syncDurably } from "../../util/durable-json.js";
 import { watchFolder, FOLDER_WATCH_RETRY_MS, FOLDER_RECONCILE_INTERVAL_MS, type FolderWatchHandle } from "../../util/folder-watch.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
-import { APP_ID, hash, isReadyAppEntry, readAppEntry, type AppEntry, type AppRow, type ReadyAppEntry } from "./apps-folder-format.js";
+import { APP_ID, hash, isReadyAppEntry, readAppEntry, readAppManifest, type AppEntry, type AppRow, type ReadyAppEntry } from "./apps-folder-format.js";
 import type { ByteLease, ByteRange } from "../../util/byte-stream.js";
 import { AppPreviewLeases } from "./apps-preview-leases.js";
 import { abortableRead } from "../../util/abortable-read.js";
-import { snapshotDigest, type StreamedAppFile } from "./apps-folder-files.js";
+import { fileIdentity, snapshotDigest, type StreamedAppFile } from "./apps-folder-files.js";
 
 interface PreviewCut { identity: string; path: string; file: StreamedAppFile; mimeType: string }
 type IndexedEntry = Pick<AppEntry, "name" | "row" | "changedAt"> & { preview: PreviewCut | undefined };
+function ordered(entries: Iterable<IndexedEntry>): IndexedEntry[] {
+  return [...entries].sort((a, b) => Number(b.row.section === "Apps") - Number(a.row.section === "Apps")
+    || b.changedAt - a.changedAt || a.name.localeCompare(b.name));
+}
 function previewCut(entry: AppEntry): PreviewCut | undefined {
   return isReadyAppEntry(entry) && entry.payload.kind === "artifact" && !Buffer.isBuffer(entry.file)
     ? { identity: entry.identity, path: entry.entry, file: entry.file, mimeType: entry.payload.artifact.mimeType } : undefined;
@@ -43,7 +49,8 @@ export class AppsFolderIndex {
   private generation = 0;
   private unavailable?: unknown;
   constructor(private readonly workspace: TronWorkspace, private readonly changed: (revision: string) => void = () => {},
-    private readonly observe: typeof watchFolder = watchFolder, private readonly publishDirectory: DirectoryPublisher = directoryPublisher()) { this.staging = new AppPublicationStaging(workspace, this.publicationStop.signal); }
+    private readonly observe: typeof watchFolder = watchFolder, private readonly publishDirectory: DirectoryPublisher = directoryPublisher(),
+    private readonly replaceManifest: ManifestReplacer = manifestReplacer()) { this.staging = new AppPublicationStaging(workspace, this.publicationStop.signal); }
 
   private async root(): Promise<string> {
     const files = await this.workspace.filesRoot().catch(error => {
@@ -149,13 +156,16 @@ export class AppsFolderIndex {
         await this.previews.retireStale(id => next.get(id)?.row.contentRevision);
         await this.workspace.filesRoot();
         if (this.closed || generation !== this.generation) return;
-        const revision = hash(JSON.stringify([...next.values()].sort((a, b) => a.name.localeCompare(b.name)).map(entry => entry.row)));
-        const changed = revision !== this.revision;
+        const revision = hash(JSON.stringify(ordered(next.values()).map(entry => entry.row)));
+        const changed = revision !== this.revision || this.unavailable !== undefined;
         this.entries = next; this.revision = revision; this.unavailable = undefined;
         if (changed) this.changed(revision);
       } catch (error) {
+        const changed = this.unavailable === undefined;
         this.full = true; this.unavailable = error;
-        await this.previews.retireStale(() => undefined); throw error;
+        await this.previews.retireStale(() => undefined);
+        if (changed && !this.closed && generation === this.generation) this.changed(this.revision);
+        throw error;
       }
     });
   }
@@ -171,8 +181,7 @@ export class AppsFolderIndex {
       if (cut[0] !== this.revision) throw new GatewayError("conflict", "Apps catalog changed; read the first page again", true, { reason: "catalog_changed" }, "catalog_changed");
       offset = cut[1] as number;
     }
-    const rows = [...this.entries.values()].sort((a, b) =>
-      Number(b.row.section === "Apps") - Number(a.row.section === "Apps") || b.changedAt - a.changedAt || a.name.localeCompare(b.name));
+    const rows = ordered(this.entries.values());
     return { revision: this.revision, rows: rows.slice(offset, offset + limit).map(entry => entry.row),
       ...(offset + limit < rows.length ? { nextCursor: Buffer.from(JSON.stringify([this.revision, offset + limit])).toString("base64url") } : {}) };
   }
@@ -212,6 +221,44 @@ export class AppsFolderIndex {
     return this.enqueue(() => this.admit(id, expectedContentRevision, async entry => {
       if (!isReadyAppEntry(entry)) throw new GatewayError("unsupported", entry.row.status.reason);
       return entry;
+    }));
+  }
+  async setMetadata(id: string, expected: string, edits: { title?: unknown; icon?: unknown }): Promise<AppRow> {
+    if (!APP_ID.test(id) || !Object.keys(edits).length) throw new GatewayError("invalid_request", "Choose a title or icon to edit");
+    await this.initialize();
+    return this.enqueue(() => this.admit(id, expected, async (entry, root) => {
+      if (!isReadyAppEntry(entry)) throw new GatewayError("unsupported", entry.row.status.reason);
+      const previous = entry.files.get("app.json");
+      const manifest = previous && Buffer.isBuffer(previous) ? JSON.parse(previous.toString("utf8")) : {};
+      for (const [key, value] of Object.entries(edits)) { if (value === null) delete manifest[key]; else manifest[key] = value; }
+      const bytes = Buffer.from(`${JSON.stringify(manifest)}\n`); readAppManifest(bytes);
+      const stage = await this.staging.create();
+      let source, destination;
+      try {
+        const file = await open(join(stage.path, "app.json"), "wx", 0o600);
+        try { await file.writeFile(bytes); await syncDurably(file); } finally { await file.close(); }
+        source = await open(stage.path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        destination = await open(join(root, id), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        if (fileIdentity(await destination.stat()) !== entry.identity) this.entryChanged(id);
+        await this.snapshot(root, id, expected); await stage.fence();
+        await this.replaceManifest(source.fd, destination.fd);
+        try {
+          await this.root();
+          const current = await readAppEntry(root, id), actual = isReadyAppEntry(current) ? current.files.get("app.json") : undefined;
+          if (!isReadyAppEntry(current) || current.identity !== entry.identity || !Buffer.isBuffer(actual) || !actual.equals(bytes)
+            || current.files.size !== entry.files.size + (previous ? 0 : 1)
+            || [...entry.files].some(([path, file]) => path !== "app.json" && (!current.files.has(path) || snapshotDigest(current.files.get(path)!) !== snapshotDigest(file)))) this.entryChanged(id);
+          return current.row;
+        } catch (error) { throw asUncertainOutcome(error, "Metadata was published but its current entry could not be verified"); }
+      } catch (error) {
+        if (isDurablePublicationUncertain(error)) throw asUncertainOutcome(error, "Metadata publication could not be durably verified");
+        throw error;
+      } finally {
+        this.invalidate(id);
+        const cleanup = await Promise.allSettled([source?.close(), destination?.close(), stage.release()]);
+        const failed = cleanup.find(result => result.status === "rejected");
+        if (failed?.status === "rejected") throw asUncertainOutcome(failed.reason, "Metadata cleanup could not be verified");
+      }
     }));
   }
   async validateRow(rowKey: string, expectedContentRevision: string): Promise<void> {
@@ -278,6 +325,8 @@ export class AppsFolderIndex {
     this.full = true; await this.initialize(); await this.reconcile();
     return (await this.requireEntry(accepted.name, accepted.row.contentRevision)).row;
   }
+  /** Access changes invalidate capabilities even when file membership is unchanged. */
+  accessChanged(): void { if (!this.closed) this.changed(this.revision); }
   async membership(ids: readonly string[]): Promise<ReadonlySet<string>> {
     await this.initialize(); await this.reconcile();
     return new Set(ids.filter(id => this.entries.has(id)));

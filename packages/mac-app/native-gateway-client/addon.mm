@@ -347,6 +347,7 @@ NAPI_MODULE_INIT() {
         check(napi_set_instance_data(env, registry.get(), [](napi_env, void *p, void *) { delete static_cast<Environment *>(p); }, nullptr)); registry.release();
         napi_property_descriptor methods[] = {{"open", nullptr, open, nullptr, nullptr, nullptr, napi_default, nullptr},
             {"publishDirectoryExclusive", nullptr, publishDirectoryExclusive, nullptr, nullptr, nullptr, napi_default, nullptr},
+            {"replaceAppManifest", nullptr, replaceAppManifest, nullptr, nullptr, nullptr, napi_default, nullptr},
         };
         check(napi_define_properties(env, exports, sizeof(methods)/sizeof(methods[0]), methods));
         napi_value version; check(napi_create_uint32(env, 4, &version));

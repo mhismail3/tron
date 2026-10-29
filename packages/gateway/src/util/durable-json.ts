@@ -4,8 +4,9 @@ import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
 
 /*
- * Every fsync the Gateway performs goes through `syncDurably`, so the rate and
- * time of durable synchronization are counted at one primitive and drained by
+ * JavaScript persistence uses `syncDurably`, so its synchronization rate and
+ * time are counted at one primitive (native filesystem transactions own their
+ * internal fsyncs separately). These counters are drained by
  * the transport's resource sampler. A store then needs no record of its own on
  * an interactive path (run markers, upload commits, catalog metadata, session
  * exports, workspace and knowledge state, display artifacts). The counters are

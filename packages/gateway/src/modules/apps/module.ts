@@ -1,4 +1,4 @@
-import type { DirectoryPublisher } from "../../machine/directory-publication.js";
+import type { DirectoryPublisher, ManifestReplacer } from "../../machine/directory-publication.js";
 import type { ModuleDescriptor } from "../../kernel/host/module-host.js";
 import type { JsonValue } from "../../protocol/types.js";
 import { integer, rejectUnknownFields, string } from "../../util/validation.js";
@@ -9,12 +9,13 @@ import type { AppReference } from "./apps-reference.js";
 import type { AppDataCommit } from "./app-data-store.js";
 
 /** Files are the only membership authority. No offer or install admission. */
-export function createAppsModule(publisher?: DirectoryPublisher, admitLive?: (reference: Extract<AppReference, { kind: "live" }>) => void): ModuleDescriptor<AppsFolderStore> { return {
+export function createAppsModule(publisher?: DirectoryPublisher, admitLive?: (reference: Extract<AppReference, { kind: "live" }>) => void,
+  replaceManifest?: ManifestReplacer, changed?: (revision: string) => void): ModuleDescriptor<AppsFolderStore> { return {
   name: "tron-swift-apps",
   purpose: "Indexes folder-backed apps and artifacts; owns scoped access and saved data.",
   tools: ["app_data"], commands: [], dependsOn: [workspaceModule],
   start: host => {
-    const store = new AppsFolderStore(host.contract(workspaceModule), host.tronHome, undefined, publisher, admitLive);
+    const store = new AppsFolderStore(host.contract(workspaceModule), host.tronHome, changed, publisher, admitLive, replaceManifest);
     const id = (params: Record<string, unknown>) => string(params.id, "id", { max: 80 });
     const revision = (params: Record<string, unknown>) => string(params.expectedContentRevision, "expectedContentRevision", { max: 64 });
     return {
@@ -38,6 +39,12 @@ export function createAppsModule(publisher?: DirectoryPublisher, admitLive?: (re
         "apps.permissions.grant": { kind: "mutation", handle: async (params, context) => {
           rejectUnknownFields(params, ["commandId", "token"], "apps.permissions.grant");
           return await store.grant(string(params.token, "token", { max: 4096 }), context.identity) as unknown as JsonValue;
+        } },
+        "apps.setMetadata": { kind: "mutation", handle: async params => {
+          rejectUnknownFields(params, ["commandId", "id", "expectedContentRevision", "title", "icon"], "apps.setMetadata");
+          const edits = Object.fromEntries(["title", "icon"].filter(key => key in params).map(key =>
+            [key, params[key] === null ? null : string(params[key], key, { max: 80 })]));
+          return await store.setMetadata(id(params), revision(params), edits) as unknown as JsonValue;
         } },
         "apps.permissions.revoke": { kind: "mutation", handle: async params => {
           rejectUnknownFields(params, ["commandId", "id"], "apps.permissions.revoke");
