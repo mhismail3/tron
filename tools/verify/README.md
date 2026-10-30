@@ -4,7 +4,8 @@
 and reports broader coverage needed after landing. The manifests and their dependency
 and dynamic-edge graph are the selection authority. No queue, landing gate, hosted CI,
 automatic scheduler or revert is involved. A previous test pass never substitutes for
-this change's affected checks; only stamped build products are reused.
+this change's affected checks; only stamped build products are reused. See the
+[oracle policy](test-oracles.md) and proposed [health design](health-design.md).
 
 ```bash
 scripts/tron verify [--base <ref>]             # affected checks since merge-base(<ref>, HEAD)
@@ -16,11 +17,7 @@ scripts/tron verify --batch --base <green-sha>   # initialize coverage in a dedi
 scripts/tron verify --batch [--plan]            # next pinned batch since the local last green
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
-scripts/tron verify ... --plan                  # print the selection and steps only
 ```
-
-The [oracle policy](test-oracles.md) defines what tests must preserve.
-[Health reporting design](health-design.md) is a proposal, not executable policy.
 
 ## Worktree dependencies
 
