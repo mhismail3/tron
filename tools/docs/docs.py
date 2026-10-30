@@ -186,13 +186,13 @@ def settings() -> str:
     for key in data["keys"]:
         home = layers(key["home"]["layers"]) if "home" in key else "as allowed"
         rows.append(f"| `{key['id']}` | {key.get('qualifier', '—')} | {key['group']} | {layers(key['layers'])} | {home} | "
-                    f"{pair(key.get('timing'))} | {key.get('effect', '—')} | {pair(key.get('floor'))} |")
-    subjects = [f"| `{s['id']}` | {s['group']} | {s['qualifier']} | {pair(s.get('floor'))} |" for s in data["subjects"]]
+                    f"{pair(key.get('timing'))} | {key.get('effect', '—')} | {key.get('tap', '—')} |")
+    subjects = [f"| `{s['id']}` | {s['group']} | {s['qualifier']} |" for s in data["subjects"]]
     return "\n".join([f"{len(rows)} keys, declared in `{SCHEMA}` (`KEYS`).", "",
-                      "| Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |",
+                      "| Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |",
                       "| --- | --- | --- | --- | --- | --- | --- | --- |", *rows, "",
                       f"Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:", "",
-                      "| Subject | Group | Qualifier | Floor |", "| --- | --- | --- | --- |", *subjects]) + "\n"
+                      "| Subject | Group | Qualifier |", "| --- | --- | --- |", *subjects]) + "\n"
 
 
 GENERATORS = {"modules": (modules, 1), "signals": (signals, 0), "rpc": (rpc, 0), "settings": (settings, 0)}

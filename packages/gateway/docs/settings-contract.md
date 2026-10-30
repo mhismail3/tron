@@ -8,15 +8,15 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 ## Foundations
 
 - **F1 Schema.** Each setting is one key declared once (`src/kernel/settings/settings-schema.ts`): type
-  and validation, group, scope grants, store bindings, timing, effect point, tier floor,
+  and validation, group, scope grants, store bindings, timing, effect point, native-tap classification,
   writers, redaction and display. `sessionOverridable` and `projectSettable` govern admission;
   store bindings describe owned persistence. iOS renders the served metadata generically.
 - **F2 Truth.** Each layer's store is the truth; the change record is audit and undo, never
   consulted for a value. A store that differs from the last observed value is an
   [outside change](#outside-changes), offered **Apply again**; Tron never re-applies on its own.
-- **F3 Policy.** Every change takes one Gateway path and one tier:
-  `tier = max(floor + web, assessment)`, capped at approve; no per-key exceptions
-  ([tiers](#tiers)).
+- **F3 Policy.** Routine reversible writes apply and log. Irreversible,
+  trust/executable authority, spend and install effects require an exact paired-native
+  tap through the dedicated [native review](#native-review), never a generic form.
 - **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
   the target has and the key's grants allow. One resolver takes the topmost applied scope with
   a value; the effective value is computed, never stored.
@@ -27,7 +27,7 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 |---|---|---|
 | Project | Admitted `.pi/settings.json` and `.pi/mcp.json` fields at the worktree root | Repository-owned, read-only; verified historical Undo alone retains its applier |
 | Session/Home override | Session JSONL for ordinary chats and workers; `<tronHome>/gateway/home/profile.json` for Home's bounded durable recipe | Settings change path; the runtime lane owns SDK effects |
-| Global | Agent and Gateway defaults, trust, floors, notifications and SDK/schema defaults | Gateway and the underlying SDK stores; hand edits are outside writers |
+| Global | Agent and Gateway defaults, trust, notifications and SDK/schema defaults | Gateway and the underlying SDK stores; hand edits are outside writers |
 
 Precedence is Project > Session/Home override > Global, admitted by
 `projectSettable` and `sessionOverridable`. Home has no Project and no separate chapter
@@ -49,66 +49,66 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 <!-- tron docs settings -->
 47 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
-| Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |
+| Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `model.ref[role=chat]` | — | model | project, session, global, home | as allowed | fixed | next-turn | quiet |
-| `model.thinking[role=chat]` | model | model | project, session, global, home | as allowed | fixed | next-turn | quiet |
-| `model.contextWindow` | model | model | project, session, global | as allowed | fixed | next-turn | quiet |
-| `model.thinkingBudgets` | — | workers | project, global | as allowed | fixed | new-chat | quiet |
-| `model.thinking[role=summarizer]` | — | context | project, global | none | live | next-compaction | quiet |
-| `model.queue[role=worker]` | — | workers | session, global, home | as allowed | live | delegate | notify |
-| `model.queue[role=subagent]` | — | workers | session, global, home | as allowed | live | next-request | notify |
-| `model.queue[role=background]` | — | workers | global, home | as allowed | live | next-memory-pass | notify |
-| `model.thinking[role=worker]` | — | workers | global, home | as allowed | fixed | delegate | notify |
-| `context.compaction.enabled` | — | context | project, session, global | none | live | next-compaction | quiet |
-| `context.compaction.reserveTokens` | model | context | project, session, global | none | live | next-compaction | quiet |
-| `context.compaction.keepRecentTokens` | model | context | project, session, global | none | live | next-compaction | quiet |
-| `context.compaction.instructions` | — | context | project, session, global | none | live | next-compaction | notify |
-| `context.branchSummary.reserveTokens` | — | context | project, global | none | live | next-compaction | quiet |
-| `context.images.autoResize` | — | tools | project, session, global | as allowed | fixed | new-chat | quiet |
-| `context.images.block` | — | tools | project, session, global | as allowed | narrow live, widen fixed | next-request | narrow quiet, widen approve |
-| `tools.active` | — | tools | project, session, global, home | session, home | fixed | next-turn | narrow quiet, widen notify |
-| `tools.codemode.mode` | — | tools | project, global | none | fixed | new-chat | narrow quiet, widen notify |
-| `tools.codemode.inlineBudget` | — | tools | project, global | none | fixed | new-chat | quiet |
-| `tools.shell.path` | — | tools | project, global | none | fixed | new-chat | notify |
-| `tools.shell.commandPrefix` | — | tools | project, global | none | fixed | new-chat | notify |
-| `permissions.projectTrust` | project | trust | global | as allowed | live | reload | narrow notify, widen approve |
-| `permissions.macTerminalKey` | device | connections | global | as allowed | live | next-change | narrow notify, widen approve |
-| `permissions.defaultProjectTrust` | — | trust | global | as allowed | live | next-change | narrow notify, widen approve |
-| `permissions.floor` | key | approvals | global | as allowed | live | next-change | narrow quiet, widen approve |
-| `permissions.budget.task` | — | workers | global, home | as allowed | narrow live, widen fixed | delegate | narrow quiet, widen approve |
-| `run.queue.steeringMode` | — | run | project, session, global | as allowed | live | next-turn | quiet |
-| `run.queue.followUpMode` | — | run | project, session, global | as allowed | live | next-turn | quiet |
-| `run.retry.enabled` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.retry.maxRetries` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.retry.baseDelayMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.retry.provider.timeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.retry.provider.maxRetries` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.retry.provider.maxRetryDelayMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.transport` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | quiet |
-| `run.httpProxy` | — | run | global | as allowed | live | restart | notify |
-| `run.cacheWarming` | — | run | global | none | fixed | new-chat | narrow quiet, widen notify |
-| `sources.extensions` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
-| `sources.skills` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
-| `sources.prompts` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
-| `sources.themes` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
-| `sources.packages` | — | sources | project, global | none | fixed | reload | narrow quiet, widen notify |
-| `sources.npmCommand` | — | sources | global | none | live | next-change | notify |
-| `setup.sessionDir` | — | setup | global | as allowed | live | restart | notify |
-| `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | quiet |
+| `model.ref[role=chat]` | — | model | project, session, global, home | as allowed | fixed | next-turn | — |
+| `model.thinking[role=chat]` | model | model | project, session, global, home | as allowed | fixed | next-turn | — |
+| `model.contextWindow` | model | model | project, session, global | as allowed | fixed | next-turn | — |
+| `model.thinkingBudgets` | — | workers | project, global | as allowed | fixed | new-chat | — |
+| `model.thinking[role=summarizer]` | — | context | project, global | none | live | next-compaction | — |
+| `model.queue[role=worker]` | — | workers | session, global, home | as allowed | live | delegate | — |
+| `model.queue[role=subagent]` | — | workers | session, global, home | as allowed | live | next-request | — |
+| `model.queue[role=background]` | — | workers | global, home | as allowed | live | next-memory-pass | — |
+| `model.thinking[role=worker]` | — | workers | global, home | as allowed | fixed | delegate | — |
+| `context.compaction.enabled` | — | context | project, session, global | none | live | next-compaction | — |
+| `context.compaction.reserveTokens` | model | context | project, session, global | none | live | next-compaction | — |
+| `context.compaction.keepRecentTokens` | model | context | project, session, global | none | live | next-compaction | — |
+| `context.compaction.instructions` | — | context | project, session, global | none | live | next-compaction | — |
+| `context.branchSummary.reserveTokens` | — | context | project, global | none | live | next-compaction | — |
+| `context.images.autoResize` | — | tools | project, session, global | as allowed | fixed | new-chat | — |
+| `context.images.block` | — | tools | project, session, global | as allowed | narrow live, widen fixed | next-request | — |
+| `tools.active` | — | tools | project, session, global, home | session, home | fixed | next-turn | trust |
+| `tools.codemode.mode` | — | tools | project, global | none | fixed | new-chat | — |
+| `tools.codemode.inlineBudget` | — | tools | project, global | none | fixed | new-chat | — |
+| `tools.shell.path` | — | tools | project, global | none | fixed | new-chat | trust |
+| `tools.shell.commandPrefix` | — | tools | project, global | none | fixed | new-chat | trust |
+| `permissions.projectTrust` | project | trust | global | as allowed | live | reload | trust |
+| `permissions.macTerminalKey` | device | connections | global | as allowed | live | next-change | trust |
+| `permissions.macTerminalServer` | — | connections | global | as allowed | live | next-change | trust |
+| `permissions.defaultProjectTrust` | — | trust | global | as allowed | live | next-change | trust |
+| `permissions.budget.task` | — | workers | global, home | as allowed | narrow live, widen fixed | delegate | spend |
+| `run.queue.steeringMode` | — | run | project, session, global | as allowed | live | next-turn | — |
+| `run.queue.followUpMode` | — | run | project, session, global | as allowed | live | next-turn | — |
+| `run.retry.enabled` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.retry.maxRetries` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.retry.baseDelayMs` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.retry.provider.timeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.retry.provider.maxRetries` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.retry.provider.maxRetryDelayMs` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.transport` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
+| `run.httpProxy` | — | run | global | as allowed | live | restart | — |
+| `run.cacheWarming` | — | run | global | none | fixed | new-chat | — |
+| `sources.extensions` | — | sources | project, global | none | fixed | reload | trust |
+| `sources.skills` | — | sources | project, global | none | fixed | reload | trust |
+| `sources.prompts` | — | sources | project, global | none | fixed | reload | — |
+| `sources.themes` | — | sources | project, global | none | fixed | reload | — |
+| `sources.packages` | — | sources | project, global | none | fixed | reload | install |
+| `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
+| `setup.sessionDir` | — | setup | global | as allowed | live | restart | — |
+| `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 
-| Subject | Group | Qualifier | Floor |
-| --- | --- | --- | --- |
-| `tools.mcp.server` | tools | server | notify |
-| `accounts.models.provider` | accounts | provider | notify |
+| Subject | Group | Qualifier |
+| --- | --- | --- |
+| `tools.mcp.server` | tools | server |
+| `accounts.models.provider` | accounts | provider |
 <!-- /tron docs -->
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
-`catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `writers`
+`catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `nativeTap`, `writers`
 (`ui`, `home`, `worker`, `agent`: the list is the grant), `redacted`, `applier`, and display
 fields (`label`, `help`, `order`, `importance`, `control`/`fallback`, `unit`/`format`,
 `confirm`, `entry`). MCP and Accounts keep their own RPCs; record subjects compare by digest.
@@ -137,96 +137,58 @@ when a change is not immediate; timing may differ by direction.
 `expected` refuses stale writes; Chat changes carry `fence: { runtimeGeneration, model?, revision? }`. Actors: `ui` (the maintainer's tap); Home, workers and agents via the `settings`
 tool (Home may name a `taskId`); `outside` (observed only).
 
-1. Validate type, options, layer and writer. 2. Compute the tier; a non-UI `approve` is held
-pending. 3. Apply through the key's applier under its store lock (atomic within a store,
-ordered with rollback across stores; one target per request, serialized per target).
-4. Append to the record and broadcast `settings.changed`.
+1. Validate type, options, layer and writer. 2. Plan the exact immutable diff. If a native
+   tap is required, return/present its review without effects.
+3. At acceptance, reacquire the actual target stripe and replan before effects; reject
+   a moved diff. Apply in store order with reverse rollback across stores.
+4. Append the durable record and broadcast `settings.changed`. Post-effect audit failure
+   is uncertain, not permission to replay the effect.
 
-Outcomes name key, layer, status, tier and redacted `before`/`after`. A chat's own Session scope
+Outcomes name key, layer, status and redacted `before`/`after`; `review` includes the
+exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
 changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction values are
 refused. **Record:** `<tronHome>/gateway/settings/changes/`, append-only 500-entry segments
 listed in `index.json`, kept forever, paged by `settings.history` (a page may be empty with a
 `nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
-tier basis, status (`applied`, `pending`, `approved`, `declined`, `expired`, `superseded`,
-`failed`, `outside`), git result and `undoOf`/`applyAgainOf`. **Undo** (`settings.undo`) writes
+status, git result and `undoOf`/`applyAgainOf`. Existing persisted facts remain readable;
+there is no pending-request folding or tier basis in new facts. **Undo** (`settings.undo`) writes
 `before` back, refused with `conflict` when the store moved; redacted entries are **Not
-undoable**. **Apply again** (`settings.applyAgain`) restores Tron's value over an outside one.
+undoable**. Consumption is derived from permanent history, checked with the current-after
+value under the same stripe. Grouped Undo requires every unique member with a consistent
+size; corrupt indexed segments refuse rather than restoring a partial group. **Apply again** (`settings.applyAgain`) restores Tron's value over an outside one.
 
-## Tiers
+## Native review
 
-- **quiet** applies and records; **notify** also pushes with Undo; **approve** waits for the
-  maintainer's tap and expires after 24 hours. A request takes its highest change's tier.
-- **Floor** per key and direction, overridable through `permissions.floor[key]` (lowering one
-  is a widening); record-subject floors are not.
-- **Web mark:** one step up for the rest of a run once a tool not declaring
-  `annotations.openWorldHint: false` is called (nested codemode calls too); pi's `read`,
-  `edit`, `write`, `grep`, `find`, `ls`, `bash`, `codemode` and `tool_search` are closed-world.
-- **Assessment:** for non-UI requests an optional Jev classifier (`settings-risk.ts`) may raise,
-  never lower, within 1.5 s, seeing only key, layer, actor kind, floor, web mark, a redacted
-  reason and a lossy diff.
-- **Approvals** (`settings.approvals`, `settings.decide`) bind a digest of target and
-  `before`/`after` (the decision's whole fence: no client fence); a newer request supersedes;
-  only the maintainer's client decides; the push carries `settings-approval` only to a relay
-  advertising it ([push relay](../../push-relay/README.md#notification-categories)); its
-  text names the request (an action's title or the changed keys, then the reason) for every
-  kind, and its tap opens the requesting chat's approval sheet. One request model serves every
-  agent request kind (#2050): a `settings` change or `action: "request"`, a `profile` review
-  and a `projects` lifecycle step all create the same pending request through this owner.
-  Each tool takes `wait`: true shows the request in the asking chat through an `approval`
-  semantic form and keeps the call waiting for the decision, expiry or Stop; false returns
-  pending at once and the outcome arrives later as `tron.settings-outcome.v1`. `settings`
-  waits by default; `profile` and `projects` do not. The approval form only presents the
-  request: the broker refuses answers to it, so every decision (chat sheet, push review,
-  Changes) is the digest-bound `settings.decide`, which settles the request and so ends the
-  wait. Every tool result names its request (`approval.requestId`, `approval.title`) pending
-  or settled, so the chat keeps the request's chip. `settings.approvals` is the one projection
-  every surface reads; author-supplied terminal, bidi and invisible format controls in its
-  reason, display values and action items are disclosed as Unicode escapes, and exact values
-  stay alongside the display text. A decision whose target chat is gone retires the request.
-  Stop retires the form and supersedes its still-pending request without applying it; the
-  approval form adds no second "input needed" push. Dry run creates no request;
-  any refused plan makes the whole preview failed/quiet, with per-change preview/error
-  rows retained, just as the real bundle refuses atomically without asking or writing.
-  The settings owner retains the digest fence, one-use decision and Changes/undo.
-  A turn cannot request its own between-runs SDK configuration (model, thinking,
-  tools or context window); runtime admission refuses before opening a form, including
-  dry run. Supported Run settings and Home's delegated-worker changes keep their declared
-  effect points. Changes history lists a request's pending fact only until a later fact
-  settles it; that fact is the request's row.
-  A timer expires a
-  request at its 24-hour deadline; a transient expiry failure keeps later known deadlines
-  armed without immediately retrying a persistently bad store. A waiting tool call consumes
-  its terminal outcome directly. Other persisted approvals and registered actions retain
-  their outcome (approved and applied, declined, failed, superseded, expired) as `tron.settings-outcome.v1`;
-  `details.requests[]` carry status, requester, reason, failure and display `before`/`after`.
-  The approvals store is the sole outbox: at most 400 accepted requests reserve capacity
-  until delivery, and further admission is `busy`, never eviction of an untold outcome.
-  Selection is non-destructive. Exact request IDs from a successfully completed durable
-  canonical read acknowledge delivery; refusal or a pre-append crash retains the request.
-  Home owns selection for both user inputs and autonomous wakes, using the existing
-  token/byte/entry envelope and activation cancellation signal to choose a fitting ordered
-  prefix. Each wake captures its existing request-policy cancellation cell and epoch
-  synchronously before selection. The same policy survives native runtime retirement;
-  Stop invalidates that attempt, not a future new nudge or a reserved successor.
-  Task recovery refusal does not disable the independent settings subscription.
-  Home's chapter ledger supplies original requester identities after rollover; the current
-  chapter proves and acknowledges its delivered IDs before sealing, without rewriting old
-  chapters or scanning all historical canonical files.
-- **Approval actions** (`registerAction`, `requestAction`): an owner's maintainer-gated
-  operation that is not a stored value shares the store, digest, expiry, decision, record
-  (`action: true`, key = subject, never undoable) and outcomes; `plan` binds an exact preview,
-  re-checked at decide (a moved state supersedes). A durable execution claim precedes
-  `apply`; the first awaited owner start recovers pre-existing execution claims as failed
-  with possibly completed effects, never replayed. Normal delivery/expiry does not join or
-  recover this owner's live effects. Action failures instruct inspection before retry rather than promising
-  that no effects occurred. Expiry and decision admission share the target stripe.
-- **One key id rule:** resolve, dry run and change take the declared id
-  (`model.thinking[role=chat]`); a plain id with fixed instances is refused naming them, and a
-  qualifier contradicting a fixed one is refused.
-- **A running Home task worker** can be changed by Home (`taskId`) or the maintainer: model,
-  thinking and Run keys apply from its next request with one fenced `Settings changed` steer
-  (`signal`: `queued`, `not-running`, `failed`); context window and tools are `busy` until it
-  settles; `resolve` adds a `worker` block (`selected`, `lastResponse`).
+A review binds target, operation identity (including Undo/Apply again), reason and
+every displayed item, alongside exact typed values. Controls, bidi and invisible
+format characters are disclosed; credential-bearing values remain redacted.
+A review is disposable presentation, not authority or a durable pending store.
+No settings tier, floor override, risk assessment, expiry, outcome outbox or decision
+RPC exists.
+
+The model tool has resolve/change only and accepts no confirmation digest.
+The built-in host presents `method: "change"` / `tron.change.v1` through its existing
+semantic interaction owner. Generic `tron.form.v1` and `ask_user` cannot grant effects.
+The trusted callback stays server-side. A non-local authenticated paired response
+must match the interaction, host epoch, revision, exact digest and answer shape.
+Acceptance consumes the interaction once; the callback is awaited inside the
+canonical `extension.respond` mutation receipt. Before acceptance, Stop/cancellation
+means no effects. After acceptance, retirement cannot falsely decline accepted work
+or cause replay. An uncertain receipt requires inspection.
+
+Direct paired-native `settings.change`, `settings.undo` and `settings.applyAgain`
+resubmit `confirmationDigest` only after the native card's explicit action.
+Project lifecycle uses `projects.change`, binding its exact typed intent and review;
+its owner revalidates filesystem, Git, occupancy and trust before effects.
+Project action facts do not invent generic inverses. Local RPC cannot confirm reviews.
+
+A refused bundle retains all per-change errors and before/after facts, but never
+opens a review or writes. Dry run has no effects. Fixed key IDs and qualifiers must
+match their declaration. A running tool cannot change its own between-runs SDK
+configuration; this fails busy before a card, including dry run.
+Home's delegated-worker model/thinking and supported Run changes retain Session
+fences and effect points. A disposed worker or changed actual target refuses
+acceptance; supported edits announce through the existing fenced worker steer.
 
 ## Outside changes
 
@@ -236,8 +198,7 @@ the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known 
 files (≤ 64 projects); first sight is the baseline. Each differing instance is one `outside`
 entry (with `HEAD` and branch for repository files; redacted keys by digest); MCP servers and
 custom providers report only added/changed/removed, then `mcp.changed` or
-`models.customChanged`. Tron's own writes are bracketed (`begin`/`end`, `adopt`). The floor
-decides only the push.
+`models.customChanged`. Tron's own writes are bracketed (`begin`/`end`, `adopt`).
 
 ## Project writes
 
@@ -255,7 +216,7 @@ lane before publishing any recipe value and retains it through SDK adoption. A b
 stale runtime refuses before publication, leaving both the persisted choice and SDK
 unchanged. SDK effects share the recipe's audit identity, not a second chapter edit.
 `permissions.budget.task` (`{ inputTokens?, outputTokens? }`) is fixed at admission; raises
-need approval, lowers apply live.
+need an exact native spend tap, lowers apply live.
 
 | Queue role | Runs | Resolves | Empty means |
 |---|---|---|---|
@@ -267,12 +228,14 @@ need approval, lowers apply live.
 uncredentialed models, models with a usage-limit error in the last 15 minutes or ≥ 95% usage,
 and moves on after a usage-limit error; captured queues are read-only. Global and Home expose
 all three ordered queue editors, including an empty inherited queue. Add uses the physical-model
-catalog and account availability; Save uses the canonical change/approval path, while Reset/Revert
+catalog and account availability; Save uses the canonical typed change path, while Reset/Revert
 removes only the owned override. Empty lists retain the role-specific meanings above. Worker thinking is
 `{ "sameAs": "home" }` by default. **Learned-profile changes** (`home.profileChange`, the
 `profile` tool) use Home `HomeProfileItems.change` through the kernel
-`SettingsChangePath.auditSubject` stripe/audit coordinator: one quiet `home.profile.item` entry per
-note, grouped and undone together, refused on a stale revision.
+`SettingsChangePath.auditSubject` stripe/audit coordinator: one `home.profile.item` entry per note, grouped and undone
+together, refused on a stale revision. Failed diffs remain ungrouped. Knowledge owns
+content, provenance, confirmed/maintainer protections, revision checks and restoration;
+the settings kernel owns only its audit/stripe seam.
 
 ## Presentation
 
@@ -287,15 +250,15 @@ no writer are not Settings rows. A declaration without a `control` has no routin
 renderer responses retain only its explicit local values (read-only with independent Reset/Revert)
 and Project inspection. Their presentation omits `control`; this does not grant a writer or scope.
 An empty section has no navigation destination. Direct chat model/thinking, safety controls,
-approvals and Changes/undo remain. `sessionOverridable`/`projectSettable` grant scopes; `editable`
+native review and Changes/Undo remain. `sessionOverridable`/`projectSettable` grant scopes; `editable`
 is the target's binding/writer capability, not a second client-side permission list. Override
 presence is explicit even for equal/false/zero values. Applied Project values serve their exact
 file/key; ignored fields serve bounded value-free diagnostics. Untrusted/unreadable Project notices
 name their file and never make a Session editor look Project-owned.
 `settings.options` pages options only for declared controls; a key without an editor has no
 options endpoint. Its canonical type, validation and runtime clamping still apply to changes.
-`dryRun` returns per-key errors and the tier. Changes list
-pending approvals first. Global writes Global, Session the Session scope, Home its saved settings;
+`dryRun` returns per-key errors and the immutable review. Changes is permanent history,
+not a pending-request inbox. Global writes Global, Session the Session scope, Home its saved settings;
 Project is inspection only. Session/Home reuse Global's renderer and editors; Project-owned rows
 have a read-only value and separate Project info pill, explicit overrides have Overridden/Revert,
 and Global alone has a Changes entry. Hand-built screens remain only for guided flows and viewers.

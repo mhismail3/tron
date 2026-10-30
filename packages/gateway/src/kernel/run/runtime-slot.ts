@@ -809,7 +809,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** This worker's Session scope and lane appliers for Home's `settings` tool (#1336): no client
    * fence (the caller resolved this slot); a running worker hears changes through `announce`. */
   taskWorkerSettingsSession(): SessionSettingsSource & { appliers: SessionAppliers } {
-    const read = () => this.settingsSessionLayer();
+    const read = () => {
+      if (this.disposed) throw new GatewayError("not_found", "The worker runtime that owned this settings review has retired");
+      return this.settingsSessionLayer();
+    };
     return {
       ...this.settingsSource(),
       get session() { return read(); },

@@ -41,18 +41,6 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
     let after: JSONValue?
     let redacted: Bool?
     let reason: String?
-    struct TierBasis: Decodable, Equatable, Sendable {
-        let direction: String
-        let floor: String
-        let floorSource: String
-        let web: Bool
-        let risk: String?
-        struct Evaluation: Decodable, Equatable, Sendable {
-            let status: String
-            let rationale: String
-        }
-        let riskEvaluation: Evaluation?
-    }
     struct GitState: Decodable, Equatable, Sendable {
         let staged: Bool
         let reason: String?
@@ -61,12 +49,9 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
         let branch: String?
     }
 
-    let tier: String
-    let tierBasis: TierBasis?
     let git: GitState?
     let status: String
     let failure: String?
-    let requestId: String?
     let action: Bool?
     let undoOf: String?
     /// A later fact's subject: for an outside change, the Tron change whose value it replaced.
@@ -93,18 +78,6 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
             target.kind == "home" || (target.kind == "session" && target.sessionId == sessionID)
         case .session(let id, _):
             layer == "session" && target.kind == "session" && target.sessionId == id
-        }
-    }
-}
-
-extension SettingsApprovalRequest {
-    func belongs(to scope: SettingsChangesScope) -> Bool {
-        switch scope {
-        case .all: true
-        case .global: changes.contains { $0.layer == "global" }
-        case .project(let cwd): target.kind == "project" && target.cwd == cwd && changes.contains { $0.layer == "project" }
-        case .home(let sessionID): target.kind == "home" || (target.kind == "session" && target.sessionId == sessionID)
-        case .session(let id, _): target.kind == "session" && target.sessionId == id
         }
     }
 }

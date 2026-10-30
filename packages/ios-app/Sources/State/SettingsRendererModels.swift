@@ -185,20 +185,23 @@ struct SettingsChangeResult: Decodable, Equatable, Sendable {
 
     /// The request's tier: the highest of its changes. An applied change's result may omit it.
     let status: String?
+    let review: ChangeReview?
     let tier: String?
     let changes: [Outcome]
 
-    private enum CodingKeys: String, CodingKey { case status, tier, changes }
+    private enum CodingKeys: String, CodingKey { case status, review, tier, changes }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         status = try container.decodeIfPresent(String.self, forKey: .status)
+        review = try container.decodeIfPresent(ChangeReview.self, forKey: .review)
         tier = try container.decodeIfPresent(String.self, forKey: .tier)
         changes = try container.decodeIfPresent([Outcome].self, forKey: .changes) ?? []
     }
 
     /// The refusal the first change carries, if any, as the Gateway's own failure.
     func throwIfRefused() throws {
+        if status == "review" { throw GatewayFailure(code: "conflict", message: "An exact native review is required; nothing changed.", retryable: false, details: nil) }
         guard let failure = changes.compactMap(\.error).first else { return }
         throw GatewayFailure(code: failure.code, message: failure.message, retryable: false, details: failure.details)
     }

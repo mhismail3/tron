@@ -3,7 +3,7 @@
 ## Purpose
 
 The Gateway's administration owners: settings store/options/binding-I/O adapters
-for the kernel's audited, tiered read/change engine, and
+for the kernel's audited, typed read/change engine, and
 the Mac-side admin services: trust binding I/O, provider auth, packages and resources, MCP,
 custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 
@@ -14,8 +14,6 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Settings declarations and binding admission | [kernel schema](../kernel/settings/settings-schema.ts) (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | [kernel SDK storage admission](../kernel/settings/settings-sdk-manager.ts), [kernel operational admission](../kernel/settings/settings-admission.ts) |
 | Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
-| Risk-provider adapter | `settings-risk.ts`; read/change engine, transaction order and audit/approvals: [kernel settings](../kernel/settings/README.md) |
-| Migration transaction, backups and publication | `settings-migration.ts`, `settings-migration-plan.ts`; shared-store value transforms: [kernel settings](../kernel/settings/README.md) |
 | Appliers and outside writers | `project-settings-writer.ts`, [kernel trust owner](../kernel/resources/trust-service.ts), `settings-outside.ts` (`OutsideChanges`) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
@@ -24,8 +22,8 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Install and lifecycle projections | `gateway-update-service.ts`, `ios-device-install-service.ts`, `ios-device-install-helper.ts`, `mac-replace-service.ts`, `diagnose.ts` |
 | Shared admission | `document-admission.ts` (`COMMAND_ID`, `admitTronSourceRoot`); [host control](host-control.md) |
 
-Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
-`observed.json`, `floors.json`, `gateway.json`), `<tronHome>/gateway/home/profile.json`
+Durable stores: `<tronHome>/gateway/settings/` (`changes/`,
+`observed.json`, `gateway.json`), `<tronHome>/gateway/home/profile.json`
 (Home's durable Session recipe) and the pi agent directory files it applies
 (`<tronHome>/agent/settings.json`, `trust.json`, `mcp.json`, `models.json`).
 
@@ -38,27 +36,25 @@ per-field string failures and the aggregate byte-limit failure are not covered b
 
 `settings-module.ts` owns the settings extension descriptor. Its request/result
 vocabulary is the [kernel settings contract](../kernel/settings/README.md); the
-session resolves its actor and settings owner at every call. Approve-tier tool calls
-(including explicit `request`) wait in the asking chat by default (`wait`), through the
-kernel's one approval wait; `wait: false` returns pending. Decisions are `settings.decide`
-only; the same tool turn receives a waited request's terminal outcome. Dry runs do not open
-forms. Stop cancels only its own pending diff. `settings-approval-blocking.e2e.test.ts`
-proves the live Home continuation, both modes, approve/deny/expiry and Stop at the real
-runtime boundary.
+session resolves its actor and actual target owner at every call. Routine reversible
+writes apply and log. Required native reviews use the dedicated built-in change
+interaction and typed paired-native callback, never generic forms. Dry run has no
+effects; Stop cancels only before acceptance. Accepted callbacks settle inside the
+canonical response receipt. There is no pending-request store, expiry or outcome outbox.
 `settings-presentation.ts` owns the profile audit-value formatter. History need
 not load Home's profile implementation; Home calls the same formatter for its
 stale-edit answer. Profile admission, records and mutation policy stay Home-owned.
 
 Project diagnostics: file/key/reason only; ≤32 entries, ≤1,024 visited fields, ≤256-character paths (ellipsis when shortened); unknown objects are not traversed.
 The full settings contract (foundations, layers, the generated key table,
-timing, change path, tiers, outside changes, project writes, Home profile,
+timing, typed change path, native review, outside changes, project writes, Home profile,
 presentation) is [docs/settings-contract.md](../../docs/settings-contract.md).
 The [three-layer settings design](../../docs/settings-three-layer-design.md)
 defines scoped permissions and runtime admission.
 In short:
 
 - **One key, declared once on the Gateway** (F1). The schema holds type,
-  group, allowed layers, timing, effect point, floor, writers, redaction and
+  group, allowed layers, timing, effect point, native-tap classification, writers, redaction and
   display. iOS renders keys generically; a new key needs no iOS release.
 - **Three scopes** (F4): **Project > Session/Home override > Global**, gated by
   registry grants. Home has no Project or separate chapter override. Private store
@@ -66,13 +62,12 @@ In short:
   retains explicit/delegated choices while Project masks them. Home SDK adoption
   holds the runtime lane before recipe publication and records one logical edit.
 - **Each store is the truth** (F2). The change record is audit and undo only.
-- **One change path, three tiers** (F3): quiet, notify, approve;
-  `tier = max(floor + web, assessment)`.
+- **One change path** (F3): routine apply/log/Undo; exact native taps only for
+  irreversible, trust/executable authority, spend and install effects.
 
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.options`, `settings.change` (with `dryRun`), `settings.undo`,
-`settings.applyAgain`, `settings.history`, `settings.approvals`,
-`settings.decide`, plus `home.profileChange` for learned-profile notes.
+`settings.applyAgain`, `settings.history`, plus `home.profileChange` for learned-profile notes.
 Broadcasts: `settings.changed`, `trust.changed`, `mcp.changed`,
 `models.customChanged`. Agents reach the same path through the `settings` tool
 (a thin client of resolve and change); Home's tool may target a delegated
@@ -80,7 +75,7 @@ worker by `taskId`.
 
 Ports in: `gateway-main.ts` wires kernel `SettingsModel`/`SettingsChangePath`,
 admin `SettingsStoreAdapter`,
-`OutsideChanges` and the risk evaluator; `GatewayService` dispatches the RPCs,
+and `OutsideChanges`; `GatewayService` dispatches the RPCs,
 pushes and broadcasts; `RuntimeSlot` supplies the Session-scope applier, fence and
 running-worker `announce`; Home owns learned-note operations/undo and typed
 post-observer projection through `HomeProfileItems` and the kernel audited-subject seam.
@@ -101,9 +96,9 @@ are installed; schema access never evaluates their late-bound service getter.
   serialize per target.
 - The record is append-only and kept forever; credentials and redacted values
   never appear in it. It is never read to compute a value.
-- Tiers only rise: the web mark is per run, the assessment can raise but never
-  lower, and only the maintainer's tap approves. Pending changes expire after
-  24 hours, evaluated on use.
+- Native review binds the exact diff. Acceptance rechecks actual target state
+  under its stripe; generic forms and local RPC cannot grant effects. Corrupt
+  indexed audit/groups refuse rather than restoring partial state.
 - Tron's own writes are bracketed (`begin`/`end`, `adopt`) and never reported as
   outside changes; Tron never re-applies a value on its own.
 - Any agent-directory event prompts the existing coalesced four-store digest scan:
@@ -123,7 +118,7 @@ are installed; schema access never evaluates their late-bound service getter.
 - Add or change a key: [kernel schema](../kernel/settings/settings-schema.ts) `KEYS`, then
   `scripts/tron docs update` refreshes the key table in the contract doc.
 - Resolve a target: `SettingsModel.resolve` / `options`.
-- Change or decide: kernel `SettingsChangePath.change`, `undo`, `applyAgain`, `decide`.
+- Change/Undo: kernel `SettingsChangePath.change`, `undo`, `applyAgain`.
 - Learned profile: Home `HomeProfileItems.change` / `undo` under `SettingsChangePath.auditSubject`.
 - Outside detection: `OutsideChanges` (`reconcile`, `adopt`, `dispose`).
 - Agent tool and web mark: `tron-settings-extension.ts`.
@@ -133,12 +128,8 @@ are installed; schema access never evaluates their late-bound service getter.
 | Signal | Level | Meaning |
 |---|---|---|
 | `conflict` from `gateway.update.config.status` / `mac.replace.plan` | RPC error | Source validation names the rejected path and missing/linked identity marker; read the config-status RPC once to distinguish an invalid checkout from absent configuration (`null`) |
-| `settings.risk.failed` | warning | Risk classification failed or hit its 1.5 s deadline; the deterministic tier stands |
-| `settings.notification.failed` | warning | A notify or pending-approval push could not be queued; the change is already recorded |
 | `settings.outside.failed` | warning | An outside-change comparison failed |
 | `settings-change.json` → `coalesced global directory hint` (test only) | test artifact | Native hints, push and errors for missed MCP drift; run the focused `#1900` reproduction below to distinguish filename-filter loss from audit/push ordering |
-| `settings.migration` | info | The three-layer migration of the shared settings stores ran after the listener bound: `counts.inputs`, `counts.replaced`, or "already complete" |
-| `settings.migration-failed` | error | That migration refused; every shared store is unchanged, startup continued, and it retries next start. `error` names the file and reason |
 | `session_configuration_*` on a `busy` settings refusal | retryable error | Home's runtime boundary refused before recipe publication; its stored and SDK selections remain unchanged |
 | `settings-run-applied` code on `session.diagnostic` | session diagnostic | The operational settings resolved and applied at request admission |
 | `gateway.shutdown-step` `step=outside-settings-dispose` | info | Time spent retiring outside-change watches and observers at shutdown |
@@ -162,13 +153,13 @@ scripts/tron docs check
 scripts/tron test gateway src/admin/settings-change.integration.test.ts -t 'reconciles missed global MCP drift'
 ```
 
-Behavior locks: `admin.lock.integration.test.ts`,
-`admin.store.lock.integration.test.ts` and
-`settings-approvals.lock.integration.test.ts` against `locks/*.golden.json`.
+Behavior locks: `admin.lock.integration.test.ts` and
+`admin.store.lock.integration.test.ts` against `locks/*.golden.json`.
 `settings-change.integration.test.ts` covers every key at every allowed layer,
 the record, undo, outside changes and project git states;
-`settings-gate.e2e.test.ts` covers tiers, approvals, the risk gate, live Run
-settings, running-worker changes and Home profile adoption.
+`native-change.e2e.test.ts` covers exact paired-native admission, callback settlement,
+receipt replay and corrupt grouped-history refusal. `settings-worker-fences.e2e.test.ts`
+retains worker model/thinking and Session fence witnesses.
 
 ## Not here
 

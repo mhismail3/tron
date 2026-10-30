@@ -162,29 +162,7 @@ struct SettingsApprovalSheet: View {
             }
             if matches.count == 1, let request = matches.first { state = .review(SettingsApprovalReview(request: request), request); return }
             if matches.count > 1 { state = .choose(matches); return }
-            guard let reference else {
-                state = .unavailable("No request from this chat is waiting for you.")
-                return
-            }
-            // Bounded history only; never infer a terminal status from disappearance.
-            // A chip knows only its request: its facts are one decision's write,
-            // so the page holding the first of them holds them all.
-            var cursor: String?, entries: [SettingsChangeHistoryEntry] = []
-            let wanted = Set(reference.changeIDs)
-            var seen: Set<String> = []
-            for _ in 0..<10 {
-                let page = try await model.settingsHistory(cursor: cursor, actor: nil, layer: nil, section: nil, key: nil, status: nil)
-                guard admits() else { return }
-                for entry in page.entries where entry.requestId == reference.requestID && SettingsApprovalOutcome.terminalStatuses.contains(entry.status) {
-                    if let original = entry.refersTo, wanted.isEmpty || wanted.contains(original), seen.insert(original).inserted { entries.append(entry) }
-                }
-                cursor = page.nextCursor
-                if !seen.isEmpty, wanted.isEmpty || seen == wanted, let review = SettingsApprovalReview(history: entries) {
-                    state = .review(review, nil); return
-                }
-                if cursor == nil { break }
-            }
-            state = .unavailable("This request is no longer waiting. Its complete terminal result is not available in this bounded history window.")
+            state = .unavailable("This settings request is no longer active.")
         } catch is CancellationError {
         } catch {
             guard admits() else { return }
@@ -331,28 +309,6 @@ struct SettingsApprovalReview: Equatable, Sendable {
                 detail: settingsLayerLabel(item.layer), exact: nil)
         }
         summary = outcome.action?.summary; failure = outcome.failure; digest = nil
-    }
-
-    /// The decided state read back from history: the request's terminal facts.
-    /// An action's fact records the exact preview the maintainer approved.
-    init?(history entries: [SettingsChangeHistoryEntry]) {
-        guard let first = entries.first, let requestID = first.requestId else { return nil }
-        self.requestID = requestID; status = first.status
-        requester = first.presentation?.actor ?? first.actor.kind.capitalized
-        reason = first.reason; target = SettingsApprovalRequest.Target(kind: first.target.kind, sessionId: first.target.sessionId, cwd: first.target.cwd)
-        expiresAt = nil
-        if first.action == true, let preview = try? first.after?.decode(SettingsApprovalRequest.Action.Preview.self) {
-            heading = preview.title
-            rows = preview.items.map { Row(title: $0.label, value: $0.value, detail: $0.detail, exact: $0.exact.map(Self.exact)) }
-        } else {
-            heading = entries.count == 1 ? "Change" : "Changes"
-            rows = entries.map { entry in
-                Row(title: entry.title, value: entry.redacted == true ? "Value hidden" : entry.presentation.map { "\($0.display.before) → \($0.display.after)" } ?? "Recorded outcome",
-                    detail: entry.presentation?.layer ?? settingsLayerLabel(entry.layer),
-                    exact: entry.redacted == true ? nil : .object(["before": entry.before ?? .null, "after": entry.after ?? .null]))
-            }
-        }
-        summary = nil; failure = first.failure; digest = nil
     }
 
     private static func exact(_ text: String) -> JSONValue {
