@@ -156,14 +156,6 @@ final class AppModel {
         let tap: PushNotificationTap
     }
 
-    /// One approval push tap carried across navigation to its chat, where the
-    /// transcript's sheet host opens the approval sheet (#2050).
-    struct StagedApprovalReview: Equatable, Sendable {
-        let id: Int
-        let sessionID: String
-        let stagedAt: Date
-    }
-
     typealias SessionPresentationTarget = SessionPresentationIdentity
 
     typealias PairingCommit = GatewayPairingCommit
@@ -287,7 +279,6 @@ final class AppModel {
     var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
-    var settingsApprovalsRevision: Int { settingsTrust.approvalsRevision }
     var pairedDevices: [PairedDevice] = []
     // Invalidates surface-owned device reads without blocking control-event intake.
     var deviceCatalogRevision = 0
@@ -297,11 +288,6 @@ final class AppModel {
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
-    /// Exists only to carry one approval push tap across navigation. A stale one
-    /// must never surprise a later manual visit, so it is honored only while fresh.
-    private(set) var stagedApprovalReview: StagedApprovalReview?
-    static let stagedApprovalReviewLifetime: TimeInterval = 120
-    private var stagedApprovalReviewSequence = 0
     /// Lease-scoped invalidation for a mounted read-only subagent transcript.
     /// This does not participate in the parent session event cursor.
     private var processTranscriptInvalidationSinks: [UUID: (ProcessTranscriptChanged) -> Void] = [:]
@@ -2902,30 +2888,8 @@ extension AppModel {
 
     func requestPushNavigation(_ tap: PushNotificationTap) {
         guard tap.sessionID != nil, tap.machineID != nil else { return }
-        stageApprovalReview(from: tap)
         pushNavigationSequence &+= 1
         pushNavigationRequest = PushNavigationRequest(id: pushNavigationSequence, tap: tap)
-    }
-
-    /// A newer tap replaces an older one, so any other tap clears the staging.
-    func stageApprovalReview(from tap: PushNotificationTap) {
-        guard tap.opensApproval, let sessionID = tap.sessionID else {
-            stagedApprovalReview = nil
-            return
-        }
-        stagedApprovalReviewSequence &+= 1
-        stagedApprovalReview = StagedApprovalReview(id: stagedApprovalReviewSequence, sessionID: sessionID, stagedAt: .now)
-    }
-
-    func freshStagedApprovalReview(now: Date = .now) -> StagedApprovalReview? {
-        guard let staged = stagedApprovalReview,
-              now.timeIntervalSince(staged.stagedAt) < Self.stagedApprovalReviewLifetime else { return nil }
-        return staged
-    }
-
-    func consumeStagedApprovalReview(_ id: Int) {
-        guard stagedApprovalReview?.id == id else { return }
-        stagedApprovalReview = nil
     }
 
     func refreshNotificationInbox() async {
@@ -4055,12 +4019,6 @@ extension AppModel {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
-    /// The open approval requests every approval surface reads (#2050); nil until read.
-    var openSettingsApprovals: [SettingsApprovalRequest]? { settingsTrust.openApprovals }
-    /// The terminal status a resolution event or decision named for a request.
-    func settingsApprovalOutcome(_ requestID: String) -> String? { settingsTrust.approvalOutcomes[requestID] }
-    func refreshSettingsApprovals() async throws { try await settingsTrust.refreshApprovals() }
-
     func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
         try await settingsTrust.settingsHistory(cursor: cursor, actor: actor, layer: layer, section: section, key: key, status: status)
     }
@@ -4077,12 +4035,6 @@ extension AppModel {
             guard let snapshot else { return true }
             return self?.admitsConfigurationSend(snapshot) == true
         }
-    }
-
-    /// Approves or declines one pending change, bound to the exact diff shown.
-    @discardableResult
-    func decideSettingsApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws -> SettingsChangeResult {
-        try await settingsTrust.decideApproval(request, approved: approved)
     }
 
     /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).
@@ -4812,10 +4764,6 @@ extension AppModel {
             settingsTrust.noteSettingsChanged()
         case "trust.changed":
             settingsTrust.noteTrustChanged()
-        case "settings.approvalsChanged":
-            let change = event.payload.objectValue
-            settingsTrust.noteApprovalsChanged(resolved: change?["kind"]?.stringValue == "resolved" ? change?["requestId"]?.stringValue : nil,
-                                               status: change?["status"]?.stringValue)
         case "providers.changed":
             providerAuth.noteProvidersChanged()
         case "packages.changed":

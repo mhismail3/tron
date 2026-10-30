@@ -1,8 +1,9 @@
 import SwiftUI
 import TronMobileCore
 
-/// Presentation-local advisory reads. The Gateway and the existing settings
-/// receipt/approval owners retain every effect, including work accepted offscreen.
+/// Presentation-local advisory reads. The Gateway and the existing receipt owner
+/// retain every effect, including work accepted offscreen; the shared exact card
+/// is the only tap that confirms a project action.
 @MainActor
 struct ProjectLifecycleView: View {
     enum Route: Hashable {
@@ -21,7 +22,7 @@ struct ProjectLifecycleView: View {
     @PresentationState private var github = false
     @PresentationState private var submitting = false
     @PresentationState private var generation = 0
-    @PresentationState private var approval: SettingsApprovalSelection?
+    @PresentationState private var reviewing: ProjectLifecycleReview?
     @PresentationState private var choosingFolder = false
     @PresentationState private var chosenPath: String?
     @PresentationState private var selected: SelectedPath?
@@ -32,7 +33,7 @@ struct ProjectLifecycleView: View {
     private struct ReadID: Hashable {
         let route: Route
         let identity: KnowledgePresentationIdentity
-        let settings, trust, approvals, foreground: Int
+        let settings, trust, foreground: Int
     }
 
     var body: some View {
@@ -44,8 +45,9 @@ struct ProjectLifecycleView: View {
         .disabled(submitting)
         // The presenting sheet's theme carries through; only a standalone presentation falls back.
         .tronSettingsVisualTheme(inheriting: .tronPrimary)
-        .tronManagedSheet(item: $approval, identity: { "settings.projects.\($0.id)" }) {
-            SettingsApprovalSheet(selection: $0)
+        .tronManagedSheet(item: $reviewing, identity: { "settings.projects.\($0.id)" }) { reviewed in
+            ChangeReviewSheet(review: reviewed.review, submitting: submitting,
+                              approve: { confirm(reviewed) }, cancel: { reviewing = nil })
         }
         .tronManagedSheet(isPresented: $choosingFolder, identity: "settings.projects.existing", onDismiss: {
             if let chosenPath { selected = SelectedPath(id: chosenPath) }
@@ -68,14 +70,14 @@ struct ProjectLifecycleView: View {
         }
         .task(id: PresentationActivityTaskID(source: ReadID(route: route, identity: model.knowledgePresentationIdentity,
             settings: model.settingsInvalidationGeneration, trust: model.trustRevision,
-            approvals: model.settingsApprovalsRevision, foreground: model.foregroundReconciliationGeneration),
+            foreground: model.foregroundReconciliationGeneration),
             presentationActive: activity.allowsPresentationPublication)) {
             guard activity.allowsPresentationPublication else { return }
             await load()
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in if !active { generation &+= 1 } }
         .onChange(of: model.selectedGatewayProfileID()) { _, _ in
-            generation &+= 1; listing = nil; project = nil; chosenPath = nil; selected = nil; approval = nil
+            generation &+= 1; listing = nil; project = nil; chosenPath = nil; selected = nil; reviewing = nil
         }
         .onDisappear { generation &+= 1 }
     }
@@ -185,11 +187,35 @@ struct ProjectLifecycleView: View {
         Task { @MainActor in
             defer { submitting = false }
             do {
-                let reference = try await model.settingsTrust.requestProject(operation, name: sourceName, newName: newName, github: github)
+                let reviewed = try await model.settingsTrust.reviewProject(operation, name: sourceName, newName: newName, github: github)
                 guard admitsPresentation() else { return }
-                approval = .request(reference)
+                reviewing = reviewed
             } catch {
                 guard admitsPresentation() else { return }
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    /// The maintainer's tap on the exact card. Its accepted command stays with the
+    /// receipt executor; an uncertain outcome is shown, never retried here.
+    private func confirm(_ reviewed: ProjectLifecycleReview) {
+        guard !submitting, reviewing?.id == reviewed.id, activity.allowsDataPublication else { return }
+        submitting = true
+        let identity = model.knowledgeDestinationIdentity
+        func admitsPresentation() -> Bool {
+            identity == model.knowledgeDestinationIdentity && PresentationPublicationPolicy.allows(
+                ambient: activity, coordinator: presentationCoordinator, token: surfaceToken)
+        }
+        Task { @MainActor in
+            defer { submitting = false }
+            do {
+                try await model.settingsTrust.confirmProject(reviewed)
+                guard admitsPresentation() else { return }
+                reviewing = nil
+            } catch {
+                guard admitsPresentation() else { return }
+                reviewing = nil
                 self.error = error.localizedDescription
             }
         }

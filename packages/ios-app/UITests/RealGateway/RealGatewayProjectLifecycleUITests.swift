@@ -149,7 +149,7 @@ extension RealGatewayPairAndChatUITests {
         lifecycleTap(app, "Create Project")
         lifecycleName(app, name)
         lifecycleTap(app, "Create Project")
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-approval-approve-'")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.buttons["change-review-approve"].waitForExistence(timeout: 15), app.debugDescription)
     }
 
     @MainActor
@@ -176,8 +176,7 @@ extension RealGatewayPairAndChatUITests {
 
     @MainActor
     private func lifecycleDecide(_ app: XCUIApplication, approve: Bool) {
-        let prefix = approve ? "settings-approval-approve-" : "settings-approval-decline-"
-        let button = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).firstMatch
+        let button = app.buttons[approve ? "change-review-approve" : "change-review-cancel"]
         XCTAssertTrue(button.waitForExistence(timeout: 15), app.debugDescription)
         button.tap()
         XCTAssertTrue(waitUntil(timeout: 20) { app.buttons.matching(identifier: "Done").allElementsBoundByIndex.contains(where: { $0.isHittable }) }, app.debugDescription)

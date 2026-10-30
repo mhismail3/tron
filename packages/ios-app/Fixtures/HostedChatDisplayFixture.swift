@@ -214,7 +214,6 @@ struct HostedHomeDashboardFixture: View {
     @State private var staleActionFinished = false
     @State private var promptRoute = "none"
     @State private var openedSession = "none"
-    @State private var settingsDecisionState = "none"
     @State private var newWorkerAdded = false
     @State private var dashboardChanged = false
     @State private var dashboardReads = "none"
@@ -236,8 +235,7 @@ struct HostedHomeDashboardFixture: View {
             delayed: arguments.contains("-home-control-delayed"),
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
             emptyContext: arguments.contains("-home-context-empty"),
-            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""),
-            settingsApprovals: arguments.contains("-home-settings-approvals"))
+            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -279,7 +277,6 @@ struct HostedHomeDashboardFixture: View {
                             Text(model.homeMutations.isRunning(profileID: profile.id) ? "running" : model.homeMutations.ownsUnresolvedCommand(profileID: profile.id) ? "unresolved" : "idle")
                                 .accessibilityIdentifier("fixture.home-command-state")
                             Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
-                            Text("settings-decisions:\(settingsDecisionState)").accessibilityIdentifier("fixture.settings-decisions")
                             Text("prompt-route:\(promptRoute)").accessibilityIdentifier("fixture.home-prompt-route")
                             Text("opened-session:\(openedSession)").accessibilityIdentifier("fixture.home-opened-session")
                             Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")
@@ -382,7 +379,6 @@ struct HostedHomeDashboardFixture: View {
                 configuredModel = await gateway.configuredModelIdentity()
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
-                settingsDecisionState = await gateway.settingsDecisionSummary()
                 dashboardReads = await gateway.dashboardReadSummary()
                 if arguments.contains("-home-dashboard-live-change"), !dashboardChanged,
                    firstRevealAt.map({ Date().timeIntervalSince($0) > 15 }) == true {
@@ -498,8 +494,6 @@ private actor HostedHomeShellGateway {
             "listRevision": .number(Double(dashboardRevision)),
             "projectionToken": .string("dashboard:\(dashboardRevision)"), "archivedCount": .number(1)])
     }
-    private var approvals: [JSONValue] = []
-    private var settingsDecisions: [String] = []
     /// The learned profile as the fixture Gateway holds it, changed by `home.profileChange`
     /// and restored by `settings.undo`, with its record entries for Changes.
     private var profileItems: [HostedProfileItem] = HostedHomeToolFixture.profileItems
@@ -522,24 +516,8 @@ private actor HostedHomeShellGateway {
         profileEntries.append(.object(entry))
         profileUndo[changeID] = (retired, profileItems)
     }
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false) {
+    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
-        // Home's and a task worker's requests show in Manage Home; a chat agent's does not.
-        approvals = settingsApprovals ? [
-            Self.settingsApprovalRequest(requestId: "settings-request-approve", digest: String(repeating: "a", count: 64),
-                actor: .object(["kind": .string("home"), "id": .string("home-session"), "sessionId": .string("home-session")]), requester: "Home",
-                key: "permissions.projectTrust", label: "Project trust", qualifiers: ["project": "/work/other"],
-                before: .null, after: .bool(true), display: ("Not set", "Trusted"),
-                confirm: "Trusting a project lets its files run with your Mac user's authority."),
-            Self.settingsApprovalRequest(requestId: "settings-request-decline", digest: String(repeating: "b", count: 64),
-                actor: .object(["kind": .string("worker"), "id": .string("worker-session"), "sessionId": .string("worker-session"), "taskId": .string("nightly-sync")]),
-                requester: "Home task nightly-sync", key: "run.retry.maxRetries", label: "Retries", qualifiers: nil,
-                before: .number(3), after: .number(6), display: ("3", "6"), confirm: nil),
-            Self.settingsApprovalRequest(requestId: "settings-request-chat", digest: String(repeating: "d", count: 64),
-                actor: .object(["kind": .string("agent"), "id": .string("ordinary-session"), "sessionId": .string("ordinary-session")]),
-                requester: "A chat's agent", key: "run.retry.maxRetries", label: "Retries", qualifiers: nil,
-                before: .number(3), after: .number(9), display: ("3", "9"), confirm: nil),
-        ] : []
         self.browserState = browserState
         self.emptyContext = emptyContext
         self.capabilityEnabled = capabilityEnabled
@@ -601,7 +579,6 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModels.isEmpty ? "none" : configuredModels.joined(separator: ",") }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
     func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
 
     private var homeReads: [String: Int] = [:]
@@ -902,17 +879,6 @@ private actor HostedHomeShellGateway {
             return (homeSettingsResolution(), nil)
         case "settings.options":
             return (try homeSettingsOptions(params), nil)
-        case "settings.approvals":
-            return (.object(["requests": .array(approvals)]), nil)
-        case "settings.decide":
-            guard params["commandId"]?.stringValue != nil, let id = params["requestId"]?.stringValue,
-                  let digest = params["digest"]?.stringValue, let approved = params["approved"]?.boolValue,
-                  let index = approvals.firstIndex(where: { $0.objectValue?["requestId"]?.stringValue == id && $0.objectValue?["digest"]?.stringValue == digest })
-            else { return taskRefusal() }
-            approvals.remove(at: index)
-            settingsDecisions.append("\(approved ? "approved" : "declined"):\(id)")
-            controlCount += 1
-            return (.object(["requestId": .string(id), "approved": .bool(approved)]), nil)
         case "home.pauseMemory", "home.resumeMemory", "settings.change", "home.disable":
             if method == "settings.change", params["dryRun"]?.boolValue == true {
                 return (settingsChangePreview(params), nil)
@@ -1127,28 +1093,6 @@ private actor HostedHomeShellGateway {
         return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("notify"),
             "changes": .array([.object(["key": change["key"] ?? .string(""), "layer": change["layer"] ?? .string("session"),
                 "status": .string("applied"), "tier": .string("notify"), "before": .null, "after": value])])])
-    }
-
-    /// One pending Global change as `settings.approvals` serves it (gateway approvalProjection).
-    private static func settingsApprovalRequest(
-        requestId: String, digest: String, actor: JSONValue, requester: String, key: String, label: String,
-        qualifiers: [String: String]?, before: JSONValue, after: JSONValue, display: (String, String), confirm: String?
-    ) -> JSONValue {
-        var change: [String: JSONValue] = [
-            "changeId": .string("change-\(requestId)"), "key": .string(key), "label": .string(label),
-            "layer": .string("global"), "op": .string("set"), "tier": .string("approve"), "tierBasis": .object([:]),
-            "before": before, "after": after,
-            "display": .object(["before": .string(display.0), "after": .string(display.1)]),
-        ]
-        if let qualifiers { change["qualifiers"] = .object(qualifiers.mapValues(JSONValue.string)) }
-        if let confirm { change["confirm"] = .string(confirm) }
-        return .object([
-            "requestId": .string(requestId), "digest": .string(digest),
-            "createdAt": .string("2026-01-01T00:00:00.000Z"), "expiresAt": .string(Date.now.addingTimeInterval(23 * 60 * 60).formatted(.iso8601)),
-            "target": .object(["kind": .string("session"), "sessionId": actor.objectValue?["sessionId"] ?? .null]),
-            "actor": actor, "requester": .string(requester), "reason": .string("You asked me to"),
-            "changes": .array([.object(change)]),
-        ])
     }
 
     private func taskRefusal() -> (JSONValue?, JSONValue?) {

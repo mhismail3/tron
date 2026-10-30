@@ -1277,9 +1277,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         burst("settings")
         openSheet("settings-link-Agent Behavior", "global-agent-behavior", section: "model")
-        // Run and approval floors are embedded beside Model in the consolidated sheet.
+        // Run settings are embedded beside Model in the consolidated sheet.
         XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
-        openSheet("settings-instances-permissions.floor-open", "agent-approvals"); dismissTopSheet(app); dismissTopSheet(app)
+        dismissTopSheet(app)
         openSheet("settings-section-tools-open", "global-tools", section: "tools"); dismissTopSheet(app)
         for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
                               ("Model Providers", "providers"), ("Setup", "setup")] {
@@ -1553,7 +1553,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 1, "one More Settings row (#1627)")
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
-            "workers": "Models", "approvals": "More Settings", "run": "More Settings", "sources": "Extensions", "setup": "Setup"])
+            "workers": "Models", "run": "More Settings", "sources": "Extensions", "setup": "Setup"])
         openSettingsSection(app, "tools")
         let codeMode = app.buttons["Other tools with codemode"]
         revealBelowNavigationBar(app, codeMode)

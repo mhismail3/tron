@@ -88,16 +88,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   owns display, memory-bounded photo previews and honest load-failure fallback. Technical details hold JSON. `TaskToolDetailPresentation` shows catalog rows/counts,
   status, paged reports and receipts; unknown shapes stay generic. Check-ins lead with the step/summary,
   then standard Attention, Progress and timestamp/reference rows; raw receipt fields stay in Technical details. Worker reports render their invocation’s outcome, Markdown summary and acceptance evidence through shared Home sections; opaque receipts stay in Technical details. Report/check-in sheets use `tronPrimary`. `ToolDetailPresentation` owns one name/icon catalog for transcript, nested calls, sheets and resource tools; unknown extension/MCP names are humanized without changing invocation identity. Task reports/messages use `PromptTextPreview` and the full reader; absent fields are not inferred.
-- **Approval requests.** Any tool call that asked the maintainer's approval (settings,
-  profile, projects) renders as the shared approval chip (`SettingsApprovalRequestChip`), named
-  by its result's `approval` reference or, while it waits, its approval form; the open-request
-  projection says whether it still waits, otherwise the resolution's or result's status shows.
-  A waiting tool's request presents the shared approval sheet once, like a question; swipe
-  dismissal leaves it waiting behind its chip, which reopens the same sheet. An approval push
-  opens its chat's requests. The ask-user form sheet has no approval mode: approval forms are
-  presentation only, decided through `settings.decide`.
-  Gateway-attributed `tron.settings-outcome.v1` contexts open the read-only outcome sheet; unknown
-  versions/shapes retain the ordinary context viewer. `ChatTranscriptSheetRoutes` owns these sheets
+- **Native change reviews.** An agent's change that needs the maintainer's tap arrives as the
+  native `change` interaction and presents `ChangeReviewCard` in the interaction sheet; generic
+  forms and ask_user never authorize effects. Historical settings-outcome contexts use the
+  ordinary context viewer. `ChatTranscriptSheetRoutes` owns transcript sheets
   above lazy rows, including push review, so scrolling cannot dismiss them. Positive status uses
   the compact-pill owner's contrast-safe success palette; failures keep the shared error palette.
 - **Thinking and context.** Thinking shows at most four measured lines, opening the full trace on
@@ -236,11 +230,9 @@ ordering. Its capture-only method provides light/dark visual review, not behavio
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
 humanization. `TronWorkerToolPreviewTests` captures light/dark native review surfaces only.
 
-`TronSettingsApprovalFormUITests` exercises the approval chip, its sheet, dismissal and a
-decision in Changes settling the chat's chip over the hosted RPC socket, retaining light/dark
-captures. `RealGatewayPairAndChatUITests/testAgentApprovalRequestsAppearInTheirChatAndSettleEverywhere`
-proves both modes and cross-surface settlement at the real Gateway; the Gateway's
-`settings-approval-blocking.e2e.test.ts` owns decision, expiry and Stop proof.
+`TronInteractionSheetUITests` exercises the native change card's exact scoped answer and the
+ask_user form over the hosted socket; the Gateway's `native-change.e2e.test.ts` owns
+authorization, receipt recovery and Stop proof.
 
 `TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility

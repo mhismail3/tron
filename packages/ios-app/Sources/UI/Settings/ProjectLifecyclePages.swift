@@ -151,7 +151,7 @@ struct ProjectLifecycleDetailPage<RenameDestination: View>: View {
                         subtitleLineLimit: nil, accent: .tronWarning)
                 }
             }
-            TronSettingsCaption("Every trust, rename, archive or untrust request opens the existing approval review. No action is approved automatically.")
+            TronSettingsCaption("Every trust, rename, archive or untrust request opens its exact review card. No action is approved automatically.")
             TronSettingsCaption("Archives are recoverable on your Mac at ~/Workspace/.archive/<name>-<id>. Project sessions must be closed before moving; start new sessions at the new location.")
         }
     }

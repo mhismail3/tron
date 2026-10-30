@@ -177,25 +177,21 @@ struct SettingsChangeResult: Decodable, Equatable, Sendable {
             let details: JSONValue?
         }
 
-        let tier: String?
         let error: Failure?
         /// The key's `confirm` text when the change needs the maintainer's tap first.
         let confirm: String?
     }
 
-    /// The request's tier: the highest of its changes. An applied change's result may omit it.
     let status: String?
     let review: ChangeReview?
-    let tier: String?
     let changes: [Outcome]
 
-    private enum CodingKeys: String, CodingKey { case status, review, tier, changes }
+    private enum CodingKeys: String, CodingKey { case status, review, changes }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         status = try container.decodeIfPresent(String.self, forKey: .status)
         review = try container.decodeIfPresent(ChangeReview.self, forKey: .review)
-        tier = try container.decodeIfPresent(String.self, forKey: .tier)
         changes = try container.decodeIfPresent([Outcome].self, forKey: .changes) ?? []
     }
 

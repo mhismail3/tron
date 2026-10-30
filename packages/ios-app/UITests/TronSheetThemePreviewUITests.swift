@@ -138,22 +138,7 @@ final class TronSheetThemePreviewUITests: XCTestCase {
         defer { app.terminate() }
         open(app, "settings-link-Agent Behavior")
         expand(app, title: "Agent Behavior")
-        let header = app.staticTexts["Agent approvals"]
-        XCTAssertTrue(header.waitForExistence(timeout: 5))
-        XCTAssertLessThan(header.frame.minY, app.staticTexts["Transport"].firstMatch.frame.minY)
-        let summary = app.staticTexts["Which setting changes need your OK."]
-        XCTAssertTrue(summary.exists)
-        XCTAssertLessThan(summary.frame.height, 22, "Approval summary is one standard-size line")
-        open(app, "settings-instances-permissions.floor-open")
-        expand(app, title: "Agent approvals")
-        let quiet = app.buttons.matching(NSPredicate(format: "value == 'Quiet'")).allElementsBoundByIndex.first { $0.isHittable }
-        XCTAssertNotNil(quiet, app.debugDescription)
-        quiet?.tap()
-        for label in ["Quiet", "Notify", "Approve"] {
-            XCTAssertTrue(app.buttons["settings-option-\(label)"].waitForExistence(timeout: 5))
-        }
-        XCTAssertTrue(app.staticTexts["The change waits for your approval"].exists)
-        close(app); close(app)
+        XCTAssertTrue(app.staticTexts["Transport"].firstMatch.waitForExistence(timeout: 5))
         for _ in 0..<3 {
             XCTAssertFalse(app.staticTexts["Advanced"].exists)
             XCTAssertTrue(app.staticTexts["Thinking budgets"].exists, "Model controls share the consolidated Agent Behavior sheet")

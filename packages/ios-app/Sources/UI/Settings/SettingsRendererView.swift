@@ -76,23 +76,14 @@ struct SettingsRendererView: View {
         .tronConfigurationSliderHost(sliderPresentation, inheriting: inheritedSliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .tronManagedSheet(item: $pendingConfirmation, identity: { $0.id }) { pending in
-            NavigationStack {
-                ScrollView {
-                    ChangeReviewCard(review: pending.review, approve: {
-                        guard pendingConfirmation?.id == pending.id else { return }
-                        pendingConfirmation = nil
-                        switch pending.operation {
-                        case .change(let change): commit(change, rowID: pending.rowID, confirmationDigest: pending.review.digest)
-                        case .applyAgain(let id): applyAgain(id, rowID: pending.rowID, confirmationDigest: pending.review.digest)
-                        }
-                    }, cancel: { pendingConfirmation = nil })
-                    .padding(18)
+            ChangeReviewSheet(review: pending.review, approve: {
+                guard pendingConfirmation?.id == pending.id else { return }
+                pendingConfirmation = nil
+                switch pending.operation {
+                case .change(let change): commit(change, rowID: pending.rowID, confirmationDigest: pending.review.digest)
+                case .applyAgain(let id): applyAgain(id, rowID: pending.rowID, confirmationDigest: pending.review.digest)
                 }
-                .tronScrollEdgeChrome()
-                .navigationTitle("Review change")
-                .navigationBarTitleDisplayMode(.inline)
-            }
-            .tronTopBlur(.sheet)
+            }, cancel: { pendingConfirmation = nil })
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active {

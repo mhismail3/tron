@@ -278,13 +278,7 @@ struct InboundProducerMessageView: View {
 
     private var tone: ChatNotificationTone { presentation.tone }
 
-    var body: some View {
-        if sheetRoutes != nil, item.semantic?.origin.kind == .gateway,
-           item.customType == "tron.settings-outcome.v1",
-           let message = SettingsApprovalOutcomeMessage(details: item.details) {
-            SettingsApprovalOutcomeChip(message: message)
-        } else { contextChip }
-    }
+    var body: some View { contextChip }
 
     private var contextChip: some View {
         Button { showingDetails = true } label: {

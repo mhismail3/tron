@@ -969,7 +969,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         toolSheet(app, "settings-change", chip: "Settings, Completed", index: 0, outcome: "Pending approval") {
             XCTAssertTrue(self.element(app, "home-tool-row-Set").label.contains("3 → 6"), self.element(app, "home-tool-row-Set").label)
             XCTAssertTrue(self.element(app, "home-tool-row-Layer").label.contains("Session"))
-            XCTAssertTrue(self.element(app, "home-tool-row-Tier").label.contains("Approve"))
         }
         toolSheet(app, "settings-resolve", chip: "Settings, Completed", index: 1, outcome: "Read") {
             XCTAssertTrue(self.element(app, "home-tool-row-model.ref[role=worker]").label.contains("Claude Opus 5.5 · Session"))

@@ -9,7 +9,7 @@ enum HostedSettingsReviewSchema {
         section("model", "Model", 10, inline: true),
         section("workers", "Workers & delegation", 15, inline: true),
         section("context", "Compaction", 20), section("tools", "Tools", 30),
-        section("approvals", "Agent changes", 45), section("run", "Connection", 50),
+        section("run", "Connection", 50),
         section("trust", "Trusted Projects", 55), section("connections", "Mac Terminal", 58),
     ]
 
@@ -61,17 +61,7 @@ enum HostedSettingsReviewSchema {
     }
 
     static let sheetThemeKeys: [JSONValue] = {
-        let approvals: [JSONValue] = additionalKeys.prefix(12).compactMap { value in
-            guard let governed = value.objectValue?["key"]?.stringValue,
-                  var row = key("permissions.floor", "approvals", "Agent approvals", .string("quiet"), "Quiet", "choice", order: 90,
-                    help: "Which setting changes need your OK.",
-                    options: [.object(["value": .string("quiet"), "label": .string("Quiet"), "detail": .string("The change applies without telling you")]),
-                              .object(["value": .string("notify"), "label": .string("Notify"), "detail": .string("The change applies and tells you")]),
-                              .object(["value": .string("approve"), "label": .string("Approve"), "detail": .string("The change waits for your approval")])]).objectValue else { return nil }
-            row["qualifiers"] = .object(["key": .string(governed)])
-            return .object(row)
-        }
-        return approvals + [key("permissions.macTerminalKey", "connections", "Mac Terminal key", .null, "Not set", "readOnly", order: 15,
+        [key("permissions.macTerminalKey", "connections", "Mac Terminal key", .null, "Not set", "readOnly", order: 15,
             help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.")]
     }()
 

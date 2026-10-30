@@ -102,7 +102,6 @@ struct SettingsRendererRow: View {
         case "permissions.budget.task": return "chart.pie"
         case "context.compaction.enabled": return "arrow.down.right.and.arrow.up.left"
         case "model.thinking[role=summarizer]": return "text.badge.checkmark"
-        case "permissions.floor": return "hand.raised"
         case "run.httpProxy": return "network"
         default: return nil
         }

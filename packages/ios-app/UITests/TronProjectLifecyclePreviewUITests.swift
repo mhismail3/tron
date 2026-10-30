@@ -33,7 +33,7 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
             for mode in ["light", "dark"] {
                 for surface in ["archive", "untrust", "trust-review", "rename-review"] {
                     let app = launch(surface: surface, mode: mode, size: size)
-                    XCTAssertTrue(app.buttons["settings-approval-approve-preview-project-\(surface.replacingOccurrences(of: "-review", with: ""))"].waitForExistence(timeout: 15), app.debugDescription)
+                    XCTAssertTrue(app.buttons["change-review-approve"].waitForExistence(timeout: 15), app.debugDescription)
                     capture(app, "project-\(surface)-\(mode)-\(size)-top")
                     app.swipeUp()
                     capture(app, "project-\(surface)-\(mode)-\(size)-bottom")
@@ -57,9 +57,9 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
         title(app, "Example")
         for operation in ["archive", "untrust"] {
             open(app, "project-preview-\(operation)")
-            XCTAssertTrue(app.buttons["settings-approval-approve-preview-project-\(operation)"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["change-review-approve"].waitForExistence(timeout: 10))
             capture(app, "project-route-\(operation)-approval-sub-sheet")
-            app.navigationBars.staticTexts["Approve"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            app.navigationBars.staticTexts["Review change"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
             title(app, "Example")
         }

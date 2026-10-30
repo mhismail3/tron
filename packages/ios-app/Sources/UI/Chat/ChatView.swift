@@ -1629,10 +1629,8 @@ struct ChatView: View {
     }
 
     private var candidatePresentedInteraction: ExtensionInteraction? {
-        // An approval form presents its request in the shared approval sheet,
-        // owned by the transcript's sheet host, never the interaction form (#2050).
         ChatExtensionInteractionPolicy.presentedInteraction(
-            (selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []).filter { $0.form?.presentation != .approval },
+            selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? [],
             requested: sessionPresentation.requestedInteractionScope,
             suppressing: sessionPresentation.suppressedInteractionScope
         )

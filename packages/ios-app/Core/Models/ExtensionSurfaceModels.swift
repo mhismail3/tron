@@ -96,20 +96,15 @@ package struct ExtensionFormQuestion: Codable, Hashable, Sendable, Identifiable 
     }
 }
 
-package enum ExtensionFormPresentation: String, Codable, Hashable, Sendable { case approval }
-
 package struct ExtensionFormDescriptor: Codable, Hashable, Sendable {
     package let version: Int
     package let title: String
     package let questions: [ExtensionFormQuestion]
     package let allowCancel: Bool
 
-    package let presentation: ExtensionFormPresentation?
-
-    private enum CodingKeys: String, CodingKey { case version, title, questions, allowCancel, presentation }
-    package init(version: Int, title: String, questions: [ExtensionFormQuestion], allowCancel: Bool, presentation: ExtensionFormPresentation? = nil) {
+    private enum CodingKeys: String, CodingKey { case version, title, questions, allowCancel }
+    package init(version: Int, title: String, questions: [ExtensionFormQuestion], allowCancel: Bool) {
         self.version = version; self.title = title; self.questions = questions; self.allowCancel = allowCancel
-        self.presentation = presentation
     }
     package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -117,7 +112,6 @@ package struct ExtensionFormDescriptor: Codable, Hashable, Sendable {
         title = try container.decodeBoundedString(forKey: .title, maximumBytes: 4 * 1_024)
         questions = try container.decodeBoundedArray(ExtensionFormQuestion.self, forKey: .questions, maximum: 4)
         allowCancel = try container.decode(Bool.self, forKey: .allowCancel)
-        presentation = try container.decodeIfPresent(ExtensionFormPresentation.self, forKey: .presentation)
     }
 }
 
@@ -850,11 +844,6 @@ package enum ExtensionPresentationPolicy {
               (1...4).contains(descriptor.questions.count),
               Set(descriptor.questions.map(\.id)).count == descriptor.questions.count,
               Set(descriptor.questions.map(\.question)).count == descriptor.questions.count else { return false }
-        if descriptor.presentation == .approval {
-            guard !descriptor.allowCancel, descriptor.questions.count == 1,
-                  let question = descriptor.questions.first, !question.multiSelect, !question.allowOther,
-                  question.options.count == 2, Set(question.options.map(\.id)) == ["approve", "deny"] else { return false }
-        }
         let multiQuestion = descriptor.questions.count > 1
         let headers = descriptor.questions.compactMap { $0.header?.trimmingCharacters(in: .whitespacesAndNewlines) }
         if multiQuestion && (headers.count != descriptor.questions.count || Set(headers).count != headers.count) { return false }

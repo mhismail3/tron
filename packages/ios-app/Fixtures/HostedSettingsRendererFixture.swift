@@ -147,8 +147,6 @@ struct HostedSettingsRendererFixture: View {
                         providerReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
                         PushNotificationsSettingsView()
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-inline-approval-boundary") {
-                        HostedInlineApprovalBoundaryFixture()
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
@@ -351,17 +349,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             }
             result = try change(params)
         case "settings.history": result = HostedSettingsChangesReview.page(params) ?? historyPage(params)
-        case "settings.approvals": result = .object(["requests": .array(approvalRequests())])
-        case "settings.decide":
-            if ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
-                throw GatewayFailure(code: "invalid_request", message: "Design previews cannot record a decision.", retryable: false, details: nil)
-            }
-            guard let id = params["requestId"]?.stringValue, params["digest"]?.stringValue == "digest-\(id)",
-                  params["commandId"]?.stringValue != nil, let approved = params["approved"]?.boolValue else {
-                throw GatewayFailure(code: "invalid_request", message: "Exact decision receipt required", retryable: false, details: nil)
-            }
-            decided[id] = approved
-            result = .object(["status": .string(approved ? "approved" : "declined"), "changes": .array([])])
         case "settings.undo":
             undos += 1
             if ProcessInfo.processInfo.arguments.contains("-settings-undo-refused") {
@@ -390,106 +377,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
 
     private var modelName: String { model == "pro" ? "Fixture Pro" : "Fixture Lite" }
 
-    /// #2050 preview requests as `settings.approvals` serves them: a profile
-    /// organization action (readable rows, exact identity) and a settings change.
-    static let profilePreview: JSONValue = .object(["title": .string("Review exact profile changes"), "items": .array([
-        placement("Prefers short morning check-ins over long evening calls.", "Unsorted › Review → Routines & wellbeing › Check ins", "note-1"),
-        placement("Keeps a paper notebook for travel plans.", "Unsorted › Review → Life & people › Travel", "note-2"),
-        placement("Uses the standing desk after lunch.", "Unsorted › Needs split → Routines & wellbeing", "note-3",
-                  detail: "Only placement and revision identity change. Text, confirmation, provenance, authority, status and historical revisions remain exact."),
-    ])])
-
-    private static func placement(_ label: String, _ value: String, _ id: String, detail: String? = nil) -> JSONValue {
-        var item: [String: JSONValue] = ["label": .string(label), "value": .string(value),
-            "exact": .string(#"{"id":"\#(id)-6f1c","revision":"rev-\#(id)-91ab","before":{"version":2,"path":["inferred","review"]},"after":{"version":2,"path":["routines","check-ins"]}}"#)]
-        if let detail { item["detail"] = .string(detail) }
-        return .object(item)
-    }
-
-    private func previewRequests() -> [JSONValue] {
-        let now = ISO8601DateFormatter().string(from: Date())
-        let expires = ISO8601DateFormatter().string(from: Date().addingTimeInterval(23 * 3600))
-        let home: JSONValue = .object(["kind": .string("home"), "sessionId": .string("fixture-home")])
-        let profile: JSONValue = .object(["requestId": .string("profile-wait"), "digest": .string("digest-profile-wait"),
-            "createdAt": .string(now), "expiresAt": .string(expires), "actor": home, "target": .object(["kind": .string("home")]),
-            "requester": .string("Home"), "reason": .string("You asked me to sort the Unsorted notes. Placement only: text and history stay unchanged, and the move can be undone."),
-            "changes": .array([]),
-            "action": .object(["subject": .string("home.profile.review"), "title": Self.profilePreview.objectValue!["title"]!, "items": Self.profilePreview.objectValue!["items"]!])])
-        let retries: JSONValue = .object(["requestId": .string("settings-pending"), "digest": .string("digest-settings-pending"),
-            "createdAt": .string(now), "expiresAt": .string(expires), "actor": home,
-            "target": .object(["kind": .string("session"), "sessionId": .string("fixture-chat")]), "requester": .string("Home"),
-            "reason": .string("A flaky provider keeps failing this chat's long runs."),
-            "changes": .array([.object(["changeId": .string("pending-settings-pending"), "key": .string("run.retry.maxRetries"),
-                "label": .string("Retries"), "layer": .string("session"), "op": .string("set"), "tier": .string("approve"),
-                "before": .number(3), "after": .number(5), "display": .object(["before": .string("3 retries"), "after": .string("5 retries")])])])])
-        return [profile, retries].filter { decided[$0.objectValue!["requestId"]!.stringValue!] == nil }
-    }
-
-    private func previewHistory() -> JSONValue {
-        let now = ISO8601DateFormatter().string(from: Date())
-        // The Gateway lists a request's pending fact only until a later fact settles it.
-        let waiting: [JSONValue] = ["profile-wait", "settings-pending"].filter { decided[$0] == nil }.map { id in
-            .object(["changeId": .string(id == "profile-wait" ? id : "pending-\(id)"), "requestId": .string(id), "action": .bool(id == "profile-wait"),
-                "at": .string(now), "actor": .object(["kind": .string("home"), "sessionId": .string("fixture-home")]),
-                "target": .object(["kind": .string(id == "profile-wait" ? "home" : "session")]), "layer": .string(id == "profile-wait" ? "global" : "session"),
-                "key": .string(id == "profile-wait" ? "home.profile.review" : "run.retry.maxRetries"), "op": .string("set"), "tier": .string("approve"),
-                "status": .string("pending"), "presentation": .object(["label": .string(id == "profile-wait" ? "Review exact profile changes" : "Retries"),
-                    "actor": .string("Home"), "layer": .string(id == "profile-wait" ? "Global" : "Session"),
-                    "display": .object(["before": .string(id == "profile-wait" ? "Requested" : "3 retries"), "after": .string(id == "profile-wait" ? "Waiting" : "5 retries")])])])
-        }
-        let entries: [JSONValue] = waiting + decided.keys.sorted().map { id in
-            let status = decided[id] == true ? "approved" : "declined"
-            if id == "profile-wait" {
-                return .object(["changeId": .string("settled-\(id)"), "requestId": .string(id), "refersTo": .string(id), "action": .bool(true),
-                    "at": .string(now), "actor": .object(["kind": .string("home"), "sessionId": .string("fixture-home")]),
-                    "target": .object(["kind": .string("home")]), "layer": .string("global"), "key": .string("home.profile.review"),
-                    "op": .string("set"), "tier": .string("approve"), "status": .string(status), "after": Self.profilePreview,
-                    "reason": .string("You asked me to sort the Unsorted notes. Placement only: text and history stay unchanged, and the move can be undone."),
-                    "presentation": .object(["label": .string("Review exact profile changes"), "actor": .string("Home"), "layer": .string("Global"),
-                        "display": .object(["before": .string("Requested"), "after": .string(status == "approved" ? "Done" : "Declined")])])])
-            }
-            return .object(["changeId": .string("settled-\(id)"), "requestId": .string(id), "refersTo": .string("pending-\(id)"),
-                "at": .string(now), "actor": .object(["kind": .string("home"), "sessionId": .string("fixture-home")]),
-                "target": .object(["kind": .string("session"), "sessionId": .string("fixture-chat")]), "layer": .string("session"),
-                "key": .string("run.retry.maxRetries"), "op": .string("set"), "tier": .string("approve"), "status": .string(status),
-                "before": .number(3), "after": .number(5), "reason": .string("A flaky provider keeps failing this chat's long runs."),
-                "presentation": .object(["label": .string("Retries"), "actor": .string("Home"), "layer": .string("Session"),
-                    "display": .object(["before": .string("3 retries"), "after": .string("5 retries")])])])
-        }
-        return .object(["entries": .array(entries), "nextCursor": .null])
-    }
-
-    private func approvalRequests() -> [JSONValue] {
-        if ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
-            return HostedProjectApprovalPreview.requests
-        }
-        if HostedInlineApprovalBoundaryFixture.requestsPreview { return previewRequests() }
-        guard ProcessInfo.processInfo.arguments.contains("-settings-changes-approvals") else { return [] }
-        return ["approve", "decline"].filter { decided[$0] == nil }.map { id in
-            .object(["requestId": .string(id), "digest": .string("digest-\(id)"),
-                "createdAt": .string(ISO8601DateFormatter().string(from: Date())),
-                "expiresAt": .string(ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))),
-                "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
-                "target": .object(["kind": .string("global")]), "requester": .string("Fixture agent"),
-                "changes": .array([.object(["changeId": .string("pending-\(id)"), "key": .string("run.retry.maxRetries"),
-                    "label": .string("Request \(id)"), "layer": .string("global"), "op": .string("set"), "tier": .string("approve"),
-                    "before": .number(4), "after": .number(6), "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])])])])
-        }
-    }
-
     private func historyPage(_ params: [String: JSONValue]) -> JSONValue {
-        if HostedInlineApprovalBoundaryFixture.requestsPreview { return previewHistory() }
-        if ProcessInfo.processInfo.arguments.contains("-settings-inline-approval-boundary") {
-            return .object(["entries": .array(decided.keys.sorted().map { id in
-                .object(["changeId": .string("settled-\(id)"), "requestId": .string(id), "refersTo": .string("pending-\(id)"),
-                    "at": .string(ISO8601DateFormatter().string(from: Date())), "actor": .object(["kind": .string("agent")]),
-                    "target": .object(["kind": .string("global")]), "layer": .string("global"), "key": .string("run.retry.maxRetries"),
-                    "op": .string("set"), "tier": .string("approve"), "status": .string(decided[id] == true ? "approved" : "declined"),
-                    "before": .number(4), "after": .number(6), "presentation": .object([
-                        "label": .string("Request \(id)"), "actor": .string("Fixture agent"), "layer": .string("Global"),
-                        "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])])])
-            }), "nextCursor": .null])
-        }
         guard params["key"] != nil || params["cursor"]?.stringValue == "fixture-next" else {
             return .object(["entries": .array([]), "nextCursor": .string("fixture-next")])
         }

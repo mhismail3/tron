@@ -59,13 +59,17 @@ struct ChangeReviewCard: View {
             }
             if approve != nil || cancel != nil || undo != nil {
                 HStack {
-                    if let cancel { Button("Cancel", action: cancel).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronAmber)) }
+                    if let cancel {
+                        Button("Cancel", action: cancel).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronAmber))
+                            .accessibilityIdentifier("change-review-cancel")
+                    }
                     Spacer(minLength: 8)
                     if let undo { Button("Undo", action: undo).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronAmber)) }
                     if let approve {
                         Button(action: approve) {
                             if submitting { ProgressView() } else { Text("Approve") }
                         }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronAmber))
+                            .accessibilityIdentifier("change-review-approve")
                     }
                 }.disabled(submitting)
             }
@@ -73,6 +77,8 @@ struct ChangeReviewCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.08)
+        // A containing element keeps each action's own identifier.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("change-review-card")
     }
 
@@ -84,5 +90,49 @@ struct ChangeReviewCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The one sheet that presents an exact review. Its owner answers Approve with the
+/// review's digest through the typed RPC; Cancel or dismissal applies nothing.
+struct ChangeReviewSheet: View {
+    let review: ChangeReview
+    var submitting = false
+    let approve: () -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                ChangeReviewCard(review: review, submitting: submitting, approve: approve, cancel: cancel)
+                    .padding(18)
+            }
+            .tronScrollEdgeChrome()
+            .navigationTitle("Review change")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .tronTopBlur(.sheet)
+    }
+}
+
+/// One exact review waiting for the maintainer's tap, and the typed owner call
+/// that answers it with the review's digest. The call reports its own outcome.
+struct PendingChangeReview: Identifiable {
+    let review: ChangeReview
+    let confirm: @MainActor (String) async -> Void
+    var id: String { review.digest }
+}
+
+extension View {
+    /// Presents a pending review in the shared sheet. Approve retires the sheet and
+    /// answers once; Cancel or dismissal leaves nothing applied.
+    func changeReviewSheet(_ pending: Binding<PendingChangeReview?>, identity: String) -> some View {
+        tronManagedSheet(item: pending, identity: { "\(identity).\($0.id)" }) { item in
+            ChangeReviewSheet(review: item.review, approve: {
+                guard pending.wrappedValue?.id == item.id else { return }
+                pending.wrappedValue = nil
+                Task { @MainActor in await item.confirm(item.review.digest) }
+            }, cancel: { pending.wrappedValue = nil })
+        }
     }
 }
