@@ -123,23 +123,22 @@ no queue, gate or auto-revert.
 - Answer questions in chat; file concrete work (bodies hold remaining scope; PRs optional);
   Pi upstream: #198. Home workers `checkin` at milestones/~30 min; `report` seals results.
 
-## Restructure slices (while epic #1345 is open)
+## Working decisions
 
-- [Plan](docs/restructure/plan.md) §4.2/§8 govern, aiming at its goals G1–G6 (§3). One slice =
-  one issue, worktree and owner module, files announced in its module issue first; one
-  change type per commit, never move and change together.
-- **Lock before touch:** affected non-deferred locks pass on base; serial locks follow batch rules.
-  Golden changes need maintainer before/after review beside the actual diff. **Hard checks:**
-  upward/two-way/Pi-seam pairs only shrink; one owner per file; no new production file > 800 lines.
-- **Feature pause for every worker:** no new features in `RuntimeSlot`, `RuntimeRegistry`,
-  `GatewayService`, `GatewayServer`, `gateway-main`, `protocol/types.ts`, `projection.ts`,
-  `AppModel`, `SessionPresentationStore`, `ChatView`, `GatewayClient` until their target
-  module exists. Heavy cleanup, test-health and robustness belong in #1345; other fixes
-  and leaf features use targeted checks, not exhaustive legacy triage. Bug fixes in paused
-  owners announce their files in the module issue (or #1345) first.
-- Fresh read-only review before landing for new tooling, locks and kernel semantics, not
-  clean moves (plan §8.4); the worker fixes defects. Closing evidence ≤ 1,500 characters
-  (App. D). ≤ 4 restructure workers + 1 steward; stop on plan §4.2.
+- A blocker is a bug in the system. Unblock it right away. If the same kind of failure
+  has happened before, or the fix is cheap, fix the mechanism behind it with a script,
+  a test or a rule. Otherwise write it down and move on. A guard that costs more than
+  the failures it prevents gets deleted.
+- Workers decide intended-behaviour golden/assertion/fixture/timeout updates themselves;
+  Home decides non-subjective gates, and an exact known-failures registry match passes.
+  Mohsin gets subjective product/visual choices (inline PNGs), irreversible/trust/spend
+  calls and rebuild taps. Add no gates; reviewers only for security, data loss or
+  irreversible changes, and only when they change a decision.
+- Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
+  file-length targets, blanket base-lock runs or pretend feature pauses.
+- Follow #2132's cadence: default 2h task timebox, 30-minute SHA/change/blocker
+  check-ins, then land green work or settle with at most 25 lines. Build ahead on
+  branches; only runtime landings wait for a checkpoint.
 
 ## Documentation
 - Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,
