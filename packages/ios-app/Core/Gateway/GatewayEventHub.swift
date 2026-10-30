@@ -9,7 +9,7 @@ package enum GatewayDiagnosticTopicAdmission {
         "session.structureChanged", "session.contextChanged", "session.resourcesChanged",
         "session.processTranscript.changed", "transport.disconnected", "transport.resyncRequired",
         "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
-        "auth.completed", "automation.changed", "knowledge.changed", "knowledge.curation.job", "settings.changed", "trust.changed",
+        "auth.completed", "automation.changed", "settings.changed", "trust.changed",
         "providers.changed", "packages.changed", "packages.progress", "packages.completed",
         "models.customChanged", "models.recentChanged", "models.catalogChanged", "mcp.changed", "devices.changed"
     ]
@@ -294,7 +294,6 @@ actor GatewayEventHub {
         case .none where delivery.event.topic == "notification.inbox.changed": return "\(prefix)notificationInboxChanged"
         case .none where delivery.event.topic == "devices.changed": return "\(prefix)devicesChanged"
         case .automationChanged: return "\(prefix)automationChanged"
-        case .knowledgeChanged: return "\(prefix)knowledgeChanged"
         default: return nil
         }
     }

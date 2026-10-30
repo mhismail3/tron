@@ -70,20 +70,14 @@ import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { HomeProfileItems } from "./modules/home/home-profile.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
-import { KnowledgeService, QueueKnowledgeModel } from "./knowledge/knowledge-service.js";
-import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
+import { KnowledgeService } from "./knowledge/knowledge-service.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "./providers/model-queue-extension.js";
 import { ModelQueueOwner, modelQueueProjectionPath } from "./providers/model-queue.js";
 import { ProviderUsageOwner } from "./providers/provider-usage.js";
-import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
-import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
-import { KnowledgeTaggingBudget, KnowledgeTaggingEngine } from "./knowledge/knowledge-tagger.js";
 import { SessionSearchIndex } from "./sessions/session-search-index.js";
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
-import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
-import { knowledgeModelLimits, type KnowledgeRecord } from "./knowledge/knowledge-contract.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./kernel/delegation/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./kernel/delegation/delegated-root-migration.js";
@@ -335,7 +329,7 @@ const connections = new ConnectionOwner(config.tronHome, undefined, (instanceIds
   "Retired unsupported legacy Jev connection instances",
   { event: "connection.legacy-jev-retired", source: "connections", instanceIds },
 ));
-const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
+
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
 const scheduleToolOperations: ScheduleToolOperations = {
@@ -505,43 +499,8 @@ const knowledgeChanges = new KnowledgeChangeCoalescer(change => transport?.broad
 const knowledgeStore = new KnowledgeStore(
   modules.contract(workspaceModule),
   change => knowledgeChanges.record(change),
-  async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );
-let queueKnowledgeSummary: (source: KnowledgeRecord & { kind: "source" }) => void = () => {};
-const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, () => modelRuntime.getProviderAuthStatus("typesafe").configured);
-const jevSourceAssessment = new JevSourceAssessmentModel(modelRuntime);
-const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
-  credentials: knowledgeCredentials,
-  queueSummary: source => queueKnowledgeSummary(source),
-  assessment: jevSourceAssessment,
-  jevBudget: knowledgeTaggingBudget,
-  connections,
-});
-const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(modelRuntime), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, assessment: jevSourceAssessment };
-const knowledge = new KnowledgeService(
-  knowledgeStore,
-  {
-    connector: (action, signal) => knowledgeConnector.invoke(action, signal),
-  },
-  (knowledgeConfig) => new QueueKnowledgeModel(modelQueue, knowledgeModelLimits(knowledgeConfig)),
-  workRegistry,
-  async operation => {
-    if (operation !== "tags") return { ok: true };
-    return knowledgeTaggingBudget.gate("typesafe");
-  },
-  // The event carries the whole job, the same shape `knowledge.curation.jobs`
-  // returns, so one client decoder serves both.
-  new KnowledgeCurationJobs(64, 120_000, job => {
-    transport?.broadcast("knowledge.curation.job", { ...job });
-    if (job.status === "failed" && (job.code === "model-error" || job.code === "model-output-invalid")) logger.log(
-      "warning",
-      "Knowledge model completion failed",
-      { event: "knowledge.model-failed", source: "knowledge", code: job.code, ...(job.reason ? { reason: job.reason } : {}) },
-    );
-  }),
-  knowledgeTagging,
-);
-queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
+const knowledge = new KnowledgeService(knowledgeStore);
 const packages = new PackageService(
   config.agentDir,
   trust,
@@ -661,7 +620,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     // join comparisons/observers before their runtime and notification targets.
     await shutdownStep("outside-settings-dispose", () => outsideSettings.dispose(), recordShutdownStep);
     await shutdownStep("notifications-dispose", async () => { notifications.dispose(); }, recordShutdownStep);
-    await shutdownStep("knowledge-dispose", async () => { knowledge.dispose(); }, recordShutdownStep);
     await shutdownStep("automations-dispose", () => automations.dispose(), recordShutdownStep);
     await shutdownStep("search-warm-settle", async () => { await sessionSearchWarmTask?.catch(() => {}); }, recordShutdownStep);
     sessionSearchWarmTask = undefined;
@@ -911,15 +869,6 @@ startupCheckpoint("composition");
 await transport.listen(async () => {
   service.startModelReleaseDateRefresh();
   startupCheckpoint("listener-bind");
-  // The shared settings stores move to the three-layer vocabulary while clients
-  // see warming-up, before the owners that read them load (sessions.initialize).
-  // Never fatal (#1649): a refusal changes nothing, is logged, and retries next start.
-  // This startup follows a user-initiated Gateway update. Keep Knowledge
-  // unavailable on upgrade failure without disabling unrelated chat features.
-  await knowledgeStore.upgradeStorage().catch((error: unknown) => {
-    logger.log("warning", "Knowledge catalog upgrade reported an error; inspect Knowledge status. No reset was attempted.", { event: "knowledge.upgrade-failed", source: "knowledge", error });
-  });
-  startupCheckpoint("knowledge-storage");
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
   startupCheckpoint("session-registry");
   // Installed native owners and presentation observers now exist; inspection

@@ -176,7 +176,7 @@ changes keep its store, cursors and spend.
 
 - **Research tools** (read-only): the shared `web_search` search/read/content contract
   ([public-web owner](../../knowledge/README.md#shared-public-web-research)), `session_search`,
-  `session_read` (never Home chapters), read-only `knowledge`, `read_file` (explicitly trusted
+  `session_read` (never Home chapters), note-only `knowledge` (read/list of active Profile notes), `read_file` (explicitly trusted
   projects). Web schema, backend and quota owner are identical to ordinary workers and native
   research children. Results are capped untrusted data; delegation is not gated on them.
 - **Settings tool:** Home changes settings through the one change path as `home`; fetched
