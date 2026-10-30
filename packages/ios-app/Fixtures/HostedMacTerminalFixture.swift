@@ -35,6 +35,10 @@ struct HostedMacTerminalFixture: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-token")
+        if scenario == "remove-profile-switch" {
+            try! profiles.save(GatewayProfile(id: "mac-terminal-b", label: "Fixture Mac B", host: "mac-terminal-b.example.test",
+                port: 9847, machineId: "mac-terminal-machine-b", deviceId: "fixture-iphone-b"), token: "fixture-token-b", selecting: false)
+        }
         let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in
             MacTerminalFixtureSocket(gateway: gateway, answers: !gateway.isStopped)
         })
@@ -71,6 +75,17 @@ struct HostedMacTerminalFixture: View {
             // The test posts this while the Mac Terminal sheet covers the screen.
             let gateway = gateway
             DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.stop-gateway") { Task { await gateway.stop() } }
+            for (suffix, profileID) in [("select-a", "mac-terminal"), ("select-b", "mac-terminal-b")] {
+                DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.\(suffix)") {
+                    Task { @MainActor in
+                        let selected = model.profiles.profiles.first { $0.id == profileID }!
+                        try! model.profiles.select(selected)
+                        let root = URL(fileURLWithPath: ProcessInfo.processInfo.environment["TRON_MAC_TERMINAL_FIXTURE"]!).deletingLastPathComponent()
+                        try! Data((model.profiles.selected?.machineId ?? "").utf8).write(to: root.appending(path: "selected-machine.txt"), options: .atomic)
+                    }
+                }
+            }
+            DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.fail-removal") { Task { await gateway.failRemoval() } }
             if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("migration") }) {
                 DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.migration-unblock") {
                     Task { @MainActor in try! MacTerminalMigrationFixture.unblock() }
@@ -175,6 +190,9 @@ private actor MacTerminalFixtureGateway {
     private let stopped = OSAllocatedUnfairLock(initialState: false)
     nonisolated var isStopped: Bool { stopped.withLock { $0 } }
     private var serverEnabled = false
+    private var pendingRemoval: CheckedContinuation<Void, Never>?
+
+    func failRemoval() { pendingRemoval?.resume(); pendingRemoval = nil }
 
     init(scenario: String, configuration: MacTerminalFixtureConfiguration?) {
         self.scenario = scenario
@@ -216,6 +234,16 @@ private actor MacTerminalFixtureGateway {
             guard change["key"]?.stringValue == "permissions.macTerminalKey",
                   change["qualifiers"]?.objectValue?["device"]?.stringValue == "fixture-iphone" else {
                 return (nil, failure("Unexpected settings change"))
+            }
+            if scenario == "remove-profile-switch", change["op"]?.stringValue == "unset" {
+                // Hold the real controller’s wire request until the UI has
+                // closed, selected B and reopened. Failed revocation changes no key.
+                await withCheckedContinuation { continuation in
+                    pendingRemoval = continuation
+                    let root = URL(fileURLWithPath: configuration.authorizedKeys).deletingLastPathComponent()
+                    try! Data("pending".utf8).write(to: root.appending(path: "removal-pending.txt"), options: .atomic)
+                }
+                return (nil, failure("The original Mac refused this key removal"))
             }
             let line: String? = change["op"]?.stringValue == "set" ? change["value"]?.stringValue.map {
                 "from=\"100.64.0.0/10\",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc \($0) tron-mac-terminal:fixture-iphone"

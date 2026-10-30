@@ -149,6 +149,54 @@ final class TronMacTerminalUITests: XCTestCase {
     }
 
     @MainActor
+    func testFailedRemoveReconcilesPendingProfileSwitchWithoutLosingTheOldEnrollment() throws {
+        let app = launch(scenario: "remove-profile-switch")
+        defer { app.terminate() }
+        let files = configuration.deletingLastPathComponent()
+        openMacTerminal(app)
+        app.buttons["Enable Mac Terminal"].tap()
+        trustHost(app)
+        waitForPhase(app, "Connected")
+        focusTerminal(app)
+        app.typeText("echo \"before=$$\" >> \(marker.path)\n")
+        let originalPID = try markerValue("before")
+        let originalAuthorization = try Data(contentsOf: authorizedKeys)
+        app.buttons["Dismiss keyboard"].tap()
+        app.buttons["Mac Terminal options"].tap()
+        app.buttons["Remove Mac Terminal"].tap()
+        app.buttons["Remove"].tap()
+        let pending = files.appending(path: "removal-pending.txt")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            FileManager.default.fileExists(atPath: pending.path)
+        }, object: nil)], timeout: 15), .completed)
+        app.navigationBars.buttons["Done"].firstMatch.tap()
+        postMacTerminalNotification("select-b")
+        let selected = files.appending(path: "selected-machine.txt")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (try? String(contentsOf: selected, encoding: .utf8)) == "mac-terminal-machine-b"
+        }, object: nil)], timeout: 15), .completed)
+        openMacTerminal(app)
+        postMacTerminalNotification("fail-removal")
+        XCTAssertTrue(app.staticTexts["Open a shell on your Mac"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(try Data(contentsOf: authorizedKeys), originalAuthorization, "failed revocation changed the old Mac’s authorization")
+        app.navigationBars.buttons["Done"].firstMatch.tap()
+        postMacTerminalNotification("select-a")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (try? String(contentsOf: selected, encoding: .utf8)) == "mac-terminal-machine"
+        }, object: nil)], timeout: 15), .completed)
+        openMacTerminal(app)
+        waitForPhase(app, "Connected")
+        focusTerminal(app)
+        app.typeText("echo \"after=$$\" >> \(marker.path)\n")
+        XCTAssertEqual(try markerValue("after"), originalPID, "returning to A lost its enrollment or shell")
+    }
+
+    private func postMacTerminalNotification(_ suffix: String) {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(rawValue: "com.tron.mobile.fixture.mac-terminal.\(suffix)" as CFString), nil, nil, true)
+    }
+
+    @MainActor
     func testHostKeyMismatchNeverConnects() throws {
         let app = launch(scenario: "mismatch")
         defer { app.terminate() }

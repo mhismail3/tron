@@ -32,6 +32,9 @@ neither Tron.app nor the Gateway owns its process or connection.
 - Done/background closes the SSH attachment, not the tmux shell. Foreground or
   **Reconnect** opens a new attachment and uses tmux's authoritative repaint.
   Input is never replayed. Shell exit ends that shell; reconnect starts another.
+- Accepted key mutations remain scoped to their original Mac across dismissal
+  and profile changes. Failure preserves that enrollment and reconciles the
+  currently selected Mac instead of reconnecting the old one under its name.
 - Each connection is generation-fenced. Output retained by the controller is
   bounded to 1 MiB; the SSH event stream is bounded and disconnects rather than
   silently continuing an emulator after lost bytes.
