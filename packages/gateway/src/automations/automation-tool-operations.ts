@@ -70,7 +70,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       || fields.some(key => input[key] === undefined)) throw new GatewayError("invalid_request", "Invalid monitor fields for this action");
     const owns = (record: AutomationRecord) => record.provenance.kind === "home" && record.provenance.homeId === route.homeId;
     if (action === "list") {
-      const all = this.service.store.snapshot().filter(owns).reverse();
+      const all = this.service.store.snapshot().filter(owns).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id));
       return { monitors: all.slice(0, 50).map(({ id, revision, name, activation, trigger, provenance }) =>
         ({ id, revision, name, activation, trigger, expiresAt: provenance.kind === "home" ? provenance.expiresAt : undefined })), omittedCount: Math.max(0, all.length - 50) };
     }

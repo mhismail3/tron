@@ -1,4 +1,4 @@
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getCurrentTools } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
@@ -70,6 +70,36 @@ it("real Gateway/socket/Pi: the existing scheduler timer expires a monitor witho
   const before = gateway.record().providerRequests.length;
   await waitFor(async () => (await phone.request("automation.get", { automationId: monitor.id })).result.activation === "completed", "real scheduler timer disarms expired monitor");
   expect(gateway.record().providerRequests).toHaveLength(before);
+});
+
+it("real Gateway/socket/Pi: list selects the newest 50 persisted monitors after restart", async () => {
+  const { gateway, phone, prompt } = await fixture();
+  await prompt("Create the persisted fixture template.", [{ action: "create", name: "Template", message: "Fixture only.", everyMinutes: 5, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }]);
+  const template = (await phone.request("automation.list", {})).result.items[0];
+  const record = (await phone.request("automation.get", { automationId: template.id })).result;
+  const directory = join(gateway.tronHome, "gateway", "automations");
+  let restarted: LockGateway | undefined;
+  try {
+    await gateway.dispose({ keepRoot: true });
+    await rm(join(directory, `${record.id}.json`));
+    // Seed valid paused records at the persisted I/O boundary. Their UUID order
+    // opposes creation order, exposing dependence on directory enumeration.
+    for (let index = 0; index < 51; index += 1) {
+      const id = `00000000-0000-4000-8000-${(index + 1).toString().padStart(12, "0")}`;
+      await writeFile(join(directory, `${id}.json`), JSON.stringify({ ...record, id, name: `Monitor ${index}`, activation: "paused", createdAt: new Date(Date.now() - index * 1_000).toISOString() }), { mode: 0o600 });
+    }
+    restarted = await startLockGateway("home-monitor", { root: gateway.root, automations: true, home: { memorySummarizer: () => async () => fauxAssistantMessage("Summary.") } });
+    owned.push(restarted);
+    const reconnected = await restarted.connect("phone-restarted");
+    const status = (await reconnected.request("home.status", {})).result;
+    restarted.script([() => fauxAssistantMessage([fauxToolCall("monitor", { action: "list" })], { stopReason: "toolUse" }), () => fauxAssistantMessage("Listed.")]);
+    expect((await reconnected.request("home.prompt", { commandId: restarted.commandId(), text: "List the persisted monitors." })).ok).toBe(true);
+    await restarted.settled(status.sessionId);
+    const result = (await restarted.registry.acquire(status.sessionId)).canonicalSessionEntries().findLast(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "monitor");
+    const listed = result?.type === "message" ? (result.message as { details?: { monitors: Array<{ name: string }>; omittedCount: number } }).details : undefined;
+    expect(listed?.monitors.map(monitor => monitor.name)).toEqual(Array.from({ length: 50 }, (_, index) => `Monitor ${index}`));
+    expect(listed?.omittedCount).toBe(1);
+  } finally { await restarted?.dispose(); await rm(gateway.root, { recursive: true, force: true }); }
 });
 
 it.each(["monitor", "result"] as const)("real Gateway/socket/Pi: %s wake resumes the same progress worker exactly once", async mode => {
