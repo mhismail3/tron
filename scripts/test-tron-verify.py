@@ -415,6 +415,7 @@ class QuarantineTests(VerifyCase):
         missing = r.health()
         self.assertEqual(missing['landedChanges'][0]['commitToPublication']['status'], 'unavailable')
         self.assertIsNone(missing['landedChanges'][0]['commitToPublication']['seconds'])
+        self.assertIsNone(missing['landedChanges'][0]['introducedCommits'])
 
     def test_health_repeated_attempts_privacy_identity_and_owned_cleanup(self):
         r = self.repo
