@@ -251,11 +251,11 @@ class FixtureTests(unittest.TestCase):
             const ROLES = ["worker", "background"] as const;
             export const KEYS: readonly { id: string; layers: Partial<Record<LayerId, string>> }[] = [
               { id: "run.retry.maxRetries", group: "advanced", qualifier: "model", layers: { mac: "r", chat: "r" }, timing: "live",
-                effect: "next-request", floor: "quiet", direction: () => "narrow" },
+                effect: "next-request", tap: "spend", direction: () => "narrow" },
               ...ROLES.map(role => ({ id: `model.queue[role=${role}]`, group: "workers", home: { layers: [] },
-                layers: both("q"), timing: { narrow: "live", widen: "fixed" }, floor: { widen: "notify", narrow: "quiet" } })),
+                layers: both("q"), timing: { narrow: "live", widen: "fixed" } })),
             ];
-            export const RECORD_SUBJECTS = [{ id: "tools.mcp.server", group: "tools", qualifier: "server", floor: "notify" }];
+            export const RECORD_SUBJECTS = [{ id: "tools.mcp.server", group: "tools", qualifier: "server" }];
             void LAYERS;
             """
         self.module("packages/gateway/src/kernel/settings", "settings", {"settings-schema.ts": schema, "tool-contract.ts": types})
@@ -268,11 +268,11 @@ class FixtureTests(unittest.TestCase):
         self.docs("update")
         self.assertEqual((self.repo / "settings.md").read_text().splitlines()[4:8], [
             "| --- | --- | --- | --- | --- | --- | --- | --- |",
-            "| `run.retry.maxRetries` | model | advanced | chat, mac | as allowed | live | next-request | quiet |",
-            "| `model.queue[role=worker]` | — | workers | project, mac | none | narrow live, widen fixed | — | narrow quiet, widen notify |",
-            "| `model.queue[role=background]` | — | workers | project, mac | none | narrow live, widen fixed | — | narrow quiet, widen notify |",
+            "| `run.retry.maxRetries` | model | advanced | chat, mac | as allowed | live | next-request | spend |",
+            "| `model.queue[role=worker]` | — | workers | project, mac | none | narrow live, widen fixed | — | — |",
+            "| `model.queue[role=background]` | — | workers | project, mac | none | narrow live, widen fixed | — | — |",
         ])
-        self.assertIn("| `tools.mcp.server` | tools | server | notify |", (self.repo / "settings.md").read_text())
+        self.assertIn("| `tools.mcp.server` | tools | server |", (self.repo / "settings.md").read_text())
 
         # Known bad: a key added to the schema leaves the committed block stale.
         self.write("packages/gateway/src/kernel/settings/settings-schema.ts", schema.replace(
