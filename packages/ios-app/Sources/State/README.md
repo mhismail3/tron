@@ -51,8 +51,8 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   `permissions.projectTrust` key. `SettingsTrustCoordinator` keeps one bounded `SettingsSnapshot`
   per target that every renderer for that target reads; generic edits dry-run first.
   Native project lifecycle uses `projects.lifecycle.v1`: disposable `projects.list`/`inspect`
-  projections and receipt-owned `projects.request`, followed by a separate exact-digest
-  `settings.decide` tap. `ProjectLifecycleModels` decodes that contract strictly; names,
+  projections and receipt-owned `projects.change`, whose review the shared card confirms by
+  resending its exact digest and intent. `ProjectLifecycleModels` decodes that contract strictly; names,
   paths and cursors are never trimmed. There is no iOS project store or approval engine.
 - **Autosave.** `ConfigurationAutosaveCoordinator` admits writes only from user input, debounces,
   serializes, merges sparse patches per target, retains up to 64 batches (then rejects visibly),

@@ -2148,8 +2148,7 @@ export class GatewayService {
         });
       case "settings.undo":
         return this.mutation(client, method, params, async (workToken) => {
-          rejectUnknownFields(params, ["commandId", "changeId", "fence", "confirmationDigest"], method);
-          if (client.isLocal && params.confirmationDigest !== undefined) throw new GatewayError("auth_required", "An exact change tap requires a paired native device");
+          rejectUnknownFields(params, ["commandId", "changeId", "fence"], method);
           const changeId = string(params.changeId, "changeId", { max: 100 });
           const found = await this.dependencies.settingsChanges.record.entry(changeId);
           const session = found?.entry.target.kind === "session"
@@ -2157,7 +2156,6 @@ export class GatewayService {
             : undefined;
           const homeChapter = found?.entry.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.undo(changeId, {
-            ...(params.confirmationDigest === undefined ? {} : { confirmationDigest: string(params.confirmationDigest, "confirmationDigest", { min: 64, max: 64 }) }),
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(homeChapter ? { homeChapter } : {}),
@@ -2168,13 +2166,11 @@ export class GatewayService {
         // Apply again is offered on an outside change that replaced or removed a
         // value Tron wrote (docs/settings-model.md 5.6); it is never automatic.
         return this.mutation(client, method, params, async workToken => {
-          rejectUnknownFields(params, ["commandId", "changeId", "confirmationDigest"], method);
-          if (client.isLocal && params.confirmationDigest !== undefined) throw new GatewayError("auth_required", "An exact change tap requires a paired native device");
+          rejectUnknownFields(params, ["commandId", "changeId"], method);
           const changeId = string(params.changeId, "changeId", { max: 100 });
           const entry = await this.dependencies.settingsChanges.record.find(changeId);
           const homeChapter = entry?.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
           return safeJson(await this.dependencies.settingsChanges.applyAgain(changeId, {
-            ...(params.confirmationDigest === undefined ? {} : { confirmationDigest: string(params.confirmationDigest, "confirmationDigest", { min: 64, max: 64 }) }),
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(homeChapter ? { homeChapter } : {}),

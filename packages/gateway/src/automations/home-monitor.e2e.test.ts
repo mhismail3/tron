@@ -59,7 +59,6 @@ it("real Gateway/socket/Pi: Home creates a visible bounded monitor without appro
   expect(listed.result.items).toHaveLength(1);
   const record = (await phone.request("automation.get", { automationId: listed.result.items[0].id })).result;
   expect(record).toMatchObject({ activation: "enabled", provenance: { kind: "home", expiresAt }, trigger: { kind: "interval", everySeconds: 300 }, target: { kind: "home" }, action: { kind: "sessionPrompt" } });
-  expect((await phone.request("settings.approvals", {})).result.requests).toHaveLength(0);
   expect(gateway.record().providerRequests[0].tools).toContain("monitor");
 });
 
@@ -202,7 +201,6 @@ it("real Gateway/socket/Pi: interval, expiry, active-count and ownership refusal
   expect(ownList.omittedCount).toBe(0);
   expect(ownList.monitors.every((record: any) => record.expiresAt && record.history === undefined && record.action === undefined)).toBe(true);
   expect(ownList.monitors.some((record: any) => record.id === foreign.result.id)).toBe(false);
-  expect((await phone.request("settings.approvals", {})).result.requests).toHaveLength(0);
   expect(gateway.record().providerRequests.every(request => request.tools.includes("monitor"))).toBe(true);
 });
 

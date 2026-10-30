@@ -96,7 +96,6 @@ private actor SettingsListRefreshSocket: GatewaySocketConnection {
             }
             result = resolution()
         case "session.list": result = .object(["sessions": .array([]), "nextCursor": .null])
-        case "settings.approvals": result = .object(["requests": .array([])])
         default: result = .object([:])
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))

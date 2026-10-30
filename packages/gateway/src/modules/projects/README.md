@@ -95,26 +95,25 @@ routing uses the same owner as the agent tool, not a tool invocation from the UI
   read-only; idle live sessions block moves; existing remotes block GitHub creation.
   These are disposable snapshots. Submission and decision always revalidate;
   rename destination validity/availability is checked on request.
-- `projects.request({commandId, action, name, newName?, github?, reason})`
-  returns the canonical pending Settings ChangeResult and approval reference.
-  Actions are create/trust/rename/archive/untrust; field bounds match the tool,
-  with commandId 8–160 characters. Native UI identity is transport-derived, never
-  caller-supplied. Creation leaves a local untrusted repository; a separate
-  `settings.decide` tap with exact requestId/digest is required to grant trust or
-  apply an action. The same native maintainer identity can make that separate
-  decision; this request RPC has no approval flag or direct apply route.
+- `projects.change({commandId, action, name, newName?, github?, reason, confirmation?})`
+  without `confirmation` plans the action and returns `{status:"review", review, intent}`
+  with no effects. Actions are create/trust/rename/archive/untrust; field bounds match
+  the tool, with commandId 8–160 characters. Native UI identity is transport-derived,
+  never caller-supplied; local clients cannot confirm. The shared card's Approve resends
+  the request with `confirmation: {digest, intent}` under a new command ID; the owner
+  revalidates canonical filesystem, Git, occupancy and trust state against the digest
+  before effects. Create applies only after that tap and creates a trusted repository.
+  Agent tools reach the same review through the native `change` interaction.
 
 Canonical receipts bind caller + commandId + method: retries return the original
 result even if their payload differs. A new intent requires a new ID; different
 methods have separate receipt keys. Native UI terminal requests have no model
 continuation/outbox; their canonical audit and receipts serve the caller.
-The approval index and terminal audit append are separate writes: an I/O failure
-between them can omit the terminal history fact after the native item retires.
-This does not replay the action; inspect its actual state before a new request.
-Disconnect cancels disposable reads, not accepted mutations.
-Refresh after request/decision, reconnect/re-entry, and existing
-`settings.approvalsChanged` (plus relevant trust/settings changes). No second
-project cache, change stream or approval engine is introduced.
+A failed effect's audit append that itself fails, or an applied effect whose history
+publication fails, is an uncertain outcome that keeps the receipt fence; inspect the
+actual state before a new request. Disconnect cancels disposable reads, not accepted
+mutations. Refresh after review/confirmation, reconnect/re-entry and trust/settings
+changes. No second project cache, change stream or approval engine is introduced.
 
 ## Entry points
 
@@ -123,9 +122,9 @@ project cache, change stream or approval engine is introduced.
 
 ## Signals
 
-Settings Changes keys `project.create` (local creation) and `project.lifecycle`
-(pending/approved/declined/expired/superseded/failed action) diagnose the phase.
-A failed action outcome instructs the requester to inspect operation state before retry.
+Settings Changes key `project.lifecycle` (started/applied/failed action facts) diagnoses
+the phase. A failed or uncertain action instructs the requester to inspect operation
+state before retry.
 
 ## Verify
 
