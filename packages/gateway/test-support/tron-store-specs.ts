@@ -7,7 +7,6 @@ import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
-import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { SwiftAppStore } from "../src/modules/apps/swift-app-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
@@ -91,12 +90,11 @@ async function settingsPath(home: string, knowledge?: KnowledgeService) {
   const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
   const model = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalService(home, { launchAgentDirectory: join(home, "agents") }) }));
   const record = new SettingsChangeRecord(home);
-  const approvals = new SettingsApprovals(home);
-  const path: SettingsChangePath = new SettingsChangePath(model, record, approvals, {
+  const path: SettingsChangePath = new SettingsChangePath(model, record, {
     setTrust: async () => { throw new Error("The settings corpus sets no trust"); },
     ...(knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(path, entry, context) } : {}),
   });
-  return { model, record, path, approvals };
+  return { model, record, path };
 }
 
 /** Tron Home's designation owner over a fixed session port: designation names sessions

@@ -12,7 +12,6 @@ import type { WebResearchTransport } from "../../knowledge/web-research.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
 import { HomeProfileItems, type HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
-import { awaitApprovalDecision } from "../../kernel/settings/settings-approval-review.js";
 import type { SettingsModel } from "../../kernel/settings/settings-model.js";
 import { HomeOwner } from "./home-owner.js";
 import { homeAppendGuardHook, type HomeAppendGuardServices } from "./home-append-guard.js";
@@ -98,7 +97,6 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
     const memoryModels = () => sessions.modelQueueOf("background", "home");
     owner = new HomeOwner({
       tronHome: composition.tronHome, agentDir: composition.agentDir, trust: composition.trust,
-      settingsOutcomes: () => composition.settings()?.changes,
       ...(composition.triggerSources ? { triggerSources: composition.triggerSources } : {}),
       sessions: {
         wakeHome: sessionId => {
@@ -269,12 +267,11 @@ export function homeProfileChanges(session: SessionContext, changes: SettingsCha
       if (!owner) throw new GatewayError("unsupported", "Knowledge is unavailable");
       return owner.store.deferProfileSorting(commandId, version);
     },
-    wait: (requestId, present, signal) => awaitApprovalDecision({ path: changes, requestId, requesterSessionId: session.sessionId(), present, ...(signal ? { signal } : {}) }),
     change: (ops, input) => {
       if (ops.some(op => op.action === "learn" && op.sensitive)) requireMaintainerTurn();
       return new HomeProfileItems(knowledge).change(changes, ops, {
         actor: { kind: "home", id: session.sessionId(), sessionId: session.sessionId(), toolCallId: input.toolCallId },
-        author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
+        author: input.author, commandId: input.commandId, ...(input.reason ? { reason: input.reason } : {}),
       });
     },
   };

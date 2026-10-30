@@ -79,10 +79,6 @@ export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: 
       return stores.macTerminalServerEnabled ?? false;
     case "gateway":
       return qualifiedOnly || layer !== "global" ? undefined : readPath(stores.gateway, binding.path);
-    case "floors":
-      // A key with one floor keeps both directions equal, so widen reads it.
-      return qualifiers.key === undefined ? undefined
-        : stores.floors[qualifiers.key]?.[qualifiers.direction === "narrow" ? "narrow" : "widen"];
   }
 }
 
@@ -168,10 +164,6 @@ function instances(schema: SettingsSchema, key: KeyDeclaration, target: Settings
     }
     return model ? [{ ...fixed, model }] : onlyQualified ? [] : [fixed];
   }
-  if (key.qualifier === "key") {
-    // Floors are Global policy only the maintainer's tap writes; they appear on the Mac target.
-    return target.kind === "global" ? schema.floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
-  }
   if (key.qualifier === "device") {
     // Global policy: the enrolled iPhones appear on the Mac target only.
     return target.kind === "global" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
@@ -242,11 +234,6 @@ export function resolveInstance(
   // A per-model value is the one for this chat's model, named as the picker names it.
   if (qualifiers.model && key.qualifier === "model") badges.push({ kind: "scope", label: `For ${modelDisplayName(qualifiers.model, options.format)}`, detail: qualifiers.model });
   if (qualifiers.project && key.qualifier === "project") badges.push({ kind: "scope", label: qualifiers.project });
-  if (qualifiers.key && key.qualifier === "key") {
-    // A directional approval level names what the agent's change does to the setting.
-    badges.push({ kind: "scope", label: qualifiers.direction
-      ? `${schema.schemaKey(qualifiers.key).label}: ${qualifiers.direction === "widen" ? "loosening" : "tightening"}` : schema.schemaKey(qualifiers.key).label });
-  }
   if (notApplied) {
     badges.push({ kind: "state", label: "Not applied (untrusted)", detail: `${LAYER_LABELS[scopeForStore(notApplied.layer)]}: ${format(notApplied.value)}`,
       action: { kind: "reviewTrust", label: "Review trust" } });

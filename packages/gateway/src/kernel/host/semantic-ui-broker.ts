@@ -6,6 +6,8 @@ import {
 } from "../pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import type {
+  ChangeReview,
+  NativeChangeAcceptance,
   ExtensionFormAnswer,
   ExtensionFormDescriptor,
   ExtensionInteraction,
@@ -14,8 +16,8 @@ import type {
   ExtensionSemanticState,
   ExtensionWidget,
 } from "../../protocol/types.js";
-import { TRON_FORM_CAPABILITY } from "./extension-adapter-contract.js";
-import type { FormCapableUI, FormRequest } from "./extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY, TRON_CHANGE_CAPABILITY } from "./extension-adapter-contract.js";
+import type { ChangeCapableUI, NativeChangeRequest, FormCapableUI, FormRequest } from "./extension-adapter-contract.js";
 import {
   canonicalExtensionFormAnswer,
   EXTENSION_FORM_MAX_ANSWER_BYTES,
@@ -46,9 +48,11 @@ interface PendingInteraction {
   reject: (error: Error) => void;
   timer?: NodeJS.Timeout;
   cleanupAbort?: () => void;
+  apply?: (acceptance: NativeChangeAcceptance) => Promise<unknown>;
 }
 
 interface InteractionRequestOptions {
+  apply?: (acceptance: NativeChangeAcceptance) => Promise<unknown>;
   signal?: AbortSignal;
   timeout?: number;
 }
@@ -143,17 +147,28 @@ export class SemanticUIBroker {
     catch (error) { this.presentation.recordRejectedCallback(operation, error); }
   }
 
-  respond(id: string, hostEpoch: string, presentationRevision: number, value: unknown, cancelled: boolean): void {
+  respond(id: string, hostEpoch: string, presentationRevision: number, value: unknown, cancelled: boolean, acceptance?: NativeChangeAcceptance): void | Promise<void> {
     this.assertActive();
     const pending = this.pending.get(id);
     if (!pending) throw new GatewayError("not_found", "Extension interaction is no longer pending");
     if (hostEpoch !== this.hostEpoch || presentationRevision !== pending.wire.presentationRevision) {
       throw new GatewayError("conflict", "Extension interaction scope is stale; refresh the session", true);
     }
-    // An approval form only shows its request in this chat (#2050): the one
-    // decision path is the digest-bound settings.decide, never a form answer.
-    if (pending.wire.method === "form" && pending.wire.form.presentation === "approval") {
-      throw new GatewayError("invalid_request", "An approval request is decided with settings.decide, not a form answer");
+    if (pending.wire.method === "change" && !cancelled) {
+      const answer = value as { digest?: unknown; approved?: unknown } | null;
+      if (!acceptance || !pending.apply || !answer || typeof answer !== "object" || Array.isArray(answer)
+        || Object.keys(answer).some(key => key !== "digest" && key !== "approved")
+        || typeof answer.approved !== "boolean" || answer.digest !== pending.wire.review.digest) {
+        throw new GatewayError("invalid_request", "Native change response does not match its exact review");
+      }
+      // Atomic acceptance cut: consume before awaiting. Stop/retirement can no
+      // longer cancel it, and the enclosing native RPC receipt awaits settlement.
+      this.finish(pending);
+      if (!answer.approved) { pending.resolve(undefined); return; }
+      return Promise.resolve().then(() => pending.apply!(acceptance)).then(result => { pending.resolve(result); }, error => {
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+        throw error;
+      });
     }
     if (cancelled) {
       if (pending.wire.method === "form" && !pending.wire.form.allowCancel) {
@@ -183,6 +198,16 @@ export class SemanticUIBroker {
     }
     this.finish(pending);
     pending.resolve(resolved);
+  }
+
+  requestChange<T>(input: { review: ChangeReview; apply: (acceptance: NativeChangeAcceptance) => Promise<T>; signal?: AbortSignal }): Promise<T | undefined> {
+    const review = structuredClone(input.review);
+    if (!review.requiresTap || !/^[a-f0-9]{64}$/.test(review.digest) || !review.title || review.items.length < 1 || review.items.length > 50
+      || encodedBytes(review) > MAX_MESSAGE_BYTES) return Promise.reject(new GatewayError("invalid_request", "Native change review is invalid"));
+    for (const item of review.items) Object.freeze(item);
+    Object.freeze(review.items);
+    Object.freeze(review);
+    return this.request({ method: "change", title: review.title, review }, { ...(input.signal ? { signal: input.signal } : {}), apply: input.apply }) as Promise<T | undefined>;
   }
 
   requestForm(input: {
@@ -332,7 +357,7 @@ export class SemanticUIBroker {
       };
       const interactions = [...this.interactions(), wire];
       if (encodedBytes(interactions) > MAX_INTERACTION_BYTES) return reject(new GatewayError("busy", "Extension UI interactions reached their bounded capacity", true));
-      const pending: PendingInteraction = { wire, resolve, reject };
+      const pending: PendingInteraction = { wire, resolve, reject, ...(options?.apply ? { apply: options.apply } : {}) };
       // Install settlement authority before publishing. Broadcast callbacks are
       // allowed to respond re-entrantly, and abort must not be lost between the
       // preflight check and committed presentation.
@@ -502,6 +527,7 @@ export class SemanticUIBroker {
       },
     };
     (context as ExtensionUIContext & FormCapableUI)[TRON_FORM_CAPABILITY] = broker.requestForm.bind(broker) as FormRequest;
+    (context as ExtensionUIContext & ChangeCapableUI)[TRON_CHANGE_CAPABILITY] = broker.requestChange.bind(broker) as NativeChangeRequest;
     return context;
   }
 }
