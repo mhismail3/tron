@@ -1621,11 +1621,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         openGlobalSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup")
-        // An actionable outside-change badge promotes this row to a detail link;
-        // its toggle and Apply again belong to that child, not the summary row.
-        let outsideEditor = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-open")
-        XCTAssertNotNil(outsideEditor, "the outside change must open its value and actions")
-        outsideEditor?.tap()
+        // Outside-change recovery is inline beside the existing control; it no
+        // longer replaces the row with a detail link. Keep the live-value and
+        // receipt-backed Apply again assertions on that same owning row.
         let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
         XCTAssertEqual(switchValue(outsideRow), globalEdit.before, "the live value must follow the edited store")
         let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)

@@ -80,7 +80,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
   `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; list and
   numeric-map drafts write only on Save; unknown fields stay read-only. Outside-change recovery
-  remains an explicit Apply again action. The Gateway supplies override presence and permissions;
+  remains an explicit inline Apply again action beneath the same value control, not a row-opening
+  detail link. The real-Gateway outside-change journey verifies the live value, receipt-backed restore
+  and marker removal on that row. The Gateway supplies override presence and permissions;
   rows never infer ownership from value equality.
 - **Chat and Home settings.** Manage Session and Manage Home open `SessionSettingsView` (scopes:
   Project, Session, Global); Home writes its saved settings, a chat its own Session scope.
