@@ -8,8 +8,12 @@ guard arguments.count == 2 else {
 }
 
 func emit(_ marker: String) {
-    print(marker)
-    fflush(stdout)
+    // A pipe is a byte stream, not a marker transport. Force two reads so the
+    // real lock journey also catches readers that mistake one chunk for a line.
+    let bytes = Data("\(marker)\n".utf8)
+    FileHandle.standardOutput.write(bytes.prefix(1))
+    usleep(20_000)
+    FileHandle.standardOutput.write(bytes.dropFirst())
 }
 
 let lock = SingleInstanceLock(lockFileURL: URL(fileURLWithPath: arguments[1], isDirectory: false))

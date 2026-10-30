@@ -83,6 +83,9 @@ the signed bundled Gateway in a disposable launchd job with the shipped `KeepAli
 without relaunch, missing or stale receipts, retry, restart-75). Then run
 `packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on the built app.
 
+The lock probe deliberately splits each newline-framed marker across writes; its reader
+waits for the complete line within the existing deadline, never treating pipe chunks as records.
+
 Script checks (pinned Node, `scripts/tron-node exec`): `node --test --test-concurrency=2
 scripts/gateway-payload-deploy.test.mjs`, `node --test scripts/gateway-install-inputs.test.mjs`
 (real `npm ci` repair, #1010), the payload scripts in [gateway-payload](../scripts/README.md#verify),

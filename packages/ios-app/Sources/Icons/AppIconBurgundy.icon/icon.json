@@ -25,7 +25,7 @@
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "srgb:0.74510,0.26275,0.46667,1.00000"
+                "solid" : "srgb:0.71373,0.27843,0.54902,1.00000"
               }
             },
             {
@@ -69,6 +69,10 @@
         {
           "appearance" : "light",
           "value" : false
+        },
+        {
+          "appearance" : "dark",
+          "value" : false
         }
       ],
       "translucency-specializations" : [
@@ -80,6 +84,13 @@
         },
         {
           "appearance" : "light",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.20000000000000001
+          }
+        },
+        {
+          "appearance" : "dark",
           "value" : {
             "enabled" : true,
             "value" : 0.20000000000000001

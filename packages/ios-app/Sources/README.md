@@ -28,9 +28,11 @@ module.
   icons. Each separates the original raster deer silhouette (including antialiased edges) from
   its cream/green or amber/white background and color. Icon Composer supplies glass, specular
   lighting, shadow and translucency, with dark backgrounds and system tinted/clear renditions.
-  The shipping icon's light-only material specialization disables specular lighting and reduces
-  shadow and translucency to 0.2 while retaining glass. Base material values remain unchanged
-  for dark, tinted and clear renditions; the development/test icon is independent.
+  The shipping icon's light and dark material specializations disable specular lighting and
+  reduce translucency to 0.2 while retaining glass; light also reduces shadow to 0.2. The
+  highlight follows the light angle (device tilt), so with it on the dense antler branches read
+  lighter than the rest of the mark. Base material values remain for tinted and clear
+  renditions; the development/test icon is independent.
   `AppIcon` (Emerald), `AppIconBurgundy` and `AppIconOliveGold` use the canonical
   `UI/Theme/ThemeColor.swift` light/dark primary ink. Regenerate their bundles and
   `Configuration/ThemeIcons.xcconfig` with `packages/ios-app/scripts/generate-theme-icons.sh`
