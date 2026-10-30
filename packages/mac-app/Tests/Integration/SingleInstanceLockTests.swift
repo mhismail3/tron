@@ -8,6 +8,7 @@ struct SingleInstanceLockTests {
     private enum ProbeError: Error { case unavailable, timedOut, unexpectedMarker(String) }
 
     private final class MarkerBox: @unchecked Sendable {
+        var bytes = Data()
         var value: String?
     }
 
@@ -42,9 +43,13 @@ struct SingleInstanceLockTests {
             let data = handle.availableData
             guard !data.isEmpty else { return }
             mutex.lock()
-            marker.value = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            mutex.unlock()
+            defer { mutex.unlock() }
+            guard marker.value == nil else { return }
+            marker.bytes.append(data)
+            // availableData may split print's body/newline (or the body itself).
+            // Only a complete line, not a readability notification, is a marker.
+            guard let newline = marker.bytes.firstIndex(of: 0x0a) else { return }
+            marker.value = String(data: marker.bytes[..<newline], encoding: .utf8)
             finished.signal()
         }
         defer { handle.readabilityHandler = nil }
