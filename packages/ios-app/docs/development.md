@@ -154,7 +154,8 @@ scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGateway
 ```
 
 `run-ui` pairs the production scene against a fresh fixture per journey, leaving
-`results/<utc>-ui.*`. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
+`results/<utc>-ui.*`. The invitation journey checks sent transcript content rather
+than a static-text AX role: copyable message rows are interactive controls. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
 `clean` before deleting a worktree. DTO changes need Gateway tests and Swift decoding.
 The fixture's canonical lifecycle root is its isolated `HOME/Workspace` (exact spelling).
 `testProjectLifecycleApproveMovesAndArchives`, `testProjectLifecycleDenialRetainsUntrustedRepository`

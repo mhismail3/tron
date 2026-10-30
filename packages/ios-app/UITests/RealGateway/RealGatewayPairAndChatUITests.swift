@@ -96,7 +96,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(app.debugDescription)")
         send.tap()
 
-        let sent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")).firstMatch
+        // Assert sent content, not an AX role: message rows are interactive
+        // copy controls, while the response below remains selectable text.
+        let sent = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")).firstMatch
         XCTAssertTrue(sent.waitForExistence(timeout: 60), "the sent prompt is not in the transcript: \(app.debugDescription)")
 
         // The fixture streams a few tokens a second, so the reply is read while
