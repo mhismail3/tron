@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 
 from tron_mac_replace_platform import MacPlatform, Failure, git
@@ -26,9 +27,10 @@ OUTCOMES = [
         "testSettingsOutsideChangesAndBuiltinExtensionPersist",
         "testAgentApprovalRequestsAppearInTheirChatAndSettleEverywhere"], [
         "src/admin/settings-approval-outcomes.e2e.test.ts"]),
-    ("Files/artifacts: installed app state survives reopen", [
+    ("Files/artifacts/research: uploads, reopen and source reads", [
         "testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen"], [
-        "src/display/display.store.lock.integration.test.ts"]),
+        "src/display/display.store.lock.integration.test.ts",
+        "src/sessions/home-research-tools.integration.test.ts"]),
     ("Independent SSH access and protocol/release identity", [
         "testMacReplacementRowAndProgressFollowTheJournal"], [
         "src/security/mac-terminal.e2e.test.ts",
@@ -86,12 +88,27 @@ def main():
         source = platform.checkout(ROOT, revision)
         fixture = Path(temporary) / "fixture"
         derived = Path(temporary) / "derived"
-        environment = {**os.environ, "TRON_IOS_E2E_STATE_DIR": str(fixture), "TRON_IOS_E2E_DERIVED_DATA": str(derived)}
+        # The signed full build already installed this exact lockfile. Reuse
+        # that tree through the harness's existing no-install option, rather
+        # than running npm ci again from a different working directory.
+        environment = {**os.environ, "TRON_IOS_E2E_STATE_DIR": str(fixture), "TRON_IOS_E2E_DERIVED_DATA": str(derived), "TRON_IOS_E2E_NO_INSTALL": "1"}
         try:
             try:
-                app = platform.build(ROOT, revision, result / "build.log")
-                status = run(source, [source / "packages/mac-app/scripts/test-signed-pi-payload-smoke.sh", app], "build.log")
+                # Reuse the existing descendant-aware process owner so a stop
+                # during npm/Xcode also joins the detached build descendants.
+                build_code = "import sys; sys.path.insert(0, sys.argv[1] + '/scripts'); from tron_mac_replace_platform import MacPlatform; MacPlatform(home=sys.argv[2]).build(sys.argv[1], sys.argv[3], sys.argv[4])"
+                status = run(source, [sys.executable, source / "scripts/ios-test-process.py",
+                    "--log", result / "build-process.log", "--evidence-dir", result / "build-process",
+                    "--overall-seconds", "3600", "--no-output-seconds", "3600", "--",
+                    sys.executable, "-c", build_code, ROOT, platform.home, revision, result / "build.log"], "build-driver.log")
+                app = platform.built_app(revision)
+                if status == 0:
+                    status = run(source, [source / "packages/mac-app/scripts/test-signed-pi-payload-smoke.sh", app], "build.log")
                 report["build"] = "PASS" if status == 0 else "FAIL"
+            except KeyboardInterrupt:
+                report["build"] = "INTERRUPTED"
+                save()
+                raise
             except Failure as error:
                 report["build"] = "FAIL"
                 report["build_error"] = str(error)
@@ -101,6 +118,8 @@ def main():
                 outcome = {"name": name, "status": "RUNNING", "commands": []}
                 report["outcomes"].append(outcome); save()
                 commands = [[source / "scripts/ios-gateway-e2e-test", "run-ui", "--only-testing", UI + journey] for journey in journeys]
+                if index == 4:
+                    commands.append([source / "scripts/ios-gateway-e2e-test", "all"])
                 if tests:
                     commands.append([source / "scripts/tron", "test", "gateway", *tests])
                 statuses = []
