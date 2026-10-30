@@ -24,14 +24,14 @@ final class TronAppearanceBehaviorUITests: XCTestCase {
         app.terminate()
     }
 
-    func testSingleSectionOmitsHeadingWithoutScreenOptIn() {
+    func testSingleSectionRetainsHeadingWithoutScreenOptIn() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-controls-review"]
         app.launch()
         XCTAssertTrue(app.buttons["alignment.inherited"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["alignment.revert"].exists, "Rows and actions must survive heading suppression")
-        XCTAssertFalse(app.staticTexts["Mixed controls"].exists, "The shared group must omit a lone heading by default")
+        XCTAssertTrue(app.staticTexts["Mixed controls"].exists, "A shared group retains its heading unless the screen opts in to hiding it")
         app.terminate()
     }
 
