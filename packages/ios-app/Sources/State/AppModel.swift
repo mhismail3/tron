@@ -4023,15 +4023,15 @@ extension AppModel {
         try await settingsTrust.settingsHistory(cursor: cursor, actor: actor, layer: layer, section: section, key: key, status: status)
     }
 
-    func applySettingsChangeAgain(_ changeID: String, confirmationDigest: String? = nil) async throws -> SettingsChangeResult {
-        try await settingsTrust.applySettingsChangeAgain(changeID, confirmationDigest: confirmationDigest)
+    func applySettingsChangeAgain(_ changeID: String) async throws {
+        try await settingsTrust.applySettingsChangeAgain(changeID)
     }
 
-    func undoSettingsChange(_ entry: SettingsChangeHistoryEntry, confirmationDigest: String? = nil) async throws -> SettingsChangeResult {
+    func undoSettingsChange(_ entry: SettingsChangeHistoryEntry) async throws {
         let target: JSONValue = .object(["kind": .string(entry.target.kind),
             "sessionId": entry.target.sessionId.map(JSONValue.string) ?? .null])
         let snapshot = entry.layer == "session" ? try rendererConfigurationSnapshot(target) : nil
-        return try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot), confirmationDigest: confirmationDigest) { [weak self] in
+        try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot)) { [weak self] in
             guard let snapshot else { return true }
             return self?.admitsConfigurationSend(snapshot) == true
         }

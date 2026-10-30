@@ -47,8 +47,7 @@ struct SettingsRendererView: View {
     @PresentationState private var pendingConfirmation: PendingConfirmation?
     private struct PendingConfirmation: Identifiable {
         let id = UUID().uuidString
-        enum Operation { case change(JSONValue), applyAgain(String) }
-        let operation: Operation
+        let change: JSONValue
         let rowID: String
         let review: ChangeReview
     }
@@ -79,10 +78,7 @@ struct SettingsRendererView: View {
             ChangeReviewSheet(review: pending.review, approve: {
                 guard pendingConfirmation?.id == pending.id else { return }
                 pendingConfirmation = nil
-                switch pending.operation {
-                case .change(let change): commit(change, rowID: pending.rowID, confirmationDigest: pending.review.digest)
-                case .applyAgain(let id): applyAgain(id, rowID: pending.rowID, confirmationDigest: pending.review.digest)
-                }
+                commit(pending.change, rowID: pending.rowID, confirmationDigest: pending.review.digest)
             }, cancel: { pendingConfirmation = nil })
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
@@ -393,7 +389,7 @@ struct SettingsRendererView: View {
             }
             rowErrors[setting.id] = nil
             if let review = preview.review, review.requiresTap {
-                pendingConfirmation = PendingConfirmation(operation: .change(change), rowID: setting.id, review: review)
+                pendingConfirmation = PendingConfirmation(change: change, rowID: setting.id, review: review)
                 previewingID = nil
             } else {
                 previewingID = nil
@@ -403,7 +399,7 @@ struct SettingsRendererView: View {
     }
 
     /// Apply again is an accepted command like `commit`: unstructured, then a disposable reload.
-    private func applyAgain(_ changeID: String, rowID: String, confirmationDigest: String? = nil) {
+    private func applyAgain(_ changeID: String, rowID: String) {
         guard changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
         changingID = rowID
         let identity = model.knowledgePresentationIdentity
@@ -412,14 +408,9 @@ struct SettingsRendererView: View {
         Task { @MainActor in
             defer { changingID = nil }
             do {
-                let result = try await model.applySettingsChangeAgain(changeID, confirmationDigest: confirmationDigest)
+                try await model.applySettingsChangeAgain(changeID)
                 guard identity == model.knowledgePresentationIdentity, requestTarget == target,
                       admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
-                if let review = result.review, result.status == "review" {
-                    pendingConfirmation = PendingConfirmation(operation: .applyAgain(changeID), rowID: rowID, review: review)
-                    return
-                }
-                try result.throwIfRefused()
                 rowErrors[rowID] = nil
                 model.noteSettingsChanged()
             } catch is CancellationError {

@@ -346,13 +346,7 @@ private struct SettingsChangeDetailView: View {
     @PresentationState private var errorMessage: String?
     @PresentationState private var loading = false
     @PresentationState private var generation = 0
-    @PresentationState private var pendingReview: PendingReview?
-    private struct PendingReview: Identifiable {
-        enum Operation { case undo, applyAgain }
-        let id = UUID().uuidString
-        let review: ChangeReview
-        let operation: Operation
-    }
+    @PresentationState private var showingUndo = false
     @PresentationState private var actionError: String?
     @PresentationState private var undoConflict: (current: String, after: String)?
     @PresentationState private var undoing = false
@@ -443,28 +437,9 @@ private struct SettingsChangeDetailView: View {
                 })
             }
         }
-        .tronManagedSheet(item: $pendingReview, identity: { $0.id }) { pending in
-            NavigationStack {
-                ScrollView {
-                    ChangeReviewCard(review: pending.review, approve: {
-                        guard pendingReview?.id == pending.id else { return }
-                        pendingReview = nil
-                        Task {
-                            switch pending.operation {
-                            case .undo: await performUndo(confirmationDigest: pending.review.digest)
-                            case .applyAgain: await performApplyAgain(confirmationDigest: pending.review.digest)
-                            }
-                        }
-                    }, cancel: { pendingReview = nil })
-                    .padding(18)
-                }
-                .tronScrollEdgeChrome()
-                .navigationTitle("Review change")
-                .navigationBarTitleDisplayMode(.inline)
-            }
-            .tronTopBlur(.sheet)
+        .tronConfirmation("Undo this change?", isPresented: $showingUndo) {
+            Button("Undo change", role: .destructive) { Task { await performUndo() } }
         }
-        .onChange(of: readID) { _, _ in pendingReview = nil }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .task(id: PresentationActivityTaskID(source: readID, presentationActive: presentationActivity.allowsPresentationPublication)) {
@@ -478,7 +453,7 @@ private struct SettingsChangeDetailView: View {
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { generation &+= 1; loading = false }
         }
-        .onDisappear { generation &+= 1; loading = false; pendingReview = nil }
+        .onDisappear { generation &+= 1; loading = false }
     }
 
     private var beforeValue: String {
@@ -539,7 +514,7 @@ private struct SettingsChangeDetailView: View {
                     .disabled(undoing)
                     .accessibilityIdentifier("settings.change.applyAgain")
                 } else if entry.action != true && entry.redacted != true && ["applied", "approved"].contains(entry.status) {
-                    Button { Task { await performUndo() } } label: {
+                    Button { showingUndo = true } label: {
                         TronSettingsRow(icon: "arrow.uturn.backward", title: undoing ? "Undoing…" : "Undo")
                     }
                     .buttonStyle(.plain)
@@ -573,20 +548,15 @@ private struct SettingsChangeDetailView: View {
         }
     }
 
-    private func performApplyAgain(confirmationDigest: String? = nil) async {
+    private func performApplyAgain() async {
         guard !undoing, model.selectedGatewayProfileID() == profileID else { return }
         undoing = true
         actionError = nil; undoConflict = nil
         defer { undoing = false }
         let identity = model.knowledgePresentationIdentity
         do {
-            let result = try await model.applySettingsChangeAgain(entry.changeId, confirmationDigest: confirmationDigest)
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
-            if let review = result.review, result.status == "review" {
-                pendingReview = PendingReview(review: review, operation: .applyAgain)
-                return
-            }
-            try result.throwIfRefused()
+            try await model.applySettingsChangeAgain(entry.changeId)
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
             dismiss()
         } catch {
             guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
@@ -594,20 +564,15 @@ private struct SettingsChangeDetailView: View {
         }
     }
 
-    private func performUndo(confirmationDigest: String? = nil) async {
+    private func performUndo() async {
         guard !undoing, model.selectedGatewayProfileID() == profileID else { return }
         undoing = true
         actionError = nil; undoConflict = nil
         defer { undoing = false }
         let identity = model.knowledgePresentationIdentity
         do {
-            let result = try await model.undoSettingsChange(entry, confirmationDigest: confirmationDigest)
+            try await model.undoSettingsChange(entry)
             guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
-            if let review = result.review, result.status == "review" {
-                pendingReview = PendingReview(review: review, operation: .undo)
-                return
-            }
-            try result.throwIfRefused()
             dismiss()
         } catch {
             guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }

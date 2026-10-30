@@ -206,36 +206,31 @@ final class SettingsTrustCoordinator {
     /// Undo is an accepted domain mutation and must use the shared receipt owner.
     /// Apply again (settings-model.md 5.6): the Gateway re-writes the value an outside
     /// change replaced, as an ordinary audited change; never automatic.
-    func applySettingsChangeAgain(_ changeID: String, confirmationDigest: String? = nil) async throws -> SettingsChangeResult {
+    func applySettingsChangeAgain(_ changeID: String) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
-        var fields: [String: JSONValue] = ["commandId": .string(commandID), "changeId": .string(changeID)]
-        if let confirmationDigest { fields["confirmationDigest"] = .string(confirmationDigest) }
-        let params = JSONValue.object(fields)
+        let params = JSONValue.object(["commandId": .string(commandID), "changeId": .string(changeID)])
         let value = try await mutationExecutor.performValue(method: "settings.applyAgain", commandID: commandID) {
             try await client.requestValue("settings.applyAgain", params)
         }
         try requireProfile(admittedProfileGeneration)
-        let result = try value.decode(SettingsChangeResult.self)
-        if result.status != "review" { try result.throwIfRefused(); noteSettingsChanged() }
-        return result
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+        noteSettingsChanged()
     }
 
-    func undoSettingsChange(_ changeID: String, fence: JSONValue?, confirmationDigest: String? = nil, admitSend: (() -> Bool)? = nil) async throws -> SettingsChangeResult {
+    func undoSettingsChange(_ changeID: String, fence: JSONValue?, admitSend: (() -> Bool)? = nil) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         var fields: [String: JSONValue] = ["commandId": .string(commandID), "changeId": .string(changeID)]
         if let fence { fields["fence"] = fence }
-        if let confirmationDigest { fields["confirmationDigest"] = .string(confirmationDigest) }
         let params = JSONValue.object(fields)
         let value = try await mutationExecutor.performValue(method: "settings.undo", commandID: commandID) {
             if let admitSend, !admitSend() { throw CancellationError() }
             return try await client.requestValue("settings.undo", params)
         }
         try requireProfile(admittedProfileGeneration)
-        let result = try value.decode(SettingsChangeResult.self)
-        if result.status != "review" { try result.throwIfRefused(); noteSettingsChanged() }
-        return result
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+        noteSettingsChanged()
     }
 
     /// Brings a target's snapshot up to `freshness`. A current snapshot is not read

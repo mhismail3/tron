@@ -2515,8 +2515,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(showsText("6 retries", in: app))
         row.tap()
         XCTAssertTrue(showsText("Key history", in: app))
-        XCTAssertTrue(showsText("Risk evaluation", in: app))
-        XCTAssertTrue(showsText("The deterministic floor is sufficient.", in: app))
         let undo = app.buttons["Undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
         undo.tap()
