@@ -435,7 +435,9 @@ def known_failures() -> dict[str, dict]:
             if not isinstance(identity, str) or "::" not in identity:
                 raise ValueError("testId must be a repository-relative test path::full case name")
             file, case = identity.split("::", 1)
-            if not file.startswith(f"{GATEWAY}/src/") or not file.endswith(".test.ts") or ".." in Path(file).parts or not case.strip() or not (ROOT / file).is_file():
+            gateway_case = file.startswith(f"{GATEWAY}/src/") and file.endswith(".test.ts")
+            mac_observation = file.startswith("packages/mac-app/Tests/Integration/") and file.endswith(".swift")
+            if not (gateway_case or mac_observation) or ".." in Path(file).parts or not case.strip() or not (ROOT / file).is_file():
                 raise ValueError(f"invalid testId: {identity}")
             if identity in known:
                 raise ValueError(f"duplicate testId: {identity}")
@@ -450,7 +452,9 @@ def known_failures() -> dict[str, dict]:
             if expiry.isoformat() != entry["expires"] or expiry <= datetime.now(timezone.utc).date():
                 raise ValueError(f"expired quarantine: {identity} (expiry {entry['expires']}, issue #{entry['issue']})")
             known[identity] = entry
-        return known
+        # Swift observations are retained provenance, never executable waivers.
+        # The Mac runner must still pass; only Gateway case IDs reach quarantine.
+        return {identity: entry for identity, entry in known.items() if identity.startswith(f"{GATEWAY}/src/")}
     except (OSError, ValueError, TypeError, VerifyError) as error:
         raise VerifyError(f"known-failures: {error}") from error
 
