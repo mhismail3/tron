@@ -381,6 +381,41 @@ class QuarantineTests(VerifyCase):
                 self.assertEqual(card['sourceRefusals'], {expected: 1})
                 self.assertIsNone(card['numerator'])
 
+    def test_health_reports_git_publication_cycle_and_missing_goal_evidence(self):
+        r = self.repo
+        remote = self.temp.name + '/origin.git'
+        subprocess.run(['git', 'init', '--bare', '-q', remote], env=r.env, check=True)
+        r.git('remote', 'add', 'origin', remote)
+        r.git('push', '-q', 'origin', 'HEAD:main')
+        r.write('mods/alpha/alpha.py', 'VALUE = 2\n')
+        r.commit('real change')
+        self.assertEqual(r.verify().returncode, 0)
+        report = r.report()
+        r.git('push', '-q', 'origin', 'HEAD:main')
+        card = r.health()
+        self.assertEqual(list(card['goals']), ['requestToMain', 'mainGreenRate', 'rework', 'escapedRegressions'])
+        self.assertEqual(card['goals']['requestToMain']['status'], 'unavailable')
+        self.assertEqual(card['goals']['mainGreenRate']['status'], 'unavailable')
+        row = card['landedChanges'][0]
+        self.assertEqual(row['commit'], r.git('rev-parse', 'HEAD'))
+        self.assertEqual(row['firstCommit'], row['commit'])
+        self.assertEqual(row['commitToPublication']['status'], 'partial')
+        self.assertGreaterEqual(row['commitToPublication']['seconds'], 0)
+        seconds = sum(s['seconds'] for s in report['steps'] if s['name'].startswith('tests:'))
+        self.assertAlmostEqual(row['testMinutes']['minutes'], seconds / 60)
+        self.assertEqual(row['testMinutes']['status'], 'partial')
+        self.assertIsNone(card['context']['conceptCount']['numerator'])
+        # Copies of one attempt do not count as rework or test time twice.
+        copy = r.path / 'test-results/copied.json'
+        copy.write_text(json.dumps(report))
+        duplicated = r.health('--verify-report', str(copy), '--verify-report', str(copy))
+        self.assertEqual(duplicated['landedChanges'][0]['testMinutes'], row['testMinutes'])
+        # A fetched tip has no observed publication timestamp in this clone.
+        r.git('reflog', 'expire', '--expire=all', 'refs/remotes/origin/main')
+        missing = r.health()
+        self.assertEqual(missing['landedChanges'][0]['commitToPublication']['status'], 'unavailable')
+        self.assertIsNone(missing['landedChanges'][0]['commitToPublication']['seconds'])
+
     def test_health_repeated_attempts_privacy_identity_and_owned_cleanup(self):
         r = self.repo
         self.fixture()

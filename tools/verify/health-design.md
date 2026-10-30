@@ -7,7 +7,15 @@ batch, dependency report or weekly digest is implemented. The future-output tabl
 is design context, not enabled jobs or authority to run them. Use outcomes to test whether deletion reduces waiting at equal/lower regression
 rate. LOC is diagnostic trailing evidence, never a quota or acceptance threshold.
 
-## Small scorecard
+## Goal outcomes first
+
+`goals` presents request→landed-on-main cycle time, main-green rate, rework
+(full-suite reruns, reverts and resumes per slice), then escaped regressions.
+Missing request/publication joins, complete per-main baselines or slice attribution
+remain unavailable; task lineages are not silently relabelled as landed slices.
+Production LOC and concept count are adjacent `context`, never targets or pass/fail.
+An exact-SHA retained metrics snapshot supplies LOC; absent snapshots/count owners
+remain unavailable. The following existing `fields` are supporting diagnostics.
 
 | Field | Exact definition and evidence | Unknown/partial rule |
 |---|---|---|
@@ -19,7 +27,7 @@ rate. LOC is diagnostic trailing evidence, never a quota or acceptance threshold
 
 Supplementary diagnostics: affected verify wall time (target under 2–3 minutes),
 test/lane wall time, owners touched, layer/cycle results, package production LOC,
-Gateway startup and Home round-trip latency. They do not replace the five fields.
+Gateway startup and Home round-trip latency. They do not replace the goal outcomes.
 Keep sample count, environment, source SHA and coverage beside every measurement.
 
 ## On-demand command
@@ -28,6 +36,14 @@ Keep sample count, environment, source SHA and coverage beside every measurement
 report, never runs suites, fetches, deploys or opens sessions. `--sha <main-sha>` pins
 another first-parent main commit. Repeat `--verify-report <json>` for retained attempts
 (including batch-owned `lane-*/verify.json`); the verifier's attempt ID deduplicates copies.
+`landedChanges` inspects at most 20 first-parent commits and 1,000 local remote-main
+reflog entries. A successful `update by push` observation plus its preceding ancestor
+tip identifies introduced commits (at most 1,000) and earliest Git author time.
+Their difference is **partial commit→publication-observation time**, not an exact
+request/server-land metric; fetch/reflog absence, invalid clocks or missing ancestry
+stay unavailable. Completed retained verifier test-step seconds become partial test
+minutes per publication; attempt IDs deduplicate copies. Overwritten attempts, direct
+suite logs and unjoined lanes are not inferred. `--all` means locks, not all Gateway tests.
 It emits JSON and atomically retains `test-results/health/aggregate-<run>.json`.
 Unavailable measurements are null, not zero; denominators and partial coverage remain visible.
 Registry-expired/invalid invocations retain failed source reports; `--plan` stays read-only.
