@@ -160,6 +160,71 @@ def score(main: str, reports: list[dict], mac: dict | None, iphone: dict | None)
                                     resumes=distribution([]))}
 
 
+def landed_changes(main: str, reports: list[dict]) -> list[dict]:
+    """Local successful-push observations, never commit dates masquerading as land times."""
+    history = git('rev-list', '--first-parent', '--max-count=20', main).splitlines()
+    try:
+        entries = [line.split('\t', 2) for line in git('reflog', 'show', '-1000', '--date=unix',
+                   '--format=%H%x09%gD%x09%gs', 'refs/remotes/origin/main').splitlines()]
+    except subprocess.CalledProcessError:
+        entries = []
+    pushes = {}
+    for index, (sha, selector, action) in enumerate(entries):
+        stamp = re.search(r'@\{(\d+)\}$', selector)
+        if action == 'update by push' and stamp and sha in history:
+            # Repeated pushes of the same tip retain the earliest observation.
+            pushes[sha] = (int(stamp[1]), entries[index + 1][0] if index + 1 < len(entries) else None)
+    rows = []
+    for sha in [s for s in history if s in pushes or s == main]:
+        stamp, previous = pushes.get(sha, (None, None))
+        commits = [sha]
+        first = None
+        seconds = None
+        if stamp is not None and previous:
+            try:
+                git('merge-base', '--is-ancestor', previous, sha)
+                commits = git('rev-list', '--reverse', '--max-count=1001', f'{previous}..{sha}').splitlines()
+                if 0 < len(commits) <= 1000:
+                    dates = [(int(line.split()[1]), line.split()[0]) for line in
+                             git('log', '--format=%H %at', f'{previous}..{sha}').splitlines()]
+                    authored, first = min(dates)
+                    seconds = stamp - authored if stamp >= authored else None
+            except subprocess.CalledProcessError:
+                pass
+        attempts = {}
+        for commit in commits[:1000]:
+            path = ROOT / 'test-results/verify' / f'{commit}.json'
+            try:
+                sources = [*reports, read(path)] if path.exists() else reports
+            except (OSError, ValueError):
+                sources = reports
+            for report in sources:
+                if report.get('schema') == 'tron.verify.v1' and report.get('commit') == commit and report.get('attemptId'):
+                    attempts[(commit, report['attemptId'])] = report
+        durations = [step['seconds'] for report in attempts.values() for step in report.get('steps', [])
+                     if step.get('name', '').startswith('tests:') and step.get('status') in ('ok', 'failed', 'quarantined')
+                     and type(step.get('seconds')) in (int, float) and math.isfinite(step['seconds']) and step['seconds'] >= 0]
+        rows.append({'commit': sha, 'firstCommit': first, 'introducedCommits': len(commits),
+                     'publicationObservedAt': datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp else None,
+                     'commitToPublication': field('partial' if seconds is not None else 'unavailable',
+                         reasons=['Git author time to local successful-push reflog observation, not request-to-server-land time']
+                         if seconds is not None else ['successful-push timestamp and preceding ancestor tip unavailable, or invalid author clock'], seconds=seconds),
+                     'testMinutes': field('partial' if durations else 'unavailable', denominator=len(attempts),
+                         reasons=['retained completed test-step wall time only; overwritten attempts and direct suite logs are not inferred'],
+                         minutes=sum(durations) / 60 if durations else None)})
+    return rows
+
+
+def goal_metrics(resumes: dict) -> dict:
+    return {'requestToMain': field('unavailable', reasons=['request timestamp and server main-publication join absent']),
+            'mainGreenRate': field('unavailable', reasons=['no complete per-main-commit Gateway/Python/iOS baseline cohort']),
+            'rework': {'fullSuiteReruns': field('unavailable', reasons=['retained reports overwrite attempts; --all is locks, not a full-suite census']),
+                       'revertsPerSlice': field('unavailable', reasons=['slice-to-revert attribution absent']),
+                       'resumesPerSlice': field('unavailable', reasons=['task lineages are not joined to landed slices']),
+                       'observedResumesPerTask': resumes},
+            'escapedRegressions': field('unavailable', reasons=['post-land regression attribution and observation window absent'])}
+
+
 def owner_summary(source: dict, now: datetime) -> tuple[dict, dict]:
     """Read an explicit source-owner diagnostic export, not its private log store."""
     rows = source.get('records', [])
@@ -312,6 +377,19 @@ def main(argv: list[str]) -> int:
             resumes, supplemental = owner_summary(read(args.owner_summary), now)
             record['fields']['resumesPerTask'] = resumes
             record['supplemental'] = supplemental
+        record['goals'] = goal_metrics(record['fields']['resumesPerTask'])
+        record['landedChanges'] = landed_changes(main_sha, reports)
+        record['context'] = {'productionLOC': field('unavailable', reasons=['no exact-SHA metrics snapshot retained; context, not a target']),
+                             'conceptCount': field('unavailable', reasons=['no canonical concept-count source; context, not a target'])}
+        metrics = ROOT / 'test-results/metrics' / f'{main_sha}.json'
+        if metrics.exists():
+            snapshot = read(metrics)
+            lines = snapshot.get('metrics', {}).get('M3.size', {}).get('byCategory', {}).get('production', {}).get('lines')
+            if snapshot.get('schema') == 'tron-metrics/1' and snapshot.get('commit') == main_sha and type(lines) is int and lines >= 0:
+                record['context']['productionLOC'] = {'value': lines, 'sourceSha': main_sha, 'role': 'context, not a target'}
+        # Presentation order puts goal outcomes ahead of the old diagnostic fields.
+        fields = record.pop('fields')
+        record['fields'] = fields
         record['status'] = 'complete'
     except KeyboardInterrupt:
         record['status'] = 'interrupted'
@@ -324,7 +402,7 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError):
         record['status'] = 'unavailable'
         record['reason'] = 'health output publication refused'
-    print(json.dumps(record, indent=2, sort_keys=True))
+    print(json.dumps(record, indent=2))
     return 130 if record['status'] == 'interrupted' else 1 if record['status'] == 'unavailable' else 0
 
 
