@@ -243,7 +243,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     {
       id: "model.thinking[role=summarizer]", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
       type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
-      layers: both(pi("compaction", "thinkingLevel")), defaultValue: "inherit", timing: "live", effect: "next-compaction", 
+      layers: both(pi("compaction", "thinkingLevel")), defaultValue: "inherit", timing: "live", effect: "next-compaction",
       writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
       importance: "advanced",
     },
@@ -270,7 +270,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       id: "context.compaction.enabled", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.boolean(),
       // The compaction owner captures the shared resolver's Project > Session >
       // Global result at the operation boundary.
-      layers: sessionPi("compaction", "enabled"), defaultValue: true, timing: "live", effect: "next-compaction", 
+      layers: sessionPi("compaction", "enabled"), defaultValue: true, timing: "live", effect: "next-compaction",
       writers: ANY_ACTOR, label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
       order: 10, importance: "essential",
     },
@@ -293,7 +293,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     },
     {
       id: "context.branchSummary.reserveTokens", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
-      layers: both(pi("branchSummary", "reserveTokens")), defaultValue: 16_384, timing: "live", effect: "next-compaction", 
+      layers: both(pi("branchSummary", "reserveTokens")), defaultValue: 16_384, timing: "live", effect: "next-compaction",
       writers: ANY_ACTOR, label: "Branch summary reserve", help: "Tokens reserved when summarizing an abandoned branch.",
       order: 50, importance: "advanced",
     },
@@ -315,7 +315,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       optionsSource: { name: "catalog.tools", dependsOn: [] },
       layers: { session: { store: "session", field: "tools" }, home: { store: "home", path: ["tools"] }, ...both(pi("defaultTools")) },
       home: { layers: ["session", "home"], defaultValue: homeToolNames },
-      defaultValue: DEFAULT_TOOL_NAMES, timing: "fixed", effect: "next-turn", 
+      defaultValue: DEFAULT_TOOL_NAMES, timing: "fixed", effect: "next-turn",
       direction: toolsDirection, writers: ANY_ACTOR,
       label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "checklist",
     },
@@ -324,7 +324,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "on", label: "On", detail: "The model calls tools directly or from a script" },
         { value: "only", label: "Only code mode", detail: "The model calls tools only from scripts" },
       ]),
-      layers: both(pi("codemode", "mode")), timing: "fixed", effect: "new-chat", 
+      layers: both(pi("codemode", "mode")), timing: "fixed", effect: "new-chat",
       writers: ["ui", "home"], label: "Code mode", help: "Let the model call tools from a script.", order: 20, importance: "advanced", control: "choice",
     },
     {
@@ -438,7 +438,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     },
     {
       id: "run.retry.provider.maxRetryDelayMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
-      layers: sessionPi("retry", "provider", "maxRetryDelayMs"), defaultValue: 60_000, timing: "live", effect: "next-request", 
+      layers: sessionPi("retry", "provider", "maxRetryDelayMs"), defaultValue: 60_000, timing: "live", effect: "next-request",
       writers: ANY_ACTOR, label: "Provider retry delay cap", help: "The longest delay the provider client waits.",
       order: 80, importance: "advanced",
     },
@@ -469,13 +469,13 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
     },
     {
-      id: "run.cacheWarming", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "run", subgroup: "Connection",
+      tap: "spend", id: "run.cacheWarming", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "run", subgroup: "Connection",
       type: types.choice([
         { value: "off", label: "Off", detail: "Prompt caches are never kept warm" },
         { value: "streaming", label: "While running", detail: "Caches stay warm while a turn runs" },
         { value: "idle", label: "Also between runs", detail: "Also kept warm between turns; costs more" },
       ]),
-      layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "fixed", effect: "new-chat", 
+      layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "fixed", effect: "new-chat",
       direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced",
     },

@@ -101,19 +101,19 @@ Dropped (design rationale); see #758.
 → [Change path](settings-contract.md#change-path)
 
 ### 5.4 Tiers
-→ [Native review (tiers retired)](settings-contract.md#native-review)
+→ [Native review](settings-contract.md#native-review)
 
 ### 5.4a Implemented: tiers, floors and the web mark
-→ [Native review (tiers retired)](settings-contract.md#native-review)
+→ [Native review](settings-contract.md#native-review)
 
 ### 5.4c Implemented: Home changes a running worker
-→ [Native review (tiers retired)](settings-contract.md#native-review)
+→ [Native review](settings-contract.md#native-review)
 
 ### 5.4b Implemented: bounded risk assessment
-→ [Native review (tiers retired)](settings-contract.md#native-review)
+→ [Native review](settings-contract.md#native-review)
 
 ### 5.5 Approvals
-→ [Native review (tiers retired)](settings-contract.md#native-review)
+→ [Native review](settings-contract.md#native-review)
 
 ### 5.6 Outside changes
 → [Outside changes](settings-contract.md#outside-changes)
@@ -178,12 +178,12 @@ Numbered decisions are folded into the contract; their record is #758.
 ### 8.1 Decisions
 Where the decisions cited from code and docs now live:
 F1–F4 → [Foundations](settings-contract.md#foundations);
-8, 22, 35 → [Native review (tiers retired)](settings-contract.md#native-review) (expiry, the requester told, push actions);
+8, 22, 35 → [Native review](settings-contract.md#native-review) (expiry, the requester told, push actions);
 12 → [Change path](settings-contract.md#change-path) (record kept forever);
 13, Q25 → [Outside changes](settings-contract.md#outside-changes);
 14, Q24–Q27, 29 → [Project writes](settings-contract.md#project-writes);
 15 → [Timing](settings-contract.md#timing); 34 → [Keys](settings-contract.md#keys) (`writers`);
-28, 32, 33 → [Native review (tiers retired)](settings-contract.md#native-review) (web mark).
+28, 32, 33 → [Native review](settings-contract.md#native-review) (web mark).
 
 ### 8.2 Open questions
 None.

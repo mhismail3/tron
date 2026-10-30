@@ -596,4 +596,3 @@ export class SettingsChangePath {
 function bindingNeedsModel(binding: Binding): boolean {
   return (binding.store === "pi" && binding.path.includes("{model}")) || (binding.store === "session" && binding.field === "contextWindow");
 }
-
