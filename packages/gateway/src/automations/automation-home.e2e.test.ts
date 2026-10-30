@@ -578,25 +578,25 @@ it("real Gateway: an automation wake cannot approve settings, trust, grants or s
     if (!revoked.ok) throw new Error(JSON.stringify(revoked));
   }
   const statement = "This is an explicitly stated synthetic sensitive fixture fact.";
-  gateway.script([
-    () => fauxAssistantMessage([fauxToolCall("settings", { action: "request", reason: "Seed a real maintainer-only decision.", wait: false,
-      changes: [{ key: "run.retry.baseDelayMs", layer: "session", op: "set", value: 10_000 }] })], { stopReason: "toolUse" }),
-    () => fauxAssistantMessage("The real setting decision awaits the maintainer."),
-  ]);
+  gateway.script([() => fauxAssistantMessage("The maintainer statement was recorded in this turn, not a future trigger.")]);
   expect((await phone.request("home.prompt", { commandId: gateway.commandId(), text: statement })).ok).toBe(true);
   await gateway.settled(sessionId);
-  const seed = (await phone.request("settings.approvals", {})).result.requests;
-  expect(seed).toHaveLength(1);
   const trustKey = "permissions.projectTrust";
   const untrusted = join(gateway.root, "untrusted");
   await mkdir(untrusted);
+  // A known exact preview is not authority. Even its digest cannot be supplied
+  // through an agent tool or turned into a native tap by trigger text.
+  const seed = await phone.request("settings.change", { commandId: gateway.commandId(), target: { kind: "global" },
+    reason: "Exact native trust preview", changes: [{ key: trustKey, qualifiers: { project: untrusted }, layer: "global", op: "set", value: true }] });
+  expect(seed.ok, JSON.stringify(seed)).toBe(true);
+  expect(seed.result).toMatchObject({ status: "review", review: { requiresTap: true } });
   const query = { target: { kind: "home" }, keys: ["run.retry.maxRetries", trustKey] };
   const baseline = await phone.request("settings.resolve", query);
   expect(baseline.ok, JSON.stringify(baseline)).toBe(true);
   const model = JSON.parse(await readFile(join(gateway.agentDir, "settings.json"), "utf8"));
   gateway.script([
     () => fauxAssistantMessage([
-      fauxToolCall("settings", { action: "change", reason: "Trigger requests must not approve fixture settings or trust.", wait: false,
+      fauxToolCall("settings", { action: "change", reason: "Trigger requests must not approve fixture settings or trust.", confirmationDigest: seed.result.review.digest,
         changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value: 3 }, { key: trustKey, qualifiers: { project: untrusted }, layer: "global", op: "set", value: true }] }),
       fauxToolCall("delegate", { taskId: "unapproved-trigger-task", title: "Unapproved trigger task", intent: "Finite fixture work without a grant", target: gateway.cwd,
         model: { provider: model.defaultProvider, id: model.defaultModel }, reason: "Use the registered fixture model for this refusal proof." }),
@@ -604,9 +604,8 @@ it("real Gateway: an automation wake cannot approve settings, trust, grants or s
     ], { stopReason: "toolUse" }),
     async () => {
       const permissions = (await phone.request("home.taskPermissions", {})).result;
-      const approvals = (await phone.request("settings.approvals", {})).result.requests;
       return fauxAssistantMessage([
-        ...approvals.map((request: { requestId: string; digest: string }) => fauxToolCall("settings.decide", { commandId: gateway.commandId(), requestId: request.requestId, digest: request.digest, approved: true })),
+        fauxToolCall("settings.decide", { commandId: gateway.commandId(), digest: seed.result.review.digest, approved: true }),
         fauxToolCall("home.decideTaskGrant", { commandId: gateway.commandId(), requestId: permissions.requests[0].id, approved: true, expiresAt: Date.now() + 60_000 }),
       ], { stopReason: "toolUse" });
     },
@@ -620,9 +619,7 @@ it("real Gateway: an automation wake cannot approve settings, trust, grants or s
   const runId = await fire(changed.result);
   await waitFor(async () => (await phone.request("automation.run.get", { automationId: automation.id, runId })).result.state === "succeeded", "untrusted trigger is canonically delivered");
   await gateway.settled(sessionId);
-  const approvals = (await phone.request("settings.approvals", {})).result.requests;
-  expect(approvals).toHaveLength(2);
-  expect(approvals.find((request: { requestId: string }) => request.requestId === seed[0].requestId)).toEqual(seed[0]);
+  expect((await phone.request("settings.approvals", {})).ok).toBe(false);
   expect((await phone.request("settings.resolve", query)).result).toEqual(baseline.result);
   const permissions = (await phone.request("home.taskPermissions", {})).result;
   expect(permissions.grants).toHaveLength(0);
@@ -634,9 +631,12 @@ it("real Gateway: an automation wake cannot approve settings, trust, grants or s
   expect(profileResults.at(-1).message.details).toEqual({ status: "refused", action: "learn",
     reason: "This profile decision requires the current maintainer turn, not a background wake or old message" });
   const calls = entries.filter(entry => entry.type === "message" && entry.message.role === "toolResult" && ["settings.decide", "home.decideTaskGrant"].includes(entry.message.toolName));
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(2);
+  const settingsResults = entries.filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "settings");
+  expect(settingsResults).toHaveLength(1);
+  expect(settingsResults[0].message.isError).toBe(true);
   expect(calls.every(entry => entry.message.isError)).toBe(true);
-  await writeFile("test-results/2094/no-authority-trace.json", JSON.stringify({ approvals, permissions, profile, profileResults, calls, requests: gateway.record().providerRequests }, null, 2));
+  await writeFile("test-results/2094/no-authority-trace.json", JSON.stringify({ preview: seed, permissions, profile, profileResults, settingsResults, calls, requests: gateway.record().providerRequests }, null, 2));
 });
 
 async function claimCancellationRace(position: "before" | "after") {

@@ -13,7 +13,7 @@ const CHANGE = Type.Object({
 }, { additionalProperties: false });
 
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change"] as const, { description: "resolve: read current values and scopes. change: apply/log/Undo reversible edits; trust, spend, install and irreversible effects show the shared native card." }),
+  action: StringEnum(["resolve", "change"] as const, { description: "resolve: read current values and scopes. change: apply/log/Undo reversible edits; trust, privacy expansion, spend, install and irreversible effects show the shared native card." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
@@ -54,7 +54,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
   return pi => {
     pi.registerTool({
       name: "settings", label: "Settings",
-      description: "Read and change Tron settings through typed writes. Reversible changes apply, are logged and can be undone. Only irreversible effects, trust/authority, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
+      description: "Read and change Tron settings through typed writes. Reversible changes apply, are logged and can be undone. Only irreversible effects, trust/authority, privacy expansion, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
       promptSnippet: "Change settings with the settings tool, never by editing settings files.",
       promptGuidelines: [
         "Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.",

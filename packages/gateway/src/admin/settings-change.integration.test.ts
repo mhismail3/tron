@@ -18,12 +18,10 @@ import { SettingsStoreAdapter } from "./settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
+import { reviewedMutation } from "../../test-support/native-change.js";
 import { OutsideChanges } from "./settings-outside.js";
 import { McpAdminService } from "./mcp-admin-service.js";
 import { ModelConfigService } from "./model-config-service.js";
-import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
-import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
 import { type SettingsStores } from "../kernel/settings/settings-types.js";
 import { composedBelow, readBinding } from "../kernel/settings/settings-resolver.js";
 import { type Resolution } from "../kernel/settings/tool-contract.js";
@@ -400,7 +398,7 @@ function client(sessionIds: string[] = []): ClientContext {
 let command = 0;
 const commandId = () => `settings-change-${String(++command).padStart(4, "0")}`;
 
-async function fixture(owner: CaseOwner, options: { segmentEntries?: number; assessRisk?: (input: SettingsRiskInput, signal: AbortSignal) => Promise<{ tier: "quiet" | "notify" | "approve"; rationale: string }> } = {}) {
+async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-settings-change-"));
   owner.roots.push(root);
   const tronHome = join(root, "tron");
@@ -431,8 +429,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
   owner.outsides.push(outside);
-  const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
-    ...(options.assessRisk ? { assessRisk: options.assessRisk } : {}),
+  const settingsChanges = new SettingsChangePath(settingsModel, record, {
     setTrust: async (project, decision) => {
       return trust.setAndApply(project, decision,
         async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
@@ -455,15 +452,14 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
     modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
-    service.invoke(c, "settings.change", { commandId: commandId(), target, changes, ...extra }) as Promise<{ status: string; changes: Array<{ changeId: string; revision?: number; git?: Record<string, unknown> }> }>;
+    reviewedMutation(service, c, "settings.change", { commandId: commandId(), target, changes, ...extra });
   const agentChange = async (target: Parameters<SettingsChangePath["change"]>[0], changes: Parameters<SettingsChangePath["change"]>[1]) => {
     const result = await settingsChanges.change(target, changes, {
       actor: { kind: "agent", id: "repository-agent" }, reason: "Update repository configuration",
     });
-    if (!result.approval) return result;
-    return settingsChanges.decide(result.approval.requestId, {
-      digest: result.approval.digest, approved: true, decidedBy: { kind: "ui", id: "device:phone" },
-    });
+    if (result.status !== "review") return result;
+    return settingsChanges.change(target, changes, { actor: { kind: "ui", id: "device:phone" },
+      reason: "Update repository configuration", confirmationDigest: result.review!.digest });
   };
   const history = async (filter: Record<string, unknown> = {}) => {
     const entries: ChangeEntry[] = [];
@@ -476,7 +472,18 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, outside, change, agentChange, history, macDocument, faux };
+  // Observe publication without resolving stores: a broken watcher must not
+  // be rescued by the oracle itself triggering a reconciliation.
+  const published = async (key: string, qualifier?: [string, string]) => {
+    for (const event of broadcasts.filter(event => event.topic === "settings.changed")) {
+      for (const id of (event.payload as { changeIds: string[] }).changeIds) {
+        const entry = await record.find(id);
+        if (entry?.key === key && (!qualifier || entry.qualifiers?.[qualifier[0] as "server"] === qualifier[1])) return true;
+      }
+    }
+    return false;
+  };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, published, outside, change, agentChange, history, macDocument, faux };
 }
 
 async function gitProject(root: string, name: string) {
@@ -506,75 +513,23 @@ describe("settings.change", () => {
     transcript.push({ case: "numeric-map-persistence", detail: resolution });
   });
 
-  caseIt("holds a non-UI change when the bounded risk model raises its tier", async owner => {
-    const f = await fixture(owner, { assessRisk: async () => ({ tier: "approve", rationale: "unexpected scope" }) });
-    const result = await f.settingsChanges.change({ kind: "global" }, [
-      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 },
-    ], { actor: { kind: "home", id: "home-fixture" }, reason: "Retry a bounded failure" });
-    expect(result.status).toBe("pending");
-    // A held change still names its values, so the agent's settings tool detail shows old → new (#957).
-    expect(result.changes[0]).toMatchObject({ key: "run.retry.maxRetries", status: "pending", before: 4, after: 6 });
-    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
-    expect((await f.history())[0]).toMatchObject({ tier: "approve", tierBasis: { floor: "quiet", risk: "approve" } });
-    transcript.push({ case: "risk-raise-held", detail: { result, history: await f.history() } });
-  });
-
-  caseIt("keeps lowered maintainer floors and web escalation, audits risk failure and timeout, and withholds value secrets", async owner => {
-    let mode: "quiet" | "fail" | "timeout" = "quiet";
-    const calls: unknown[] = [];
-    const evaluator = new SettingsRiskEvaluator({ evaluate: async (request, signal, context) => {
-      calls.push(request);
-      expect(context?.maxChargeCents).toBe(JEV_MAX_ESTIMATED_CHARGE_CENTS);
-      if (mode === "fail") throw new Error("provider failure must not be copied into audit");
-      if (mode === "timeout") await new Promise((_, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-      });
-      return { requestedModel: "jev-latest", actualModel: "jev-latest", usage: { input_tokens: 50, output_tokens: 0 },
-        estimatedCostCents: 0.001, maxEstimatedChargeCents: JEV_MAX_ESTIMATED_CHARGE_CENTS,
-        answers: { tier: { type: "choice", choice: "quiet", confidence: 1, probabilities: { quiet: 1, notify: 0, approve: 0 } },
-          rationale: { type: "choice", choice: "baseline", confidence: 1, probabilities: { baseline: 1, scope: 0, consequence: 0, uncertain: 0 } } } };
-    } });
-    const f = await fixture(owner, { assessRisk: evaluator.assess.bind(evaluator) });
-    const agent = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
-    await f.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: true }]);
-    await f.change({ kind: "global" }, [{ key: "permissions.floor", layer: "global", op: "set", value: "notify",
-      qualifiers: { key: "context.images.block", direction: "widen" } }]);
-    expect(calls).toHaveLength(0); // UI taps never spend on risk classification.
-    const lowered = await f.settingsChanges.change({ kind: "global" }, [
-      { key: "context.images.block", layer: "global", op: "set", value: false },
-    ], agent);
-    expect(lowered).toMatchObject({ status: "applied", tier: "notify" });
-    expect((await f.history({ key: "context.images.block" })).find(e => e.changeId === lowered.changes[0]!.changeId))
-      .toMatchObject({ tierBasis: { floor: "notify", floorSource: "override", risk: "quiet", riskEvaluation: { status: "assessed" } } });
-    const web = await f.settingsChanges.change({ kind: "global" }, [
-      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 5 },
-    ], { ...agent, web: true });
-    expect(web).toMatchObject({ status: "applied", tier: "notify" });
-    mode = "fail";
-    const failed = await f.settingsChanges.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }], agent);
-    expect(failed).toMatchObject({ status: "applied", tier: "quiet" });
-    expect((await f.history()).find(e => e.changeId === failed.changes[0]!.changeId))
-      .toMatchObject({ tierBasis: { risk: null, riskEvaluation: { status: "failed" } } });
-    mode = "timeout";
-    const timedOut = await f.settingsChanges.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 7 }], agent);
-    expect(timedOut).toMatchObject({ status: "applied", tier: "quiet" });
-    expect((await f.history()).find(e => e.changeId === timedOut.changes[0]!.changeId))
-      .toMatchObject({ tierBasis: { risk: null, riskEvaluation: { status: "timeout" } } });
-    mode = "quiet";
-    const beforeRefusal = calls.length;
+  caseIt("refuses unauthorized bundles before review and discloses no credentials in a native preview", async owner => {
+    const f = await fixture(owner);
+    const actor = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await expect(f.settingsChanges.change({ kind: "global" }, [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 },
       { key: "run.httpProxy", layer: "global", op: "set", value: "http://private-fixture.invalid:3128" },
-    ], agent))
-      .rejects.toMatchObject({ code: "invalid_request", message: "HTTP proxy cannot be changed by home" });
-    expect(calls).toHaveLength(beforeRefusal); // Authorization precedes disclosure.
-    await f.settingsChanges.change({ kind: "global" }, [{ key: "tools.shell.commandPrefix", layer: "global", op: "set", value: "API_TOKEN=private-fixture.invalid" }],
-      { ...agent, reason: "Use Bearer fixture-secret-token-123456789" });
-    expect(JSON.stringify(calls)).not.toContain("private-fixture.invalid");
-    expect(JSON.stringify(calls)).not.toContain("fixture-secret-token");
-    expect(JSON.stringify(await f.history())).not.toContain("provider failure must not be copied");
-    expect((await f.macDocument()).retry).toEqual({ maxRetries: 7 });
-    transcript.push({ case: "risk-floor-failure-timeout-redaction", detail: { calls, outcomes: (await f.history()).map(e => ({ key: e.key, tier: e.tier, basis: e.tierBasis })) } });
+    ], actor)).rejects.toMatchObject({ code: "invalid_request", message: "HTTP proxy cannot be changed by home" });
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
+    expect(await f.history()).toEqual([]);
+    const preview = await f.settingsChanges.change({ kind: "global" }, [
+      { key: "tools.shell.commandPrefix", layer: "global", op: "set", value: "API_TOKEN=sk-fixturesecret123456789" },
+    ], { ...actor, reason: "Use Bearer fixture-secret-token-123456789" });
+    expect(preview).toMatchObject({ status: "review", review: { requiresTap: true } });
+    expect(JSON.stringify(preview)).not.toContain("sk-fixturesecret123456789");
+    expect(JSON.stringify(preview)).not.toContain("fixture-secret-token");
+    expect(await f.history()).toEqual([]);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
   });
 
   caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
@@ -585,8 +540,7 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
     expect(f.broadcasts).toContainEqual({ topic: "settings.changed", payload: expect.objectContaining({ keys: ["run.retry.maxRetries"], layer: "global" }) });
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
-    expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "global", before: 4, after: 6, status: "applied", tier: "quiet",
-      tierBasis: { floor: "quiet", floorSource: "code", web: false, risk: null },
+    expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "global", before: 4, after: 6, status: "applied",
       presentation: { label: "Retries", section: "run", actor: "You", layer: "Global", display: { before: "4 retries", after: "6 retries" } } });
 
     // A stale `expected` is refused and changes nothing.
@@ -594,7 +548,7 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
 
     // Undo writes `before` back as an ordinary change that names what it undid.
-    const undone = await f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId }) as { changes: Array<{ changeId: string }> };
+    const undone = await reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId }) as { changes: Array<{ changeId: string }> };
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     const undoEntry = (await f.history()).find(candidate => candidate.changeId === undone.changes[0]!.changeId);
     expect(undoEntry).toMatchObject({ undoOf: applied.changes[0]!.changeId, before: 6, after: 4 });
@@ -602,7 +556,7 @@ describe("settings.change", () => {
     // Undo after a later conflicting change is refused with the current value.
     const second = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 }]);
     await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 10 }]);
-    await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: second.changes[0]!.changeId }))
+    await expect(reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: second.changes[0]!.changeId }))
       .rejects.toMatchObject({ code: "conflict", details: { current: 10, after: 8,
         display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
@@ -614,10 +568,10 @@ describe("settings.change", () => {
     expect(proxy.changes[0]).not.toHaveProperty("after");
     expect(JSON.stringify(proxy)).not.toContain("proxy.invalid");
     const proxyEntry = (await f.history({ key: "run.httpProxy" }))[0]!;
-    expect(proxyEntry).toMatchObject({ changed: true, redacted: true, tier: "notify",
+    expect(proxyEntry).toMatchObject({ changed: true, redacted: true,
       presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });
     expect(JSON.stringify(await f.history())).not.toContain("proxy.invalid");
-    await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
+    await expect(reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
       .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
 
     // A layer the key does not allow, and a key with no writer, are refused.
@@ -719,8 +673,8 @@ describe("settings.change", () => {
     const granted = await f.change({ kind: "project", cwd: project }, [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true }]);
     expect((await f.trust.inspect(project)).savedDecision).toBe(true);
     expect(f.broadcasts.some(event => event.topic === "trust.changed")).toBe(true);
-    expect((await f.history({ key: "permissions.projectTrust" }))[0]).toMatchObject({ after: true, tier: "approve", tierBasis: { direction: "widen" } });
-    await f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: granted.changes[0]!.changeId });
+    expect((await f.history({ key: "permissions.projectTrust" }))[0]).toMatchObject({ after: true, status: "applied" });
+    await reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: granted.changes[0]!.changeId });
     expect((await f.trust.inspect(project)).savedDecision).toBeNull();
 
     // Trust is keyed by the Project root: a Mac request naming a subdirectory
@@ -746,7 +700,7 @@ describe("settings.change", () => {
     expect(await trustRow()).toMatchObject({ value: true, layer: "global" });
     const blocked = await f.change({ kind: "project", cwd: child }, [{ key: "permissions.projectTrust", layer: "global", op: "set", value: false }]);
     expect(await trustRow()).toMatchObject({ value: false });
-    await f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: blocked.changes[0]!.changeId });
+    await reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: blocked.changes[0]!.changeId });
     expect((await f.trust.inspect(child)).savedDecision).toBe(true);
     expect(JSON.parse(await readFile(join(f.agentDir, "trust.json"), "utf8"))[await realpath(child)]).toBeUndefined();
   });
@@ -892,7 +846,7 @@ describe("outside changes", () => {
     transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
   });
 
-  caseIt("a file event alone records the change and pushes by floor: quiet keys never push", async owner => {
+  caseIt("a file event alone records and broadcasts each change without a tier push", async owner => {
     const f = await fixture(owner);
     f.outside.startWatching(() => {});
     await row(f, { kind: "global" }, "run.retry.maxRetries");
@@ -907,8 +861,9 @@ describe("outside changes", () => {
     expect(f.pushes).toEqual([]);
     // Adding a package (a widening with a notify floor) pushes.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: ["npm:outside-package"] }));
-    await until(() => f.pushes.length > 0);
-    expect(f.pushes).toEqual([expect.objectContaining({ title: "Changed outside Tron", message: expect.stringContaining("Packages") })]);
+    await until(() => f.published("sources.packages"));
+    expect(await f.published("sources.packages")).toBe(true);
+    expect(f.pushes).toEqual([]);
   });
 
   caseIt("a git project: owner edits, commits, a stash and a pull are outside changes Tron never offers to re-apply", async owner => {
@@ -952,9 +907,10 @@ describe("outside changes", () => {
     git(project, "pull", "-q", "--ff-only", clone, "main");
     await transport();
     const pulled = (await outsideEntries(f)).filter(entry => entry.git?.head === git(project, "rev-parse", "HEAD").trim());
-    expect(pulled.map(entry => [entry.key, entry.tier]).sort()).toEqual([["run.transport", "quiet"], ["sources.packages", "notify"]]);
-    expect(f.pushes.slice(pushesBefore)).toEqual([expect.objectContaining({ message: expect.stringContaining("Packages") })]);
-    expect(f.pushes.slice(pushesBefore).some(push => push.message.includes("Transport"))).toBe(false);
+    expect(pulled.map(entry => entry.key).sort()).toEqual(["run.transport", "sources.packages"]);
+    expect(await f.published("sources.packages")).toBe(true);
+    expect(await f.published("run.transport")).toBe(true);
+    expect(f.pushes.slice(pushesBefore)).toEqual([]);
     transcript.push({ case: "outside git", detail: await outsideEntries(f) });
   });
 });
@@ -1022,14 +978,14 @@ describe("outside changes to MCP servers and custom models", () => {
       await writeFile(target, JSON.stringify({ mcpServers: { "missed-write": { command: "echo", args: ["fixture"] } } }));
       await waitFor(async () => {
         await hint();
-        return f.pushes.some(push => push.message.includes("MCP server missed-write"));
+        return f.published("tools.mcp.server", ["server", "missed-write"]);
       }, "an unclassified directory event publishes the missed MCP change");
       const entries = (await f.history()).filter(entry => entry.actor.kind === "outside");
       expect(entries).toHaveLength(1);
       expect(entries[0]).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "missed-write" }, status: "outside", redacted: true });
       expect(failures).toEqual([]);
     } finally {
-      transcript.push({ case: "coalesced global directory hint", detail: { filename, filenames, pushes: f.pushes, failures } });
+      transcript.push({ case: "coalesced global directory hint", detail: { filename, filenames, broadcasts: f.broadcasts, failures } });
     }
   }, 30_000); // New controlled missing-event case owns the 12s hang-bound failure plus fixture setup.
 
@@ -1049,12 +1005,12 @@ describe("outside changes to MCP servers and custom models", () => {
     const globalMcp = join(f.agentDir, "mcp.json");
     const current = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     await writeJson(globalMcp, { ...current, mcpServers: { ...current.mcpServers, "hand-added": { url: "http://127.0.0.1:1/hand", headers: { Authorization: "Bearer outside-secret" } } } });
-    await until("push: MCP server hand-added", () => f.pushes.some(push => push.message.includes("MCP server hand-added")));
+    await until("publication: MCP server hand-added", () => f.published("tools.mcp.server", ["server", "hand-added"]));
     const added = (await outsideEntries(f))[0]!;
-    expect(added).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "hand-added" }, op: "set", added: true, tier: "notify", redacted: true,
+    expect(added).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "hand-added" }, op: "set", added: true, redacted: true,
       layer: "global", target: { kind: "global" }, actor: { kind: "outside", id: globalMcp },
       presentation: { label: "MCP server hand-added", section: "tools", display: { before: "Not configured", after: "Added" } } });
-    expect(f.pushes.at(-1)).toMatchObject({ title: "Changed outside Tron" });
+    expect(f.pushes).toEqual([]);
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed").length).toBe(2);
     expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
     expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
@@ -1098,11 +1054,11 @@ describe("outside changes to MCP servers and custom models", () => {
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: late }, keys: ["run.transport"] });
     await mkdir(join(late, ".pi"));
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
-    await until("push: MCP server first", () => f.pushes.some(push => push.message.includes("MCP server first")));
+    await until("publication: MCP server first", () => f.published("tools.mcp.server", ["server", "first"]));
     await new Promise(resolve => setTimeout(resolve, 400)); // the rescan that replaces the root watch settles
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
-    await until("push: MCP server second", () => f.pushes.some(push => push.message.includes("MCP server second")));
-    expect(f.pushes.some(push => push.message.includes("MCP server second"))).toBe(true);
+    await until("publication: MCP server second", () => f.published("tools.mcp.server", ["server", "second"]));
+    expect(await f.published("tools.mcp.server", ["server", "second"])).toBe(true);
 
     // Project scope follows the Project root, not the subdirectory a chat runs in.
     const chat = await f.registry.create(subdirectory);
@@ -1112,7 +1068,7 @@ describe("outside changes to MCP servers and custom models", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
     // An actual repository edit remains observable under its repository root.
     await writeJson(join(project, ".pi", "mcp.json"), { mcpServers: { "project-tron": { url: "http://127.0.0.1:1/project" } } });
-    await until("push: MCP server project-tron", () => f.pushes.some(push => push.message.includes("MCP server project-tron")));
+    await until("publication: MCP server project-tron", () => f.published("tools.mcp.server", ["server", "project-tron"]));
     await expect(readFile(join(subdirectory, ".pi", "mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     git(project, "add", ".pi/mcp.json");
     git(project, "commit", "-q", "-m", "project mcp");
@@ -1131,8 +1087,8 @@ describe("outside changes to MCP servers and custom models", () => {
     const pulled = (await outsideEntries(f))[0]!;
     expect(pulled).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "pulled" }, added: true, layer: "project",
       target: { kind: "project", cwd: await realpath(project) }, git: { path: ".pi/mcp.json", head: git(project, "rev-parse", "HEAD").trim(), branch: "main" } });
-    await until("push: MCP server pulled", () => f.pushes.length > pushesBefore);
-    expect(f.pushes.slice(pushesBefore)).toEqual([expect.objectContaining({ message: expect.stringContaining("MCP server pulled") })]);
+    await until("publication: MCP server pulled", () => f.published("tools.mcp.server", ["server", "pulled"]));
+    expect(f.pushes.slice(pushesBefore)).toEqual([]);
     expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
     expect(await servers(f, { scope: "project", cwd: subdirectory })).toEqual(expect.arrayContaining(["project:project-tron", "project:pulled"]));
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
@@ -1149,7 +1105,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const modelsPath = join(f.agentDir, "models.json");
     const saved = JSON.parse(await readFile(modelsPath, "utf8")) as { providers: Record<string, unknown> };
     await writeJson(modelsPath, { providers: { ...saved.providers, "hand-provider": { baseUrl: "https://hand-models.invalid/v1", api: "openai-completions", apiKey: "outside-model-secret", models: [{ id: "h" }] } } });
-    await until("push: custom model provider hand-provider", () => f.pushes.some(push => push.message.includes("Custom model provider hand-provider")));
+    await until("publication: custom model provider hand-provider", () => f.published("accounts.models.provider", ["provider", "hand-provider"]));
     expect((await outsideEntries(f)).length).toBe(beforeModels + 1);
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, added: true,
       presentation: { label: "Custom model provider hand-provider", section: "accounts" } });
@@ -1232,7 +1188,6 @@ describe("every key at every allowed layer", () => {
         home: await json(join(f.tronHome, "gateway", "home", "profile.json")),
         trust: await json(join(f.agentDir, "trust.json")) as Record<string, boolean>,
         macTerminal: await f.macTerminalKeys.read(),
-        floors: await json(join(f.tronHome, "gateway", "settings", "floors.json")),
         gateway: await json(join(f.tronHome, "gateway", "settings", "gateway.json")),
         session: slot.settingsSessionLayer(),
       } as unknown as SettingsStores;
@@ -1271,7 +1226,7 @@ describe("every key at every allowed layer", () => {
           const actor = key.id === "permissions.macTerminalKey"
             ? { ...client([slot.id]), identity: ENROLLED_IPHONE } as ClientContext : client([slot.id]);
           expect(await f.change(targets[layer]!, request, { ...extra, dryRun: true }, actor))
-            .toMatchObject({ dryRun: true, status: "applied", changes: [{ tier: "approve" }] });
+            .toMatchObject({ dryRun: true, status: "review", review: { requiresTap: true } });
           report.push({ ...instance, result: "native mutation: real sshd Gateway round trips" });
           continue;
         }
@@ -1291,7 +1246,7 @@ describe("every key at every allowed layer", () => {
         expect(after!.layer, `${key.id}@${layer} source`).toBe(scope);
         if (!key.redacted) expect(after!.value, `${key.id}@${layer} value`).toEqual(expectedValue);
         expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
-        const undo = f.service.invoke(client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
+        const undo = reviewedMutation(f.service, client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
         if (key.redacted) {
           // A redacted change has no recorded `before`: never undoable, so unset it directly.
           await expect(undo).rejects.toMatchObject({ code: "conflict" });

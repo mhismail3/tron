@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { RequestSpan, runInRequestSpan } from "../util/request-span.js";
 import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -87,11 +88,22 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
   it("serializes concurrent expected-value Session changes and never overwrites the winner", async () => {
     const f = await setup();
     const slot = await f.create();
-    const results = await Promise.allSettled([2, 3].map(value => f.service.invoke(f.client, "settings.change", {
+    const spans = [new RequestSpan(), new RequestSpan()];
+    let release!: () => void, entered = false;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const stripe = f.settings.settingsChanges.withTarget({ kind: "session", sessionId: slot.id }, async () => { entered = true; await held; });
+    await waitFor(() => entered || undefined, "actual Session settings stripe held");
+    const calls = [2, 3].map((value, index) => runInRequestSpan(spans[index]!, () => f.service.invoke(f.client, "settings.change", {
       commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
       changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value, expected: null }],
     })));
+    // Public request-stage evidence, not a delay or a mocked source: both real
+    // RPCs have finished admission and are queued on the same shipped stripe.
+    try { await waitFor(() => spans.every(span => span.currentStage() === "settings.target-stripe") || undefined, "both RPCs queued at the actual target stripe"); }
+    finally { release(); await stripe; }
+    const results = await Promise.allSettled(calls);
+    spans.forEach(span => span.breakdown(0));
     const winners = results.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof f.service.invoke>>> => result.status === "fulfilled");
     expect(winners).toHaveLength(1);
     const refusal = results.find((result): result is PromiseRejectedResult => result.status === "rejected");

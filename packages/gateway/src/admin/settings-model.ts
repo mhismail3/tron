@@ -299,7 +299,7 @@ export class SettingsStoreAdapter {
         return {};
       case "session-settings": {
         if (!context.session || target.kind !== "session") throw new GatewayError("invalid_request", "A Session-scope change needs its open session");
-        return { revision: await context.session.appliers.setSetting(plan.key.id, value, true, plan.fixedAt) };
+        return { revision: await context.session.appliers.setSetting(plan.key.id, value, context.actor.kind === "ui", plan.fixedAt) };
       }
       case "session": {
         const appliers = context.session?.appliers;

@@ -164,7 +164,8 @@ export class ProjectLifecycle {
       try { result = await this.apply(action); }
       catch (error) {
         await changes.record.append([{ ...entry, changeId: randomUUID(), refersTo: changeId, at: new Date().toISOString(),
-          status: "failed", failure: "Project effect did not complete cleanly; inspect canonical filesystem, Git and trust state before another action" }]);
+          status: "failed", failure: "Project effect did not complete cleanly; inspect canonical filesystem, Git and trust state before another action" }])
+          .catch(publication => { throw asUncertainOutcome(publication, "Project effect failed and its audit could not be published; inspect before retrying"); });
         throw asUncertainOutcome(error, "Project effect may have occurred; inspect before retrying");
       }
       const appliedId = randomUUID();

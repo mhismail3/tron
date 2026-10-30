@@ -41,7 +41,7 @@ async function setup(mode: "v2" | "migration") {
     const state = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
     for (let i = 0; i < 3; i++) await fs.rm(join(state, `${profileOperationKey(`create-original-${i}-historical-fixture`)}.json`));
   }
-  const context = { commandId: "original-partition-command", actor: { kind: "ui" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason", web: true };
+  const context = { commandId: "original-partition-command", actor: { kind: "ui" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason" };
   const assignments = originals.map((record, index) => ({ id: record.id, expectedRevision: record.revisionId, path: `engineering/selected-${index}` }));
   const request = { commandId: context.commandId, mode: mode === "v2" ? "reorganize" as const : "migrate" as const, assignments };
   const cold = async () => {
@@ -90,10 +90,10 @@ it("backs up exact original audit, publishes the full migration group on cold re
   fault.mockRestore();
   const changes = await cold();
   const published = await profile.retryPartition(changes, context.commandId, "home");
-  expect(published.tier).toBe("approve");
+  expect(published.status).toBe("applied");
   const audit = (await changes.history({ key: "home.profile.item" })).entries;
   expect(audit).toHaveLength(3);
-  expect(audit.every(entry => entry.at === envelope.replayAt && entry.commandId === context.commandId && entry.group?.size === 3 && entry.tierBasis.web && entry.actor.toolCallId === "original-tool-call")).toBe(true);
+  expect(audit.every(entry => entry.at === envelope.replayAt && entry.commandId === context.commandId && entry.group?.size === 3 && entry.actor.toolCallId === "original-tool-call")).toBe(true);
   expect(audit.map(entry => entry.qualifiers?.note).reverse()).toEqual(recovery.prepared.map(record => record.id));
   expect((await profile.retryPartition(changes, context.commandId, "home")).changes).toEqual(published.changes);
   expect((await changes.history({ key: "home.profile.item" })).entries).toEqual(audit);
@@ -109,7 +109,7 @@ it("backs up exact original audit, publishes the full migration group on cold re
   expect(undoEntries.map(entry => entry.undoOf).sort()).toEqual(published.changes.map(change => change.changeId).sort());
   expect(undoEntries.every(entry => entry.commandId === "undo-partition-command" && entry.group?.size === 3)).toBe(true);
   const one = await knowledge!.store.read(originals[0]!.id) as typeof originals[number];
-  const reorganized = await profile.partition(changes, { commandId: "reorganize-one", mode: "reorganize", assignments: [{ id: one.id, expectedRevision: one.revisionId, path: "engineering/selected" }] }, { ...context, commandId: "reorganize-one", web: false });
+  const reorganized = await profile.partition(changes, { commandId: "reorganize-one", mode: "reorganize", assignments: [{ id: one.id, expectedRevision: one.revisionId, path: "engineering/selected" }] }, { ...context, commandId: "reorganize-one" });
   expect(reorganized.changes).toHaveLength(1);
   expect((await knowledge!.store.read(one.id) as typeof one).content.profile).toEqual({ version: 2, path: ["engineering", "selected"] });
   await changes.undo(reorganized.changes[0]!.changeId, { actor: { kind: "ui", id: "fixture" }, commandId: "undo-reorganize" });
@@ -205,7 +205,7 @@ it("keeps distinct original commands with identical assignments as distinct inte
   const changes = await cold();
   const first = await knowledge!.store.profilePartitionRecovery(context.commandId);
   expect(first.committed).toBe(false);
-  const secondContext = { ...context, commandId: "distinct-original-command", reason: "A distinct explicit intent", web: false };
+  const secondContext = { ...context, commandId: "distinct-original-command", reason: "A distinct explicit intent" };
   const second = await profile.partition(changes, { ...request, commandId: secondContext.commandId }, secondContext);
   expect(second.changes).toHaveLength(3);
   const recovery = await knowledge!.store.profilePartitionRecovery(secondContext.commandId);
@@ -214,7 +214,7 @@ it("keeps distinct original commands with identical assignments as distinct inte
   await expect(profile.retryPartition(changes, context.commandId, context.actor.kind)).rejects.toThrow(/changed since/);
   const audit = (await changes.history({ key: "home.profile.item" })).entries;
   expect(audit).toHaveLength(3);
-  expect(audit.every(entry => entry.commandId === secondContext.commandId && entry.reason === secondContext.reason && !entry.tierBasis.web)).toBe(true);
+  expect(audit.every(entry => entry.commandId === secondContext.commandId && entry.reason === secondContext.reason)).toBe(true);
   for (const original of originals) {
     const current = await knowledge!.store.read(original.id) as typeof original;
     const destination = request.assignments.find(assignment => assignment.id === original.id)!.path!;
@@ -228,7 +228,7 @@ it("keeps distinct original commands with identical assignments as distinct inte
 it("retains original Undo links across a real postcommit Undo crash and cold publication retry", async () => {
   const { f, profile, originals, context, request, cold } = await setup("v2");
   const applied = await profile.partition(f.settings.settingsChanges, request, context);
-  const undoContext = { commandId: "original-crashed-undo", actor: { kind: "ui" as const, id: "fixture" }, reason: "Original Undo reason", web: true };
+  const undoContext = { commandId: "original-crashed-undo", actor: { kind: "ui" as const, id: "fixture" }, reason: "Original Undo reason" };
   knowledge!.dispose();
   await f.registry.dispose();
   await f.registry.administrativeWorkRegistry.waitUntilSettled();
@@ -243,7 +243,7 @@ it("retains original Undo links across a real postcommit Undo crash and cold pub
   const audit = (await changes.history({ key: "home.profile.item" })).entries;
   const undoEntries = audit.filter(entry => entry.undoOf);
   expect(undoEntries.map(entry => entry.undoOf).sort()).toEqual(applied.changes.map(change => change.changeId).sort());
-  expect(undoEntries.every(entry => entry.commandId === undoContext.commandId && entry.reason === undoContext.reason && entry.tierBasis.web && entry.group?.size === 3)).toBe(true);
+  expect(undoEntries.every(entry => entry.commandId === undoContext.commandId && entry.reason === undoContext.reason && entry.group?.size === 3)).toBe(true);
   for (const original of originals) {
     const now = await knowledge!.store.read(original.id) as typeof original;
     expect(withoutPartition(now)).toEqual(withoutPartition(original));

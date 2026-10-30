@@ -37,6 +37,8 @@
     "test-support/runtime-registry-fixture.ts",
     "test-support/scenario-lock.ts",
     "test-support/settings-dependencies.ts",
+    "test-support/native-change.ts",
+    "test-support/native-change-crash-child.ts",
     "test-support/settings-schema.ts",
     "test-support/store-path-lock.ts",
     "test-support/tron-home-environment-guard.ts",

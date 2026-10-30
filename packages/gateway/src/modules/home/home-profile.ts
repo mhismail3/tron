@@ -500,8 +500,8 @@ export class HomeProfileItems {
     const existing = "id" in op ? before.items.find(item => item.id === op.id) : undefined;
     // The previous contract made confirmed standing rules binding. Home may propose
     // a new inferred item, but cannot rewrite or retire that existing authority.
-    if (author.kind === "home" && existing && (existing.confirmed || existing.record.provenance.actor !== "agent" || existing.record.provenance.source !== "home")) {
-      throw new GatewayError("invalid_request", "Only the maintainer may edit confirmed or non-Home-owned profile items; Home edits stay inferred");
+    if (author.kind === "home" && existing && (existing.confirmed || existing.record.content.privacyScope === "private" || existing.record.provenance.actor !== "agent" || existing.record.provenance.source !== "home")) {
+      throw new GatewayError("invalid_request", "Only the maintainer may edit confirmed, private or non-Home-owned profile items; Home edits stay inferred");
     }
     const result = await this.write(owner, op, author, confirmed, before, commandId);
     const after = await readHomeProfile(owner);
@@ -621,12 +621,11 @@ export class HomeProfileItems {
 
 /** What the Home runtime gives the tool: the change path, as Home. */
 function homeMayOrganize(note: Extract<KnowledgeRecord, { kind: "note" }>): boolean {
-  return note.content.profile !== undefined && !note.content.confirmed && note.content.privacyScope !== "private"
+  return !note.content.confirmed && note.content.privacyScope !== "private"
     && note.provenance.actor === "agent" && note.provenance.source === "home"
     && !note.content.tags?.some(tag => ["kind-standing-decision", "kind-delegation-default", "kind-correction"].includes(tag));
 }
 export interface HomeProfileChangeAccess {
   deferSorting(commandId: string, version: string): Promise<{ status: "deferred"; version: string }>;
   change(ops: HomeProfileRequest[], input: { toolCallId: string; author: HomeProfileAuthor; commandId: string; reason?: string }): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })>;
-  /** Waits in Home's chat for the maintainer's decision on its own pending request. */
 }

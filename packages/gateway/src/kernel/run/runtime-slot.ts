@@ -817,6 +817,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       ...this.settingsSource(),
       get session() { return read(); },
       appliers: {
+        admit: (key, layer) => { if (layer === "session" && key.id === "tools.active") this.assertNoLiveTaskConfiguration("active tools"); },
         setModel: (ref, fixedAt) => this.setModel(ref.provider, ref.id, undefined, undefined, fixedAt),
         setThinking: (level, fixedAt) => this.setThinking(level as ThinkingLevel, undefined, undefined, fixedAt),
         setContextWindow: (model, value, fixedAt) => this.setContextWindow(model.provider, model.id, value, this.revision, this.runtimeGeneration, undefined, fixedAt),
@@ -958,8 +959,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       fixed[key] = { ...(fixedAt ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     }
     const requestPins = readSessionRequestPins(branch);
-    // Tier admission and timing are separate: lowering a floor must not make
-    // an unapproved widening live. Only an approval or the maintainer's tap
+    // Admission and timing are separate. Only the maintainer's native action
     // releases the fixed-direction snapshot (including Follow the default).
     if (typeof this.dependencies.settingsSchema.schemaKey(key).timing !== "string" && allowFixedDirection) {
       const owners = this.dependencies.settings();
@@ -3937,8 +3937,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Home's saved settings own its model, thinking and tools: a direct choice is
    * that change, adopted under this lane like any other. */
   protected async changeHomeRecipe(key: string, value: unknown, initiatingWorkToken?: string): Promise<number> {
-    await this.dependencies.settings()!.changes.change({ kind: "home" }, [{ key, layer: "session", op: "set", value }],
+    const result = await this.dependencies.settings()!.changes.change({ kind: "home" }, [{ key, layer: "session", op: "set", value }],
       { actor: { kind: "ui", id: "tron-home" }, commandId: randomUUID(), homeChapter: this.homeSettingsChapter(initiatingWorkToken) });
+    if (result.status !== "applied") throw new GatewayError("invalid_request", "This Home choice requires the exact native change card; nothing changed");
     return this.revision;
   }
 

@@ -142,8 +142,10 @@ export class SettingsChangeRecord {
     const names = new Set(index.segments.map(segment => segment.name));
     const orphans = files.filter(file => file.name.endsWith(".jsonl") && !names.has(file.name.slice(0, -6)));
     if (orphans.some(file => !file.isFile() || !segmentName(file.name.slice(0, -6)))) throw new GatewayError("conflict", "The settings audit contains an unknown segment");
-    const ordered = orphans.map(file => file.name.slice(0, -6)).sort();
-    if (ordered.some(name => name.startsWith("once-")) && ordered.length !== 1) throw new GatewayError("conflict", "The settings audit orphan order is ambiguous");
+    // An unindexed Home group is not ordinary append recovery. Only Home can
+    // prove its domain committed and that Forget did not invalidate its envelope.
+    // appendOnce publishes that exact group on the owner\'s explicit retry.
+    const ordered = orphans.map(file => file.name.slice(0, -6)).filter(name => !name.startsWith("once-")).sort();
     const candidates: ChangeEntry[] = [];
     let changed = false;
     const tail = index.segments.at(-1);
@@ -159,14 +161,8 @@ export class SettingsChangeRecord {
     for (const name of ordered) {
       const rows = await this.segmentLines(name);
       if (!rows.length) throw new GatewayError("conflict", "The settings audit contains an empty orphan");
-      if (name.startsWith("once-")) {
-        const intent = publication(rows);
-        if (intent?.name !== name) throw new GatewayError("conflict", "The settings transfer audit identity conflicts");
-        index.segments.push({ name, count: rows.length, closed: true });
-      } else {
-        if (name !== String(index.segments.length).padStart(6, "0")) throw new GatewayError("conflict", "The settings audit contains an unordered orphan");
-        index.segments.push({ name, count: rows.length });
-      }
+      if (name !== String(index.segments.length).padStart(6, "0")) throw new GatewayError("conflict", "The settings audit contains an unordered orphan");
+      index.segments.push({ name, count: rows.length });
       candidates.push(...rows);
       changed = true;
     }

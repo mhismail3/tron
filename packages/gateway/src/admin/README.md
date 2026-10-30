@@ -63,7 +63,7 @@ In short:
   holds the runtime lane before recipe publication and records one logical edit.
 - **Each store is the truth** (F2). The change record is audit and undo only.
 - **One change path** (F3): routine apply/log/Undo; exact native taps only for
-  irreversible, trust/executable authority, spend and install effects.
+  irreversible, trust/executable authority, privacy expansion, spend and install effects.
 
 RPCs (shapes in the [Gateway README](../../README.md)): `settings.resolve`,
 `settings.options`, `settings.change` (with `dryRun`), `settings.undo`,

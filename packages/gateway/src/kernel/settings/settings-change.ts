@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { ModelRuntime } from "../pi/coding-agent.js";
 import { asUncertainOutcome, GatewayError } from "../../errors.js";
-import { AsyncMutex } from "../../util/async-mutex.js";
+import { RequestSpanLane } from "../../util/request-span.js";
 import { type ConfirmChange, type ChangeRequest, type SettingsSignal, type ChangeOutcome, type ChangeResult, type ChangeStatus, type GitResult, type FixedSetting, type SettingsTarget, type Direction, type LayerId, type Qualifiers } from "./tool-contract.js";
 import type { Actor, ActorKind, ChangeEntry, SettingsChangeRecord } from "./settings-record.js";
 import { composedBelow, readBinding, resolveSettings } from "./settings-resolver.js";
@@ -111,7 +111,7 @@ const STORE_ORDER: Record<Binding["store"], number> = {
 export type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
 
 export class SettingsChangePath {
-  private readonly stripes = Array.from({ length: 32 }, () => new AsyncMutex());
+  private readonly stripes = Array.from({ length: 32 }, () => new RequestSpanLane("settings.target-stripe"));
   private observer: SettingsObserver | undefined;
   private disposed = false;
   private startup: Promise<void> | undefined;
@@ -119,7 +119,7 @@ export class SettingsChangePath {
   constructor(private readonly model: SettingsModel<SettingsChangeOwner>, readonly record: SettingsChangeRecord,
     private readonly writers: SettingsWriters, private readonly now: () => Date = () => new Date()) {}
 
-  private mutexFor(target: SettingsTarget): AsyncMutex {
+  private mutexFor(target: SettingsTarget): RequestSpanLane {
     const id = target.kind === "session" ? `session:${target.sessionId}` : target.kind === "project" ? `project:${target.cwd}` : target.kind;
     return this.stripes[createHash("sha256").update(id).digest().readUInt32BE(0) % this.stripes.length]!;
   }
@@ -175,7 +175,7 @@ export class SettingsChangePath {
         errors.set(index, error instanceof GatewayError ? error : new GatewayError("invalid_request", String(error)));
       }
     }
-    const requiresTap = planned.some(plan => plan.key.tap && (plan.key.tap !== "spend" || plan.direction === "widen"));
+    const requiresTap = planned.some(plan => plan.key.tap && (plan.key.tap !== "spend" && plan.key.tap !== "privacy" || plan.direction === "widen"));
     const review = changeReview({ target, undoOf: context.undoOf, applyAgainOf: context.applyAgainOf, planned: planned.map(plan => ({
       key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null })) },
       { title: planned.map(plan => plan.key.label).join(", "), requiresTap, ...(context.reason ? { reason: context.reason } : {}),
@@ -199,9 +199,12 @@ export class SettingsChangePath {
     const applied = await this.applyAll(target, stores, planned, context, entry => entry);
     const changes = this.outcomes(applied.filter(done => !done.plan.target), "applied");
     const adopted = this.outcomes(applied.filter(done => done.plan.target), "applied");
-    await this.observer?.applied(target, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
-    if (adopted.length) await this.observer?.applied(applied.find(done => done.plan.target)!.plan.target!, adopted, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
-    const signal = await this.announce(changes, context);
+    let signal: SettingsSignal | undefined;
+    try {
+      await this.observer?.applied(target, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
+      if (adopted.length) await this.observer?.applied(applied.find(done => done.plan.target)!.plan.target!, adopted, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
+      signal = await this.announce(changes, context);
+    } catch (error) { throw asUncertainOutcome(error, "Settings applied but notification failed; inspect before retrying"); }
     return { status: "applied", changes, review, ...(signal ? { signal } : {}) };
   }
 
@@ -216,7 +219,8 @@ export class SettingsChangePath {
       await this.record.recover();
       const mutation = await operation();
       if (mutation.status === "failed") {
-        if (mutation.writes.length) await this.record.append(mutation.writes.map(write => this.subjectEntry(write, mutation.context, "failed", mutation.failure)));
+        if (mutation.writes.length) await this.record.append(mutation.writes.map(write => this.subjectEntry(write, mutation.context, "failed", mutation.failure)))
+          .catch(error => { throw asUncertainOutcome(error, "Profile failed after effects and its audit could not be published"); });
         throw mutation.error;
       }
       const group = { id: randomUUID(), size: mutation.writes.length };
@@ -228,8 +232,10 @@ export class SettingsChangePath {
         before: entry.before ?? null, after: entry.after ?? null,
       }));
       const context = mutation.context;
-      await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
-      return project(mutation.result, { status: "applied", changes });
+      try {
+        await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
+        return await project(mutation.result, { status: "applied", changes });
+      } catch (error) { throw asUncertainOutcome(error, "Profile applied but its result could not be published"); }
   }
 
   /** Home freezes these original inputs in its existing backup before domain effects. */
@@ -245,10 +251,11 @@ export class SettingsChangePath {
 
   private async publishSubjectAuditInStripe(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
     const entries = this.subjectPublication(writes, context, replayAt);
-      await this.record.appendOnce(entries);
+      await this.record.appendOnce(entries).catch(error => { throw asUncertainOutcome(error, "Committed Profile audit could not be published"); });
       const changes: ChangeOutcome[] = entries.map(entry => ({ changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!,
         layer: "session", status: "applied", before: entry.before ?? null, after: entry.after ?? null }));
-      if (entries.length) await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) });
+      if (entries.length) await Promise.resolve().then(() => this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) }))
+        .catch(error => { throw asUncertainOutcome(error, "Profile committed but its notification failed"); });
       return { status: "applied", changes };
   }
 
@@ -287,7 +294,7 @@ export class SettingsChangePath {
       const current = await this.record.entry(changeId);
       if (!current || current.undone) throw new GatewayError("conflict", "This change has already been undone");
       const { entry } = current;
-      if (entry.action || entry.redacted) throw new GatewayError("conflict", "This change has no supported inverse; inspect it with its owner");
+      if (entry.action || entry.redacted) throw new GatewayError("conflict", "This change is not undoable; inspect it with its owner");
       if (entry.status !== "applied") throw new GatewayError("conflict", "Only an applied change can be undone");
       return this.changeInStripe(entry.target, [{
         key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}), layer: entry.layer,
@@ -345,11 +352,6 @@ export class SettingsChangePath {
     });
   }
 
-  /**
-   * Every settled request this requester has not heard, as one canonical message
-   * (decision 4e6e8f54): approved and applied, declined, failed, superseded or expired.
-   * The text is for the model; `details` carries the same facts for the chat's chip.
-   */
   /** Applies every plan in store order, rolls back on a failure (doc 5.2), and
    * records one entry per change, with the canonical before/after facts. */
   private async applyAll(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
@@ -366,7 +368,8 @@ export class SettingsChangePath {
         for (const done of result.filter(done => !done.plan.target)) landed.set(done.plan.changeId, { ...(done.git ? { git: done.git } : {}), changeId: done.plan.changeId });
         return result;
       } finally {
-        await outside?.end(writes, landed);
+        try { await outside?.end(writes, landed); }
+        catch (error) { throw asUncertainOutcome(error, "Settings effects settled but outside-observation publication failed"); }
       }
     };
     if (target.kind !== "home" || !context.homeChapter || !planned.some(adoptsHomeRuntime)) return apply();
@@ -435,8 +438,9 @@ export class SettingsChangePath {
         await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers).catch(() => undefined);
       }
       await this.record.append(ordered.filter(plan => !plan.target).map(plan => shape(this.entry(target, plan, context, "failed",
-        plan.changeId === failure!.plan.changeId ? failure!.error.message : "Rolled back: another change in the same request failed"))));
-      throw failure.error;
+        plan.changeId === failure!.plan.changeId ? failure!.error.message : "Rolled back: another change in the same request failed"))))
+        .catch(error => { throw asUncertainOutcome(error, "Settings failed after effects and its audit could not be published"); });
+      throw applied.length ? asUncertainOutcome(failure.error, "Settings effects required compensation; inspect before retrying") : failure.error;
     }
     const entries = applied.filter(done => !done.plan.target).map(done => shape(this.entry(target, done.plan, context, "applied", undefined, done.git)));
     await this.record.append(entries).catch(error => {
@@ -554,7 +558,12 @@ export class SettingsChangePath {
     const before = binding.store === "trust" ? stores.trust[qualifiers.project!]
       : readBinding(stores, store, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && !deepEqual(request.expected, before ?? null)) {
-      throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, { current: (before ?? null) as never });
+      throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, {
+        current: (before ?? null) as never,
+        ...(context.undoOf ? { after: request.expected as never, display: {
+          current: formatStoredSetting(key.type, before), after: formatStoredSetting(key.type, request.expected),
+        } } : {}),
+      });
     }
     const defaultValue = keyDefault(key, qualifiers);
     // A composing layer's entries are relative: compare what each value selects.

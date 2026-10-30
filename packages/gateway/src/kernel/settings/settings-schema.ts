@@ -71,9 +71,9 @@ export interface KeyDeclaration {
   defaultValueFor?: (qualifiers: Partial<Record<QualifierName, string>>) => unknown;
   timing: TimingDeclaration;
   effect: Effect;
-  /** Only trust/authority, spend, install or irreversible effects require a native tap. */
-  tap?: "trust" | "spend" | "install" | "irreversible";
-  /** How a change's direction is read. Keys without one use their single floor. */
+  /** Trust/authority, privacy widening, spend, install or irreversible effects require a native tap. */
+  tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
+  /** How a change's direction is read; undeclared directions default to widening. */
   direction?: (before: unknown, after: unknown) => Direction;
   /** Who may request a change. This list is the grant (decision 34): there is
    * no per-task or per-chat grant beside it, and a task worker may change
@@ -121,7 +121,7 @@ const QUEUE = [
 
 const larger = (before: unknown, after: unknown): Direction =>
   typeof before === "number" && typeof after === "number" && after < before ? "narrow" : "widen";
-const turnsOn = (before: unknown, after: unknown): Direction => after === true && before !== true ? "narrow" : "widen";
+const turnsOn = (_before: unknown, after: unknown): Direction => after === true ? "narrow" : "widen";
 /** Trust: granting widens, revoking or clearing narrows. */
 const grants = (_before: unknown, after: unknown): Direction => after === true ? "widen" : "narrow";
 const toolsDirection = (before: unknown, after: unknown): Direction => {
@@ -303,7 +303,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "Resize images", help: "Shrink large images before they are sent.", order: 60, importance: "advanced",
     },
     {
-      id: "context.images.block", sessionOverridable: true, projectSettable: false, group: "tools", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
+      tap: "privacy", id: "context.images.block", sessionOverridable: true, projectSettable: false, group: "tools", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
       layers: sessionPi("images", "blockImages"), defaultValue: false, timing: { narrow: "live", widen: "fixed" }, effect: "next-request",
       direction: turnsOn, writers: ANY_ACTOR,
       label: "Block images", help: "Replace images with a placeholder for the model.", order: 70, importance: "advanced", control: "toggle",

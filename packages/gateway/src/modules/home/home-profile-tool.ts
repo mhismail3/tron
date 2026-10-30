@@ -141,6 +141,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         } catch (error) {
           // Publication may have failed AFTER the domain committed. Never call it
           // saved, mint another identity, or invite an unqualified second apply.
+          if (error instanceof GatewayError && error.code === "invalid_request") return refused(request.action, error.message);
           const reason = error instanceof Error ? error.message : String(error);
           return answer({ status: "retry_required", action: request.action, commandId: original, reason },
             `Profile ${request.action} is not acknowledged: ${reason}. Use retry with original command ${original}; it proves committed identities before repairing the audit, or resumes only the backed-up precommit intent. No success is assumed.`);

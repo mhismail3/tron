@@ -1,4 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawn, execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { once } from "node:events";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,13 +25,13 @@ afterEach(disposeFixtures);
 const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true,
   isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
 let sequence = 0;
-function settingsService(f: Awaited<ReturnType<typeof fixture>>) {
+function settingsService(f: Awaited<ReturnType<typeof fixture>>, broadcast: (topic: string, payload: unknown) => void = () => {}) {
   return new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
     modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: f.settings.settingsChanges,
     sessions: f.registry, home: homeOwnerOf(f.registry), receipts: new CommandReceiptStore(f.tronHome),
     uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES), notifications: { enqueue: async () => "queued" },
-    broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+    broadcast, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
 }
 async function settledWorker(f: Awaited<ReturnType<typeof fixture>>) {
@@ -76,6 +81,123 @@ async function saveCase(name: string, evidence: unknown) {
 }
 
 describe("typed changes and exact native acceptance", () => {
+  it("refuses a small input when the full Home catalog leaves no native response headroom", async () => {
+    const f = await fixture(false, false, 8000);
+    await setHomeMemoryModels(f.registry, [f.model]);
+    const home = await f.registry.acquire(f.home.sessionId), calls = f.faux.state.callCount;
+    await home.prompt("A small input still carries the declared Home tools").catch(() => {});
+    await waitFor(() => !home.isBusy && !home.hasActiveAgentRun || undefined, "catalog-only overflow releases native ownership");
+    const observed = { refused: f.signals.some(signal => signal.event === "refused" && signal.reason === "context-overflow"),
+      providerCalls: f.faux.state.callCount - calls };
+    expect(observed).toEqual({ refused: true, providerCalls: 0 });
+    await saveCase("catalog-only-overflow", observed);
+  });
+
+  it("keeps canonical key identity refusal across real Home resolve, change, dry run and contradictory qualifiers", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [f.model]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const turn = async (args: Record<string, unknown>, id: string) => {
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("settings", args, { id })], { stopReason: "toolUse" }), fauxAssistantMessage("Done")]);
+      await home.prompt(id);
+      await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null || undefined, "key identity tool turn settled");
+      const result = home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return { isError: result.message.isError, text: result.message.content.map(part => part.type === "text" ? part.text : "").join("") };
+    };
+    expect(await turn({ action: "resolve", keys: ["model.thinking"] }, "key-read")).toMatchObject({
+      isError: true, text: expect.stringContaining("use model.thinking[role=chat]") });
+    for (const dryRun of [true, false]) {
+      const changed = await turn({ action: "change", reason: "Cheaper", dryRun,
+        changes: [{ key: "model.thinking", layer: "session", op: "set", value: "low", qualifiers: { role: "chat" } }] }, `key-write-${dryRun}`);
+      expect(changed.text).toContain("use model.thinking[role=chat]");
+    }
+    const contradicted = await turn({ action: "change", reason: "Cheaper", dryRun: true,
+      changes: [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low", qualifiers: { role: "worker" } }] }, "key-qualifier");
+    expect(contradicted.text).toContain("role=worker is a different setting");
+    await saveCase("canonical-key-identity", contradicted);
+  });
+
+  it.each(["pending", "effects", "completion"] as const)("recovers the actual native response receipt after a fixture kill at %s without replaying effects", async cut => {
+    const f = await fixture(), root = join(f.root, `native-crash-${cut}`);
+    await mkdir(root);
+    const args = ["--experimental-transform-types", "--import",
+      pathToFileURL(fileURLToPath(new URL("../../test-support/home-ledger-crash-preload.mjs", import.meta.url))).href,
+      fileURLToPath(new URL("../../test-support/native-change-crash-child.ts", import.meta.url)), root, cut];
+    const child = spawn(process.execPath, [...args, "kill"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PI_OFFLINE: "1" } });
+    let output = "";
+    child.stdout.on("data", bytes => { output += bytes; }); child.stderr.on("data", bytes => { output += bytes; });
+    const exited = once(child, "exit");
+    try {
+      await waitFor(async () => {
+        try { return await readFile(join(root, "cut"), "utf8"); }
+        catch { if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Native crash fixture exited: ${output}`); return undefined; }
+      }, `native response durable ${cut} cut`, { boundMs: 15_000 });
+      child.kill("SIGKILL");
+      expect((await exited)[1]).toBe("SIGKILL");
+      await promisify(execFile)(process.execPath, [...args, "recover"], { env: { ...process.env, PI_OFFLINE: "1" }, timeout: 20_000 });
+      const recovered = JSON.parse(await readFile(join(root, "recovered.json"), "utf8"));
+      if (cut === "completion") expect(recovered.replay).toEqual({ result: { answered: true } });
+      else expect(recovered.replay).toMatchObject({ error: { code: "conflict", details: { outcomeUnknown: true } } });
+      expect(recovered.tools).toEqual(cut === "pending" ? null : ["-bash", "-edit", "-write"]);
+      expect(recovered.history).toHaveLength(cut === "pending" ? 0 : 1);
+      if (cut !== "pending") expect(recovered.history[0]).toMatchObject({ status: "applied", commandId: "native-crash-response",
+        actor: { kind: "ui", id: "device:native-crash" }, after: ["-bash", "-edit", "-write"] });
+      await saveCase(`receipt-crash-${cut}`, recovered);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await exited;
+    }
+  }, 30_000);
+
+  it("refuses an internal Home tool recipe change instead of silently treating a native review as application", async () => {
+    const f = await fixture(), home = await f.registry.acquire(f.home.sessionId);
+    const before = (await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["tools.active"])).keys[0]!.value;
+    await expect(home.setTools(["settings"])).rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("native change card") });
+    expect((await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["tools.active"])).keys[0]!.value).toEqual(before);
+    expect((await f.settings.settingsChanges.history({ key: "tools.active" })).entries).toEqual([]);
+  });
+
+  it("keeps the canonical receipt pending after a real observer I/O failure, without reapplying the same command", async () => {
+    const f = await fixture();
+    let notifications = 0;
+    const service = settingsService(f, topic => {
+      if (topic === "settings.changed") { notifications++; readFileSync(join(f.root, "missing-observer-target")); }
+    });
+    const params = { commandId: `observer-io-${++sequence}`, target: { kind: "global" },
+      changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 9 }] };
+    const first = await service.invoke(phone, "settings.change", params).then(() => undefined, error => error);
+    await expect(service.invoke(phone, "settings.change", params)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+    expect(notifications).toBe(1);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toHaveLength(1);
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).retry.maxRetries).toBe(9);
+    expect(first).toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+    await saveCase("observer-io-uncertainty", { code: first.code, details: first.details, notifications });
+  });
+
+  it("allows exactly one of sixteen concurrent Undo commands and permanently consumes the original inverse", async () => {
+    const f = await fixture(), service = settingsService(f);
+    const original = await service.invoke(phone, "settings.change", { commandId: `undo-original-${++sequence}`, target: { kind: "global" },
+      changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 }] }) as unknown as { changes: Array<{ changeId: string }> };
+    const changeId = original.changes[0]!.changeId;
+    const race = await Promise.allSettled(Array.from({ length: 16 }, (_, index) => service.invoke(phone, "settings.undo",
+      { commandId: `undo-race-${sequence}-${index}`, changeId })));
+    const winners = race.filter(result => result.status === "fulfilled");
+    expect(winners).toHaveLength(1);
+    expect(winners[0]).toMatchObject({ value: { status: "applied" } });
+    expect(race.filter(result => result.status === "rejected")).toHaveLength(15);
+    expect(race.filter(result => result.status === "rejected").every(result => result.reason.code === "conflict")).toBe(true);
+    const history = (await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries;
+    expect(history.filter(entry => entry.undoOf === changeId)).toHaveLength(1);
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).retry?.maxRetries).toBeUndefined();
+    await service.invoke(phone, "settings.change", { commandId: `undo-restored-after-${++sequence}`, target: { kind: "global" },
+      changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 }] });
+    await expect(service.invoke(phone, "settings.undo", { commandId: `undo-consumed-${sequence}`, changeId })).rejects.toMatchObject({ code: "conflict" });
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).retry.maxRetries).toBe(3);
+    expect((await f.settings.settingsChanges.history({ key: "run.retry.maxRetries" })).entries.filter(entry => entry.undoOf === changeId)).toHaveLength(1);
+    await saveCase("undo-sixteen-way", { race, history });
+  });
+
   it("applies a reversible routine edit in its original real tool turn without any approval reader or form", async () => {
     const f = await fixture();
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);

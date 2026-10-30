@@ -19,7 +19,7 @@ import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/se
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SECTIONS, recordSubject } from "../kernel/settings/settings-schema.js";
-import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileOp } from "../modules/home/home-profile.js";
+import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileRequest } from "../modules/home/home-profile.js";
 import type { ObservedStore } from "../kernel/settings/settings-types.js";
 import { presentHistoryEntry, presentResolution } from "../admin/settings-presentation.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
@@ -195,11 +195,25 @@ function settingsQualifiers(raw: unknown, label: string): Qualifiers {
 
 /** One `home.profileChange` op, typed: only the maintainer's actions, each with the
  * revision he read, and nothing an action does not take. */
-function profileChangeOp(raw: unknown, label: string): HomeProfileOp {
+function profileChangeOp(raw: unknown, label: string): HomeProfileRequest {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new GatewayError("invalid_request", `${label} must be an object`);
   const value = raw as Record<string, unknown>;
-  const action = oneOf(value.action, `${label}.action`, HOME_PROFILE_MAINTAINER_ACTIONS);
-  const allowed: Record<typeof action, string[]> = {
+  const action = oneOf(value.action, `${label}.action`, [...HOME_PROFILE_MAINTAINER_ACTIONS, "migrate", "reorganize", "retry"] as const);
+  if (action === "retry") {
+    rejectUnknownFields(value, ["action", "commandId"], label);
+    return { action, commandId: string(value.commandId, `${label}.commandId`, { min: 8, max: 200 }) };
+  }
+  if (action === "migrate" || action === "reorganize") {
+    rejectUnknownFields(value, ["action", "assignments"], label);
+    if (!Array.isArray(value.assignments) || value.assignments.length < 1 || value.assignments.length > 500) throw new GatewayError("invalid_request", "assignments holds 1 to 500 exact profile destinations");
+    return { action, assignments: value.assignments.map((raw, index) => {
+      const assignment = object(raw, `${label}.assignments[${index}]`);
+      rejectUnknownFields(assignment, ["id", "expectedRevision", "path"], label);
+      return { id: string(assignment.id, "id", { max: 200 }), expectedRevision: string(assignment.expectedRevision, "expectedRevision", { min: 16, max: 80 }),
+        path: string(assignment.path, "path", { min: 1, max: 131 }) };
+    }) };
+  }
+  const allowed = {
     confirm: ["action", "id", "expectedRevision"],
     refine: ["action", "id", "expectedRevision", "text", "kind", "reason"],
     supersede: ["action", "id", "expectedRevision", "text", "kind", "reason"],
@@ -671,13 +685,14 @@ export class GatewayService {
         // The maintainer's learned-profile changes (docs/settings-model.md 6.4): typed ops
         // through the one change path, as Home's profile tool, confirmed by his tap.
         return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "changes"], method);
+          rejectUnknownFields(params, ["commandId", "changes", "reason"], method);
           if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is not available on this Gateway");
           if (!Array.isArray(params.changes) || params.changes.length < 1 || params.changes.length > 50) throw new GatewayError("invalid_request", "changes holds 1 to 50 profile changes");
           const ops = params.changes.map((raw, index) => profileChangeOp(raw, `changes[${index}]`));
           return safeJson(await new HomeProfileItems(() => this.dependencies.knowledge).change(this.dependencies.settingsChanges, ops, {
             actor: { kind: "ui", id: client.identity }, author: { kind: "maintainer" },
             commandId: string(params.commandId, "commandId", { min: 8, max: 120 }),
+            ...(params.reason === undefined ? {} : { reason: string(params.reason, "reason", { min: 1, max: 2000 }) }),
           }));
         });
       case "home.reconfirmPermissions":
@@ -2385,6 +2400,7 @@ export class GatewayService {
     const expectation = () => this.configurationExpectation({ expectedRuntimeGeneration: fence!.runtimeGeneration, expectedModel: fence!.model ?? null });
     return {
       ...slot.settingsSource(),
+      get session() { return slot.settingsSessionLayer(); },
       appliers: {
         setModel: (ref, fixedAt) => slot.setModel(ref.provider, ref.id, workToken, expectation(), fixedAt),
         setThinking: (level, fixedAt) => slot.setThinking(oneOf(level, "level", thinkingLevels), workToken, expectation(), fixedAt),

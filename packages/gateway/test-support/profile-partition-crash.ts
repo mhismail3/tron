@@ -50,7 +50,7 @@ registerHooks({ resolve(specifier, context, next) { try { return next(specifier,
 `);
   const storeModule = fileURLToPath(new URL("../src/knowledge/knowledge-store.ts", import.meta.url));
   const workspaceModule = fileURLToPath(new URL("../src/workspace/tron-workspace.ts", import.meta.url));
-  const modules = Object.fromEntries(Object.entries({ profile: "../src/modules/home/home-profile.ts", service: "../src/knowledge/knowledge-service.ts", change: "../src/kernel/settings/settings-change.ts", model: "../src/kernel/settings/settings-model.ts", record: "../src/kernel/settings/settings-record.ts", approvals: "../src/kernel/settings/settings-approvals.ts", adapter: "../src/admin/settings-model.ts", schema: "./settings-schema.ts", trust: "../src/kernel/resources/trust-service.ts" }).map(([key, path]) => [key, fileURLToPath(new URL(path, import.meta.url))]));
+  const modules = Object.fromEntries(Object.entries({ profile: "../src/modules/home/home-profile.ts", service: "../src/knowledge/knowledge-service.ts", change: "../src/kernel/settings/settings-change.ts", model: "../src/kernel/settings/settings-model.ts", record: "../src/kernel/settings/settings-record.ts", adapter: "../src/admin/settings-model.ts", schema: "./settings-schema.ts", trust: "../src/kernel/resources/trust-service.ts" }).map(([key, path]) => [key, fileURLToPath(new URL(path, import.meta.url))]));
   const sdk = import.meta.resolve("@earendil-works/pi-coding-agent");
   await writeFile(program, `import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -90,7 +90,6 @@ else if (audit) {
   const { SettingsChangePath } = await import(modules.change);
   const { SettingsModel } = await import(modules.model);
   const { SettingsChangeRecord } = await import(modules.record);
-  const { SettingsApprovals } = await import(modules.approvals);
   const { SettingsStoreAdapter } = await import(modules.adapter);
   const { TEST_SETTINGS_SCHEMA } = await import(modules.schema);
   const { TrustService } = await import(modules.trust);
@@ -99,7 +98,7 @@ else if (audit) {
   const knowledge = new KnowledgeService(store);
   const profile = new HomeProfileItems(() => knowledge);
   const model = new SettingsModel(new SettingsStoreAdapter({schema:TEST_SETTINGS_SCHEMA,agentDir:home+'/agent',tronHome:home,trust:new TrustService(home+'/agent'),modelRuntime}));
-  const changes = new SettingsChangePath(model,new SettingsChangeRecord(home),new SettingsApprovals(home),{setTrust:async()=>{throw new Error('Not used');},undoSubject:(entry,context)=>profile.undo(changes,entry,context)});
+  const changes = new SettingsChangePath(model,new SettingsChangeRecord(home),{setTrust:async()=>{throw new Error('Not used');},undoSubject:(entry,context)=>profile.undo(changes,entry,context)});
   if (audit.undoChangeId) await changes.undo(audit.undoChangeId,audit.context);
   else await profile.partition(changes,{commandId:audit.context.commandId,mode:'migrate',assignments},audit.context);
 } else await store.partitionProfile({ commandId:'partition-child-command', mode:'migrate', assignments });

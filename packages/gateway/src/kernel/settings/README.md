@@ -41,8 +41,8 @@ No Knowledge DTO or profile inverse is invented by the settings kernel.
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
 worker. Routine reversible changes apply, log and can be undone. Only irreversible,
-trust/executable authority, spend and install effects require an exact native tap;
-spend limits require it when widening. Writer grants and scope admission apply first.
+trust/executable authority, privacy expansion, spend and install effects require an exact native tap;
+privacy access and spend limits require it when widening. Writer grants and scope admission apply first.
 There are no settings tiers, floor overrides, pending requests, expiry, outcome
 outbox, risk-model calls or settings decision RPCs.
 
@@ -72,8 +72,10 @@ original operation. Redacted/action facts are not generically undoable.
 Segment replacement precedes index publication. Recovery adopts only complete,
 unambiguous bounded published bytes and never replays effects. Corrupt history
 refuses writes/history; startup reports it without failing unrelated settings reads.
-Post-effect audit failure is an uncertain outcome: canonical command receipts retain
-the replay fence rather than admitting the effect again.
+Post-effect audit, observation, notification or result-publication failure is an uncertain
+outcome: canonical command receipts retain the replay fence rather than admitting the
+effect again. An unindexed identity-addressed Profile group is not adopted by generic
+recovery: only its domain owner can prove commit and publish it through `appendOnce`.
 
 Home calls `validateSubjectAudit` before its own effects and freezes the original
 ordered writes/context/timestamp in its existing domain envelope. After proving its
@@ -87,6 +89,7 @@ creates no backup, migration journal, domain recovery engine or second settings 
 
 | Signal | One-step diagnosis |
 | --- | --- |
+| `settings.target-stripe` request stage | A settings write is queued on its actual target stripe; inspect the owning request span before diagnosing a stale read or replay. |
 | `TRON_SETTINGS_HISTORY_UNAVAILABLE` | Startup audit recovery refused. Inspect the bounded index/segments; history and writes must fail closed, without effect replay. |
 
 Persistence errors propagate to their caller. No background expiry/retry timer exists.

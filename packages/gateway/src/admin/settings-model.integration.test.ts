@@ -16,7 +16,7 @@ import { SettingsStoreAdapter } from "./settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SettingsApprovals } from "../kernel/settings/settings-approvals.js";
+import { reviewedMutation } from "../../test-support/native-change.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
@@ -42,7 +42,7 @@ afterEach(async () => {
 });
 
 function subscribed(sessionIds: string[] = []): ClientContext {
-  return { id: "settings-client", identity: "local", isLocal: true, isSubscribed: (id: string) => sessionIds.includes(id), isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
+  return { id: "settings-client", identity: "device:settings-client", isLocal: false, isSubscribed: (id: string) => sessionIds.includes(id), isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
 }
 
 function row(resolution: Resolution, key: string, qualifiers?: Record<string, string>): ResolvedKey {
@@ -108,7 +108,7 @@ async function fixture() {
     toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
       : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
   }));
-  const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
+  const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
       async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
       async inspection => { await registry.commitProjectReload(inspection.projectDir); },
@@ -400,7 +400,7 @@ describe("settings renderer contract", () => {
     const initial = await resolve();
     expect(row(initial, queue)).toMatchObject({ value: [], display: "Same as Home", presentation: { control: "list" } });
     expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
-    const change = async (id: string, key: string, value: unknown) => await f.service.invoke(subscribed(), "settings.change", {
+    const change = async (id: string, key: string, value: unknown) => await reviewedMutation(f.service, subscribed(), "settings.change", {
       commandId: id, target, changes: [{ key, layer: "global", op: "set", value }],
     });
     await change("queue-two", queue, [first, second]);
@@ -443,8 +443,7 @@ describe("settings renderer contract", () => {
   };
   /** A maintainer's change through the RPC: the iPhone's own tap, as the Mac target. */
   const maintainerChange = (f: Fixture, changes: unknown[], dryRun = false) =>
-    f.service.invoke(subscribed(), "settings.change", { commandId: commandId(), target: macTarget, changes, ...(dryRun ? { dryRun: true } : {}) }) as
-      Promise<{ dryRun?: true; status: string; tier: string; changes: Array<Record<string, unknown>> }>;
+    reviewedMutation(f.service, subscribed(), "settings.change", { commandId: commandId(), target: macTarget, changes, ...(dryRun ? { dryRun: true } : {}) });
   const options = (f: Fixture, request: Record<string, unknown>, target: Record<string, unknown> = macTarget) =>
     f.service.invoke(subscribed(), "settings.options", { target, ...request }) as Promise<Options>;
 
@@ -452,16 +451,16 @@ describe("settings renderer contract", () => {
     const f = await fixture();
     await f.trust.set(f.project, true);
     const changeAt = async (target: Record<string, unknown>, value: string[]) => {
-      if (target.kind !== "project") return f.service.invoke(subscribed(), "settings.change", {
+      if (target.kind !== "project") return reviewedMutation(f.service, subscribed(), "settings.change", {
         commandId: commandId(), target, changes: [{ key: "tools.active", layer: target.kind, op: "set", value }],
       });
       // Repository composition remains available to logged agent requests, not app editors.
       const result = await f.settingsChanges.change({ kind: "project", cwd: String(target.cwd) },
         [{ key: "tools.active", layer: "project", op: "set", value }],
         { actor: { kind: "agent", id: "repository-agent" }, reason: "Choose repository tools" });
-      if (result.approval) return f.settingsChanges.decide(result.approval.requestId, {
-        digest: result.approval.digest, approved: true, decidedBy: { kind: "ui", id: "local" },
-      });
+      if (result.status === "review") return f.settingsChanges.change({ kind: "project", cwd: String(target.cwd) },
+        [{ key: "tools.active", layer: "project", op: "set", value }],
+        { actor: { kind: "ui", id: "device:settings-client" }, reason: "Choose repository tools", confirmationDigest: result.review!.digest });
       return result;
     };
     const projectTarget = { kind: "project", cwd: f.project };
@@ -563,7 +562,7 @@ describe("settings renderer contract", () => {
     expect(presentedRow(surface, "model.ref[role=chat]").presentation.control).toBe("catalog");
     expect(presentedRow(surface, "model.thinking[role=chat]", { model: f.modelKey }).presentation.control).toBe("choice");
     expect(presentedRow(surface, "run.httpProxy").presentation.control).toBe("secret");
-    expect(surface.keys.some(key => key.key === "permissions.floor")).toBe(true);
+    expect(surface.keys.some(key => key.key === "permissions.floor")).toBe(false);
   });
 
   it("keeps false overrides resettable and Changes undoable without publishing a routine editor", async () => {
@@ -653,10 +652,10 @@ describe("settings renderer contract", () => {
     const groups = (...keys: string[]) => keys.map(key => before.keys.find(row => row.key === key)?.group);
     expect(groups("permissions.budget.task")).toEqual(["workers"]);
     expect(groups("run.retry.maxRetries", "run.httpProxy")).toEqual(["run", "run"]);
-    expect(groups("context.images.block", "permissions.defaultProjectTrust", "permissions.floor")).toEqual(["tools", "trust", "approvals"]);
+    expect(groups("context.images.block", "permissions.defaultProjectTrust")).toEqual(["tools", "trust"]);
+    expect(before.keys.map(key => key.key)).not.toContain("permissions.floor");
     expect(before.sections.map(entry => entry.id)).not.toContain("advanced");
-    expect(section(before, "approvals").order).toBeLessThan(section(before, "run").order);
-    expect(presentedRow(before, "permissions.floor").presentation.help).toBe("Which setting changes need your OK.");
+    expect(before.sections.map(section => section.id)).not.toContain("approvals");
     for (const served of before.sections) expect(served.description.length, served.id).toBeGreaterThan(0);
     // A section the target has no key in is not presented at all.
     expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
