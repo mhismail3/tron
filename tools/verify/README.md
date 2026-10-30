@@ -66,8 +66,8 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 1. `scripts/tron ownership`
 2. `scripts/tron budgets HEAD --base <base>` (sizes are reported; few cases fail)
 3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
-   --base <base>` when Markdown, a manifest or the Gateway changed (a Markdown-only
-   change needs no Gateway `node_modules`; [tools/docs](../docs/README.md))
+   --base <base>` when Markdown, a manifest or the Gateway changed; `--all` and empty-diff
+   baselines check every block without `--base` (loaded generators need Gateway dependencies).
 4. the privacy guard over `git diff <base>..HEAD`
 5. `git diff --check`
 6. When the selection touches the Gateway: `npm run check` (production and test
@@ -114,8 +114,8 @@ ordinary journeys. `--module` does not widen to unrelated kernel locks;
 `--update-locks` remains confined to the named owner's locks.
 
 Small changes run only what can catch a regression in them:
-- **Markdown** selects no module: no test reads it, so the documentation
-  checks are its evidence. A Markdown-only change passes on the static checks.
+- **Markdown** selects no module: documentation checks are its evidence. An actual
+  Markdown-only diff needs no Gateway dependencies ([tools/docs](../docs/README.md)).
 - A module whose change is **only its own tests and goldens** (`*.golden.*`,
   `Goldens/`) runs those tests, plus its locks when a golden changed. Nothing
   else reads them, so it neither widens nor adds dependents' locks. Code

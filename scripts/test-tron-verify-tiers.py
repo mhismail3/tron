@@ -60,6 +60,20 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(r.report()['passingTests'], 0)
 
+    def test_main_baselines_refuse_unchecked_loaded_docs_at_head(self):
+        r = self.repo
+        # The real loaded generator is deliberately unavailable in this tiny repo.
+        # An unchanged block is not proof it was ever generated successfully.
+        r.write('README.md', '# Fixture\n\n<!-- tron docs settings -->\nstale\n<!-- /tron docs -->\n')
+        r.commit('unchecked generated block already on main')
+        for arguments in ([], ['--all']):
+            with self.subTest(arguments=arguments):
+                result = r.verify('--base', 'HEAD', *arguments)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                step = next(s for s in r.report()['steps'] if s['name'] == 'generated docs')
+                self.assertEqual(step['status'], 'failed')
+                self.assertEqual(step['command'], [str(r.path.resolve() / 'scripts/tron'), 'docs', 'check'])
+
     def test_default_docs_and_empty_diff_need_no_executable_tests(self):
         r = self.repo
         empty = self.plan()

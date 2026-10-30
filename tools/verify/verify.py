@@ -658,11 +658,15 @@ def main(argv: list[str]) -> int:
     tron = str(ROOT / "scripts/tron")
     ios_test = str(ROOT / "scripts/tron-ios-test")
     node = [str(ROOT / "scripts/tron-node"), "exec"]
+    # A baseline has no trusted green predecessor: unchanged bytes can already
+    # be stale. Keep diff-scoped generation only for actual changed selections.
+    baseline_docs = name == "all" or (name == "changed" and not selection["paths"])
     checks = [
         ("ownership", [tron, "ownership"], {}),
         ("budgets", [tron, "budgets", "HEAD", "--base", base], {}),
         ("documentation policy", ["python3", "scripts/check-documentation-policy.py"], {}),
-        ("generated docs", [tron, "docs", "check", "--base", base] if selection["docInputs"] or gateway_touched else None, {}),
+        ("generated docs", [tron, "docs", "check", *([] if baseline_docs else ["--base", base])]
+         if baseline_docs or selection["docInputs"] or gateway_touched else None, {}),
         ("agent policy", ["bash", "scripts/check-agent-policy.sh"], {}),
         ("privacy guard", f"git diff {base}..HEAD | scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),
