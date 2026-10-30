@@ -264,7 +264,7 @@ final class TronAccessibilityUITests: XCTestCase {
     }
 
     func testKnowledgeProductIsAbsentFromDashboardAndConnectedServices() {
-        for variant in ["-fixture-light", "-fixture-dark", "-fixture-large-type"] {
+        for variant in ["-fixture-light", "-fixture-dark", "-fixture-xxxl", "-fixture-large-type"] {
             let app = launch(["-fixture-dashboard", variant])
             defer { app.terminate() }
             let menu = app.buttons["dashboard.menu"]
