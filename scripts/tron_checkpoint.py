@@ -23,10 +23,9 @@ OUTCOMES = [
     ("Home continuity and current Profile", ["testHomeStatusShowsHostPressureAndWorkers"], [
         "src/sessions/home-memory-tools.e2e.test.ts",
         "src/modules/home/home-profile-triage.integration.test.ts"]),
-    ("Controls: settings persistence and required approvals", [
-        "testSettingsOutsideChangesAndBuiltinExtensionPersist",
-        "testAgentApprovalRequestsAppearInTheirChatAndSettleEverywhere"], [
-        "src/admin/settings-approval-outcomes.e2e.test.ts"]),
+    ("Controls: settings persistence and exact native review", [
+        "testSettingsOutsideChangesAndBuiltinExtensionPersist"], [
+        "src/admin/native-change.e2e.test.ts"]),
     ("Files/artifacts/research: uploads, reopen and source reads", [
         "testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen"], [
         "src/display/display.store.lock.integration.test.ts",

@@ -14,7 +14,7 @@ struct HostedProjectLifecyclePreview: View {
             .tronManagedSheet(isPresented: $presented, identity: "preview.project-lifecycle") {
                 Group {
                     if let action = HostedProjectApprovalPreview(surface: surface) {
-                        SettingsApprovalSheet(selection: .request(SettingsApprovalReference(requestID: action.id, changeIDs: [])))
+                        ChangeReviewSheet(review: action.review, approve: {}, cancel: { presented = false })
                     } else {
                         NavigationStack {
                             HostedProjectLifecycleContent(surface: surface)
@@ -54,7 +54,8 @@ private struct HostedProjectLifecycleContent: View {
     var body: some View {
         content
             .tronManagedSheet(item: $approval, identity: { "preview.project-lifecycle.\($0.rawValue)" }) { action in
-                SettingsApprovalSheet(selection: .request(SettingsApprovalReference(requestID: action.id, changeIDs: [])))
+                // Design preview: Approve sends nothing; only the real owner confirms.
+                ChangeReviewSheet(review: action.review, approve: {}, cancel: { approval = nil })
             }
             .tronManagedSheet(isPresented: $choosingFolder, identity: "preview.project-lifecycle.existing") {
                 WorkspaceBrowser { _ in choosingFolder = false }
@@ -96,8 +97,8 @@ private struct HostedProjectLifecycleContent: View {
     }
 }
 
-/// Socket-served synthetic action previews for the production approval sheet.
-/// Decisions are refused by the fixture socket: this gallery cannot apply anything.
+/// Synthetic exact reviews for the production review sheet. This gallery sends
+/// no command, so its Approve cannot apply anything.
 enum HostedProjectApprovalPreview: String, CaseIterable, Identifiable {
     case trust, rename, archive, untrust
     var id: String { "preview-project-\(rawValue)" }
@@ -112,31 +113,19 @@ enum HostedProjectApprovalPreview: String, CaseIterable, Identifiable {
         }
     }
 
-    static var requests: [JSONValue] {
-        allCases.map { action in
-            let source = "~/Workspace/\(action == .trust ? "field-notes" : "Example")"
-            var items: [JSONValue] = [.object(["label": .string("Project"), "value": .string(source)])]
-            if action == .archive || action == .rename {
-                items.append(.object(["label": .string("Destination"), "value": .string(action == .archive
-                    ? "~/Workspace/.archive/Example-00000000-0000-4000-8000-000000000023" : "~/Workspace/field-notes")]))
-            }
-            let effect: String
-            switch action {
-            case .trust: effect = "Allow project extensions and hooks to load. No GitHub repository is created in this sample."
-            case .rename: effect = "Move the folder and preserve trust after success. GitHub and historical sessions are not renamed."
-            case .archive: effect = "Keep all files in a recoverable archive and remove trust. No hard delete."
-            case .untrust: effect = "Keep the folder and stop loading project extensions and hooks."
-            }
-            items.append(.object(["label": .string("Effect"), "value": .string(effect)]))
-            return .object(["requestId": .string(action.id), "digest": .string("preview-digest-\(action.rawValue)"),
-                "createdAt": .string(ISO8601DateFormatter().string(from: Date())),
-                "expiresAt": .string(ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))),
-                "actor": .object(["kind": .string("ui"), "id": .string("fixture-device")]),
-                "target": .object(["kind": .string("global")]), "requester": .string("iPhone design preview"),
-                "reason": .string("Synthetic visual review only. No project command was submitted; decisions are disabled by the fixture."),
-                "changes": .array([]), "action": .object(["subject": .string("project.lifecycle"),
-                    "title": .string("\(action.rawValue.capitalized) project"), "items": .array(items)])])
+    var review: ChangeReview {
+        let source = "~/Workspace/\(self == .trust ? "field-notes" : "Example")"
+        let destination: String
+        switch self {
+        case .trust: destination = "Trusted: project extensions and hooks load. No GitHub repository is created in this sample."
+        case .rename: destination = "~/Workspace/field-notes, trust preserved. GitHub and historical sessions are not renamed."
+        case .archive: destination = "~/Workspace/.archive/Example-00000000-0000-4000-8000-000000000023, trust removed. No hard delete."
+        case .untrust: destination = "Not trusted: the folder stays and project extensions and hooks stop loading."
         }
+        let value: JSONValue = .object(["digest": .string("preview-digest-\(rawValue)"), "title": .string("\(rawValue.capitalized) project"),
+            "requiresTap": .bool(true), "reason": .string("Synthetic visual review only. No project command is submitted."),
+            "items": .array([.object(["label": .string("Project"), "before": .string(source), "after": .string(destination)])])])
+        return try! value.decode(ChangeReview.self)
     }
 }
 #endif

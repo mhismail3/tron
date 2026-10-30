@@ -10,9 +10,8 @@ import { settingsDependencies, setHomeMemoryModels } from "../../test-support/se
 import { HOME_TOOL_NAMES, homeToolCatalog } from "../modules/home/home-runtime-policy.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
-import { APPROVAL_TTL_MS } from "../kernel/settings/settings-approvals.js";
+import { maintainerChange } from "../../test-support/native-change.js";
 import type { ChangeEntry } from "../kernel/settings/settings-record.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -22,15 +21,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
 
-/**
- * The settings risk gate end to end (docs/settings-model.md 5.4-5.5, F3): real
- * agents in a real RuntimeRegistry (an ordinary chat and a designated Home) call
- * the `settings` tool from faux-model turns, the Gateway sets the web mark from
- * the tool calls it executed, and the maintainer decides through the Gateway
- * RPCs. Quiet, notify and approve, the floor override, superseded approvals and
- * 24-hour expiry with the requester told are each one case. The transcript of
- * every case is retained at `test-results/settings-gate.json`.
- */
+/** Real agent, SDK and store witnesses for typed writes, live inheritance, request pins and worker signals. */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-gate.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
 const roots: string[] = [];
@@ -173,19 +164,21 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings request ")).map(text);
     return { results, outcomes };
   }
-  const pendingApproval = async (slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>) => {
-    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions[0], "blocking settings prompt");
-    return (await settingsChanges.pendingApprovals()).find(request => request.actor.sessionId === slot.id)!;
+  const answerNative = async (slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, approved: boolean) => {
+    const card = await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions[0], "exact native image review");
+    if (card.method !== "change") throw new Error("A generic form cannot authorize image access");
+    expect(card.review.requiresTap).toBe(true);
+    expect(slot.settingsSessionLayer().requestPins?.["context.images.block"]?.value).toBe(true);
+    return service.invoke(phone(), "extension.respond", { commandId: commandId(), sessionId: slot.id,
+      interactionId: card.id, hostEpoch: card.hostEpoch, presentationRevision: card.presentationRevision,
+      value: { digest: card.review.digest, approved } });
   };
   const settle = (results: Array<{ tool: string; details?: Record<string, unknown> }>) => results.find(result => result.tool === "settings")!.details!;
   const history = async () => (await service.invoke(phone(), "settings.history", { limit: 200 }) as unknown as { entries: ChangeEntry[] }).entries;
-  const approvals = async () => (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<Record<string, unknown> & { requestId: string; digest: string }> }).requests;
-  const decide = (requestId: string, digest: string, approved: boolean) =>
-    service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId, digest, approved }) as Promise<Record<string, unknown>>;
   const approveProjectChange = async (changes: Parameters<typeof settingsChanges.change>[1]) => {
     const result = await settingsChanges.change({ kind: "project", cwd: project }, changes,
       { actor: { kind: "agent", id: "repository-agent" }, reason: "Choose repository defaults" });
-    return result.approval ? decide(result.approval.requestId, result.approval.digest, true) : result;
+    return result;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
   const designateHome = async () => {
@@ -198,25 +191,8 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     await slot.setModel(MODEL.provider, MODEL.id);
     return slot;
   };
-  /** Outcome messages as the canonical session files hold them. */
-  const canonicalOutcomes = async () => {
-    const found: string[] = [];
-    for (const name of await readdir(sessionDir, { recursive: true })) {
-      if (!String(name).endsWith(".jsonl")) continue;
-      for (const line of (await readFile(join(sessionDir, String(name)), "utf8")).split("\n").filter(Boolean)) {
-        const entry = JSON.parse(line) as { type: string; customType?: string; content?: unknown };
-        if (entry.type === "custom_message" && entry.customType === SETTINGS_OUTCOME_MESSAGE) found.push(String(entry.content));
-      }
-    }
-    return found;
-  };
-  const homeOutcome = async (slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, requestId: string) => {
-    await waitFor(async () => (await canonicalOutcomes()).some(text => text.startsWith(`Settings request ${requestId}:`)) || undefined, "exact autonomous Home outcome appended");
-    await waitFor(() => slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "autonomous Home outcome settled");
-    return (await canonicalOutcomes()).filter(text => text.startsWith(`Settings request ${requestId}:`));
-  };
   return {
-    settingsChanges, pendingApproval, canonicalOutcomes, homeOutcome, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide, approveProjectChange,
+    settingsChanges, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, answerNative, settle, history, approveProjectChange,
     macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, homeDiagnostics, advance: (ms: number) => { clock += ms; },
   };
 }
@@ -225,7 +201,7 @@ const retries = (value: number, expected: number) => ({
   action: "change", reason: "Flaky provider today", changes: [{ key: "run.retry.maxRetries", layer: "global", op: "set", value, expected }],
 });
 
-describe("settings risk gate", () => {
+describe("typed settings at real runtime boundaries", () => {
   it("refuses a Project model write, and a repository's own model is inherited with Project provenance without changing Global defaults", async () => {
     const f = await fixture();
     const target = { kind: "project", cwd: f.project };
@@ -331,7 +307,7 @@ describe("settings risk gate", () => {
     const f = await fixture({ reasoning: true });
     const home = await f.designateHome();
     const tools = ["ask_user", "date", "settings"];
-    const save = (changes: Array<Record<string, unknown>>) => f.service.invoke(phone(), "settings.change", {
+    const save = (changes: Array<Record<string, unknown>>) => maintainerChange(f.service, phone(), "settings.change", {
       commandId: commandId(), target: { kind: "home" },
       changes: changes.map(change => ({ layer: "session", op: "set", ...change })),
     });
@@ -386,7 +362,7 @@ describe("settings risk gate", () => {
     const first = await f.designateHome();
     for (const [key, value] of [["model.thinking[role=chat]", "high"], ["run.retry.maxRetries", 7], ["context.images.block", true]] as const) {
       const snapshot = first.snapshot();
-      await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: first.id },
+      await maintainerChange(f.service, phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: first.id },
         fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
         changes: [{ key, layer: "session", op: "set", value }] });
     }
@@ -496,12 +472,8 @@ describe("settings risk gate", () => {
     const imagesTurn = f.run(slot, "request images", [{ name: "settings", args: {
       action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "session", op: "set", value: false }],
     } }]);
-    const approval = await f.pendingApproval(slot);
-    expect(slot.snapshot().extensionPresentation.pendingInteractions).toHaveLength(1);
-    await f.service.invoke(phone(), "settings.decide", {
-      commandId: commandId(), requestId: approval.requestId, digest: approval.digest, approved: true,
-    });
-    expect(f.settle((await imagesTurn).results)).toMatchObject({ status: "approved" });
+    await f.answerNative(slot, true);
+    expect(f.settle((await imagesTurn).results)).toMatchObject({ status: "applied" });
     expect((await observe()).images).toBeGreaterThan(0);
     // Narrowing during a model/tool loop must affect the next request in the
     // same turn, not only the next user prompt.
@@ -523,16 +495,15 @@ describe("settings risk gate", () => {
     expect(withinTurn).toHaveLength(2);
     expect(withinTurn[0]).toBeGreaterThan(0);
     expect(withinTurn[1]).toBe(0);
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [
-      { key: "permissions.floor", layer: "global", op: "set", value: "quiet", qualifiers: { key: "context.images.block", direction: "widen" } },
-    ] });
-    const lowered = f.settle((await f.run(slot, "request images under the lower floor", [{ name: "settings", args: {
+    const widening = f.run(slot, "request images again", [{ name: "settings", args: {
       action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "session", op: "set", value: false }],
-    } }])).results);
-    expect(lowered).toMatchObject({ status: "applied", tier: "quiet" });
+    } }]);
+    await f.answerNative(slot, false);
+    const lowered = f.settle((await widening).results);
+    expect(lowered).toMatchObject({ status: "declined" });
     expect((await observe()).images).toBe(0);
     expect(slot.settingsSessionLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true }) });
-    await f.service.invoke(phone(), "settings.change", {
+    await maintainerChange(f.service, phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
       changes: [{ key: "context.images.block", layer: "session", op: "unset" }],
@@ -543,7 +514,7 @@ describe("settings risk gate", () => {
   it.each([false, true])("an approved Global image-block widening (session target: %s) releases only inheriting open chats", async (viaSession) => {
     const f = await fixture();
     const target = { kind: "global" } as const;
-    const setDefault = (value: boolean, sessionId?: string) => f.service.invoke(phone(), "settings.change", {
+    const setDefault = (value: boolean, sessionId?: string) => maintainerChange(f.service, phone(), "settings.change", {
       commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target,
       changes: [{ key: "context.images.block", layer: "global", op: "set", value }],
     });
@@ -567,7 +538,7 @@ describe("settings risk gate", () => {
     expect(await images(inheriting)).toBe(0);
     expect(await images(explicit)).toBe(0);
     const widened = await setDefault(false, viaSession ? inheriting.id : undefined);
-    expect(widened).toMatchObject({ status: "applied", tier: "approve" });
+    expect(widened).toMatchObject({ status: "applied" });
     expect(await images(inheriting)).toBeGreaterThan(0);
     expect(await images(explicit)).toBe(0);
     transcript.push({ case: `Global image widening via ${viaSession ? "session" : "default"}`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit) } });
@@ -797,7 +768,7 @@ describe("settings risk gate", () => {
         { key: "run.retry.provider.timeoutMs", layer: "session", op: "set", value: 10_000 },
       ],
     } }]);
-    expect(f.settle(changed.results)).toMatchObject({ status: "applied", tier: "quiet" });
+    expect(f.settle(changed.results)).toMatchObject({ status: "applied" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
       changes: [{ key: "context.images.block", layer: "global", op: "set", value: true }] });
@@ -847,189 +818,6 @@ describe("settings risk gate", () => {
       settings: resumed.settingsSessionLayer().settings, mac: await f.macDocument() }] });
   });
 
-  it("an ordinary chat's agent: quiet from a clean run and after bash, notify after an undeclared third-party tool, approve for a notify floor after web", async () => {
-    const f = await fixture();
-    const slot = await f.chat();
-    const steps: Array<Record<string, unknown>> = [];
-
-    // A clean run, with a built-in and a declared closed-world third-party tool: quiet.
-    const clean = await f.run(slot, "raise retries", [
-      { name: "read", args: { path: join(f.project, "missing.txt") } },
-      { name: "count_lines", args: {} },
-      { name: "settings", args: retries(4, 3) },
-    ]);
-    expect(f.settle(clean.results)).toMatchObject({ status: "applied", tier: "quiet" });
-    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
-    steps.push({ step: "clean run", result: f.settle(clean.results) });
-
-    // bash is trusted (decision 33): Tron's direct bash tool does not mark the run.
-    const shell = await f.run(slot, "run a command, then raise retries", [
-      { name: "bash", args: { command: "echo trusted" } },
-      { name: "settings", args: retries(5, 4) },
-    ]);
-    expect(shell.results[0]).toMatchObject({ tool: "bash", isError: false, text: expect.stringContaining("trusted") });
-    expect(f.settle(shell.results)).toMatchObject({ status: "applied", tier: "quiet" });
-    expect(f.pushes).toEqual([]);
-    steps.push({ step: "after bash", result: f.settle(shell.results) });
-
-    // The same quiet-floor change after a tool that does not declare
-    // openWorldHint: false: the run is marked, one step up to notify, applied and pushed.
-    const marked = await f.run(slot, "raise retries again", [
-      { name: "fetch_page", args: {} },
-      { name: "settings", args: retries(6, 5) },
-    ]);
-    expect(f.settle(marked.results)).toMatchObject({ status: "applied", tier: "notify" });
-    expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
-    expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "explicit", sessionId: slot.id, message: expect.stringContaining("Retries") }));
-    // Only the approval push is categorized; a notify-tier change is not.
-    expect(f.pushes.at(-1)).not.toHaveProperty("category");
-    steps.push({ step: "after an undeclared third-party tool", result: f.settle(marked.results), push: f.pushes.at(-1) });
-
-    // The mark belongs to that run: the next run is clean again (decision 28).
-    const next = await f.run(slot, "and once more", [{ name: "settings", args: retries(7, 6) }]);
-    expect(f.settle(next.results)).toMatchObject({ status: "applied", tier: "quiet" });
-
-    // A notify-floor change (adding a default tool widens tools.active) after web: approve, so pending.
-    const widening = f.run(slot, "add a tool", [
-      { name: "fetch_page", args: {} },
-      { name: "settings", args: { action: "change", reason: "The page said to", changes: [{ key: "tools.active", layer: "global", op: "set", value: ["read", "bash", "edit", "write", "fetch_page"] }] } },
-    ]);
-    const pending = await f.pendingApproval(slot);
-    expect(pending).toMatchObject({ status: "pending" });
-    expect((await f.macDocument()).defaultTools).toBeUndefined();
-    expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "waiting", sessionId: slot.id, category: "settings-approval" }));
-    const [waiting] = await f.approvals();
-    // The row the iPhone shows: who asked and the exact change, as Gateway display strings.
-    expect(waiting).toMatchObject({
-      requestId: pending.requestId, actor: { kind: "agent", sessionId: slot.id }, requester: "A chat's agent", reason: "The page said to",
-      // The Mac held nothing, so the selection is stored relative to the built-in tools.
-      changes: [{ key: "tools.active", layer: "global", tier: "approve", after: ["+fetch_page"], display: { before: "Not set", after: "+fetch_page" } }],
-    });
-    steps.push({ step: "notify floor after web", result: pending, approvals: await f.approvals() });
-    await f.decide(pending.requestId, pending.digest, false);
-    expect(f.settle((await widening).results)).toMatchObject({ status: "declined" });
-
-    const entries = await f.history();
-    const byKey = entries.filter(entry => entry.actor.kind === "agent" && entry.key === "run.retry.maxRetries").reverse();
-    expect(byKey.map(entry => [entry.tier, entry.tierBasis.web, entry.status])).toEqual([
-      ["quiet", false, "applied"], ["quiet", false, "applied"], ["notify", true, "applied"], ["quiet", false, "applied"],
-    ]);
-    expect(byKey[0]!.actor).toMatchObject({ kind: "agent", id: slot.id, sessionId: slot.id });
-    expect(byKey[0]!.reason).toBe("Flaky provider today");
-    transcript.push({ case: "ordinary chat agent", steps });
-  }, 60_000);
-
-  it("Home: trust waits for the tap, a decline changes nothing, the web step raises a quiet change, and a lowered floor lets trust through with a notification", async () => {
-    const f = await fixture();
-    const home = await f.designateHome();
-    const steps: Array<Record<string, unknown>> = [];
-    const trustProject = (project: string) => ({ action: "change", reason: "The maintainer asked me to work there", changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project } }] });
-
-    // Home asking to trust a project: pending; nothing applies until approved on the device.
-    const trustTurn = f.run(home, "trust the other project", [{ name: "settings", args: trustProject(f.other) }]);
-    const pending = await f.pendingApproval(home);
-    expect(pending).toMatchObject({ status: "pending" });
-    expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
-    // An approval for a different diff is refused (no approve-then-swap).
-    await expect(f.decide(pending.requestId, "0".repeat(64), true)).rejects.toMatchObject({ code: "conflict" });
-    const approved = await f.decide(pending.requestId, pending.digest, true);
-    expect(approved).toMatchObject({ status: "approved" });
-    expect((await f.trust.inspect(f.other)).savedDecision).toBe(true);
-    steps.push({ step: "trust approved", pending, approved });
-    expect(f.settle((await trustTurn).results)).toMatchObject({ status: "approved" });
-
-    // A second request, declined: no change; both outcomes recorded.
-    await f.trust.set(f.other, null);
-    const again = f.run(home, "trust it again", [{ name: "settings", args: trustProject(f.other) }]);
-    const second = await f.pendingApproval(home);
-    expect(await f.decide(second.requestId, second.digest, false)).toMatchObject({ status: "declined" });
-    expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
-    const trustEntries = (await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status);
-    expect(trustEntries).toEqual(expect.arrayContaining(["approved", "declined"]));
-    expect(trustEntries).not.toContain("pending");
-    steps.push({ step: "trust declined", statuses: trustEntries });
-
-    // The original tool turn owns the declined outcome; no autonomous turn repeats it.
-    const declined = f.settle((await again).results);
-    expect(declined).toMatchObject({ status: "declined" });
-    const told = await f.run(home, "anything new?", []);
-    expect(told.outcomes).toEqual([]);
-    steps.push({ step: "Home told", outcome: declined });
-
-    // Quiet from a clean turn; notify after web_search in that turn.
-    expect(f.settle((await f.run(home, "retries", [{ name: "settings", args: retries(4, 3) }])).results)).toMatchObject({ status: "applied", tier: "quiet" });
-    const webTurn = await f.run(home, "read this page then raise retries", [
-      { name: "web_search", args: { op: "read", url: "https://example.org/page" } },
-      { name: "settings", args: retries(5, 4) },
-    ]);
-    expect(f.settle(webTurn.results)).toMatchObject({ status: "applied", tier: "notify" });
-    steps.push({ step: "Home quiet then notify after web_search", result: f.settle(webTurn.results) });
-
-    // Only the maintainer's tap lowers a floor: Home's request is refused.
-    const lowerFloor = { key: "permissions.floor", layer: "global", op: "set", value: "notify", qualifiers: { key: "permissions.projectTrust", direction: "widen" } };
-    const refused = await f.run(home, "lower the trust floor", [{ name: "settings", args: { action: "change", reason: "To save taps", changes: [lowerFloor] } }]);
-    expect(refused.results[0]).toMatchObject({ isError: true, text: expect.stringContaining("cannot be changed by home") });
-    // His row asks first: a dry run names the approve tier and the key's confirm text.
-    const preview = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [lowerFloor], dryRun: true }) as { tier: string; changes: Array<{ confirm?: string }> };
-    expect(preview).toMatchObject({ tier: "approve", changes: [{ confirm: expect.stringContaining("Lowering a floor") }] });
-    // His tap lowers it at once; the record names its tier (approve, the floor key's widen floor).
-    const lowered = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [lowerFloor] }) as Record<string, unknown>;
-    expect(lowered).toMatchObject({ status: "applied", tier: "approve" });
-    const floorEntry = (await f.history()).find(entry => entry.key === "permissions.floor")!;
-    expect(floorEntry).toMatchObject({ actor: { kind: "ui" }, status: "applied", tier: "approve", tierBasis: { direction: "widen", floor: "approve" }, after: "notify" });
-    expect(floorEntry).not.toHaveProperty("before");
-    // Now Home's trust request applies with a notification, and the record names the override.
-    const through = await f.run(home, "trust it now", [{ name: "settings", args: trustProject(f.other) }]);
-    expect(f.settle(through.results)).toMatchObject({ status: "applied", tier: "notify" });
-    expect((await f.trust.inspect(f.other)).savedDecision).toBe(true);
-    const overridden = (await f.history()).find(entry => entry.key === "permissions.projectTrust" && entry.status === "applied")!;
-    expect(overridden.tierBasis).toMatchObject({ floor: "notify", floorSource: "override" });
-    steps.push({ step: "floor lowered by tap, trust with a notification", floor: floorEntry, trust: overridden });
-    transcript.push({ case: "Home", steps });
-  }, 90_000);
-
-  it("a superseding diff resumes the blocked tool explicitly and refuses the old approval", async () => {
-    const f = await fixture();
-    const slot = await f.chat();
-    const firstTurn = f.run(slot, "add a tool", [{ name: "fetch_page", args: {} }, { name: "settings", args: {
-      action: "change", reason: "Need the page tool", changes: [{ key: "tools.active", layer: "global", op: "set", value: ["read", "fetch_page"] }],
-    } }]);
-    const first = await f.pendingApproval(slot);
-    const replacement = await f.settingsChanges.change(first.target, [
-      { key: "tools.active", layer: "global", op: "set", value: ["read", "fetch_page", "count_lines"] },
-    ], { actor: { kind: "agent", sessionId: "replacement" }, reason: "A newer exact diff", request: true, session: slot.taskWorkerSettingsSession() });
-    expect(f.settle((await firstTurn).results)).toMatchObject({ status: "superseded" });
-    await expect(f.decide(first.requestId, first.digest, true)).rejects.toMatchObject({ code: "not_found" });
-    expect((await f.approvals()).map(request => request.requestId)).toEqual([replacement.approval!.requestId]);
-    f.advance(APPROVAL_TTL_MS + 1);
-    expect(await f.approvals()).toEqual([]);
-    await expect(f.decide(replacement.approval!.requestId, replacement.approval!.digest, true)).rejects.toMatchObject({ code: "conflict" });
-    expect((await f.macDocument()).defaultTools).toBeUndefined();
-    const statuses = (await f.history()).filter(entry => entry.key === "tools.active").map(entry => entry.status);
-    expect(statuses).toEqual(expect.arrayContaining(["superseded", "expired"]));
-    expect(statuses).not.toContain("pending");
-    expect(statuses).not.toContain("applied");
-    expect((await f.run(slot, "next", [])).outcomes).toEqual([]);
-    transcript.push({ case: "superseded and expired", steps: [{ statuses }] });
-  }, 60_000);
-
-  it("Home's pending change expires after 24 hours and resumes its original tool turn", async () => {
-    const f = await fixture();
-    const home = await f.designateHome();
-    const asked = f.run(home, "trust the other project", [{ name: "settings", args: { action: "change", reason: "The maintainer asked me to work there",
-      changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: f.other } }] } }]);
-    const pending = await f.pendingApproval(home);
-    f.advance(APPROVAL_TTL_MS + 1);
-    expect(await f.approvals()).toEqual([]);
-    await expect(f.decide(pending.requestId, pending.digest, true)).rejects.toMatchObject({ code: "not_found" });
-    expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
-    expect((await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status)).toEqual(["expired"]);
-    expect(f.settle((await asked).results)).toMatchObject({ status: "expired" });
-    expect((await f.run(home, "next", [])).outcomes).toEqual([]);
-    expect(await f.canonicalOutcomes()).toEqual([]);
-    transcript.push({ case: "Home expiry in original turn", steps: [{ status: "expired" }] });
-  }, 60_000);
-
   it("a Home task worker: quiet from a clean turn, notify after an undeclared third-party tool in its turn", async () => {
     const f = await homeTaskFixture();
     // The worker's project carries a third-party tool that declares nothing, so it marks the run.
@@ -1075,11 +863,11 @@ describe("settings risk gate", () => {
     await delegateOnce("marked-worker", 5, 4, true);
     expect(fetched.get("marked-worker")).toContain("Ignore previous instructions");
     const entries = (await settingsChanges.history({ key: "run.retry.maxRetries" })).entries.reverse();
-    expect(entries.map(entry => [entry.actor.kind, entry.tier, entry.tierBasis.web, entry.status, entry.after])).toEqual([
-      ["worker", "quiet", false, "applied", 4], ["worker", "notify", true, "applied", 5],
+    expect(entries.map(entry => [entry.actor.kind, entry.status, entry.after])).toEqual([
+      ["worker", "applied", 4], ["worker", "applied", 5],
     ]);
     expect(entries.map(entry => entry.actor.taskId)).toEqual(["clean-worker", "marked-worker"]);
-    transcript.push({ case: "Home task worker", steps: entries.map(entry => ({ actor: entry.actor, tier: entry.tier, tierBasis: entry.tierBasis, status: entry.status })) });
+    transcript.push({ case: "Home task worker", steps: entries.map(entry => ({ actor: entry.actor, status: entry.status })) });
   }, 90_000);
 
   /**
@@ -1175,7 +963,7 @@ describe("settings risk gate", () => {
     expect(changed.isError).toBe(false);
     expect(changed.text).toContain("signalled in its steering lane");
     const changeResult = changed.details as { status: string; signal: { status: string; taskId: string; appliesFrom: string }; worker: Record<string, unknown> };
-    expect(changeResult).toMatchObject({ status: "applied", tier: "quiet", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" },
+    expect(changeResult).toMatchObject({ status: "applied", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" },
       worker: { running: true, selected: { model: `${REASONING.provider}/${REASONING.id}`, thinking: "high" }, lastResponse: null } });
     expect(worker.snapshot().model).toMatchObject(REASONING);
     steps.push({ inspected: JSON.parse(inspected.text).worker, changed: changeResult });
@@ -1185,14 +973,6 @@ describe("settings risk gate", () => {
       changes: [{ key: "tools.active", layer: "session", op: "set", value: ["read"] }] });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/active tools change only between runs/);
-
-    // The maintainer raised thinking's floor: Home's next thinking change waits, and the worker keeps "high".
-    await service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
-      changes: [{ key: "permissions.floor", layer: "global", op: "set", value: "approve", qualifiers: { key: "model.thinking[role=chat]" } }] });
-    const pendingTurn = homeSays("Lower live-worker thinking", "settings", { action: "change", taskId: "live-worker", reason: "Cheaper final step",
-      changes: [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }] });
-    await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "Home blocks for the live worker approval");
-    expect(worker.snapshot().thinkingLevel).toBe("high");
 
     // Release the in-flight request: it ran on its start settings. The next request of the same run
     // uses Home's model and thinking and carries the signal, once.
@@ -1205,17 +985,16 @@ describe("settings risk gate", () => {
     const acknowledged = worker.taskWorkerSettingsState();
     expect(acknowledged.lastResponse).toMatchObject({ model: `${f.model.provider}/${started.model}` });
 
-    // The maintainer approves from the iPhone while that request is in flight: applied live, signalled.
-    const [request] = (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<{ requestId: string; digest: string }> }).requests;
-    const approved = await service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId: request!.requestId, digest: request!.digest, approved: true }) as unknown as Record<string, unknown>;
-    expect(approved).toMatchObject({ status: "approved", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" } });
+    // The second routine write is accepted while the next request remains in flight.
+    const approved = await homeSays("Lower live-worker thinking", "settings", { action: "change", taskId: "live-worker", reason: "Cheaper final step",
+      changes: [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }] });
+    expect(approved.details).toMatchObject({ status: "applied", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" } });
     expect(worker.snapshot().thinkingLevel).toBe("low");
-    expect((await pendingTurn).details).toMatchObject({ status: "approved" });
     gates[1]!.open();
     await waitFor(() => workerRequests.length >= 3 || undefined, "worker's request after approval");
     expect(workerRequests[2]).toMatchObject({ model: REASONING.id, thinking: "low" });
     expect(workerRequests[2]!.signals).toHaveLength(2);
-    expect(workerRequests[2]!.signals[1]).toMatch(/^\[Tron settings\] Tron Home changed this session's settings \(approved by the maintainer\) while you work on task live-worker\. Reason: Cheaper final step\.\n- Thinking: High → Low \(from your next model request; /);
+    expect(workerRequests[2]!.signals[1]).toMatch(/^\[Tron settings\] Tron Home changed this session's settings while you work on task live-worker\. Reason: Cheaper final step\.\n- Thinking: High → Low \(from your next model request; /);
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("live-worker").catch(() => undefined))?.lifecycle === "terminal" || undefined, "task terminal");
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
     steps.push({ requests: workerRequests, approved });
@@ -1244,8 +1023,7 @@ describe("settings risk gate", () => {
     expect(entries.map(entry => [entry.key, entry.status, entry.after, entry.actor.taskId, entry.target])).toEqual([
       ["model.ref[role=chat]", "applied", REASONING, "live-worker", { kind: "session", sessionId: workerSessionId }],
       ["model.thinking[role=chat]", "applied", "high", "live-worker", { kind: "session", sessionId: workerSessionId }],
-      ["model.thinking[role=chat]", "pending", "low", "live-worker", { kind: "session", sessionId: workerSessionId }],
-      ["model.thinking[role=chat]", "approved", "low", "live-worker", { kind: "session", sessionId: workerSessionId }],
+      ["model.thinking[role=chat]", "applied", "low", "live-worker", { kind: "session", sessionId: workerSessionId }],
       ["model.ref[role=chat]", "applied", { provider: f.model.provider, id: f.model.id }, "live-worker", { kind: "session", sessionId: workerSessionId }],
     ]);
     const status = await homeOwnerOf(f.registry).taskStatus("live-worker");

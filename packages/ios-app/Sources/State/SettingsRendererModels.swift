@@ -177,28 +177,27 @@ struct SettingsChangeResult: Decodable, Equatable, Sendable {
             let details: JSONValue?
         }
 
-        let tier: String?
         let error: Failure?
         /// The key's `confirm` text when the change needs the maintainer's tap first.
         let confirm: String?
     }
 
-    /// The request's tier: the highest of its changes. An applied change's result may omit it.
     let status: String?
-    let tier: String?
+    let review: ChangeReview?
     let changes: [Outcome]
 
-    private enum CodingKeys: String, CodingKey { case status, tier, changes }
+    private enum CodingKeys: String, CodingKey { case status, review, changes }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         status = try container.decodeIfPresent(String.self, forKey: .status)
-        tier = try container.decodeIfPresent(String.self, forKey: .tier)
+        review = try container.decodeIfPresent(ChangeReview.self, forKey: .review)
         changes = try container.decodeIfPresent([Outcome].self, forKey: .changes) ?? []
     }
 
     /// The refusal the first change carries, if any, as the Gateway's own failure.
     func throwIfRefused() throws {
+        if status == "review" { throw GatewayFailure(code: "conflict", message: "An exact native review is required; nothing changed.", retryable: false, details: nil) }
         guard let failure = changes.compactMap(\.error).first else { return }
         throw GatewayFailure(code: failure.code, message: failure.message, retryable: false, details: failure.details)
     }

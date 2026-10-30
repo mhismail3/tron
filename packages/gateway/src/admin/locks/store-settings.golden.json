@@ -3,157 +3,28 @@
   "module": "gateway/admin",
   "files": [
     "agent/settings.json",
-    "gateway/settings/approvals.json",
     "gateway/settings/changes/000000.jsonl",
-    "gateway/settings/changes/index.json",
-    "gateway/settings/floors.json"
+    "gateway/settings/changes/index.json"
   ],
   "projection": {
     "history": [
       {
-        "changeId": "00000009-0000-4000-8000-000000000000",
-        "at": "2026-01-01T00:00:00.000Z",
-        "actor": {
-          "kind": "agent",
-          "id": "01a00000-0000-7000-8000-00000000c0a1",
-          "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-        },
-        "target": {
-          "kind": "global"
-        },
-        "layer": "global",
-        "key": "run.retry.maxRetries",
-        "op": "set",
-        "before": 6,
-        "after": 2,
-        "reason": "Corpus: an agent asks to retry less",
-        "tier": "approve",
-        "tierBasis": {
-          "direction": "widen",
-          "floor": "approve",
-          "floorSource": "override",
-          "web": false,
-          "risk": null
-        },
-        "status": "declined",
-        "requestId": "00000006-0000-4000-8000-000000000000",
-        "refersTo": "00000005-0000-4000-8000-000000000000",
-        "decidedBy": {
-          "kind": "ui",
-          "id": "device:corpus-phone"
-        }
-      },
-      {
-        "changeId": "00000007-0000-4000-8000-000000000000",
-        "at": "2026-01-01T00:00:00.000Z",
-        "actor": {
-          "kind": "agent",
-          "id": "01a00000-0000-7000-8000-00000000c0a1",
-          "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-        },
-        "target": {
-          "kind": "global"
-        },
-        "layer": "global",
-        "key": "context.images.block",
-        "op": "set",
-        "before": true,
-        "after": false,
-        "reason": "Corpus: an agent asks to allow images",
-        "tier": "approve",
-        "tierBasis": {
-          "direction": "widen",
-          "floor": "approve",
-          "floorSource": "code",
-          "web": false,
-          "risk": null
-        },
-        "status": "pending",
-        "requestId": "00000008-0000-4000-8000-000000000000"
-      },
-      {
-        "changeId": "00000005-0000-4000-8000-000000000000",
-        "at": "2026-01-01T00:00:00.000Z",
-        "actor": {
-          "kind": "agent",
-          "id": "01a00000-0000-7000-8000-00000000c0a1",
-          "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-        },
-        "target": {
-          "kind": "global"
-        },
-        "layer": "global",
-        "key": "run.retry.maxRetries",
-        "op": "set",
-        "before": 6,
-        "after": 2,
-        "reason": "Corpus: an agent asks to retry less",
-        "tier": "approve",
-        "tierBasis": {
-          "direction": "widen",
-          "floor": "approve",
-          "floorSource": "override",
-          "web": false,
-          "risk": null
-        },
-        "status": "pending",
-        "requestId": "00000006-0000-4000-8000-000000000000"
-      },
-      {
-        "changeId": "00000004-0000-4000-8000-000000000000",
-        "at": "2026-01-01T00:00:00.000Z",
-        "actor": {
-          "kind": "ui",
-          "id": "device:corpus-phone"
-        },
-        "target": {
-          "kind": "global"
-        },
-        "layer": "global",
-        "key": "permissions.floor",
-        "qualifiers": {
-          "key": "context.images.block",
-          "direction": "narrow"
-        },
-        "op": "set",
-        "after": "notify",
-        "reason": "Corpus: raise the floor of context.images.block",
-        "tier": "quiet",
-        "tierBasis": {
-          "direction": "narrow",
-          "floor": "quiet",
-          "floorSource": "code",
-          "web": false,
-          "risk": null
-        },
-        "status": "applied"
-      },
-      {
         "changeId": "00000003-0000-4000-8000-000000000000",
         "at": "2026-01-01T00:00:00.000Z",
         "actor": {
-          "kind": "ui",
-          "id": "device:corpus-phone"
+          "kind": "agent",
+          "id": "01a00000-0000-7000-8000-00000000c0a1",
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
         },
         "target": {
           "kind": "global"
         },
+        "key": "run.retry.maxRetries",
         "layer": "global",
-        "key": "permissions.floor",
-        "qualifiers": {
-          "key": "run.retry.maxRetries"
-        },
         "op": "set",
-        "after": "approve",
-        "reason": "Corpus: raise the floor of run.retry.maxRetries",
-        "tier": "quiet",
-        "tierBasis": {
-          "direction": "narrow",
-          "floor": "quiet",
-          "floorSource": "code",
-          "web": false,
-          "risk": null
-        },
+        "before": 6,
+        "after": 2,
+        "reason": "Corpus: retry less",
         "status": "applied"
       },
       {
@@ -166,19 +37,11 @@
         "target": {
           "kind": "global"
         },
-        "layer": "global",
         "key": "context.images.block",
+        "layer": "global",
         "op": "set",
         "after": true,
         "reason": "Corpus: block images",
-        "tier": "quiet",
-        "tierBasis": {
-          "direction": "narrow",
-          "floor": "quiet",
-          "floorSource": "code",
-          "web": false,
-          "risk": null
-        },
         "status": "applied"
       },
       {
@@ -191,19 +54,11 @@
         "target": {
           "kind": "global"
         },
-        "layer": "global",
         "key": "run.retry.maxRetries",
+        "layer": "global",
         "op": "set",
         "after": 6,
         "reason": "Corpus: retry longer",
-        "tier": "quiet",
-        "tierBasis": {
-          "direction": "widen",
-          "floor": "quiet",
-          "floorSource": "code",
-          "web": false,
-          "risk": null
-        },
         "status": "applied"
       }
     ],
@@ -235,92 +90,11 @@
           ]
         },
         {
-          "key": "permissions.floor",
-          "qualifiers": {
-            "key": "context.images.block",
-            "direction": "widen"
-          },
-          "group": "approvals",
-          "subgroup": "Floors",
-          "value": "approve",
-          "display": "Approve",
-          "layer": "global",
-          "applied": true,
-          "badges": [
-            {
-              "kind": "scope",
-              "label": "Block images: loosening"
-            }
-          ],
-          "overridden": false,
-          "layers": [
-            {
-              "layer": "global",
-              "applied": true
-            }
-          ]
-        },
-        {
-          "key": "permissions.floor",
-          "qualifiers": {
-            "key": "context.images.block",
-            "direction": "narrow"
-          },
-          "group": "approvals",
-          "subgroup": "Floors",
-          "value": "notify",
-          "display": "Notify",
-          "layer": "global",
-          "applied": true,
-          "badges": [
-            {
-              "kind": "scope",
-              "label": "Block images: tightening"
-            }
-          ],
-          "overridden": true,
-          "layers": [
-            {
-              "layer": "global",
-              "value": "notify",
-              "display": "Notify",
-              "applied": true
-            }
-          ]
-        },
-        {
-          "key": "permissions.floor",
-          "qualifiers": {
-            "key": "run.retry.maxRetries"
-          },
-          "group": "approvals",
-          "subgroup": "Floors",
-          "value": "approve",
-          "display": "Approve",
-          "layer": "global",
-          "applied": true,
-          "badges": [
-            {
-              "kind": "scope",
-              "label": "Retries"
-            }
-          ],
-          "overridden": true,
-          "layers": [
-            {
-              "layer": "global",
-              "value": "approve",
-              "display": "Approve",
-              "applied": true
-            }
-          ]
-        },
-        {
           "key": "run.retry.maxRetries",
           "group": "run",
           "subgroup": "Retry",
-          "value": 6,
-          "display": "6 retries",
+          "value": 2,
+          "display": "2 retries",
           "layer": "global",
           "applied": true,
           "badges": [],
@@ -328,123 +102,14 @@
           "layers": [
             {
               "layer": "global",
-              "value": 6,
-              "display": "6 retries",
+              "value": 2,
+              "display": "2 retries",
               "applied": true
             }
           ]
         }
       ],
       "diagnostics": []
-    },
-    "approvals": {
-      "pending": [
-        {
-          "target": {
-            "kind": "global"
-          },
-          "actor": {
-            "kind": "agent",
-            "id": "01a00000-0000-7000-8000-00000000c0a1",
-            "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-          },
-          "reason": "Corpus: an agent asks to allow images",
-          "changes": [
-            {
-              "changeId": "00000007-0000-4000-8000-000000000000",
-              "key": "context.images.block",
-              "layer": "global",
-              "op": "set",
-              "before": true,
-              "after": false,
-              "tier": "approve",
-              "tierBasis": {
-                "direction": "widen",
-                "floor": "approve",
-                "floorSource": "code",
-                "web": false,
-                "risk": null
-              }
-            }
-          ],
-          "requestId": "00000008-0000-4000-8000-000000000000",
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "16757fe0301a1006dd69c45663cc4d443e295e511405f9b32c4e3d1786763e8e",
-          "status": "pending"
-        }
-      ],
-      "requests": [
-        {
-          "target": {
-            "kind": "global"
-          },
-          "actor": {
-            "kind": "agent",
-            "id": "01a00000-0000-7000-8000-00000000c0a1",
-            "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-          },
-          "reason": "Corpus: an agent asks to retry less",
-          "changes": [
-            {
-              "changeId": "00000005-0000-4000-8000-000000000000",
-              "key": "run.retry.maxRetries",
-              "layer": "global",
-              "op": "set",
-              "before": 6,
-              "after": 2,
-              "tier": "approve",
-              "tierBasis": {
-                "direction": "widen",
-                "floor": "approve",
-                "floorSource": "override",
-                "web": false,
-                "risk": null
-              }
-            }
-          ],
-          "requestId": "00000006-0000-4000-8000-000000000000",
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "cd04bb013f0905cf28340075db5b11fe5b550eaf4e04e8462b266e3cd5bbc22d",
-          "status": "declined",
-          "decidedAt": "2026-01-01T00:00:00.000Z"
-        },
-        {
-          "target": {
-            "kind": "global"
-          },
-          "actor": {
-            "kind": "agent",
-            "id": "01a00000-0000-7000-8000-00000000c0a1",
-            "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-          },
-          "reason": "Corpus: an agent asks to allow images",
-          "changes": [
-            {
-              "changeId": "00000007-0000-4000-8000-000000000000",
-              "key": "context.images.block",
-              "layer": "global",
-              "op": "set",
-              "before": true,
-              "after": false,
-              "tier": "approve",
-              "tierBasis": {
-                "direction": "widen",
-                "floor": "approve",
-                "floorSource": "code",
-                "web": false,
-                "risk": null
-              }
-            }
-          ],
-          "requestId": "00000008-0000-4000-8000-000000000000",
-          "createdAt": "2026-01-01T00:00:00.000Z",
-          "expiresAt": "2026-01-02T00:00:00.000Z",
-          "digest": "16757fe0301a1006dd69c45663cc4d443e295e511405f9b32c4e3d1786763e8e",
-          "status": "pending"
-        }
-      ]
     }
   }
 }

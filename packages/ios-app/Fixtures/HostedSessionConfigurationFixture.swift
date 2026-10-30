@@ -37,8 +37,7 @@ struct HostedSessionConfigurationFixture: View {
                 capabilities: [], diagnostics: [], semanticState: .init(statuses: [:], working: .init(message: nil, visible: false),
                     hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
                 surfaces: [], pendingInteractions: []), diagnostics: [])
-        socket = HostedSessionConfigurationSocket(snapshot: snapshot,
-            settingsApprovals: ProcessInfo.processInfo.arguments.contains("-session-settings-approvals"))
+        socket = HostedSessionConfigurationSocket(snapshot: snapshot)
         _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { [socket] _ in socket }),
             profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "session-configuration-fixture"))))
@@ -128,29 +127,10 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private var modelDelivery: Task<Void, Error>?
     nonisolated let modelRequestCounts: AsyncStream<Int>
     private let modelRequestContinuation: AsyncStream<Int>.Continuation
-    private var approvals: [JSONValue] = []
     private var decisions: [String] = []
-    init(snapshot: SessionSnapshot, settingsApprovals: Bool) {
+    init(snapshot: SessionSnapshot) {
         self.snapshot = snapshot
         (modelRequestCounts, modelRequestContinuation) = AsyncStream.makeStream(of: Int.self)
-        // This chat's agent's request shows in its Manage Session; another chat's does not.
-        approvals = settingsApprovals ? ["configuration-fixture", "other-session"].map { sessionID in
-            .object([
-                "requestId": .string(sessionID == "other-session" ? "settings-other-request" : "settings-session-request"),
-                "digest": .string(String(repeating: sessionID == "other-session" ? "e" : "c", count: 64)),
-                "createdAt": .string("2026-01-01T00:00:00.000Z"), "expiresAt": .string(Date.now.addingTimeInterval(23 * 60 * 60).formatted(.iso8601)),
-                "target": .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                "actor": .object(["kind": .string("agent"), "id": .string(sessionID), "sessionId": .string(sessionID)]),
-                "requester": .string("A chat's agent"), "reason": .string("The page said to"),
-                "changes": .array([.object([
-                    "changeId": .string("change-\(sessionID)"), "key": .string("tools.active"),
-                    "label": .string("Active tools"), "layer": .string("session"), "op": .string("set"), "tier": .string("approve"),
-                    "tierBasis": .object([:]), "before": .array([.string("read"), .string("bash")]),
-                    "after": .array([.string("read"), .string("bash"), .string("fetch_page")]),
-                    "display": .object(["before": .string("read, bash"), "after": .string("read, bash, fetch_page")]),
-                ])]),
-            ])
-        } : []
     }
     /// The reported chat (#1651): 27 of 52 tools and High thinking overridden, an
     /// unset context window, and the repository's ignored `defaultTools`, which the
@@ -355,17 +335,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             snapshot.revision += 1
             pendingThinking = (id, snapshot.revision)
             return // Hold the original success while a second client supersedes it.
-        case "settings.approvals":
-            result = .object(["requests": .array(approvals)])
-        case "settings.decide":
-            let params = frame.objectValue?["params"]?.objectValue ?? [:]
-            guard let requestID = params["requestId"]?.stringValue, let digest = params["digest"]?.stringValue,
-                  let approved = params["approved"]?.boolValue,
-                  let index = approvals.firstIndex(where: { $0.objectValue?["requestId"]?.stringValue == requestID && $0.objectValue?["digest"]?.stringValue == digest })
-            else { throw GatewayFailure(code: "conflict", message: "Approval refused", retryable: false, details: nil) }
-            approvals.remove(at: index)
-            decisions.append("\(approved ? "approved" : "declined"):\(requestID)")
-            result = .object(["requestId": .string(requestID), "approved": .bool(approved)])
         case "session.processHistory.list" where ProcessInfo.processInfo.arguments.contains("-history-long"):
             try await Task.sleep(for: .milliseconds(750))
             result = .object(["historyRevision": .string("fixture-history"),

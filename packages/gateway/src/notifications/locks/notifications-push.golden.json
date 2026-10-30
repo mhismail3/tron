@@ -1188,7 +1188,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:06fb4f3db72ea217c2f024e1c4af68f7ae7fba6245f62b2ca775c1cb1fd033c5",
+      "promptHash": "sha256:bc3f98cb0568ca0d07d7a5251a8ce14bbbc22c697c8cf5c90feecb67203f7569",
       "messages": [
         {
           "role": "user",
@@ -1219,46 +1219,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:06fb4f3db72ea217c2f024e1c4af68f7ae7fba6245f62b2ca775c1cb1fd033c5",
-      "messages": [
-        {
-          "role": "user",
-          "text": "finish the quiet run"
-        },
-        {
-          "role": "assistant",
-          "text": "Finished the quiet run."
-        },
-        {
-          "role": "user",
-          "text": "ask me while I am away"
-        }
-      ]
-    },
-    {
-      "tools": [
-        "read",
-        "bash",
-        "edit",
-        "write",
-        "lock_select",
-        "jev",
-        "web_search",
-        "settings",
-        "projects",
-        "ask_user",
-        "display",
-        "swift_app",
-        "computer",
-        "notify"
-      ],
-      "promptSections": [
-        "tools",
-        "rules",
-        "docs",
-        "cwd"
-      ],
-      "promptHash": "sha256:06fb4f3db72ea217c2f024e1c4af68f7ae7fba6245f62b2ca775c1cb1fd033c5",
+      "promptHash": "sha256:bc3f98cb0568ca0d07d7a5251a8ce14bbbc22c697c8cf5c90feecb67203f7569",
       "messages": [
         {
           "role": "user",
@@ -1271,18 +1232,6 @@
         {
           "role": "user",
           "text": "ask me while I am away"
-        },
-        {
-          "role": "assistant",
-          "text": "",
-          "toolCalls": [
-            "lock_select"
-          ]
-        },
-        {
-          "role": "toolResult",
-          "text": "chosen: Keep",
-          "toolName": "lock_select"
         }
       ]
     },
@@ -1309,7 +1258,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:06fb4f3db72ea217c2f024e1c4af68f7ae7fba6245f62b2ca775c1cb1fd033c5",
+      "promptHash": "sha256:bc3f98cb0568ca0d07d7a5251a8ce14bbbc22c697c8cf5c90feecb67203f7569",
       "messages": [
         {
           "role": "user",
@@ -1334,14 +1283,6 @@
           "role": "toolResult",
           "text": "chosen: Keep",
           "toolName": "lock_select"
-        },
-        {
-          "role": "assistant",
-          "text": "Keeping the hidden path."
-        },
-        {
-          "role": "user",
-          "text": "ask me while I am watching"
         }
       ]
     },
@@ -1368,7 +1309,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:06fb4f3db72ea217c2f024e1c4af68f7ae7fba6245f62b2ca775c1cb1fd033c5",
+      "promptHash": "sha256:bc3f98cb0568ca0d07d7a5251a8ce14bbbc22c697c8cf5c90feecb67203f7569",
       "messages": [
         {
           "role": "user",
@@ -1401,6 +1342,65 @@
         {
           "role": "user",
           "text": "ask me while I am watching"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:bc3f98cb0568ca0d07d7a5251a8ce14bbbc22c697c8cf5c90feecb67203f7569",
+      "messages": [
+        {
+          "role": "user",
+          "text": "finish the quiet run"
+        },
+        {
+          "role": "assistant",
+          "text": "Finished the quiet run."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am away"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_select"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "chosen: Keep",
+          "toolName": "lock_select"
+        },
+        {
+          "role": "assistant",
+          "text": "Keeping the hidden path."
+        },
+        {
+          "role": "user",
+          "text": "ask me while I am watching"
         },
         {
           "role": "assistant",
@@ -1439,7 +1439,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:06fb4f3db72ea217c2f024e1c4af68f7ae7fba6245f62b2ca775c1cb1fd033c5",
+      "promptHash": "sha256:bc3f98cb0568ca0d07d7a5251a8ce14bbbc22c697c8cf5c90feecb67203f7569",
       "messages": [
         {
           "role": "user",
@@ -1518,7 +1518,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:06fb4f3db72ea217c2f024e1c4af68f7ae7fba6245f62b2ca775c1cb1fd033c5",
+      "promptHash": "sha256:bc3f98cb0568ca0d07d7a5251a8ce14bbbc22c697c8cf5c90feecb67203f7569",
       "messages": [
         {
           "role": "user",
@@ -1607,7 +1607,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:18c3fd93c1fbfa0abea0c4c217871c7c222a3e4241de5d517a2521e6ac26ff7b",
+      "promptHash": "sha256:0fa48659940b88911c8eb9ec6e8a8c31d7c41db8d213531721e8fc3fd0c5b0f8",
       "messages": [
         {
           "role": "user",
@@ -1640,7 +1640,7 @@
         "docs",
         "cwd"
       ],
-      "promptHash": "sha256:18c3fd93c1fbfa0abea0c4c217871c7c222a3e4241de5d517a2521e6ac26ff7b",
+      "promptHash": "sha256:0fa48659940b88911c8eb9ec6e8a8c31d7c41db8d213531721e8fc3fd0c5b0f8",
       "messages": [
         {
           "role": "user",

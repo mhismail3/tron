@@ -53,7 +53,6 @@ export function normalizeExtensionForm(input: ExtensionFormDescriptor): Extensio
     version: EXTENSION_FORM_VERSION,
     title: plain(input.title, true),
     allowCancel: input.allowCancel,
-    ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
     questions: input.questions.map((question) => ({
       id: plain(question.id),
       ...(question.header === undefined ? {} : { header: plain(question.header) }),
@@ -77,8 +76,7 @@ function assertExtensionForm(value: unknown): asserts value is ExtensionFormDesc
     throw new GatewayError("conflict", "Extension form is malformed");
   }
   const form = value as ExtensionFormDescriptor;
-  if (Object.keys(form).some((key) => key !== "version" && key !== "title" && key !== "questions" && key !== "allowCancel" && key !== "presentation")
-    || (form.presentation !== undefined && form.presentation !== "approval")
+  if (Object.keys(form).some((key) => key !== "version" && key !== "title" && key !== "questions" && key !== "allowCancel")
     || form.version !== EXTENSION_FORM_VERSION
     || typeof form.allowCancel !== "boolean"
     || !bounded(form.title, EXTENSION_FORM_MAX_TITLE_BYTES, true)
@@ -92,13 +90,6 @@ function assertExtensionForm(value: unknown): asserts value is ExtensionFormDesc
   const questionTexts = new Set<string>();
   const headers = new Set<string>();
   for (const question of form.questions) assertQuestion(question, form.questions.length, questionIDs, questionTexts, headers);
-  if (form.presentation === "approval") {
-    const question = form.questions[0]!;
-    if (form.allowCancel || form.questions.length !== 1 || question.multiSelect || question.allowOther
-      || question.options.length !== 2 || !["approve", "deny"].every(id => question.options.some(option => option.id === id))) {
-      throw new GatewayError("conflict", "Approval form requires one approve/deny question");
-    }
-  }
   if (bytes(form) > EXTENSION_FORM_MAX_INTERACTION_BYTES) {
     throw new GatewayError("busy", "Extension form reached its bounded capacity", true);
   }

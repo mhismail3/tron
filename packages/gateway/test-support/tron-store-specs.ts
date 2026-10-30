@@ -7,7 +7,6 @@ import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
-import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { SwiftAppStore } from "../src/modules/apps/swift-app-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
@@ -91,12 +90,11 @@ async function settingsPath(home: string, knowledge?: KnowledgeService) {
   const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
   const model = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalService(home, { launchAgentDirectory: join(home, "agents") }) }));
   const record = new SettingsChangeRecord(home);
-  const approvals = new SettingsApprovals(home);
-  const path: SettingsChangePath = new SettingsChangePath(model, record, approvals, {
+  const path: SettingsChangePath = new SettingsChangePath(model, record, {
     setTrust: async () => { throw new Error("The settings corpus sets no trust"); },
     ...(knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(path, entry, context) } : {}),
   });
-  return { model, record, path, approvals };
+  return { model, record, path };
 }
 
 /** Tron Home's designation owner over a fixed session port: designation names sessions
@@ -129,50 +127,25 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
   });
 }
 
-/** A resolution with only the named keys' floor instances: every other key's floor is its code default. */
-function floorsOf<T extends { keys: Array<{ key: string; qualifiers?: Record<string, string> }> }>(resolved: T, keys: readonly string[]): T {
-  return { ...resolved, keys: resolved.keys.filter((entry) => entry.key !== "permissions.floor" || keys.includes(entry.qualifiers?.key ?? "")) };
-}
-
 export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/admin", name: "store-settings",
-    // Settings values and history, the maintainer's floor overrides (`floors.json`) and the
-    // approval requests an agent's change above its floor leaves (`approvals.json`).
+    // Canonical values and permanent change/Undo history; no settings approval store.
     paths: ["agent/settings.json", "gateway/settings"],
     reproducible: true,
     async record(home) {
       const { path } = await settingsPath(home);
       const ui = { kind: "ui" as const, id: IDENTITY };
       const agent = { kind: "agent" as const, id: CORPUS_IDS.session, sessionId: CORPUS_IDS.session };
-      await path.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }],
-        { actor: ui, reason: "Corpus: retry longer" });
-      await path.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: true }],
-        { actor: ui, reason: "Corpus: block images" });
-      // One single floor raised to approve, one directional floor raised to notify.
-      for (const [qualifiers, value] of [[{ key: "run.retry.maxRetries" }, "approve"], [{ key: "context.images.block", direction: "narrow" }, "notify"]] as const) {
-        await path.change({ kind: "global" }, [{ key: "permissions.floor", qualifiers, layer: "global", op: "set", value }],
-          { actor: ui, reason: `Corpus: raise the floor of ${qualifiers.key}` });
-      }
-      const held = await path.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 2 }],
-        { actor: agent, reason: "Corpus: an agent asks to retry less" });
-      await path.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: false }],
-        { actor: agent, reason: "Corpus: an agent asks to allow images" });
-      const approval = (held as { approval?: { requestId: string; digest: string } }).approval;
-      if (!approval) throw new Error(`The corpus agent change was not held: ${JSON.stringify(held)}`);
-      await path.decide(approval.requestId, { digest: approval.digest, approved: false, decidedBy: ui });
+      await path.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }], { actor: ui, reason: "Corpus: retry longer" });
+      await path.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: true }], { actor: ui, reason: "Corpus: block images" });
+      await path.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 2 }], { actor: agent, reason: "Corpus: retry less" });
+      await path.change({ kind: "global" }, [{ key: "context.images.block", layer: "global", op: "set", value: false }], { actor: agent, reason: "Corpus: allow images" });
     },
     async read(home) {
-      const { model, record, approvals } = await settingsPath(home);
-      // `pendingApprovals` expires requests against the wall clock; the store's own reads do not.
-      const history = (await record.page({ limit: 50 })).entries;
-      const requestIds = [...new Set(history.flatMap((entry) => (entry as { requestId?: string }).requestId ?? []))];
-      return {
-        history,
-        resolved: floorsOf(await model.resolve({ kind: "global" }, undefined, ["run.retry.maxRetries", "context.images.block", "permissions.floor"]),
-          ["run.retry.maxRetries", "context.images.block"]),
-        approvals: { pending: await approvals.pending(), requests: await Promise.all(requestIds.map((id) => approvals.get(id) ?? null)) },
-      };
+      const { model, record } = await settingsPath(home);
+      return { history: (await record.page({ limit: 50 })).entries,
+        resolved: await model.resolve({ kind: "global" }, undefined, ["run.retry.maxRetries", "context.images.block"]) };
     },
   },
   {

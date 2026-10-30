@@ -102,21 +102,6 @@ const codemodeTurn = (context) => {
   }
   return undefined;
 };
-// A prompt carrying the approval journey marker asks through the real settings
-// tool (#2050): "without waiting" returns pending, otherwise the call waits.
-const APPROVAL_MARKER = "APPROVAL-JOURNEY";
-const approvalTurn = (context) => {
-  const last = context.messages.at(-1);
-  if (last?.role === "toolResult" && last.toolName === "settings") {
-    const status = (textOf(last).match(/"status":"([a-z]+)"/) ?? [])[1];
-    return fauxAssistantMessage("Approval journey heard: " + (status ?? "no status"));
-  }
-  const wait = !latestUserText(context).includes("without waiting");
-  return fauxAssistantMessage([fauxToolCall("settings", { action: "request", wait,
-    reason: wait ? "Fixture approval that waits in this chat" : "Fixture approval returned pending",
-    changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value: wait ? 5 : 6 }] },
-    { id: wait ? "e2e-approval-wait" : "e2e-approval-pending" })], { stopReason: "toolUse" });
-};
 // Ordinary prompts consume this script in order. A prompt carrying the ask
 // journey marker consumes its own script instead, so the real-UI ask journey
 // (#935) cannot shift the responses every other journey and boundary case expects.
@@ -208,7 +193,6 @@ const scripted = (context, options, state, model) => {
     return fauxAssistantMessage("Home automation message received without approval authority.");
   }
   if (latestUserText(context).includes("HOME-AUTOMATION-JOURNEY:")) return fauxAssistantMessage("Home automation fixture ready.");
-  if (latestUserText(context).includes(APPROVAL_MARKER)) return approvalTurn(context);
   if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
   if (latestUserText(context).includes("historical sheet replay") && context.messages.at(-1)?.role === "toolResult"
       && context.messages.at(-1)?.toolName === "ask_user") {

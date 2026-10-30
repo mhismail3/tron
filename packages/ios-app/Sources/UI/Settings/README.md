@@ -10,8 +10,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
   `SettingsChoiceSlider`, `SettingsAutosave`.
-- Audit and approvals: `SettingsChangesView`, `SettingsChangeRow`, `SettingsApprovalSheet`
-  and `SettingsApprovalReviewContent` (in `SettingsApprovalsSection.swift`).
+- Audit: `SettingsChangesView`, `SettingsChangeRow`; exact reviews use the shared
+  `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`,
   `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
@@ -101,20 +101,12 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Repository Overrides last; `ProjectSettingsSections` owns the unchanged trust editor and ignored
   repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
 - **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history` by
-  Project/Session/Global, pins approvals above history and keeps last-look per Mac. Undo and
+  Project/Session/Global and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
-- **Approvals.** One chip (`SettingsApprovalChip`) and one sheet (`SettingsApprovalSheet`) for
-  every agent request kind (#2050): a chat's request chips, a waiting request's own presentation,
-  an approval push and Changes' Waiting for you all open the same sheet. Every surface reads
-  `SettingsTrustCoordinator`'s open-request projection of `settings.approvals`; a
-  `settings.approvalsChanged` resolution or a decision removes a request at once. The sheet lays
-  out who asks and why, what it applies to, its expiry and each change in standard settings rows;
-  exact identities and values stay behind the technical toggle. Only its red X/green check submits
-  `settings.decide` with the displayed digest through the receipt owner; a waiting request has no
-  Done, and swipe dismissal leaves it waiting behind its chip. A decided request reopens in the
-  same layout from bounded history (Applied, Declined, Expired, Superseded, Failed); missing
-  proof stays unavailable, never inferred.
+- **Exact reviews.** The maintainer's own edits apply directly. A row whose dry run requires a
+  tap (trust, privacy or spend widening, installs, irreversible effects) opens the shared
+  `ChangeReviewSheet`; Approve commits once bound to the shown digest, Cancel sends nothing.
 - **Providers.** Configured above Available. Connect/Configure opens one sheet showing every
   advertised method; the visible sheet owns the operation's prompts, and an answered choice
   restarts with `replaceOperationId` (`ProviderAuthSelectionTrail`). Usage rows reserve a skeleton
@@ -222,16 +214,16 @@ remain visible/read-only with Gateway reasons. The list omits the Gateway's hidd
 archive namespace and saved deny tombstones whose inspection returns `not_found`;
 these trust records remain untouched. Choose Existing only inspects: it never writes
 an untrusted decision or creates a second project store.
-`SettingsTrustCoordinator` sends `projects.request` through its existing receipt
-executor, with a fresh command ID per intent. The result only opens the canonical
-`SettingsApprovalSheet`; the displayed digest's separate tap owns every decision.
-Requests/decisions revalidate on the Gateway. No agent-tool fallback is used.
+`SettingsTrustCoordinator` sends `projects.change` through its existing receipt
+executor, with a fresh command ID per call. The review creates nothing and opens the
+shared `ChangeReviewSheet`; its Approve resubmits the exact digest and typed intent,
+which the Gateway revalidates before effects. No agent-tool fallback is used.
 
 `TronProjectLifecyclePreviewUITests` exercises these production-owned views through
 `HOSTED_TEST`'s `HostedProjectLifecyclePreview` in light/dark at Large and XXXL.
 Sample paths, drafts, busy reasons and the preview-only disclaimer stay in the fixture.
-Archive, Untrust, Trust and Rename review reuse `SettingsApprovalSheet` with synthetic
-socket-served requests; fixture decisions refuse without effects. The route journey
+Archive, Untrust, Trust and Rename review reuse `ChangeReviewSheet` with synthetic
+reviews; the preview sends no command. The route journey
 opens and dismisses detail, rename, approval, Add/Create and folder sub-sheets.
 Captures and route checks are not real-Gateway lifecycle acceptance.
 `RealGatewayProjectLifecycleUITests` owns separate approve/move/archive, denial,

@@ -35,16 +35,6 @@ final class SettingsTrustCoordinator {
 
     private(set) var settingsInvalidationGeneration = 0
     private(set) var trustRevision = 0
-    /// Advances on `settings.approvalsChanged`, a decision and profile change, so
-    /// the open-request projection and history surfaces re-read.
-    private(set) var approvalsRevision = 0
-    /// The Gateway's open approval requests (#2050): the one client projection the
-    /// chat chips, the approval sheet and Changes read. Nil until read for this
-    /// profile. A resolution event or decision removes its request at once.
-    private(set) var openApprovals: [SettingsApprovalRequest]?
-    /// Terminal statuses that resolution events and decisions named, by request.
-    private(set) var approvalOutcomes: [String: String] = [:]
-    private var approvalsRead: (revision: Int, task: Task<Void, Error>)?
 
     init(
         client: GatewayClient,
@@ -83,28 +73,43 @@ final class SettingsTrustCoordinator {
         return try value.decode(ProjectLifecycleRow.self)
     }
 
-    /// The existing receipt executor owns accepted work. This only asks for a
-    /// canonical pending action; SettingsApprovalSheet owns the separate digest tap.
-    func requestProject(_ operation: ProjectLifecycleOperation, name: String, newName: String? = nil, github: Bool = false) async throws -> SettingsApprovalReference {
+    /// The exact review of one typed project action. The Gateway plans it without
+    /// effects; only `confirmProject` with this review's digest and intent applies it.
+    func reviewProject(_ operation: ProjectLifecycleOperation, name: String, newName: String? = nil, github: Bool = false) async throws -> ProjectLifecycleReview {
         let admission = profileGeneration
-        let commandID = uuidSource.next().uuidString
-        var params: [String: JSONValue] = ["commandId": .string(commandID), "action": .string(operation.rawValue),
-            "name": .string(name), "reason": .string("Requested \(operation.rawValue) from iPhone Trusted Projects")]
+        var params: [String: JSONValue] = ["action": .string(operation.rawValue), "name": .string(name),
+            "reason": .string("Requested \(operation.rawValue) from iPhone Trusted Projects")]
         if let newName { params["newName"] = .string(newName) }
         if operation == .create || operation == .trust { params["github"] = .bool(github) }
-        let value = try await mutationExecutor.performValue(method: "projects.request", commandID: commandID) {
-            try await client.requestValue("projects.request", JSONValue.object(params))
-        }
+        let value = try await projectChange(params)
         try requireProfile(admission)
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-        let pending = try value.decode(ProjectLifecyclePendingResult.self)
-        guard pending.status == "pending", let approval = pending.approval,
-              !approval.requestId.isEmpty, !approval.digest.isEmpty else {
-            throw GatewayFailure(code: "invalid_response", message: "No pending project approval was proven. Inspect the project and Changes before retrying.", retryable: false, details: nil)
+        let planned = try value.decode(ProjectLifecycleReviewResult.self)
+        guard planned.status == "review", planned.review.requiresTap, !planned.review.digest.isEmpty else {
+            throw GatewayFailure(code: "invalid_response", message: "No exact project review was proven. Inspect the project and Changes before retrying.", retryable: false, details: nil)
         }
+        return ProjectLifecycleReview(params: params, review: planned.review, intent: planned.intent)
+    }
+
+    /// The maintainer's tap on the exact card: the Gateway revalidates canonical
+    /// filesystem, Git and trust state against the digest before any effect.
+    func confirmProject(_ reviewed: ProjectLifecycleReview) async throws {
+        let admission = profileGeneration
+        var params = reviewed.params
+        params["confirmation"] = .object(["digest": .string(reviewed.review.digest), "intent": reviewed.intent])
+        let value = try await projectChange(params)
+        try requireProfile(admission)
         noteSettingsChanged()
-        noteApprovalsChanged()
-        return SettingsApprovalReference(requestID: approval.requestId, changeIDs: [])
+        noteTrustChanged()
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+    }
+
+    private func projectChange(_ fields: [String: JSONValue]) async throws -> JSONValue {
+        let commandID = uuidSource.next().uuidString
+        var params = fields
+        params["commandId"] = .string(commandID)
+        return try await mutationExecutor.performValue(method: "projects.change", commandID: commandID) {
+            try await client.requestValue("projects.change", JSONValue.object(params))
+        }
     }
 
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {
@@ -119,7 +124,8 @@ final class SettingsTrustCoordinator {
 
     /// Trust for one project is the Mac-layer key `permissions.projectTrust`
     /// qualified by that project; it changes through `settings.change`, whose
-    /// outcome carries the resulting trust inspection.
+    /// outcome carries the resulting trust inspection. The maintainer's own tap is
+    /// the paired-native authority, so the Gateway applies it directly.
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
@@ -136,6 +142,7 @@ final class SettingsTrustCoordinator {
             try await client.requestValue("settings.change", params)
         }
         try requireProfile(admittedProfileGeneration)
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
         guard let inspection = value.objectValue?["changes"]?.arrayValue?.first?.objectValue?["result"] else {
             throw GatewayFailure(code: "invalid_response", message: "The trust change returned no trust inspection.", retryable: false, details: nil)
         }
@@ -153,7 +160,7 @@ final class SettingsTrustCoordinator {
     /// This iPhone's Mac Terminal key is the Mac-layer key
     /// `permissions.macTerminalKey` qualified by its device; enrolling and
     /// revoking are ordinary logged changes, and the maintainer's tap that
-    /// sends one is its approval.
+    /// sends one is its authority.
     func setMacTerminalKey(device: String, publicKey: String?) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
@@ -180,37 +187,6 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
-    /// A resolution names its request and terminal status, so every surface drops
-    /// it before the confirming read (#2050).
-    func noteApprovalsChanged(resolved requestID: String? = nil, status: String? = nil) {
-        if let requestID, let status, SettingsApprovalOutcome.terminalStatuses.contains(status) { settle(requestID, status) }
-        approvalsRevision &+= 1
-    }
-
-    /// Brings the open-request projection up to the current revision. Concurrent
-    /// callers share one read; a read overtaken by a newer revision is discarded.
-    func refreshApprovals() async throws {
-        if let read = approvalsRead, read.revision == approvalsRevision { return try await read.task.value }
-        let admittedProfileGeneration = profileGeneration
-        let revision = approvalsRevision
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let value = try await client.requestValue("settings.approvals", JSONValue.object([:]))
-            try requireProfile(admittedProfileGeneration)
-            let requests = try value.decode(SettingsApprovalsResponse.self).requests
-            guard revision == approvalsRevision else { return }
-            openApprovals = requests
-        }
-        approvalsRead = (revision, task)
-        defer { if approvalsRead?.revision == revision { approvalsRead = nil } }
-        try await task.value
-    }
-
-    private func settle(_ requestID: String, _ status: String) {
-        openApprovals?.removeAll { $0.requestId == requestID }
-        approvalOutcomes[requestID] = status
-    }
-
     /// One bounded audit page. Empty pages may still carry a cursor; callers
     /// advance until it is absent rather than treating an empty page as EOF.
     func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
@@ -230,58 +206,35 @@ final class SettingsTrustCoordinator {
     /// Undo is an accepted domain mutation and must use the shared receipt owner.
     /// Apply again (settings-model.md 5.6): the Gateway re-writes the value an outside
     /// change replaced, as an ordinary audited change; never automatic.
-    func applySettingsChangeAgain(_ changeID: String) async throws {
+    func applySettingsChangeAgain(_ changeID: String, confirmationDigest: String? = nil) async throws -> SettingsChangeResult {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
-        let params = JSONValue.object(["commandId": .string(commandID), "changeId": .string(changeID)])
+        var fields: [String: JSONValue] = ["commandId": .string(commandID), "changeId": .string(changeID)]
+        if let confirmationDigest { fields["confirmationDigest"] = .string(confirmationDigest) }
+        let params = JSONValue.object(fields)
         let value = try await mutationExecutor.performValue(method: "settings.applyAgain", commandID: commandID) {
             try await client.requestValue("settings.applyAgain", params)
         }
         try requireProfile(admittedProfileGeneration)
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-        noteSettingsChanged()
+        let result = try value.decode(SettingsChangeResult.self)
+        if result.status != "review" { try result.throwIfRefused(); noteSettingsChanged() }
+        return result
     }
 
-    func undoSettingsChange(_ changeID: String, fence: JSONValue?, admitSend: (() -> Bool)? = nil) async throws {
+    func undoSettingsChange(_ changeID: String, fence: JSONValue?, confirmationDigest: String? = nil, admitSend: (() -> Bool)? = nil) async throws -> SettingsChangeResult {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         var fields: [String: JSONValue] = ["commandId": .string(commandID), "changeId": .string(changeID)]
         if let fence { fields["fence"] = fence }
+        if let confirmationDigest { fields["confirmationDigest"] = .string(confirmationDigest) }
         let params = JSONValue.object(fields)
         let value = try await mutationExecutor.performValue(method: "settings.undo", commandID: commandID) {
             if let admitSend, !admitSend() { throw CancellationError() }
             return try await client.requestValue("settings.undo", params)
         }
         try requireProfile(admittedProfileGeneration)
-        try value.decode(SettingsChangeResult.self).throwIfRefused()
-        noteSettingsChanged()
-    }
-
-    /// The maintainer's decision on one pending change, bound to the exact diff
-    /// he saw by its digest. That diff is the decision's whole fence: the Gateway
-    /// re-checks it against the stores, so no chat needs to be open to decide.
-    @discardableResult
-    func decideApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws -> SettingsChangeResult {
-        let admittedProfileGeneration = profileGeneration
-        let commandID = uuidSource.next().uuidString
-        let params: [String: JSONValue] = [
-            "commandId": .string(commandID), "requestId": .string(request.requestId),
-            "digest": .string(request.digest), "approved": .bool(approved),
-        ]
-        let value: JSONValue
-        do {
-            value = try await mutationExecutor.performValue(method: "settings.decide", commandID: commandID) {
-                try await client.requestValue("settings.decide", JSONValue.object(params))
-            }
-        } catch {
-            // A refused decision (superseded, expired) still changed what is open.
-            if profileGeneration == admittedProfileGeneration { noteApprovalsChanged() }
-            throw error
-        }
-        try requireProfile(admittedProfileGeneration)
         let result = try value.decode(SettingsChangeResult.self)
-        if let status = result.status { noteApprovalsChanged(resolved: request.requestId, status: status) } else { noteApprovalsChanged() }
-        try result.throwIfRefused()
+        if result.status != "review" { try result.throwIfRefused(); noteSettingsChanged() }
         return result
     }
 
@@ -361,8 +314,8 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsOptionsResponse.self)
     }
 
-    /// A dry run of one change to a target: its tier, any `confirm` text, and any
-    /// refusal. Nothing is applied; the caller decides what a refusal shows.
+    /// A dry run of one change to a target: its exact review, any `confirm` text and
+    /// any refusal. Nothing is applied; the caller decides what a refusal shows.
     func previewChange(target: JSONValue, change: JSONValue, fence: JSONValue? = nil) async throws -> SettingsChangeResult {
         let admittedProfileGeneration = profileGeneration
         var params: [String: JSONValue] = [
@@ -377,13 +330,14 @@ final class SettingsTrustCoordinator {
 
     /// One change to a target through the confirmed mutation path. A refusal the
     /// Gateway returns in its outcome is thrown, so nothing reads as applied.
-    func change(target: JSONValue, change: JSONValue, fence: JSONValue? = nil, admitSend: (() -> Bool)? = nil) async throws {
+    func change(target: JSONValue, change: JSONValue, fence: JSONValue? = nil, confirmationDigest: String? = nil, admitSend: (() -> Bool)? = nil) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         var fields: [String: JSONValue] = [
             "commandId": .string(commandID), "target": target, "changes": .array([change]),
         ]
         if let fence { fields["fence"] = fence }
+        if let confirmationDigest { fields["confirmationDigest"] = .string(confirmationDigest) }
         let params = JSONValue.object(fields)
         let value = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {
             if let admitSend, !admitSend() { throw CancellationError() }
@@ -406,11 +360,6 @@ final class SettingsTrustCoordinator {
         refreshes.values.forEach { $0.task.cancel() }
         refreshes = [:]
         settingsInvalidationGeneration &+= 1
-        approvalsRead?.task.cancel()
-        approvalsRead = nil
-        openApprovals = nil
-        approvalOutcomes = [:]
-        approvalsRevision &+= 1
     }
 
     private func requireProfile(_ admittedProfileGeneration: Int) throws {

@@ -46,9 +46,7 @@ import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
-import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { HomeProfileItems } from "../src/modules/home/home-profile.js";
-import { registerProfileApprovals } from "../src/modules/home/home-profile-approvals.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";
 
@@ -236,11 +234,10 @@ export async function fixture(label: string): Promise<Fixture> {
   // and the maintainer's home.profileChange share its profile applier and record.
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime: runtime }));
   const record = new SettingsChangeRecord(tronHome);
-  const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
+  const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, record, {
     setTrust: async () => { throw new Error("trust is not changed here"); },
     undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
   });
-  registerProfileApprovals(settingsChanges, () => knowledge);
   settings = { model: settingsModel, changes: settingsChanges };
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];

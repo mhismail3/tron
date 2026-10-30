@@ -360,7 +360,8 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     await mkdir(join(root, "project"), { recursive: true });
     const current = { provider: "openai-codex", id: "gpt-5.6-sol" };
     slot = Object.assign({ modelRuntime: runtime, setModel: vi.fn(async () => 2), snapshot: () => ({ model: current }) },
-      { settingsSource: () => ({ cwd: join(root, "project"), home: false, session: { model: current, settings: {} }, modelRuntime: runtime }) });
+      { settingsSource: () => ({ cwd: join(root, "project"), home: false, session: { model: current, settings: {} }, modelRuntime: runtime }),
+        settingsSessionLayer: () => ({ model: current, settings: {} }) });
     const subscribedClient = { ...client, isSubscribed: () => true };
     await expect(service.invoke(subscribedClient, "settings.change", sessionSettingChange("model", {
       commandId: "hidden-model-choice", sessionId: "historical-session", expectedRuntimeGeneration: "generation",

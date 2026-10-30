@@ -206,7 +206,7 @@ enum SettingsGroupKind {
 
     /// Schema sections Settings places itself; any other served section joins More.
     /// Sources and setup are shown inside Extensions and Setup.
-    static let placedSections: Set<String> = ["model", "workers", "context", "approvals", "run", "trust", "connections", "tools", "sources", "setup"]
+    static let placedSections: Set<String> = ["model", "workers", "context", "run", "trust", "connections", "tools", "sources", "setup"]
 
     static func icon(forSection id: String) -> String {
         switch id {
@@ -235,10 +235,8 @@ struct GlobalAgentBehaviorView: View {
                                          showsGroupHeadings: true)
                 }
                 TrustedProjectsSettingsView()
-                ForEach(["approvals", "run"], id: \.self) { section in
-                    SettingsRendererView(target: target, writeLayer: "global", presentation: .section(section), embedded: true,
-                                         showsGroupHeadings: true, selection: .allExcept(TrustedProjectsSettingsView.keys))
-                }
+                SettingsRendererView(target: target, writeLayer: "global", presentation: .section("run"), embedded: true,
+                                     showsGroupHeadings: true, selection: .allExcept(TrustedProjectsSettingsView.keys))
             }.padding(20)
         }
         .tronScrollEdgeChrome()
@@ -278,10 +276,10 @@ struct SettingsSectionLinks: View {
     private var chatScope: Bool { target.objectValue?["kind"]?.stringValue == "session" }
     private func root(_ id: String) -> String {
         if chatScope && ["model", "workers"].contains(id) { return "advanced" }
-        return id == "workers" ? "model" : ["approvals", "run"].contains(id) ? "advanced" : id
+        return id == "workers" ? "model" : id == "run" ? "advanced" : id
     }
     private func members(_ id: String) -> [SettingsRendererSection] {
-        let ids = id == "model" ? ["model", "workers"] : id == "advanced" ? (chatScope ? ["model", "workers", "approvals", "run"] : ["approvals", "run"]) : [id]
+        let ids = id == "model" ? ["model", "workers"] : id == "advanced" ? (chatScope ? ["model", "workers", "run"] : ["run"]) : [id]
         return ids.compactMap { id in sections.first { $0.id == id } }.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }
@@ -294,7 +292,7 @@ struct SettingsSectionLinks: View {
     /// line; joining each section's served description would wrap.
     private func sectionDescription(_ id: String) -> String? {
         let members = members(id)
-        if id == "advanced" { return chatScope ? "Workers, connection, and approvals" : "Connection and approvals" }
+        if id == "advanced" { return chatScope ? "Workers and connection" : "Connection" }
         if members.count > 1, id == "model" { return "Models, thinking, and workers" }
         let text = members.compactMap(\.description).joined(separator: " · ")
         return text.isEmpty ? nil : text
@@ -364,9 +362,9 @@ struct SessionSettingsView: View {
         let shown = Set(sections.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }.map(\.id))
-        let rows = (homeProfileID == nil ? ["context", "tools", "model", "workers", "approvals", "run"] : ["workers", "tools", "approvals", "run"])
+        let rows = (homeProfileID == nil ? ["context", "tools", "model", "workers", "run"] : ["workers", "tools", "run"])
             .filter(shown.contains)
-        let moreRows = rows.filter { ["model", "workers", "approvals", "run"].contains($0) }
+        let moreRows = rows.filter { ["model", "workers", "run"].contains($0) }
         // The chat's project, read-only, below its own choices; Manage Session's
         // Workspace row already names the branch. Its notices are listed there once.
         let project = homeProfileID == nil ? projectCWD.flatMap { cwd in

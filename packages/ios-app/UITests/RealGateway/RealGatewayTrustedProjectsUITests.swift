@@ -120,8 +120,8 @@ extension RealGatewayPairAndChatUITests {
         try closeSheet()
         try closeSheet()
 
-        // Exercise the actual native request/decision route, not a settings
-        // write: create records false, and only the separate digest tap trusts.
+        // Exercise the actual native review route, not a settings write: the
+        // review creates nothing, and only the card's digest tap creates and trusts.
         add.tap()
         app.buttons["Create Project"].tap()
         let field = app.textFields["project-lifecycle-name"]
@@ -130,12 +130,12 @@ extension RealGatewayPairAndChatUITests {
         field.typeText("selection-approved\n")
         let create = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Create Project", "Create Project, ")).allElementsBoundByIndex.last(where: { $0.isHittable })
         try XCTUnwrap(create).tap()
-        let approve = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-approval-approve-'")).firstMatch
+        let approve = app.buttons["change-review-approve"]
         XCTAssertTrue(approve.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertEqual(stored("selection-approved"), false, "projects.request alone must not grant trust")
+        XCTAssertNil(stored("selection-approved"), "The exact review alone must not create or trust")
         approve.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { stored("selection-approved") == true },
-                      "Trust must change only after the separate settings.decide approval tap")
+                      "Trust must change only after the card's exact digest tap")
         XCTAssertEqual(stored("trusted-project"), true)
         XCTAssertEqual(stored("blocked-parent"), false)
     }

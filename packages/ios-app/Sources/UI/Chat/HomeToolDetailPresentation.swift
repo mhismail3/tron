@@ -252,13 +252,12 @@ extension HomeToolDetailPresentation {
         let title = dryRun ? "Check a settings change" : requests.count == 1 ? "Change a setting" : "Change \(requests.count) settings"
         let outcomes = call.details?["changes"]?.arrayValue?.compactMap(\.objectValue)
         let status = call.details?["status"]?.stringValue
-        let tier = call.details?["tier"]?.stringValue
         let header: Header
         if call.running { header = runningHeader(icon: "slider.horizontal.3", title: title, subtitle: nil) }
         else if call.error { header = Header(icon: "slider.horizontal.3", title: title, subtitle: nil, pill: "Error", tone: .failure) }
         else if let status {
-            let pill = dryRun ? "Dry run · \(tier?.capitalized ?? "")" : statusLabel(status)
-            header = Header(icon: "slider.horizontal.3", title: title, subtitle: tier.map { "\($0.capitalized) tier" },
+            let pill = dryRun ? "Dry run" : statusLabel(status)
+            header = Header(icon: "slider.horizontal.3", title: title, subtitle: nil,
                             pill: pill, tone: dryRun ? .neutral : tone(forStatus: status))
         } else { return nil }
 
@@ -279,17 +278,10 @@ extension HomeToolDetailPresentation {
                 let to = unset && outcome?["after"] == nil ? "Unset" : settingValue(after)
                 rows.append(Row(icon: "arrow.right", title: unset ? "Unset" : "Set", value: from.map { "\($0) → \(to)" } ?? to))
             }
-            if let changeTier = outcome?["tier"]?.stringValue { rows.append(Row(icon: "shield.lefthalf.filled", title: "Tier", value: changeTier.capitalized)) }
             if let changeStatus = outcome?["status"]?.stringValue, !dryRun { rows.append(Row(icon: "checkmark.circle", title: "Status", value: statusLabel(changeStatus))) }
             if let confirm = outcome?["confirm"]?.stringValue { rows.append(Row(icon: "exclamationmark.bubble", title: "Approval asks", value: confirm)) }
             if let message = outcome?["error"]?.objectValue?["message"]?.stringValue { rows.append(Row(icon: "exclamationmark.triangle", title: "Error", value: message)) }
             sections.append(.rows(title: keyTitle(key, qualifiers: request["qualifiers"]?.objectValue), detail: nil, rows: rows))
-        }
-        if let approval = call.details?["approval"]?.objectValue {
-            var rows: [Row] = []
-            if let request = approval["requestId"]?.stringValue { rows.append(Row(icon: "number", title: "Request", value: request)) }
-            if let expires = approval["expiresAt"]?.stringValue { rows.append(Row(icon: "hourglass", title: "Expires", value: HomeSheetTime.absolute(expires))) }
-            sections.append(.rows(title: "Approval", detail: "Nothing changes until you approve it in Manage Home.", rows: rows))
         }
         if let reason = call.string("reason") { sections.append(.text(id: "reason", title: "Reason", text: reason)) }
         return HomeToolDetailPresentation(header: header, sections: sections)

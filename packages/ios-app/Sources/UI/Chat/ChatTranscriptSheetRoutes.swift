@@ -39,7 +39,6 @@ enum ChatTranscriptSheetRoute: Equatable, Identifiable {
     case thinkingTrace(ChatThinkingTraceSheetRoute)
     case prompt(HomeTextReading)
     case notificationDetail(ChatNotificationDetailSheetRoute)
-    case settingsApproval(SettingsApprovalSelection)
 
     var id: String {
         switch self {
@@ -47,7 +46,6 @@ enum ChatTranscriptSheetRoute: Equatable, Identifiable {
         case .thinkingTrace(let route): "chat.thinking-trace.\(route.identity)"
         case .prompt(let reading): "chat.prompt.\(reading.id)"
         case .notificationDetail(let route): "chat.transcript-event-detail.\(route.eventID)"
-        case .settingsApproval(let selection): "chat.settings-approval.\(selection.id)"
         }
     }
 
@@ -110,9 +108,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
     @Environment(\.tronPresentationActivity) private var activity
     @State private var toolRun: ToolRunResolvedState?
     @State private var displayHandoff = ToolDisplayHandoff()
-    /// Waiting requests this chat already presented: a dismissed one stays
-    /// pending behind its chip and is not presented again (#2050).
-    @State private var presentedApprovals: Set<String> = []
 
     func body(content: Content) -> some View {
         content
@@ -130,7 +125,7 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 // A new presentation supersedes any intent the previous one left
                 // behind. A dismissal is not a cancellation: the sheet completes
                 // its own handoff as it goes away.
-                guard let route else { presentStagedApproval(); return }
+                guard let route else { return }
                 displayHandoff.cancel()
                 // The opened run's own resolution stays the fallback while the
                 // sheet dismisses and its handoff completes.
@@ -143,48 +138,12 @@ struct ChatTranscriptSheetHost: ViewModifier {
                    || previous.sessionID != current.sessionID {
                     displayHandoff.cancel()
                 }
-                if let previous, let current, previous.sessionID != current.sessionID,
-                   let route = routes.route, case .settingsApproval = route { routes.dismiss() }
                 refreshToolRun()
-                presentStagedApproval()
             }
-            .onChange(of: model.selectedGatewayProfileID()) { _, _ in
-                displayHandoff.cancel()
-                if let route = routes.route, case .settingsApproval = route { routes.dismiss() }
-            }
+            .onChange(of: model.selectedGatewayProfileID()) { _, _ in displayHandoff.cancel() }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { displayHandoff.cancel() }
-                else { presentStagedApproval() }
             }
-            .onChange(of: model.stagedApprovalReview?.id, initial: true) { _, _ in presentStagedApproval() }
-            .onChange(of: waitingApprovalIDs, initial: true) { _, _ in presentStagedApproval() }
-            .onChange(of: activity.allowsPresentationPublication) { _, active in if active { presentStagedApproval() } }
-    }
-
-    /// Requests this chat's tools are waiting on: each approval form names one.
-    private var waitingApprovalIDs: [String] {
-        guard let sessionID = installationTag?.sessionID else { return [] }
-        return (model.authoritativeSnapshot(for: sessionID)?.extensionPresentation.pendingInteractions ?? [])
-            .filter { $0.method == .form && $0.form?.presentation == .approval }
-            .compactMap { $0.form?.questions.first?.id }
-    }
-
-    /// One approval sheet route for every way in (#2050): a tool that waits
-    /// presents its request once, like a question; an approval push opens this
-    /// chat's requests. Neither decides; the sheet's toolbar does.
-    private func presentStagedApproval() {
-        guard routes.route == nil, activity.allowsPresentationPublication,
-              let sessionID = installationTag?.sessionID else { return }
-        if let staged = model.freshStagedApprovalReview(),
-           staged.sessionID == sessionID || sessionID == model.homeStatus.status?.sessionId {
-            model.consumeStagedApprovalReview(staged.id)
-            routes.present(.settingsApproval(.session(staged.sessionID)))
-            return
-        }
-        if let requestID = waitingApprovalIDs.first(where: { !presentedApprovals.contains($0) }) {
-            presentedApprovals.insert(requestID)
-            routes.present(.settingsApproval(.request(SettingsApprovalReference(requestID: requestID, changeIDs: []))))
-        }
     }
 
     @ViewBuilder
@@ -204,8 +163,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
             )
         case .prompt(let reading):
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: .tronPrimary)
-        case .settingsApproval(let selection):
-            SettingsApprovalSheet(selection: selection)
         case .notificationDetail(let value):
             LiveNotificationDetailSheet(
                 eventID: value.eventID,

@@ -88,7 +88,6 @@ export interface FixtureOptions {
   queueSummarizer?: boolean;
   knowledge?: () => KnowledgeService | undefined;
   settingsNow?: Parameters<typeof settingsDependencies>[0]["now"];
-  settingsSchedule?: Parameters<typeof settingsDependencies>[0]["schedule"];
   homeDiagnostic?: import("../src/modules/home/home-diagnostic.js").HomeDiagnostic;
 }
 
@@ -206,7 +205,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const registry = await createRegistry();
   settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, sessions: registry, registry,
     home: () => homeOwnerOf(registry), knowledge,
-    ...(options.settingsNow ? { now: options.settingsNow } : {}), ...(options.settingsSchedule ? { schedule: options.settingsSchedule } : {}) });
+    ...(options.settingsNow ? { now: options.settingsNow } : {}) });
   await settings.settingsChanges.start();
   const owned = { registry, root };
   fixtures.push(owned);
@@ -224,7 +223,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     const restarted = owned.registry;
     settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, sessions: restarted, registry: restarted,
       home: () => homeOwnerOf(restarted), knowledge,
-      ...(options.settingsNow ? { now: options.settingsNow } : {}), ...(options.settingsSchedule ? { schedule: options.settingsSchedule } : {}) });
+      ...(options.settingsNow ? { now: options.settingsNow } : {}) });
     await settings.settingsChanges.start();
     await bringUpToReadiness(owned.registry);
     return owned.registry;

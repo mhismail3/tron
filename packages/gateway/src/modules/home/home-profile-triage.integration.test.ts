@@ -10,7 +10,6 @@ import { workspaceModule } from "../../workspace/workspace-module.js";
 import { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
 import { readHomeProfileIndex } from "./home-profile.js";
-import { registerProfileApprovals } from "./home-profile-approvals.js";
 import type { KnowledgeRecord } from "../../knowledge/knowledge-contract.js";
 
 type Note = Extract<KnowledgeRecord, { kind: "note" }>;
@@ -34,7 +33,6 @@ async function setup() {
   let registry = await f.restartToReadiness();
   f.registry = registry;
   knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
-  registerProfileApprovals(f.settings.settingsChanges, () => knowledge);
   await homeOwnerOf(registry).recoverTasks();
   return {
     f,
@@ -43,7 +41,6 @@ async function setup() {
       registry = await f.restartToReadiness();
       f.registry = registry;
       knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
-      registerProfileApprovals(f.settings.settingsChanges, () => knowledge);
       await homeOwnerOf(registry).recoverTasks();
     },
     async turn(input: string, args?: Record<string, unknown>, callId = "triage-call") {
@@ -127,8 +124,14 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   expect(note.content.privacyScope).toBe("private");
   const move = await p.turn("Propose a place for that sensitive note.", { action: "reorganize", assignments: [{ id: note.id, expectedRevision: note.revisionId, path: "life/health" }], reason: "Exact review before moving private material" }, "sensitive-review");
   evidence.push({ sensitivePlacementReview: move.result });
-  expect(move.result).toMatchObject({ status: "pending" });
+  expect(move.result).toMatchObject({ status: "refused" });
   expect((await knowledge!.store.read(note.id) as Note).revisionId).toBe(note.revisionId);
+  for (const action of ["refine", "supersede"] as const) {
+    const edit = await p.turn("Infer a new private fact from this short reply.", { action, id: note.id,
+      kind: "fact", text: "An invented sensitive fixture inference", reason: "Not an explicit sensitive statement" }, `sensitive-${action}`);
+    expect(edit.result).toMatchObject({ status: "refused" });
+    expect(await knowledge!.store.read(note.id)).toEqual(note);
+  }
   const metadata = await p.turn("What is available to read?", { action: "read" }, "sensitive-index");
   expect(metadata.first.system).not.toContain(text);
   expect(metadata.result.status).toBe("read");
@@ -147,7 +150,7 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   evidence.push({ declaredSensitiveInferenceRefused: true, explicitSensitiveUnsorted: true, metadataBodyFree: true, excludedAndForgottenAbsentFromHomeReads: true, coldRestart: true });
 }, 120_000);
 
-it("lets Home retire its own unconfirmed standing proposal with a reason but requires exact review for refinement", async () => {
+it("lets Home refine and retire its own unconfirmed proposal without promoting authority or losing history", async () => {
   const p = await setup();
   const learned = await p.turn("Propose this standing decision for my review.", { action: "learn", kind: "standing-decision", text: "Proposed synthetic standing decision" }, "own-standing");
   expect(learned.result.status).toBe("saved");
@@ -156,16 +159,18 @@ it("lets Home retire its own unconfirmed standing proposal with a reason but req
   expect(original.content.confirmed).toBe(false);
   const refine = await p.turn("Propose exact revised wording.", { action: "refine", id, text: "Revised synthetic standing decision", reason: "Exact wording review" }, "own-refine-review");
   evidence.push({ exactRefinementReview: refine.result });
-  expect(refine.result.status).toBe("pending");
-  expect((await knowledge!.store.read(id) as Note).revisionId).toBe(original.revisionId);
+  expect(refine.result.status).toBe("saved");
+  const refined = await knowledge!.store.read(id) as Note;
+  expect(refined.content).toMatchObject({ title: "Revised synthetic standing decision", confirmed: false });
+  expect(await knowledge!.store.read(id, original.revisionId)).toEqual(original);
   const retired = await p.turn("Withdraw your unconfirmed proposal.", { action: "retire", id, reason: "Withdrawing my own unconfirmed proposal" }, "own-standing-retire");
   expect(retired.result).toMatchObject({ status: "saved", action: "retire", id });
   const current = await knowledge!.store.read(id) as Note;
   expect(current.content.retired).toBe(true);
   expect(current.content.confirmed).toBe(false);
-  expect(current.content.title).toBe(original.content.title);
+  expect(current.content.title).toBe(refined.content.title);
   expect(current.provenance.reason).toBe("Withdrawing my own unconfirmed proposal");
-  evidence.push({ ownStandingProposalRetiredWithoutApproval: true, reasonRecorded: true, refinementWaitedForExactReview: true });
+  evidence.push({ ownStandingProposalRetiredWithoutApproval: true, reasonRecorded: true, refinementStayedInferredWithHistory: true });
 }, 120_000);
 
 it("does not offer sorting or accept Not now during a real worker-completion wake, even with an old maintainer message", async () => {
