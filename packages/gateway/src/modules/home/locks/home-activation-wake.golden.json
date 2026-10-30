@@ -1847,7 +1847,6 @@
           "memory_search",
           "delegate",
           "task",
-          "monitor",
           "profile",
           "web_search",
           "session_search",
@@ -1863,7 +1862,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:db262cc7b91fe0a018c27b0091cb634ccfd77993afa9ed57489f2e0fb8fc2a2f",
+        "promptHash": "sha256:41b59b9981dc4f72b9b30a412b92918196ac8b8233fb4974ea1fe35027e1cf3f",
         "messages": [
           {
             "role": "user",
@@ -1885,7 +1884,6 @@
           "memory_search",
           "delegate",
           "task",
-          "monitor",
           "profile",
           "web_search",
           "session_search",
@@ -1901,7 +1899,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:db262cc7b91fe0a018c27b0091cb634ccfd77993afa9ed57489f2e0fb8fc2a2f",
+        "promptHash": "sha256:41b59b9981dc4f72b9b30a412b92918196ac8b8233fb4974ea1fe35027e1cf3f",
         "messages": [
           {
             "role": "user",
@@ -1935,7 +1933,6 @@
           "memory_search",
           "delegate",
           "task",
-          "monitor",
           "profile",
           "web_search",
           "session_search",
@@ -1951,7 +1948,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:db262cc7b91fe0a018c27b0091cb634ccfd77993afa9ed57489f2e0fb8fc2a2f",
+        "promptHash": "sha256:41b59b9981dc4f72b9b30a412b92918196ac8b8233fb4974ea1fe35027e1cf3f",
         "messages": [
           {
             "role": "user",
@@ -2036,7 +2033,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:db262cc7b91fe0a018c27b0091cb634ccfd77993afa9ed57489f2e0fb8fc2a2f"
+      "promptHash": "sha256:41b59b9981dc4f72b9b30a412b92918196ac8b8233fb4974ea1fe35027e1cf3f"
     },
     {
       "caller": "home-delegated",
@@ -2044,7 +2041,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:db262cc7b91fe0a018c27b0091cb634ccfd77993afa9ed57489f2e0fb8fc2a2f"
+      "promptHash": "sha256:41b59b9981dc4f72b9b30a412b92918196ac8b8233fb4974ea1fe35027e1cf3f"
     },
     {
       "caller": "home-wake",
@@ -2052,7 +2049,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:db262cc7b91fe0a018c27b0091cb634ccfd77993afa9ed57489f2e0fb8fc2a2f"
+      "promptHash": "sha256:41b59b9981dc4f72b9b30a412b92918196ac8b8233fb4974ea1fe35027e1cf3f"
     }
   ],
   "requestOptions": [
@@ -2217,10 +2214,6 @@
       {
         "name": "task",
         "schema": "sha256:568c791581a58047e5d9fa56d713ebda0f2632d360dc26010cbb56128103a375"
-      },
-      {
-        "name": "monitor",
-        "schema": "sha256:26deb19e002262a637ef0b2a58abff36095f44abc12f082e6fd4e417013de984"
       },
       {
         "name": "profile",
@@ -2399,7 +2392,6 @@
           "memory_search",
           "profile",
           "delegate",
-          "monitor",
           "task"
         ]
       },
@@ -2687,7 +2679,6 @@
                 "memory_search",
                 "delegate",
                 "task",
-                "monitor",
                 "profile",
                 "web_search",
                 "session_search",
@@ -2762,7 +2753,6 @@
                 "memory_search",
                 "delegate",
                 "task",
-                "monitor",
                 "profile",
                 "web_search",
                 "session_search",
@@ -2852,7 +2842,6 @@
                 "memory_search",
                 "delegate",
                 "task",
-                "monitor",
                 "profile",
                 "web_search",
                 "session_search",
@@ -3410,58 +3399,6 @@
                   "title": {
                     "description": "rename (required): the worker session's new title, at most 80 characters on one line.",
                     "maxLength": 80,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "action"
-                ],
-                "type": "object"
-              }
-            },
-            {
-              "description": "Manage your own Home-trigger automations without approval; never the maintainer's. create requires name, message (authorized objective, refs and stop conditions), everyMinutes (5–1440) and expiresAt (future ISO timestamp, at most 24 hours from creation). At most 3 active. list returns your monitors and revisions. pause, resume and delete require automationId and expectedRevision. Visible and pausable in Automations. A firing carries no maintainer authority and cannot renew grants. Pause/delete when done, stopped or blocked on the maintainer; never undo a maintainer pause.",
-              "name": "monitor",
-              "parameters": {
-                "additionalProperties": false,
-                "properties": {
-                  "action": {
-                    "enum": [
-                      "create",
-                      "list",
-                      "pause",
-                      "resume",
-                      "delete"
-                    ],
-                    "type": "string"
-                  },
-                  "automationId": {
-                    "maxLength": 64,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "everyMinutes": {
-                    "maximum": 1440,
-                    "minimum": 5,
-                    "type": "integer"
-                  },
-                  "expectedRevision": {
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "expiresAt": {
-                    "maxLength": 64,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "message": {
-                    "maxLength": 65536,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "name": {
-                    "maxLength": 256,
                     "minLength": 1,
                     "type": "string"
                   }
