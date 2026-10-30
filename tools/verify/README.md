@@ -5,7 +5,7 @@ and reports broader coverage needed after landing. The manifests and their depen
 and dynamic-edge graph are the selection authority. No queue, landing gate, hosted CI,
 automatic scheduler or revert is involved. A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
-[oracle policy](test-oracles.md) and [health contract](health-design.md).
+[oracle policy](test-oracles.md) and [on-demand health contract](health-design.md#on-demand-command).
 
 ```bash
 scripts/tron verify [--base <ref>]             # affected checks since merge-base(<ref>, HEAD)
@@ -18,28 +18,6 @@ scripts/tron verify --batch [--plan]            # next pinned batch since the lo
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 ```
-
-## On-demand health scorecard
-
-`scripts/tron health` reads the locally pinned `origin/main` SHA's existing verify
-report, never runs suites, fetches, deploys or opens sessions. `--sha <main-sha>` pins
-another first-parent main commit. Repeat `--verify-report <json>` for retained attempts
-(including batch-owned `lane-*/verify.json`); the verifier's attempt ID deduplicates copies.
-It emits JSON and atomically retains `test-results/health/aggregate-<run>.json`.
-Unavailable measurements are null, not zero; denominators and partial coverage remain visible.
-Registry-expired/invalid invocations retain failed source reports; `--plan` stays read-only.
-Case digests and config/attempt identities come from the executed verifier, not inferred test names.
-
-Optional `--owner-summary <json>` reads an explicit `system.logs` aggregate export
-(`records`): `home.response-timing`, `home.task.history-summary`, `capability.usage`.
-Only approved scalars/names survive. This bounded tail is **partial**, not a complete
-30-day census. Root hashes deduplicate history pages; incomplete roots are excluded.
-`--mac-identity <json>` reads the selected payload manifest identified by `mac verify`;
-`--iphone-identity <json>` reads existing iPhone log-capture metadata. The script does not
-verify installation itself; missing protocol/source/build evidence remains partial.
-Approval/server-landed timestamps remain unavailable pending the settings owner seam.
-`--cleanup` deletes only this schema's expired aggregates in this directory (30 days);
-90-day digest retention is policy only. No digests, scheduler or nightly jobs exist.
 
 ## Worktree dependencies
 
