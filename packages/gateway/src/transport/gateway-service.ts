@@ -402,7 +402,7 @@ export class GatewayService {
     this.macReplace = new MacReplaceService({
       tronHome: dependencies.config?.tronHome ?? process.cwd(),
       channel: this.updateService.channel,
-      sourceRoot: async () => (await this.updateService.configStatus().catch(() => null))?.sourceRoot,
+      sourceRoot: async () => (await this.updateService.configStatus())?.sourceRoot,
       ...(notifications ? { notify: async ({ sourceId, message }) => notifications.enqueue({ sessionId: "mac-replace", sourceId, kind: "explicit", title: "Tron Mac", message }) } : {}),
       ...(home ? {
         latestWorkerTask: (sessionId: string) => home.latestWorkerTask(sessionId),

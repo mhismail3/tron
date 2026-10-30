@@ -14,7 +14,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import {
   COMMAND_ID,
   admitIsoTimestamp,
-  admitTrustedDirectory,
+  admitTronSourceRoot,
   admittedFailure,
   boundedFailureText,
   type FailureLine,
@@ -153,24 +153,6 @@ function targetDocument(value: unknown): IosPhysicalDeviceTarget {
     connectionState: boundedText(raw.connectionState, "target connection state", 80),
     developerModeEnabled: raw.developerModeEnabled,
   };
-}
-
-/** The markers that prove a checkout is a complete Tron repository able to build
- * and install the iOS app. */
-const SOURCE_ROOT_MARKERS = [
-  "packages/ios-app/project.yml",
-  "config/ci-toolchain.env",
-  "scripts/tron-ios-device",
-  "scripts/validate-ios-artifact.py",
-  "scripts/verify-gateway-protocol-contract.py",
-];
-
-async function admitSourceRoot(value: unknown): Promise<string> {
-  return admitTrustedDirectory(value, {
-    subject: "iOS source repository",
-    markers: SOURCE_ROOT_MARKERS,
-    markerRejection: "iOS source repository is not a complete Tron checkout",
-  });
 }
 
 function configDocument(value: unknown): IosDeviceInstallConfig {
@@ -449,7 +431,7 @@ export class IosDeviceInstallService {
     if (value === undefined) return null;
     const config = configDocument(value);
     if (config.deviceId !== deviceId) throw new GatewayError("conflict", "iOS device install configuration owner is malformed");
-    if (config.sourceRoot !== undefined) await admitSourceRoot(config.sourceRoot);
+    if (config.sourceRoot !== undefined) await admitTronSourceRoot(config.sourceRoot);
     return config;
   }
 
@@ -459,7 +441,7 @@ export class IosDeviceInstallService {
   }): Promise<IosDeviceInstallConfig> {
     this.requireUsable();
     const deviceId = admitDeviceId(value.deviceId);
-    const sourceRoot = await admitSourceRoot(value.sourceRoot);
+    const sourceRoot = await admitTronSourceRoot(value.sourceRoot);
     return this.mutex.run(async () => {
       const previous = await this.configStatus(deviceId);
       const gatewayChannel = this.options.gatewayChannel ?? "stable";
@@ -728,7 +710,7 @@ export async function runIosDeviceInstallHelper(input: {
   if (configValue === undefined) throw new Error("iOS device install configuration is missing");
   const config = configDocument(configValue);
   if (!config.sourceRoot || !config.target) throw new Error("iOS device install configuration is incomplete");
-  const sourceRoot = await admitSourceRoot(config.sourceRoot);
+  const sourceRoot = await admitTronSourceRoot(config.sourceRoot);
   const currentValue = await readDocument(statusPath(tronHome, deviceId));
   const current = currentValue === undefined ? undefined : statusDocument(currentValue);
   if (!current || current.commandId !== commandId) throw new Error("iOS device install command ownership changed");

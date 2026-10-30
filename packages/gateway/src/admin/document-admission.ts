@@ -65,13 +65,21 @@ export function admitIsoTimestamp(value: unknown, admission: TimestampAdmission)
   return value;
 }
 
+/** Repository identity shared by Gateway rebuild, Mac replacement and device
+ * install. Operation-specific helpers are checked when invoked, not treated as
+ * permanent identity by a Gateway that can outlive those helpers. */
+export async function admitTronSourceRoot(value: unknown): Promise<string> {
+  return admitTrustedDirectory(value, {
+    subject: "Source repository",
+    markers: ["packages/gateway/package.json", "packages/ios-app/project.yml", "scripts/tron"],
+  });
+}
+
 export interface TrustedDirectoryAdmission {
   /** Subject of every rejection, for example `Gateway update sourceRoot`. */
   subject: string;
   /** Root-relative files that must exist as regular, non-linked files. */
   markers?: string[];
-  /** Rejection for a missing or linked marker; defaults to `${subject} is not a Tron repository`. */
-  markerRejection?: string;
 }
 
 /** Admit a trusted absolute directory and return its resolved real path. The
@@ -80,11 +88,11 @@ export interface TrustedDirectoryAdmission {
  * names must exist as a regular file. This is the only admission for a path an
  * admin surface later executes or reads from. */
 export async function admitTrustedDirectory(value: unknown, admission: TrustedDirectoryAdmission): Promise<string> {
-  const { subject } = admission;
   if (typeof value !== "string" || !isAbsolute(value) || Buffer.byteLength(value) > MAX_PATH_BYTES
     || CONTROL_CHARACTERS.test(value)) {
-    throw new GatewayError("invalid_request", `${subject} must be an absolute path`);
+    throw new GatewayError("invalid_request", `${admission.subject} must be an absolute path`);
   }
+  const subject = `${admission.subject} ${JSON.stringify(value)}`;
   const root = parse(value).root;
   let cursor = root;
   for (const component of value.slice(root.length).split(/[\\/]+/u).filter(Boolean)) {
@@ -103,7 +111,7 @@ export async function admitTrustedDirectory(value: unknown, admission: TrustedDi
   for (const marker of admission.markers ?? []) {
     const markerInfo = await lstat(join(resolved, marker)).catch(() => undefined);
     if (!markerInfo?.isFile() || markerInfo.isSymbolicLink()) {
-      throw new GatewayError("conflict", admission.markerRejection ?? `${subject} is not a Tron repository`);
+      throw new GatewayError("conflict", `${subject} is not a Tron repository (missing or linked marker: ${marker})`);
     }
   }
   return resolved;

@@ -9,6 +9,7 @@ import {
   COMMAND_ID,
   admitIsoTimestamp,
   admitTrustedDirectory,
+  admitTronSourceRoot,
   admittedFailure,
   boundedFailureText,
   type FailureLine,
@@ -330,13 +331,6 @@ function stateIdentity(raw: Record<string, unknown>, name: string): GatewayUpdat
   }, name);
 }
 
-/** Files that prove a checkout is a complete Tron repository able to build and
- * deploy a Gateway payload. */
-const SOURCE_ROOT_MARKERS = [
-  "packages/gateway/package.json", "packages/gateway/package-lock.json",
-  "scripts/gateway-payload-deploy.mjs",
-];
-
 function configDocument(value: unknown): GatewayUpdateConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("conflict", "Gateway update config is malformed");
   const raw = value as Record<string, unknown>;
@@ -384,13 +378,13 @@ export class GatewayUpdateService {
     const value = await readBounded(path);
     if (value === undefined) return null;
     const config = configDocument(value);
-    await admitTrustedDirectory(config.sourceRoot, { subject: "Gateway update sourceRoot", markers: SOURCE_ROOT_MARKERS });
+    await admitTronSourceRoot(config.sourceRoot);
     if (config.artifactRoot !== undefined) await admitTrustedDirectory(config.artifactRoot, { subject: "Gateway update artifactRoot" });
     return config;
   }
 
   async configure(value: { sourceRoot: unknown; artifactRoot?: unknown }): Promise<GatewayUpdateConfig> {
-    const sourceRoot = await admitTrustedDirectory(value.sourceRoot, { subject: "Gateway update sourceRoot", markers: SOURCE_ROOT_MARKERS });
+    const sourceRoot = await admitTronSourceRoot(value.sourceRoot);
     let artifactRoot: string | undefined;
     if (value.artifactRoot !== undefined && value.artifactRoot !== null) {
       artifactRoot = await admitTrustedDirectory(value.artifactRoot, { subject: "Gateway update artifactRoot" });

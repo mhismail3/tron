@@ -20,7 +20,18 @@ development](../../../mac-app/docs/development.md).
   rollback availability. A runtime acts only on its own `TRON_GATEWAY_CHANNEL`.
   `gateway.update.config` stores only a trusted absolute non-symlinked `sourceRoot`
   and optional `artifactRoot` in `gateway/update-config.json`; `gateway-update.v1`
-  is advertised only when configured.
+  is advertised when the update helper is available (a source need not yet be configured).
+- Quick Rebuild uses one repository-identity admission in `document-admission.ts` for
+  Gateway and device source roots; Mac replacement reads the Gateway root through
+  that same admission. Identity requires regular, non-linked `packages/gateway/package.json`,
+  `packages/ios-app/project.yml` and `scripts/tron`, not implementation helpers that
+  an installed Gateway may outlive. Operation-specific build prerequisites remain
+  checked by each builder. The device keeps its own source/target binding; no
+  persisted configuration is merged or rewritten. Rejections name the path and
+  missing/linked marker, and Mac replacement preserves that diagnosis rather than
+  treating invalid configuration as absent. `source-repository.integration.test.ts`
+  proves admission against the real checkout and filesystem plus the Gateway/Mac
+  RPC error parity over a real socket.
 - Source mode imports `buildSourcePayload` from the configured checkout's
   `scripts/gateway-payload-deploy.mjs` (so builder changes apply to that rebuild;
   `deploy.source-builder` records its SHA-256); the installed helper keeps locking,

@@ -22,7 +22,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Packages, extensions, hooks, tools | `package-service.ts`, `package-provides.ts`, `session-free-extensions.ts`, `hook-resources.ts`, `tool-catalog.ts` |
 | MCP administration | `mcp-admin-service.ts` |
 | Install and lifecycle projections | `gateway-update-service.ts`, `ios-device-install-service.ts`, `ios-device-install-helper.ts`, `mac-replace-service.ts`, `diagnose.ts` |
-| Shared admission | `document-admission.ts` (`COMMAND_ID`) |
+| Shared admission | `document-admission.ts` (`COMMAND_ID`, `admitTronSourceRoot`); [host control](host-control.md) |
 
 Durable stores: `<tronHome>/gateway/settings/` (`changes/`, `approvals.json`,
 `observed.json`, `floors.json`, `gateway.json`), `<tronHome>/gateway/home/profile.json`
@@ -132,6 +132,7 @@ are installed; schema access never evaluates their late-bound service getter.
 
 | Signal | Level | Meaning |
 |---|---|---|
+| `conflict` from `gateway.update.config.status` / `mac.replace.plan` | RPC error | Source validation names the rejected path and missing/linked identity marker; read the config-status RPC once to distinguish an invalid checkout from absent configuration (`null`) |
 | `settings.risk.failed` | warning | Risk classification failed or hit its 1.5 s deadline; the deterministic tier stands |
 | `settings.notification.failed` | warning | A notify or pending-approval push could not be queued; the change is already recorded |
 | `settings.outside.failed` | warning | An outside-change comparison failed |
