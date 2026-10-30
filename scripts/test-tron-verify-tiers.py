@@ -18,6 +18,28 @@ class TierTests(fixture.VerifyCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return json.loads(result.stdout[result.stdout.index('{'):])
 
+    def test_mac_observation_validates_but_never_waives_an_executed_failure(self):
+        from datetime import datetime, timedelta, timezone
+        r = self.repo
+        path = "packages/mac-app/Tests/Integration/ObservationTests.swift"
+        r.write("packages/mac-app/mac.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write(path, "// Registry fixture; native execution is not requested.\n")
+        r.commit("existing Swift observation subject")
+        subject = r.git("rev-parse", "HEAD")
+        r.git("branch", "-f", "base")
+        r.write("tools/verify/known-failures.json", json.dumps([{
+            "testId": path + "::ObservationTests/branchObserved()",
+            "evidence": {"command": "original branch-owned native run", "commit": subject, "failureDigest": "0" * 64},
+            "issue": 2152, "expires": (datetime.now(timezone.utc) + timedelta(days=7)).date().isoformat(),
+        }]))
+        r.commit("observational Mac record")
+        self.plan()  # Real CLI admission accepts the narrow Swift namespace.
+        r.write("mods/alpha/test-alpha.py", fixture.FAILING)
+        r.commit("actual executed failure")
+        result = r.verify()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("AssertionError: 1 != 2", result.stdout)
+
     def test_skipped_python_cases_are_not_reported_as_passes(self):
         r = self.repo
         r.write('mods/alpha/test-alpha.py',

@@ -85,7 +85,12 @@ failing `evidence.command`, full base `evidence.commit`, SHA-256
 covers the full failure-message array (JSON, `ensure_ascii=False`), replacing only
 the checkout root with `<repo>`; a changed failure inside the same test refuses.
 The commit must be an ancestor of HEAD. Expiry is 00:00 UTC on the named date.
-Seed only from fresh current-main reproductions, retaining raw logs/JSON.
+Gateway waiver entries require fresh current-main reproductions and raw logs/JSON.
+Swift cases under `packages/mac-app/Tests/Integration/` may record explicitly
+branch-observed intermittent failures with the original commit, exact xcresult
+failure-text-array digest and owner issue. These are observational metadata only:
+they are filtered out of the waiver map; Mac failures always remain failures.
+An ancestry-preserving merge never turns branch evidence into main evidence.
 
 Tests execute unchanged. Only exact, unexpired case AND digest matches allow exit 0
 with verdict `quarantined`; `failedTests`, passing counts, logs and each expiry/issue

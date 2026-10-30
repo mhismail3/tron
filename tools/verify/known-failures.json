@@ -28,5 +28,15 @@
     },
     "issue": 2112,
     "expires": "2026-11-05"
+  },
+  {
+    "testId": "packages/mac-app/Tests/Integration/SingleInstanceLockTests.swift::SingleInstanceLockTests/crossProcessExclusionAndReleaseRecovery()",
+    "evidence": {
+      "command": "cd packages/mac-app && ../../scripts/tron-xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData-TerminalValidation -only-testing:TronMacIntegrationTests/CodeSignatureProbeTests -only-testing:TronMacIntegrationTests/CuaProcessOwnerTests -only-testing:TronMacIntegrationTests/GatewayLauncherArgvTests -only-testing:TronMacIntegrationTests/GatewayNetworkCacheFilesystemTests -only-testing:TronMacIntegrationTests/MacQuitGatewayTests -only-testing:TronMacIntegrationTests/MenuBarLogReaderTransportTests -only-testing:TronMacIntegrationTests/MenuBarTerminationTests -only-testing:TronMacIntegrationTests/NativeHostRetirementTests -only-testing:TronMacIntegrationTests/SingleInstanceLockTests -only-testing:TronMacIntegrationTests/SubprocessTests -only-testing:TronMacIntegrationTests/TronLogFilesystemTests -only-testing:TronMacIntegrationTests/UninstallLocalStateTests -only-testing:TronMacIntegrationTests/WizardProgressFilesystemTests -resultBundlePath ../../test-results/terminal-resume-mac.xcresult",
+      "commit": "3a32ad97c3c5a95a27b762a144da4d524fe633d0",
+      "failureDigest": "2790dc98705b50db0442460e9fa66f2ce49245dd3a95b9f10f09bdc7d990abdb"
+    },
+    "issue": 2152,
+    "expires": "2026-11-05"
   }
 ]
