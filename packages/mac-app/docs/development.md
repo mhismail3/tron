@@ -115,6 +115,8 @@ logs and xcresults survive failures, and later groups still run after a failed p
 This is a smoke selection, not exhaustive product or deployed-device qualification:
 future Profile/Knowledge/approval stages update their probes as those features ship.
 It does not measure the five program metrics or claim real APNs/device validation.
+The SSH oracle starts a temporary high-port tailnet listener with fixture keys/state;
+it never changes Remote Login, user SSH keys or the live Gateway.
 
 Agents use `scripts/tron checkpoint --test-mode`: committed HEAD instead of fetched
 main, a disposable signed-build checkout and isolated Gateway/state, no reinstall

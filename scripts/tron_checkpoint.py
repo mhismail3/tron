@@ -147,6 +147,11 @@ def main():
             cleanup = run(source, [source / "scripts/ios-gateway-e2e-test", "clean"], "cleanup.log", environment)
             report["cleanup_exit"] = cleanup
             if args.test_mode:
+                # Payload staging seals directories read-only. Restore write
+                # permission only in this disposable checkout before removal.
+                for directory, _, _ in os.walk(source):
+                    path = Path(directory)
+                    path.chmod(path.stat().st_mode | 0o200)
                 git(ROOT, "worktree", "remove", "--force", source)
             save()
     print(f"Partial/full evidence: {result}", flush=True)
