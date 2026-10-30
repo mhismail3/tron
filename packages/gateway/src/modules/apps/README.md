@@ -84,6 +84,10 @@ scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
 Store/lock journeys retain the named v1 and real SQLite oracles.
 The install journey crosses RuntimeRegistry, canonical display grants,
 GatewayService/receipts, real publisher files and the native interpreter.
+The feed probe compiles once per file in bounded asynchronous suite preparation,
+with a private compiler cache removed at suite teardown. Each native invocation
+still starts a fresh interpreter process; compilation is not part of either
+15-second feed journey's behavior deadline. No built artifact survives the run.
 Artifacts: `test-results/apps-install/report.json`.
 Fixture kill cuts release the workspace lease first; they do not prove whole-Gateway
 ungraceful crash or power-loss recovery.

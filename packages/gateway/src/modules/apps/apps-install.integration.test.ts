@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createTestRegistry, displayOwnerOf } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -24,12 +25,28 @@ const results: string[] = [];
 const phone = { id: "phone", identity: "device:apps-install", isLocal: false } as ClientContext;
 const source = 'import SwiftUI\nstruct ContentView: View { var body: some View { Text("Builds") } }';
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+let nativeRoot: string | undefined;
+let feedBoundary: string;
+beforeAll(async () => {
+  if (process.platform !== "darwin") return;
+  nativeRoot = await mkdtemp(join(tmpdir(), "tron-apps-native-"));
+  feedBoundary = join(nativeRoot, "feeds-boundary");
+  const engine = fileURLToPath(new URL("../../../../ios-app/SwiftAppEngine/", import.meta.url));
+  const probe = fileURLToPath(new URL("./fixtures/FeedsBoundaryMain.swift", import.meta.url));
+  const swift = (await readdir(engine)).filter(name => name.endsWith(".swift")).map(name => join(engine, name));
+  // Build preparation has its own bounded child lifetime. It must not consume
+  // either journey's 15-second behavior budget or block Vitest's timeout owner.
+  await promisify(execFile)("/usr/bin/xcrun", ["swiftc", "-swift-version", "6", "-package-name", "TronIOSApp", "-parse-as-library", "-D", "SWIFT_APP_FEEDS_BOUNDARY", "-o", feedBoundary, ...swift, probe], {
+    timeout: 240_000, env: { ...process.env, CLANG_MODULE_CACHE_PATH: join(nativeRoot, "clang-cache") },
+  });
+}, 240_000);
 afterEach(async () => {
   await Promise.all(live.splice(0).map(registry => registry.dispose()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   vi.unstubAllEnvs();
 });
 afterAll(async () => {
+  if (nativeRoot) await rm(nativeRoot, { recursive: true, force: true });
   await mkdir("test-results/apps-install", { recursive: true });
   await writeFile("test-results/apps-install/report.json", JSON.stringify({ results }, null, 2));
 });
@@ -332,13 +349,8 @@ struct ContentView: View {
     await tool(f, offerArgs(["ios-builds"]), program);
     await rpc(f, "apps.install", installParams(await rpc(f, "apps.review", { sourceSha256: sha(program) }), "native-feed-install"));
     const snapshot = await rpc(f, "apps.open", { appId: "builds" });
-    const engine = fileURLToPath(new URL("../../../../ios-app/SwiftAppEngine/", import.meta.url));
-    const probe = fileURLToPath(new URL("./fixtures/FeedsBoundaryMain.swift", import.meta.url));
-    const binary = join(f.root, "feeds-boundary");
-    const swift = (await readdir(engine)).filter(name => name.endsWith(".swift")).map(name => join(engine, name));
-    execFileSync("/usr/bin/xcrun", ["swiftc", "-swift-version", "6", "-package-name", "TronIOSApp", "-parse-as-library", "-D", "SWIFT_APP_FEEDS_BOUNDARY", "-o", binary, ...swift, probe], { timeout: 240_000, env: { ...process.env, CLANG_MODULE_CACHE_PATH: join(f.root, "clang-cache") } });
     const run = (action: string | null, userInitiated: boolean, overrides: Record<string, unknown> = {}) => {
-      const output = execFileSync(binary, {
+      const output = execFileSync(feedBoundary, {
         input: JSON.stringify({ source: snapshot.source, feeds: snapshot.feeds, host: "mac.example.ts.net", action, userInitiated, ...overrides }), encoding: "utf8", timeout: 15_000,
       });
       results.push(`native ${action ?? "open"} user=${userInitiated}: ${output}`);
@@ -393,13 +405,7 @@ struct ContentView: View {
   var body: some View { Text(report) }
   func install() { openURL(URL(string: build.installURL)!) }
 }`;
-      const engine = fileURLToPath(new URL("../../../../ios-app/SwiftAppEngine/", import.meta.url));
-      const probe = fileURLToPath(new URL("./fixtures/FeedsBoundaryMain.swift", import.meta.url));
-      const binary = join(f.root, "retained-feeds-boundary");
-      const swift = (await readdir(engine)).filter(name => name.endsWith(".swift")).map(name => join(engine, name));
-      execFileSync("/usr/bin/xcrun", ["swiftc", "-swift-version", "6", "-package-name", "TronIOSApp", "-parse-as-library", "-D", "SWIFT_APP_FEEDS_BOUNDARY", "-o", binary, ...swift, probe],
-        { env: { ...process.env, CLANG_MODULE_CACHE_PATH: join(f.root, "clang-cache") } });
-      const output = execFileSync(binary, { input: JSON.stringify({ source: program, feeds: { "ios-builds": feed }, host: "mac.example.ts.net", action: "install", userInitiated: true }), encoding: "utf8" });
+      const output = execFileSync(feedBoundary, { input: JSON.stringify({ source: program, feeds: { "ios-builds": feed }, host: "mac.example.ts.net", action: "install", userInitiated: true }), encoding: "utf8", timeout: 15_000 });
       results.push(`native retained feed: ${output}`);
       expect(JSON.parse(output)).toMatchObject({ report: `Retained build:${retainedId}`, succeeded: true,
         link: `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestURL)}` });

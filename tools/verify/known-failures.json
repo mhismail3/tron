@@ -30,16 +30,6 @@
     "expires": "2026-11-05"
   },
   {
-    "testId": "packages/gateway/src/modules/apps/apps-install.integration.test.ts::reviewed Swift app lifecycle through the Gateway lists retained timestamp/commit publications alongside UUID publications without relaxing safe reads",
-    "evidence": {
-      "command": "python3 tools/verify/gateway.py --reporter=default --reporter=json --outputFile.json=\"$PWD/test-results/2158/current-default.json\"",
-      "commit": "e0b2f5751af1380f4e7c5390988803be1e112e85",
-      "failureDigest": "ce0d773b9aa1411ec30879301092e6cca08e28df6030eb4e4ff9d44a05960ae2"
-    },
-    "issue": 2115,
-    "expires": "2026-11-05"
-  },
-  {
     "testId": "packages/mac-app/Tests/Integration/SingleInstanceLockTests.swift::SingleInstanceLockTests/crossProcessExclusionAndReleaseRecovery()",
     "evidence": {
       "command": "cd packages/mac-app && ../../scripts/tron-xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData-TerminalValidation -only-testing:TronMacIntegrationTests/CodeSignatureProbeTests -only-testing:TronMacIntegrationTests/CuaProcessOwnerTests -only-testing:TronMacIntegrationTests/GatewayLauncherArgvTests -only-testing:TronMacIntegrationTests/GatewayNetworkCacheFilesystemTests -only-testing:TronMacIntegrationTests/MacQuitGatewayTests -only-testing:TronMacIntegrationTests/MenuBarLogReaderTransportTests -only-testing:TronMacIntegrationTests/MenuBarTerminationTests -only-testing:TronMacIntegrationTests/NativeHostRetirementTests -only-testing:TronMacIntegrationTests/SingleInstanceLockTests -only-testing:TronMacIntegrationTests/SubprocessTests -only-testing:TronMacIntegrationTests/TronLogFilesystemTests -only-testing:TronMacIntegrationTests/UninstallLocalStateTests -only-testing:TronMacIntegrationTests/WizardProgressFilesystemTests -resultBundlePath ../../test-results/terminal-resume-mac.xcresult",
