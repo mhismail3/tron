@@ -186,7 +186,7 @@ async function listSessions(
 const HOME_COMMANDS = [
   "/home [status]", "/home designate [provider/id]", "/home disable", "/home memory <provider/id>...", "/home resume", "/home context",
   "/home reconfirm-permissions", "/home permissions", "/home revoke-scope <id>", "/home revoke-grant <id>",
-  "/home approve-grant <request-id> <expiry-ms>", "/home deny-grant <request-id> <expiry-ms>", "/home task <id>",
+  "/home task <id>",
   "/home steer <id> <text>", "/home interrupt <id> [text]", "/home stop <id>", "/home redeliver <id>",
 ];
 const HOME_USAGE = `Usage: ${HOME_COMMANDS.join(" | ")}\n`;
@@ -208,7 +208,6 @@ export type HomeCommand =
   | { kind: "permissions" }
   | { kind: "revoke-scope"; scopeId: string }
   | { kind: "revoke-grant"; grantId: string }
-  | { kind: "decide-grant"; requestId: string; approved: boolean; expiresAt: number }
   | { kind: "redeliver-task"; taskId: string }
   | { kind: "task"; taskId: string }
   | { kind: "stop-task"; taskId: string }
@@ -230,8 +229,6 @@ function parseHomeCommand(input: string): HomeCommand | undefined {
   if (input === "/home permissions") return { kind: "permissions" };
   const revoke = /^\/home revoke-(scope|grant) ([A-Za-z0-9][A-Za-z0-9._-]{0,159})$/u.exec(input);
   if (revoke) return revoke[1] === "scope" ? { kind: "revoke-scope", scopeId: revoke[2]! } : { kind: "revoke-grant", grantId: revoke[2]! };
-  const decision = /^\/home (approve|deny)-grant ([A-Za-z0-9][A-Za-z0-9._-]{0,159}) ([0-9]+)$/u.exec(input);
-  if (decision && Number.isSafeInteger(Number(decision[3]))) return { kind: "decide-grant", requestId: decision[2]!, approved: decision[1] === "approve", expiresAt: Number(decision[3]) };
   const redeliver = /^\/home redeliver ([A-Za-z0-9][A-Za-z0-9._-]{0,159})$/u.exec(input);
   if (redeliver) return { kind: "redeliver-task", taskId: redeliver[1]! };
   const task = /^\/home (task|stop|steer|interrupt) ([A-Za-z0-9][A-Za-z0-9._-]{0,159})(?: (.+))?$/u.exec(input);
@@ -381,11 +378,7 @@ async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, co
       await client.request(command.kind === "revoke-scope" ? "home.revokeTaskScope" : "home.revokeTaskGrant", { commandId: randomUUID(),
         ...(command.kind === "revoke-scope" ? { scopeId: command.scopeId } : { grantId: command.grantId }) });
       process.stdout.write("Home task authorization revocation accepted. Already admitted work is unchanged.\n");
-    } else if (command.kind === "decide-grant") {
-      const result = await client.request("home.decideTaskGrant", { commandId: randomUUID(), requestId: command.requestId, approved: command.approved, expiresAt: command.expiresAt });
-      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    }
-    else if (command.kind === "redeliver-task") {
+    } else if (command.kind === "redeliver-task") {
       const route = await client.request("home.status", {}) as unknown as import("../protocol/types.js").HomeStatus;
       if (!route.enabled || !route.homeId || !route.routeGeneration) throw new Error("Home route is unavailable");
       await client.request("home.redeliverTaskResult", { commandId: randomUUID(), taskId: command.taskId, homeId: route.homeId, routeGeneration: route.routeGeneration });

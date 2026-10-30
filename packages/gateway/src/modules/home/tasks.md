@@ -40,10 +40,13 @@ following symlinks).
 The standing scope covers any currently trusted project (trust re-resolved at admission),
 bound to the epoch. Otherwise a task needs a one-use grant binding intent digest, target,
 scope, expiry and epoch, consumed at admission; a `grant-required` refusal records the request
-first and returns its `requestId`. Approval records the decision and one grant; a decided
-request never mints another or replays the task. Revocation shares the consumption mutex and
-does not stop admitted work. Only `home.reconfirmPermissions` re-stamps scopes. Only maintainer
-RPCs list, revoke and decide.
+first. When Home's `delegate` or `task resume` asks, admission waits on the exact native grant
+card in Home's chat (`HomeTaskDispatcher.authorizeTask`); its tap records the decision and one
+grant that the same admission consumes, and a decline runs nothing. The maintainer's own
+message to a stopped worker is itself the grant for that continuation. A decided request never
+mints another, so it shows no second card. Revocation shares the consumption mutex and does
+not stop admitted work. Only `home.reconfirmPermissions` re-stamps scopes; maintainer RPCs
+list and revoke.
 
 ## Worker progress check-ins
 
@@ -159,8 +162,7 @@ next startup; it is not treated as a successful cleanup.
 - Interrupt aborts only in-flight tool calls (bash: SIGINT, SIGTERM, SIGKILL 5 s apart, abandoned
   after 15 s) and queues `text` as steering. Stop persists `stopIntent`, aborts and joins the
   root prompt; an orphan active task is reconciled from its file at once.
-- `home.reconfirmPermissions`, `home.decideTaskGrant` and revocations are maintainer-only and
-  receipted.
+- `home.reconfirmPermissions` and revocations are maintainer-only and receipted.
 
 ## Task wake inbox and terminal push
 

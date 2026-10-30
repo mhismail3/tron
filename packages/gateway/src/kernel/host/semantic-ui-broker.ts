@@ -55,7 +55,12 @@ interface InteractionRequestOptions {
   apply?: (acceptance: NativeChangeAcceptance) => Promise<unknown>;
   signal?: AbortSignal;
   timeout?: number;
+  /** The interaction's own expiry, distinct from a decline or an abort. */
+  expired?: () => void;
 }
+
+/** An exact change card expires unanswered after a day; nothing is applied. */
+export const CHANGE_REVIEW_TTL_MS = 24 * 60 * 60_000;
 
 const THEME_COLORS: Record<ThemeColor, string | number> = {
   accent: 6, border: 8, borderAccent: 6, borderMuted: 8,
@@ -207,7 +212,12 @@ export class SemanticUIBroker {
     for (const item of review.items) Object.freeze(item);
     Object.freeze(review.items);
     Object.freeze(review);
-    return this.request({ method: "change", title: review.title, review }, { ...(input.signal ? { signal: input.signal } : {}), apply: input.apply }) as Promise<T | undefined>;
+    let expired = false;
+    return (this.request({ method: "change", title: review.title, review }, { ...(input.signal ? { signal: input.signal } : {}), apply: input.apply,
+      timeout: CHANGE_REVIEW_TTL_MS, expired: () => { expired = true; } }) as Promise<T | undefined>).then(value => {
+      if (expired) throw new GatewayError("conflict", "The exact change card expired unanswered; nothing was applied");
+      return value;
+    });
   }
 
   requestForm(input: {
@@ -362,7 +372,7 @@ export class SemanticUIBroker {
       // allowed to respond re-entrantly, and abort must not be lost between the
       // preflight check and committed presentation.
       this.pending.set(wire.id, pending);
-      if (timeout) pending.timer = setTimeout(() => { if (this.pending.has(wire.id)) { this.finish(pending); resolve(undefined); } }, timeout);
+      if (timeout) pending.timer = setTimeout(() => { if (this.pending.has(wire.id)) { this.finish(pending); options?.expired?.(); resolve(undefined); } }, timeout);
       if (options?.signal) {
         const abort = () => { if (this.pending.has(wire.id)) { this.finish(pending); resolve(input.method === "confirm" ? false : undefined); } };
         options.signal.addEventListener("abort", abort, { once: true });

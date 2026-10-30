@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, disposeFixtures, reportCall } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
@@ -17,7 +17,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
-import { SemanticUIBroker } from "../kernel/host/semantic-ui-broker.js";
+import { CHANGE_REVIEW_TTL_MS, SemanticUIBroker } from "../kernel/host/semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../kernel/host/presentation/extension-presentation-store.js";
 import { changeReview } from "../kernel/settings/settings-types.js";
 import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
@@ -250,6 +250,11 @@ describe("typed changes and exact native acceptance", () => {
       expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries).toHaveLength(1);
       expect(f.home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "native-change"))
         .toMatchObject({ isError: false, details: { status: "applied" } });
+      // The tapped change is logged once and the maintainer can undo it.
+      await expect(f.service.invoke(phone, "settings.undo", { commandId: `undo-tapped-${++sequence}`, changeId: history[0]!.changeId }))
+        .resolves.toMatchObject({ status: "applied" });
+      expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBeUndefined();
+      expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries.filter(entry => entry.undoOf === history[0]!.changeId)).toHaveLength(1);
       await saveCase("accepted", { interaction: f.interaction, history });
     } finally { await f.home.abort("agent"); await f.prompting; }
   });
@@ -431,6 +436,26 @@ describe("typed changes and exact native acceptance", () => {
     await Promise.all([writer, ...readers]);
     expect(reads).toBeGreaterThan(0);
     expect((await record.page({ limit: 200, filter: entry => entry.changeId.startsWith("race-") })).entries).toHaveLength(151);
+  });
+
+  it("an unanswered exact change card expires after a day, applies nothing and refuses a late tap", async () => {
+    vi.useFakeTimers();
+    const broker = new SemanticUIBroker(new ExtensionPresentationStore(() => {}));
+    let applied = 0;
+    try {
+      const review = changeReview("expiring", { title: "Expiring change", requiresTap: true, items: [{ label: "Effect", before: "Absent", after: "Present" }] });
+      const requested = broker.requestChange({ review, apply: async () => { applied += 1; return "applied"; } }).then(value => ({ value }), error => ({ error }));
+      const interaction = broker.interactions()[0]!;
+      expect(Date.parse(interaction.expiresAt!) - Date.now()).toBe(CHANGE_REVIEW_TTL_MS);
+      await vi.advanceTimersByTimeAsync(CHANGE_REVIEW_TTL_MS - 1);
+      expect(broker.interactions()).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await requested).toMatchObject({ error: { code: "conflict", message: expect.stringContaining("expired") } });
+      expect(broker.interactions()).toEqual([]);
+      expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, { digest: review.digest, approved: true }, false,
+        { deviceId: phone.identity, commandId: "late-tap" })).toThrow();
+      expect(applied).toBe(0);
+    } finally { broker.retire(); vi.useRealTimers(); }
   });
 
   it("a synchronous trusted callback throw settles both the original request and the response", async () => {

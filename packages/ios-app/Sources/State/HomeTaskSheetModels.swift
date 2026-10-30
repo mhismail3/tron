@@ -232,8 +232,6 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
     let scopes: [Scope]
     let decisions: [Decision]
     let grants: [Grant]
-    /// Requests no decision has answered, computed once during admission.
-    let pendingRequests: [Request]
 
     private struct Wire: Decodable {
         let revision: Int
@@ -272,8 +270,7 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
             needsReconfirmation: wire.needsReconfirmation ?? false,
             scopes: wire.scopes,
             decisions: wire.decisions,
-            grants: wire.grants,
-            pendingRequests: wire.requests.filter { !decidedRequestIDs.contains($0.id) }
+            grants: wire.grants
         )
     }
 }

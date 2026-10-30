@@ -623,6 +623,15 @@ it("real Gateway: a Home-created monitor wake cannot approve settings, trust, gr
     () => fauxAssistantMessage("No maintainer decision was supplied."),
   ]);
   const runId = await fire(automation);
+  // The wake's delegate can only present the exact grant card and wait; it cannot
+  // answer it. The maintainer declines.
+  const home = await gateway.registry.acquire(sessionId);
+  const grantCard = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "the wake's grant card");
+  expect(grantCard.review!.title).toBe("Allow Home task unapproved-trigger-task once");
+  expect((await phone.request("home.taskPermissions", {})).result.grants).toHaveLength(0);
+  expect((await phone.request("session.open", { sessionId })).ok).toBe(true);
+  expect((await phone.request("extension.respond", { commandId: gateway.commandId(), sessionId, interactionId: grantCard.id, hostEpoch: grantCard.hostEpoch,
+    presentationRevision: grantCard.presentationRevision, value: { digest: grantCard.review!.digest, approved: false } })).ok).toBe(true);
   await waitFor(async () => (await phone.request("automation.run.get", { automationId: automation.id, runId })).result.state === "succeeded", "untrusted trigger is canonically delivered");
   await gateway.settled(sessionId);
   expect((await phone.request("settings.approvals", {})).ok).toBe(false);

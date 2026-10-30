@@ -11,8 +11,13 @@ import { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
 import { readHomeProfileIndex } from "./home-profile.js";
 import type { KnowledgeRecord } from "../../knowledge/knowledge-contract.js";
+import { answerChangeCard } from "../../../test-support/native-change.js";
+import { displayOwnerOf } from "../../../test-support/gateway-registry.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
 
 type Note = Extract<KnowledgeRecord, { kind: "note" }>;
+const maintainer = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
 let knowledge: KnowledgeService | undefined;
 const evidence: unknown[] = [];
 afterEach(async () => {
@@ -34,6 +39,7 @@ async function setup() {
   f.registry = registry;
   knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
   await homeOwnerOf(registry).recoverTasks();
+  let service: GatewayService | undefined;
   return {
     f,
     async restart() {
@@ -43,7 +49,8 @@ async function setup() {
       knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
       await homeOwnerOf(registry).recoverTasks();
     },
-    async turn(input: string, args?: Record<string, unknown>, callId = "triage-call") {
+    /** One Home turn; `card` is the maintainer's answer to the exact card it waits on. */
+    async turn(input: string, args?: Record<string, unknown>, callId = "triage-call", card?: boolean) {
       const captured: Array<{ system: string; messages: Array<Record<string, unknown>> }> = [];
       const replies = args ? [fauxAssistantMessage(fauxToolCall("profile", args, { id: callId }), { stopReason: "toolUse" }), fauxAssistantMessage("Done.")] : [fauxAssistantMessage("Done.")];
       f.faux.setResponses(replies.map(reply => (context: TranscriptContext) => {
@@ -52,6 +59,16 @@ async function setup() {
       }));
       const home = await registry.acquire(f.home.sessionId);
       await home.prompt(input);
+      if (card !== undefined) {
+        // One maintainer RPC owner per fixture registry: it observes settings changes once.
+        service ??= new GatewayService({ display: displayOwnerOf(registry),
+          config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
+          modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: f.settings.settingsChanges,
+          sessions: registry, home: homeOwnerOf(registry), receipts: new CommandReceiptStore(f.tronHome), notifications: { enqueue: async () => "queued" },
+          broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+        } as unknown as GatewayServiceDependencies);
+        await (await answerChangeCard(service, maintainer, home, card, `triage-card-${callId}`)).response;
+      }
       await waitFor(() => home.snapshot().operation === undefined && home.snapshot().configurationBlocker === null, "Home settled");
       return { first: captured[0]!, result: captured.at(-1)!.messages.find(message => message.role === "toolResult" && message.toolCallId === callId)?.details as Record<string, unknown> };
     },
@@ -122,14 +139,15 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   expect(note.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
   expect(note.content.confirmed).toBe(false);
   expect(note.content.privacyScope).toBe("private");
-  const move = await p.turn("Propose a place for that sensitive note.", { action: "reorganize", assignments: [{ id: note.id, expectedRevision: note.revisionId, path: "life/health" }], reason: "Exact review before moving private material" }, "sensitive-review");
+  const move = await p.turn("Propose a place for that sensitive note.", { action: "reorganize", assignments: [{ id: note.id, expectedRevision: note.revisionId, path: "life/health" }], reason: "Exact review before moving private material" }, "sensitive-review", false);
   evidence.push({ sensitivePlacementReview: move.result });
-  expect(move.result).toMatchObject({ status: "refused" });
+  expect(move.result).toMatchObject({ status: "declined" });
   expect((await knowledge!.store.read(note.id) as Note).revisionId).toBe(note.revisionId);
   for (const action of ["refine", "supersede"] as const) {
+    // Home never edits private material alone: its edit waits on the exact card.
     const edit = await p.turn("Infer a new private fact from this short reply.", { action, id: note.id,
-      kind: "fact", text: "An invented sensitive fixture inference", reason: "Not an explicit sensitive statement" }, `sensitive-${action}`);
-    expect(edit.result).toMatchObject({ status: "refused" });
+      kind: "fact", text: "An invented sensitive fixture inference", reason: "Not an explicit sensitive statement" }, `sensitive-${action}`, false);
+    expect(edit.result).toMatchObject({ status: "declined" });
     expect(await knowledge!.store.read(note.id)).toEqual(note);
   }
   const metadata = await p.turn("What is available to read?", { action: "read" }, "sensitive-index");
@@ -150,27 +168,25 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   evidence.push({ declaredSensitiveInferenceRefused: true, explicitSensitiveUnsorted: true, metadataBodyFree: true, excludedAndForgottenAbsentFromHomeReads: true, coldRestart: true });
 }, 120_000);
 
-it("lets Home refine and retire its own unconfirmed proposal without promoting authority or losing history", async () => {
+it("lets Home retire its own unconfirmed standing proposal with a reason but requires exact review for refinement", async () => {
   const p = await setup();
   const learned = await p.turn("Propose this standing decision for my review.", { action: "learn", kind: "standing-decision", text: "Proposed synthetic standing decision" }, "own-standing");
   expect(learned.result.status).toBe("saved");
   const id = learned.result.id as string;
   const original = await knowledge!.store.read(id) as Note;
   expect(original.content.confirmed).toBe(false);
-  const refine = await p.turn("Propose exact revised wording.", { action: "refine", id, text: "Revised synthetic standing decision", reason: "Exact wording review" }, "own-refine-review");
+  const refine = await p.turn("Propose exact revised wording.", { action: "refine", id, text: "Revised synthetic standing decision", reason: "Exact wording review" }, "own-refine-review", false);
   evidence.push({ exactRefinementReview: refine.result });
-  expect(refine.result.status).toBe("saved");
-  const refined = await knowledge!.store.read(id) as Note;
-  expect(refined.content).toMatchObject({ title: "Revised synthetic standing decision", confirmed: false });
-  expect(await knowledge!.store.read(id, original.revisionId)).toEqual(original);
+  expect(refine.result.status).toBe("declined");
+  expect((await knowledge!.store.read(id) as Note).revisionId).toBe(original.revisionId);
   const retired = await p.turn("Withdraw your unconfirmed proposal.", { action: "retire", id, reason: "Withdrawing my own unconfirmed proposal" }, "own-standing-retire");
   expect(retired.result).toMatchObject({ status: "saved", action: "retire", id });
   const current = await knowledge!.store.read(id) as Note;
   expect(current.content.retired).toBe(true);
   expect(current.content.confirmed).toBe(false);
-  expect(current.content.title).toBe(refined.content.title);
+  expect(current.content.title).toBe(original.content.title);
   expect(current.provenance.reason).toBe("Withdrawing my own unconfirmed proposal");
-  evidence.push({ ownStandingProposalRetiredWithoutApproval: true, reasonRecorded: true, refinementStayedInferredWithHistory: true });
+  evidence.push({ ownStandingProposalRetiredWithoutApproval: true, reasonRecorded: true, refinementWaitedForExactReview: true });
 }, 120_000);
 
 it("does not offer sorting or accept Not now during a real worker-completion wake, even with an old maintainer message", async () => {

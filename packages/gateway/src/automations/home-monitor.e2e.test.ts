@@ -243,7 +243,7 @@ it("real Gateway/socket/Pi: a monitor cannot resume on a consumed one-use grant 
   const { gateway, phone, sessionId, prompt, monitors } = await fixture();
   const owner = homeOwnerOf(gateway.registry);
   let reports = 0;
-  const dispatch = async (taskId: string, intent: string) => {
+  const dispatch = async (taskId: string, intent: string, card?: boolean) => {
     let called = false;
     gateway.script(Array.from({ length: 12 }, () => context => {
       if (getCurrentTools(context.messages).some(tool => tool.name === "report")) {
@@ -255,6 +255,18 @@ it("real Gateway/socket/Pi: a monitor cannot resume on a consumed one-use grant 
     }));
     const response = await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Run this authorized grant fixture." });
     expect(response.ok, JSON.stringify(response)).toBe(true);
+    if (card !== undefined) {
+      // No standing scope covers it: Home's delegate waits on the exact grant card,
+      // which the maintainer answers over the real socket in Home's chat.
+      const home = await gateway.registry.acquire(sessionId);
+      const interaction = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "exact grant card");
+      expect(interaction.review!.title).toBe(`Allow Home task ${taskId} once`);
+      expect(await owner.taskResult(taskId).catch(() => undefined)).toMatchObject({ lifecycle: "pending", grantRef: null });
+      expect((await phone.request("session.open", { sessionId })).ok).toBe(true);
+      const answered = await phone.request("extension.respond", { commandId: gateway.commandId(), sessionId, interactionId: interaction.id,
+        hostEpoch: interaction.hostEpoch, presentationRevision: interaction.presentationRevision, value: { digest: interaction.review!.digest, approved: card } });
+      expect(answered.ok, JSON.stringify(answered)).toBe(true);
+    }
     await waitFor(async () => (await owner.taskResult(taskId).catch(() => undefined))?.wake?.state === "acknowledged", "delegation result wake settled");
     await gateway.settled(sessionId);
   };
@@ -264,11 +276,9 @@ it("real Gateway/socket/Pi: a monitor cannot resume on a consumed one-use grant 
   const initial = (await phone.request("home.taskPermissions", {})).result;
   for (const scope of initial.scopes.filter((scope: any) => scope.active)) expect((await phone.request("home.revokeTaskScope", { commandId: gateway.commandId(), scopeId: scope.id })).ok).toBe(true);
   const intent = "Complete exactly this synthetic one-use objective";
-  await dispatch("request-grant", intent);
+  await dispatch("one-use-worker", intent, true);
   const request = (await phone.request("home.taskPermissions", {})).result.requests[0];
   expect(request).toBeDefined();
-  expect((await phone.request("home.decideTaskGrant", { commandId: gateway.commandId(), requestId: request.id, approved: true, expiresAt: Date.now() + 3_600_000 })).ok).toBe(true);
-  await dispatch("one-use-worker", intent);
   await waitFor(async () => (await owner.taskResult("one-use-worker").catch(() => undefined))?.wake?.state === "acknowledged", "one-use worker progress result");
   await gateway.settled(sessionId);
   const consumed = (await phone.request("home.taskPermissions", {})).result;
@@ -283,12 +293,19 @@ it("real Gateway/socket/Pi: a monitor cannot resume on a consumed one-use grant 
   ]);
   const fired = await phone.request("automation.runNow", { commandId: gateway.commandId(), automationId: monitor.id, expectedRevision: monitor.revision });
   expect(fired.ok).toBe(true);
+  // The wake cannot renew authority: its resume only presents a new exact grant card,
+  // and nothing runs unless the maintainer taps it. He declines.
+  const home = await gateway.registry.acquire(sessionId);
+  const renewal = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "monitor's grant card");
+  const declined = await phone.request("extension.respond", { commandId: gateway.commandId(), sessionId, interactionId: renewal.id,
+    hostEpoch: renewal.hostEpoch, presentationRevision: renewal.presentationRevision, value: { digest: renewal.review!.digest, approved: false } });
+  expect(declined.ok, JSON.stringify(declined)).toBe(true);
   await waitFor(async () => (await phone.request("automation.run.get", { automationId: monitor.id, runId: fired.result.runId })).result.state === "succeeded", "consumed-grant monitor delivered");
   await gateway.settled(sessionId);
   const results = (await gateway.registry.acquire(sessionId)).canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && ["task", "home.decideTaskGrant"].includes(entry.message.toolName));
   expect(results).toHaveLength(2);
   expect(results.every(entry => entry.message.isError)).toBe(true);
-  expect(JSON.stringify(results[0])).toContain("grant-required");
+  expect(JSON.stringify(results[0])).toContain("declined this task grant");
   expect((await phone.request("home.taskPermissions", {})).result.grants).toEqual(consumed.grants);
   expect(reports).toBe(2);
 });

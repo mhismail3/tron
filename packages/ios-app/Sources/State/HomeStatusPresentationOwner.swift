@@ -241,9 +241,7 @@ enum HomeManageRowPresentation {
 
     static func permissions(_ permissions: HomeTaskPermissionsDTO?) -> String {
         guard let permissions else { return "Unavailable while task recovery is closed" }
-        let standing = permissions.scopes.contains(where: \.active) ? "All trusted projects" : "No standing scopes"
-        guard !permissions.pendingRequests.isEmpty else { return standing }
-        return "\(standing) · \(permissions.pendingRequests.count) pending"
+        return permissions.scopes.contains(where: \.active) ? "All trusted projects" : "No standing scopes"
     }
 }
 

@@ -44,8 +44,11 @@ worker. Routine reversible changes, tool selection included, apply, log and can 
 Widening trust/executable authority, privacy access or spend, and any install or
 irreversible effect, require an exact native tap; narrowing them is routine. Writer
 grants and scope admission apply first.
-There are no settings tiers, floor overrides, pending requests, expiry, outcome
-outbox, risk-model calls or settings decision RPCs.
+There are no settings tiers, floor overrides, pending-request stores, outcome outbox,
+risk-model calls or settings decision RPCs. The one approval primitive is the native
+`change` card: it blocks the requesting turn, applies once on its tap, and expires
+unanswered after a day (`CHANGE_REVIEW_TTL_MS`) with nothing applied. Settings, Home
+profile edits, project lifecycle and Home task grants all use it.
 
 A required review alone has no effects. The model tool supplies no digest argument.
 The built-in host's dedicated `change` interaction binds a server-owned typed callback,

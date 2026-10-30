@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { answerChangeCard } from "../../../test-support/native-change.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { expect, it, vi } from "vitest";
 import * as durability from "../../foundation/durable-json.js";
@@ -79,7 +80,13 @@ it("the real Home profile tool retries one original label group and native Chang
     provenance: { actor: "user", source: "explicit-standing-rule", evidence: [] }, relations: [],
     content: { title: "Never publish without approval.", body: "Preserve the full binding instruction.", role: "decision", confirmed: true,
       tags: ["home-file-unknown", "home-profile", "kind-standing-decision", "home-file-home", "fixture-label"] } });
-  const originalCommand = command("native-organize-first");
+  // Home's protected organization waits in its turn for the maintainer's exact card.
+  const first = homeActivation(f, "Propose this exact release placement, preserving the confirmed instruction.", [
+    profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }], reason: "Explicit placement-only organization" }, "organize-tool-first"), say("the reviewed operation needs its original publication retry"),
+  ]);
+  const card = await waitFor(() => f.slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "Home's exact profile card");
+  expect(card.review!.items[0]).toMatchObject({ before: "Prior organization", after: "Engineering › Release" });
+  expect(await f.store.read(original.id)).toEqual(original);
   await mkdir(f.record.path, { recursive: true });
   const parent = await stat(f.record.path);
   const sync = durability.syncDurably;
@@ -89,12 +96,13 @@ it("the real Home profile tool retries one original label group and native Chang
     if (!failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned tool audit publication fault"); }
     await sync(handle);
   });
-  await expect(f.service.invoke(maintainer, "home.profileChange", { commandId: originalCommand,
-    reason: "Explicit placement-only organization", changes: [{ action: "reorganize", assignments: [{ id: original.id,
-      expectedRevision: original.revisionId, path: "engineering/release" }] }] })).rejects.toThrow("Owned tool audit publication fault");
+  const { response } = await answerChangeCard(f.service, maintainer, f.slot, true, command("approve-organize"));
+  await expect(response).rejects.toThrow("Owned tool audit publication fault");
+  const settled = await first;
+  expect(settled.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details).toMatchObject({ status: "retry_required" });
   const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
   const backups = await Promise.all((await readdir(directory)).map(async name => JSON.parse(await readFile(join(directory, name), "utf8")) as { operation: { commandId: string; envelope?: { context?: { actor?: { toolCallId?: string } } } } }));
-  const originalOperations = backups.filter(backup => backup.operation.commandId === originalCommand);
+  const originalOperations = backups.filter(backup => backup.operation.envelope?.context?.actor?.toolCallId === "organize-tool-first");
   expect(originalOperations).toHaveLength(1);
   const pending = originalOperations[0]!.operation;
   expect(await history(f)).toEqual([]);
@@ -109,7 +117,7 @@ it("the real Home profile tool retries one original label group and native Chang
   expect(await f.store.read(original.id)).toEqual(committed);
   const audit = await history(f);
   expect(audit).toHaveLength(1);
-  expect(audit[0]).toMatchObject({ commandId: pending.commandId, actor: { kind: "ui", id: maintainer.identity },
+  expect(audit[0]).toMatchObject({ commandId: pending.commandId, actor: { kind: "home", toolCallId: "organize-tool-first" },
     before: { text: "Never publish without approval.", confirmed: true, fileLabels: [{ index: 0, tag: "home-file-unknown" }, { index: 3, tag: "home-file-home" }] },
     after: { text: "Never publish without approval.", confirmed: true, profile: { version: 2, path: ["engineering", "release"] } } });
   expect(audit[0]!.after).not.toHaveProperty("fileLabels");
@@ -118,7 +126,7 @@ it("the real Home profile tool retries one original label group and native Chang
   expect({ ...restored, revisionId: original.revisionId }).toEqual(original);
   const undoEntries = (await history(f)).filter(entry => entry.undoOf);
   expect(undoEntries.map(entry => entry.undoOf)).toEqual(organized.changeIds);
-  recordCase("tool-original-envelope-retry-native-label-undo", { originalCommand: pending.commandId, originalActor: "maintainer", changeIds: organized.changeIds, exactMalformedLabelsRestored: true });
+  recordCase("tool-original-envelope-retry-native-label-undo", { originalCommand: pending.commandId, originalToolCall: "organize-tool-first", changeIds: organized.changeIds, exactMalformedLabelsRestored: true });
 });
 
 it("new profile content is discoverable but never automatically inserted into Home", async () => {
@@ -140,8 +148,12 @@ it("Home cannot rewrite existing confirmed instruction-kind authority or promote
   const original = (await f.store.createNote({ commandId: command("binding-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "explicit-standing-rule", evidence: [], reason: "Maintainer explicitly confirmed this standing constraint." }, relations: [], content: { title: "Never publish without approval.", body: "Keep this exact binding constraint intact.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"], profile: { version: 2, path: ["communication"] } } } })).record;
   for (const [index, operation] of [{ action: "refine", text: "Publish without asking." }, { action: "supersede", kind: "standing-decision", text: "Approval is optional." }, { action: "retire", reason: "Assumed irrelevant." }].entries()) {
     const callId = `binding-refusal-${index}`;
-    const turn = await homeActivation(f, "Consider changing this rule.", [profileCall({ ...operation, id: original.id, reason: "reason" in operation ? operation.reason : "Review the exact proposed authority change" }, callId), say("review needed")]);
-    expect(turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === callId)?.details).toMatchObject({ status: "refused" });
+    const turn = homeActivation(f, "Consider changing this rule.", [profileCall({ ...operation, id: original.id, reason: "reason" in operation ? operation.reason : "Review the exact proposed authority change" }, callId), say("review needed")]);
+    // Home cannot change it alone: the turn waits on the exact card, and a decline applies nothing.
+    const { interaction, response } = await answerChangeCard(f.service, maintainer, f.slot, false, command(`decline-${index}`));
+    expect(interaction.review!.items[0]!.before).toBe("Confirmed standing decision");
+    await response;
+    expect((await turn).last.messages.find(message => message.role === "toolResult" && message.toolCallId === callId)?.details).toMatchObject({ status: "declined" });
     expect(await f.store.read(original.id)).toEqual(original);
   }
   await homeActivation(f, "Record this as a proposal, not authority.", [profileCall({ action: "learn", kind: "standing-decision", text: "Proposal: approval might be optional for fixtures." }, "binding-proposal"), say("proposal saved")]);

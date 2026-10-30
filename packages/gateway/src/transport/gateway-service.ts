@@ -673,14 +673,6 @@ export class GatewayService {
           const id = string(params[field], field, { max: 160 });
           return safeJson(method === "home.revokeTaskScope" ? await this.requireHome().revokeTaskScope(id) : await this.requireHome().revokeTaskGrant(id));
         });
-      case "home.decideTaskGrant":
-        return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "requestId", "approved", "expiresAt"], method);
-          if (typeof params.approved !== "boolean" || !Number.isSafeInteger(params.expiresAt)) throw new GatewayError("invalid_request", "Decision requires approved and an integer expiresAt");
-          return safeJson(await this.requireHome().decideTaskGrant(string(params.requestId, "requestId", { max: 160 }), {
-            decisionId: string(params.commandId, "commandId", { max: 160 }), approved: params.approved, expiresAt: params.expiresAt as number,
-          }));
-        });
       case "home.profileChange":
         // The maintainer's learned-profile changes (docs/settings-model.md 6.4): typed ops
         // through the one change path, as Home's profile tool, confirmed by his tap.
@@ -2514,7 +2506,7 @@ export class GatewayService {
       const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
       // This request's own work entry must not count as the session being busy.
       const resumed = await this.requireHome().resumeWorkerSession(slot.id,
-        [text, attachments.envelope].filter(Boolean).join("\n\n"), workToken, attachments.images);
+        [text, attachments.envelope].filter(Boolean).join("\n\n"), workToken, attachments.images, string(params.commandId, "commandId", { min: 8, max: 160 }));
       // A resume names its worker operation even while it waits for a running-worker slot (#959).
       return { operationId: resumed.operationId };
     }

@@ -13,6 +13,13 @@ import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/re
 import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
+import { changeReview } from "../../kernel/settings/settings-types.js";
+import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
+
+/** Who may record a one-use grant: the native card's tap, or the maintainer's own command. */
+export type HomeTaskGrantApproval = { confirm: ConfirmChange } | { maintainerCommand: string };
+/** A tapped grant is consumed by the admission that asked for it, within this bound. */
+const HOME_TASK_GRANT_USE_MS = 60_000;
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
@@ -344,13 +351,13 @@ export class HomeTaskDispatcher {
 
   /** `signal` is the delegating turn's Stop. Admission never outlives it: a stopped
    * or expired step refuses the dispatch and settles any task record it created. */
-  async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle> {
+  async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, signal?: AbortSignal, approval?: HomeTaskGrantApproval): Promise<HomeTaskHandle> {
     if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
     await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
     // From here startOwned owns `work`; the task settles it when it settles.
-    try { return await this.startOwned(identity, request, work, signal); }
+    try { return await this.startOwned(identity, request, work, signal, approval); }
     catch (error) { work.settle(); throw error; }
   }
 
@@ -411,7 +418,7 @@ export class HomeTaskDispatcher {
    * is the maintainer's or Home's instruction; the brief restates any question the run was
    * stopped before it was answered. A resume admits like any task and starts at once. */
   async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest,
-    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] } = {}): Promise<HomeTaskHandle & { operationId: string }> {
+    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[]; approval?: HomeTaskGrantApproval } = {}): Promise<HomeTaskHandle & { operationId: string }> {
     const { signal } = options;
     if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
     await this.assertAvailable();
@@ -423,7 +430,7 @@ export class HomeTaskDispatcher {
   }
 
   private async resumeOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, work: GatewayWorkHandle,
-    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] }): Promise<HomeTaskHandle & { operationId: string }> {
+    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[]; approval?: HomeTaskGrantApproval }): Promise<HomeTaskHandle & { operationId: string }> {
     const { signal } = options;
     const text = request.text?.trim();
     if (typeof request.taskId !== "string" || typeof request.operationId !== "string"
@@ -468,8 +475,7 @@ export class HomeTaskDispatcher {
     this.transition(task, "created");
     let authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
     try {
-      authority = await this.stage("authorize", taskId, signal, () => this.authorization.authorize({ intentDigest: task.intentDigest,
-        target: task.target, authorizationScope: "full-work", restoreEpoch: epoch }));
+      authority = await this.authorizeTask(task, epoch, signal, options.approval);
       if (epoch !== await this.stage("restore-epoch", taskId, signal, () => this.store.restoreEpoch())) throw new GatewayError("conflict", "Task namespace identity changed during admission");
     } catch (error) { await this.admissionFailed(task, error); throw error; }
     const operationId = `task-${randomUUID()}`;
@@ -478,7 +484,35 @@ export class HomeTaskDispatcher {
     return { ...handle, sessionId, operationId };
   }
 
-  private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
+  /** A one-use grant comes only from the maintainer: his tap on the exact card an
+   * agent's admission presents, or his own Continue. Nothing else records one. */
+  private async authorizeTask(task: HomeTaskRecord, epoch: string, signal: AbortSignal | undefined, approval: HomeTaskGrantApproval | undefined) {
+    const request = { intentDigest: task.intentDigest, target: task.target, authorizationScope: "full-work" as const, restoreEpoch: epoch };
+    try { return await this.stage("authorize", task.taskId, signal, () => this.authorization.authorize(request)); }
+    catch (error) {
+      if (!(error instanceof HomeTaskAuthorizationError) || error.code !== "grant-required" || !error.requestId || !approval) throw error;
+      const requestId = error.requestId;
+      // A decided request never mints a second grant, so it gets no second card.
+      if ((await this.authorization.list()).decisions.some(decision => decision.requestId === requestId)) throw error;
+      const grant = async (decisionId: string) => {
+        await this.decideGrant(requestId, { decisionId, approved: true, expiresAt: Date.now() + HOME_TASK_GRANT_USE_MS });
+        return this.authorization.authorize(request);
+      };
+      if ("maintainerCommand" in approval) return grant(approval.maintainerCommand);
+      const brief = task.intent.text.replace(/\s+/gu, " ").trim();
+      const review = changeReview({ subject: "home.task.grant", requestId }, { title: `Allow Home task ${task.taskId} once`, requiresTap: true,
+        reason: "No standing scope covers this task; Home asks for one exact run.", items: [
+          { label: "Task", before: "Not authorized", after: `One full-work run of ${task.taskId}`, exact: JSON.stringify({ requestId, intentDigest: task.intentDigest }) },
+          { label: "Project", before: "No grant", after: task.target },
+          { label: "Brief", before: "—", after: brief.length <= 400 ? brief : `${brief.slice(0, 399)}…`, detail: "The exact brief digest binds this tap." },
+        ] });
+      const authority = await approval.confirm(review, acceptance => grant(acceptance.commandId));
+      if (!authority) throw new GatewayError("conflict", "The maintainer declined this task grant; nothing ran");
+      return authority;
+    }
+  }
+
+  private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined, approval?: HomeTaskGrantApproval): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
     const keys = Object.keys(input);
     if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title", "reason", "provenance", "modelQueues"].includes(key))
@@ -512,8 +546,7 @@ export class HomeTaskDispatcher {
     this.transition(task, "created");
     let authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
     try {
-      authority = await this.stage("authorize", taskId, signal, () => this.authorization.authorize({ intentDigest: task.intentDigest,
-        target: task.target, authorizationScope: "full-work", restoreEpoch: epoch }));
+      authority = await this.authorizeTask(task, epoch, signal, approval);
       if (epoch !== await this.stage("restore-epoch", taskId, signal, () => this.store.restoreEpoch())) throw new GatewayError("conflict", "Task namespace identity changed during admission");
     } catch (error) { await this.admissionFailed(task, error); throw error; }
     return this.admit({ task, authority, input, title, choice, deferredThinking }, work, signal);
@@ -785,7 +818,7 @@ export class HomeTaskDispatcher {
   }
   async revokeScope(scopeId: string) { await this.assertAvailable(); await this.authorization.revokeScope(scopeId); }
   async revokeGrant(grantId: string) { await this.assertAvailable(); await this.authorization.revokeGrant(grantId); }
-  async decideGrant(requestId: string, input: { decisionId: string; approved: boolean; expiresAt: number }) {
+  private async decideGrant(requestId: string, input: { decisionId: string; approved: boolean; expiresAt: number }) {
     await this.assertAvailable();
     return this.setup.run(async () => {
       const restoreEpoch = await this.store.restoreEpoch();

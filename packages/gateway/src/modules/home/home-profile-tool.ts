@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Type, type TSchema } from "../../kernel/pi/ai.js";
 import type { ExtensionToolContext, ToolDefinition } from "../../kernel/pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
+import { nativeChangeConfirmer } from "../../kernel/host/native-change.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { profilePath } from "../../knowledge/knowledge-profile-placement.js";
 import { profileIndex } from "./home-profile-hierarchy.js";
@@ -32,6 +33,7 @@ export type HomeProfileToolDetails =
   | HomeProfileSaved
   | { status: "deferred"; version: string }
   | { status: "refused"; action: ProfileToolAction; reason: string }
+  | { status: "declined"; action: ProfileToolAction }
   | { status: "unavailable"; action: ProfileToolAction }
   | { status: "organized"; action: "migrate" | "reorganize" | "retry"; commandId: string; changeIds: string[] }
   | { status: "retry_required"; action: ProfileToolAction; commandId: string; reason: string }
@@ -121,6 +123,9 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       if (!changes) return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
       const citation = triggeringMessage(context);
       if (!citation) return refused(request.action, "no maintainer message in this chat to cite as evidence");
+      // Edits Home may not make alone wait for the maintainer's tap on the exact card.
+      const confirm = nativeChangeConfirmer(context, signal);
+      const declined = () => answer({ status: "declined", action: request.action }, "The maintainer declined the exact profile card; the original notes are unchanged.");
       if (request.action === "defer") {
         try {
           const result = await changes.deferSorting(commandId(citation.sessionId, toolCallId), request.version!);
@@ -135,7 +140,8 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         const original = request.action === "retry" ? request.commandId! : commandId(citation.sessionId, toolCallId);
         const op: HomeProfileRequest = request.action === "retry" ? { action: "retry", commandId: original } : { action: request.action, assignments: request.assignments! };
         try {
-          const result = await changes.change([op], { toolCallId, author: { kind: "home", ...citation }, commandId: original, ...(request.reason ? { reason: request.reason.trim() } : {}) });
+          const result = await changes.change([op], { toolCallId, author: { kind: "home", ...citation }, commandId: original, ...(request.reason ? { reason: request.reason.trim() } : {}), ...(confirm ? { confirm } : {}) });
+          if (result.status === "declined") return declined();
           return answer({ status: "organized", action: request.action, commandId: original, changeIds: result.changes.map(change => change.changeId) },
             `Profile ${request.action} acknowledged through Changes. Original command ${original}; ${result.changes.length} label-only changes. No content or authority was inferred.`);
         } catch (error) {
@@ -155,8 +161,9 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       try {
         const result = await changes.change([op], {
           toolCallId, author: { kind: "home", ...citation }, commandId: commandId(citation.sessionId, toolCallId),
-          ...(request.reason ? { reason: request.reason.trim() } : {}),
+          ...(request.reason ? { reason: request.reason.trim() } : {}), ...(confirm ? { confirm } : {}),
         });
+        if (result.status === "declined") return declined();
         [saved] = result.saved as [HomeProfileSaved];
       } catch (error) {
         if (error instanceof GatewayError && error.code === "unsupported") return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");

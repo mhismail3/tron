@@ -455,7 +455,6 @@ private actor HostedHomeShellGateway {
     private var taskRedelivered = false
     private var scopeRevoked = false
     private var grantRevoked = false
-    private var taskDecisions: [String: JSONValue] = [:]
     private var materialized = false
     private var promptRoutes: [String] = []
     private var openedSessions: [String] = []
@@ -794,19 +793,6 @@ private actor HostedHomeShellGateway {
                 guard params["grantId"]?.stringValue == "grant-one" else { return taskRefusal() }; grantRevoked = true
             }
             controlCount += 1; return (.object(["accepted": .bool(true)]), nil)
-        case "home.decideTaskGrant":
-            guard params["commandId"]?.stringValue != nil, let id = params["requestId"]?.stringValue,
-                  ["request-approve", "request-deny"].contains(id), taskDecisions[id] == nil,
-                  let approved = params["approved"]?.boolValue, let expires = params["expiresAt"]?.intValue,
-                  Double(expires) > Date.now.timeIntervalSince1970 * 1000 else { return taskRefusal() }
-            let decision: JSONValue = .object(["id": params["commandId"]!, "requestId": .string(id), "approved": .bool(approved),
-                "decidedAt": .number(Double(Int(Date.now.timeIntervalSince1970 * 1000))), "expiresAt": .number(Double(expires))])
-            var grant = taskBinding().objectValue!
-            grant["id"] = .string("grant-\(id)"); grant["decisionId"] = params["commandId"]!
-            grant["expiresAt"] = .number(Double(expires)); grant["state"] = .string("available")
-            let result: JSONValue = .object(["decision": decision, "grant": approved ? .object(grant) : .null])
-            taskDecisions[id] = result; controlCount += 1
-            return (result, nil)
         case "home.profileList" where ProcessInfo.processInfo.arguments.contains("-home-profile-empty"):
             return (.object(["items": .array([]), "unclassified": .number(0)]), nil)
         case "home.profileList":
@@ -1164,9 +1150,8 @@ private actor HostedHomeShellGateway {
         let binding = taskBinding()
         // A grant's expiry must equal its decision's exactly; read the clock once.
         let expiresAt = nowMilliseconds() + 604_800_000
-        var decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
+        let decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
             "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(expiresAt)])]
-        decisions += taskDecisions.keys.sorted().map { taskDecisions[$0]!.objectValue!["decision"]! }
         var grant = binding.objectValue!
         grant["id"] = .string("grant-one"); grant["decisionId"] = .string("existing-decision")
         grant["expiresAt"] = .number(expiresAt); grant["state"] = .string(grantRevoked ? "revoked" : "available")
@@ -1179,7 +1164,7 @@ private actor HostedHomeShellGateway {
         }
         return .object(["revision": .number(Double(controlCount + 1)), "scopes": .array([.object(scope)]),
             "needsReconfirmation": .bool(ProcessInfo.processInfo.arguments.contains("-home-permissions-restored") && !scopeRevoked && controlCount == 0),
-            "requests": .array(ids.map { .object(["id": .string($0), "request": binding]) }), "decisions": .array(decisions), "grants": .array([.object(grant)] + taskDecisions.keys.sorted().compactMap { taskDecisions[$0]!.objectValue!["grant"].flatMap { $0 == .null ? nil : $0 } })])
+            "requests": .array(ids.map { .object(["id": .string($0), "request": binding]) }), "decisions": .array(decisions), "grants": .array([.object(grant)])])
     }
 
     private func model(_ id: String, name: String, virtual: Bool = false) -> JSONValue {

@@ -39,6 +39,7 @@ import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../../sessions/session-search-contract.js";
+import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 
 export interface HomeModuleServices {
   runSettled: RunSettledPolicy;
@@ -50,8 +51,8 @@ export interface HomeModuleServices {
   profile: HomeSessionProfileServices;
   appendGuard: HomeAppendGuardServices;
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
-  delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle>;
-  task(sessionId: string, request: unknown): Promise<unknown>;
+  delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange): Promise<HomeTaskHandle>;
+  task(sessionId: string, request: unknown, confirm?: ConfirmChange): Promise<unknown>;
   monitor(sessionId: string, toolCallId: string, request: unknown): Promise<unknown>;
   profileChanges(session: SessionContext): HomeProfileChangeAccess | undefined;
   knowledge: KnowledgeService | undefined;
@@ -208,7 +209,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
       return platform.monitor(sessionId, toolCallId, request);
     },
     knowledge: platform.knowledge(), read: (request, signal) => readHomeSessionEntry(sessions, owner, request, signal),
-    delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal),
+    delegate: (sessionId, request, signal, confirm) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal, confirm),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     lifecycle: {
       // The designation is read before any runtime is built.
@@ -249,7 +250,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
       idle: (sessionId, by) => { owner.noteHomeIdle(sessionId, by); owner.resources.idle(sessionId); },
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
-    task: (sessionId, request) => owner.taskTool(sessionId, request),
+    task: (sessionId, request, confirm) => owner.taskTool(sessionId, request, confirm),
     profileChanges: session => homeProfileChanges(session, platform.settings()?.changes, platform.knowledge, () => {
       const evidence = owner.requestPolicyFor(session.sessionId())?.contextEvidence();
       return evidence?.kind === "user" && evidence.activationOpen;
@@ -278,6 +279,7 @@ export function homeProfileChanges(session: SessionContext, changes: SettingsCha
       return new HomeProfileItems(knowledge).change(changes, ops, {
         actor: { kind: "home", id: session.sessionId(), sessionId: session.sessionId(), toolCallId: input.toolCallId },
         author: input.author, commandId: input.commandId, ...(input.reason ? { reason: input.reason } : {}),
+        ...(input.confirm ? { confirm: input.confirm } : {}),
       });
     },
   };
@@ -319,8 +321,8 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
       inputAdmission: () => services().inputAdmission, appendGuard: homeAppendGuardHook(() => services().appendGuard) }, extension: session => {
       const owners = services();
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
-        (request, signal) => owners.delegate(session.sessionId(), request, signal),
-        request => owners.task(session.sessionId(), request),
+        (request, signal, confirm) => owners.delegate(session.sessionId(), request, signal, confirm),
+        (request, confirm) => owners.task(session.sessionId(), request, confirm),
         () => owners.knowledge, () => owners.profileChanges(session),
         (id, request) => owners.monitor(session.sessionId(), id, request));
     } }; },

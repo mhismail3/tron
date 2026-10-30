@@ -42,7 +42,7 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testHomeTaskPermissionsRevokeDecideAndReconfirm() {
+    func testHomeTaskPermissionsRevokeAndReconfirm() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-permissions-restored"]
@@ -58,13 +58,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
         revokeHomePermission(app, "Revoke grant grant-one")
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:3", timeout: 5))
-        for (id, count) in [("approve", 4), ("deny", 5)] {
-            let decision = app.buttons["home-grant-\(id)-request-\(id)"]
-            reveal(decision, in: app); decision.tap()
-            XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:\(count)", timeout: 5))
-            XCTAssertFalse(decision.exists, "Decided requests leave the pending projection")
-        }
-        keepScreenshot(named: "home-task-permission-denied")
+        // Grant requests are decided only on their exact card in Home's chat.
+        XCTAssertFalse(app.staticTexts["Pending requests"].exists)
+        keepScreenshot(named: "home-task-permission-revoked")
     }
 
     /// Revoking is destructive: a cancelled confirmation changes nothing, and only the
@@ -448,37 +444,20 @@ final class TronSmokeUITests: XCTestCase {
     func testHomeDelegationSettingsApprovalCaptures() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
-            for state in ["pending", "empty", "restored"] {
+            for state in ["empty", "restored"] {
                 let app = XCUIApplication()
-                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-                if state != "pending" { app.launchArguments.append("-home-permissions-\(state)") }
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-permissions-\(state)"]
                 if appearance == "dark" { app.launchArguments.append("-home-dark") }
                 app.launch()
                 XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
                 app.buttons["home-pinned-row"].tap()
                 openManageHome(app)
                 openHomeModelsSettings(app)
-                let anchor = state == "pending" ? app.buttons["home-grant-approve-request-approve"]
-                    : state == "restored" ? app.buttons["home-permissions-reconfirm"] : app.buttons["Revoke scope scope-one"]
+                let anchor = state == "restored" ? app.buttons["home-permissions-reconfirm"] : app.buttons["Revoke scope scope-one"]
                 reveal(anchor, in: app)
                 XCTAssertTrue(anchor.isHittable, app.debugDescription)
                 if state == "empty" { app.swipeUp() }
                 keepScreenshot(named: "approval-delegation-\(state)-\(appearance)")
-                if state == "pending" {
-                    for component in ["date", "time"] {
-                        // The combined settings row can also project the action's
-                        // identifier; the last match is the actual trailing button.
-                        let matches = app.buttons.matching(identifier: "home-grant-expiry-\(component)-request-approve")
-                        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-                        let expiry = matches.element(boundBy: matches.count - 1)
-                        XCTAssertTrue(expiry.isHittable, app.debugDescription)
-                        expiry.tap()
-                        let title = "Expiry \(component)"
-                        XCTAssertTrue(app.navigationBars.staticTexts[title].firstMatch.waitForExistence(timeout: 5), "Home must open the same managed picker sheet as Automations, not a native compact popover: \(app.debugDescription)")
-                        keepScreenshot(named: "approval-delegation-expiry-\(component)-\(appearance)")
-                        app.buttons["Done"].firstMatch.tap()
-                    }
-                }
                 XCTAssertFalse(app.buttons["home-permissions-reload"].exists)
                 XCTAssertEqual(app.buttons["home-permissions-reconfirm"].exists, state == "restored")
                 if state == "empty" {

@@ -3,7 +3,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, t
 import { GatewayError } from "../../errors.js";
 import { isVirtualModel } from "../../providers/virtual-model.js";
 import { ModelQueueExhausted, type ModelQueueOwner } from "../../providers/model-queue.js";
-import { splitModelRef, type modelQueueKey } from "../../kernel/settings/tool-contract.js";
+import { splitModelRef, type ConfirmChange, type modelQueueKey } from "../../kernel/settings/tool-contract.js";
 import { SUBAGENT_QUEUE_MODEL, type QueueModelState } from "../../providers/model-queue-extension.js";
 import type { TrustService } from "../../kernel/resources/trust-service.js";
 import type { SettingsModel } from "../../kernel/settings/settings-model.js";
@@ -91,7 +91,7 @@ export interface HomeWorkerChoicePort {
  * only; later Home/profile changes cannot retarget it. The worker queue's and
  * subagent queue's availability is returned to Home and written into the brief. */
 export async function dispatchWithWorkerChoice(owner: Pick<HomeOwner, "dispatchTask">, ports: HomeWorkerChoicePort,
-  sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal) {
+  sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange) {
   if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
     throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
   }
@@ -144,7 +144,7 @@ export async function dispatchWithWorkerChoice(owner: Pick<HomeOwner, "dispatchT
     provenance: {
       model: { via: request.model ? "home-explicit" : queued ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
       thinking: { via: request.thinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
-    } }, signal);
+    } }, signal, confirm);
   return { ...handle, worker, ...(subagentModels ? { subagentModels } : {}) };
 }
 

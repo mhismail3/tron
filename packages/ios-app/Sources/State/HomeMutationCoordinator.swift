@@ -15,7 +15,6 @@ final class HomeMutationCoordinator {
     enum Command: Equatable {
         case designate, disable, pauseMemory, resumeMemory
         case revokeScope(String), revokeGrant(String)
-        case decideGrant(requestID: String, approved: Bool, expiresAt: Int)
         case reconfirmPermissions
         case redeliver(taskID: String, homeID: String, routeGeneration: Int)
         /// The maintainer's learned-profile changes, one request (gateway settings-model.md 6.4).
@@ -31,7 +30,6 @@ final class HomeMutationCoordinator {
             case .resumeMemory: "home.resumeMemory"
             case .revokeScope: "home.revokeTaskScope"
             case .revokeGrant: "home.revokeTaskGrant"
-            case .decideGrant: "home.decideTaskGrant"
             case .reconfirmPermissions: "home.reconfirmPermissions"
             case .redeliver: "home.redeliverTaskResult"
             case .changeProfile: "home.profileChange"
@@ -124,8 +122,6 @@ final class HomeMutationCoordinator {
         switch command {
         case .revokeScope(let id): params["scopeId"] = .string(id)
         case .revokeGrant(let id): params["grantId"] = .string(id)
-        case .decideGrant(let request, let approved, let expires):
-            params["requestId"] = .string(request); params["approved"] = .bool(approved); params["expiresAt"] = .number(Double(expires))
         case .changeProfile(let changes):
             params["changes"] = try JSONValue.encode(changes)
         case .undoProfileChange(let changeID):

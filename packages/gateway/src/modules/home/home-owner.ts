@@ -11,7 +11,8 @@ import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
 import { HomeGlobalResources } from "./home-global-resources.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
-import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
+import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskGrantApproval, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
+import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 import type { HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
 import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
@@ -238,7 +239,7 @@ export class HomeOwner {
 
   /** Delegate authority is sampled for the exact enabled Home, never a fork or
    * disabled chapter. Home does not inherit a project's executable resources. */
-  async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal) {
+  async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange) {
     await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) {
@@ -249,7 +250,7 @@ export class HomeOwner {
     const choice = request.model || request.provenance ? request : { ...request, ...await this.currentChatChoice(sessionId),
       ...(request.thinking === undefined ? {} : { thinking: request.thinking }) };
     if (this.record !== record) throw new GatewayError("conflict", "Home changed during task admission");
-    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, choice, signal);
+    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, choice, signal, confirm ? { confirm } : undefined);
   }
 
   /** Read the live session, not designation-time defaults or a learned note. The
@@ -282,9 +283,6 @@ export class HomeOwner {
   async revokeTaskGrant(grantId: string): Promise<{ accepted: true }> {
     await (await this.taskOwner()).revokeGrant(grantId); return { accepted: true };
   }
-  async decideTaskGrant(requestId: string, input: { decisionId: string; approved: boolean; expiresAt: number }) {
-    return (await this.taskOwner()).decideGrant(requestId, input);
-  }
 
   async reconfirmTaskPermissions(): Promise<{ reconfirmed: true }> {
     await (await this.taskOwner()).reconfirmPermissions();
@@ -308,7 +306,7 @@ export class HomeOwner {
    * later in-place resume of the same session) and its operation are resolved here, and an
    * explicit `operationId` is only a guard. Every refusal names the field or the task's state.
    */
-  async taskTool(sessionId: string, input: unknown): Promise<unknown> {
+  async taskTool(sessionId: string, input: unknown, confirm?: ConfirmChange): Promise<unknown> {
     const request = admitHomeTaskToolRequest(input);
     // Tool guards reject before dispatch. Record them here; dispatch records only its own
     // rejections, so the later contextual error wrapping never logs the same refusal twice.
@@ -376,7 +374,7 @@ export class HomeOwner {
     const operationId = row.operationId!;
     try {
       if (action === "resume") {
-        const resumed = await this.resumeTask({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, sessionId);
+        const resumed = await this.resumeTask({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, sessionId, undefined, [], confirm ? { confirm } : undefined);
         return { accepted: true, action, taskId: resumed.taskId, sessionId: resumed.sessionId, operationId: resumed.operationId,
           resumes: task.taskId, ...resolved };
       }
@@ -455,24 +453,25 @@ export class HomeOwner {
 
   /** Resumes a settled task in place as its successor (#929): from Home's task tool or the
    * maintainer's Continue. The result wakes this Home like any task's. */
-  async resumeTask(request: HomeTaskResumeRequest, sessionId?: string, workToken?: string, images: ImageContent[] = []) {
+  async resumeTask(request: HomeTaskResumeRequest, sessionId?: string, workToken?: string, images: ImageContent[] = [], approval?: HomeTaskGrantApproval) {
     await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || (sessionId !== undefined && homeSessionId(record) !== sessionId)) {
       throw new GatewayError("conflict", "Task resume is unavailable for this Home");
     }
-    return this.tasks.resume({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request, { ...(workToken ? { exceptWorkToken: workToken } : {}), images });
+    return this.tasks.resume({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request, { ...(workToken ? { exceptWorkToken: workToken } : {}), images, ...(approval ? { approval } : {}) });
   }
 
   /** A maintainer message to a Home worker whose task has settled continues that task in
    * place with the message as its instruction, instead of being refused (#929). */
-  async resumeWorkerSession(workerSessionId: string, text: string, workToken?: string, images: ImageContent[] = []) {
+  async resumeWorkerSession(workerSessionId: string, text: string, workToken?: string, images: ImageContent[] = [], maintainerCommand?: string) {
     const task = await (await this.taskOwner()).latestTaskForSession(workerSessionId);
     if (!task) throw new GatewayError("conflict", "This session runs no Home task");
     if (task.lifecycle !== "terminal" || !task.operationId) {
       throw new GatewayError("busy", "The worker's task is still settling; send the message again in a moment", true);
     }
-    return this.resumeTask({ taskId: task.taskId, operationId: task.operationId, text }, undefined, workToken, images);
+    // The maintainer's own message is the authority for this one continuation.
+    return this.resumeTask({ taskId: task.taskId, operationId: task.operationId, text }, undefined, workToken, images, maintainerCommand ? { maintainerCommand } : undefined);
   }
 
   /** The newest task on a worker session: the task itself, or the in-place continuation that resumed it. */

@@ -13,7 +13,7 @@ extension HomeTaskSheet.PendingRevocation.Target {
 
     var message: String {
         switch self {
-        case .scope: "Tasks in every trusted project stop being pre-approved. Pending requests still ask first."
+        case .scope: "Tasks in every trusted project stop being pre-approved. Each new task then asks on its exact card in Home's chat."
         case .grant: "This one-use grant stops covering its exact task binding."
         }
     }
@@ -76,18 +76,6 @@ extension HomeTaskSheet {
                     }
                 }
             }
-            if !permissions.pendingRequests.isEmpty {
-                TronSettingsGroup("Pending requests", detail: "Approval covers this exact task only; it does not replay it.") {
-                    VStack(spacing: 0) {
-                        ForEach(Array(permissions.pendingRequests.enumerated()), id: \.element.id) { index, request in
-                            if index > 0 { TronSettingsDivider() }
-                            HomeGrantRequestRow(request: request, enabled: canMutate) { approved, expiresAt in
-                                mutate(.decideGrant(requestID: request.id, approved: approved, expiresAt: expiresAt))
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -109,65 +97,5 @@ extension HomeTaskSheet {
         case .consumed: ("Used", .tronSlate)
         case .revoked: ("Revoked", .tronSlate)
         }
-    }
-}
-
-/// A pending request owns only its expiry draft. Every piece of its layout is
-/// a standard settings row; expiry uses the same shared controls as Automations.
-private struct HomeGrantRequestRow: View {
-    let request: HomeTaskPermissionsDTO.Request
-    let enabled: Bool
-    let onDecide: (Bool, Int) -> Void
-    @PresentationState private var expiry = Date.now.addingTimeInterval(3600)
-    @PresentationState private var editingExpiryComponent: TronDateComponent?
-    @Environment(\.tronSettingsVisualTheme) private var visualTheme
-
-    var body: some View {
-        VStack(spacing: 0) {
-            TronSettingsRow(icon: "lock", title: request.request.target,
-                            subtitle: "One task · \(request.request.authorizationScope)", titleIsIdentifier: true) {
-                TronStatusPill(text: "Pending", accent: .tronWarning)
-            }
-            TronSettingsDivider()
-            TronSettingsRow(icon: "calendar", title: "Expiry date") {
-                TronDateValueButton(date: expiry, component: .date) { editingExpiryComponent = .date }
-                    .accessibilityLabel("Expiry date")
-                    .accessibilityValue(expiry.formatted(date: .abbreviated, time: .omitted))
-                    .accessibilityIdentifier("home-grant-expiry-date-\(request.id)")
-            }
-            TronSettingsDivider()
-            TronSettingsRow(icon: "clock", title: "Expiry time") {
-                TronDateValueButton(date: expiry, component: .time) { editingExpiryComponent = .time }
-                    .accessibilityLabel("Expiry time")
-                    .accessibilityValue(expiry.formatted(date: .omitted, time: .shortened))
-                    .accessibilityIdentifier("home-grant-expiry-time-\(request.id)")
-            }
-            TronSettingsDivider()
-            TronSettingsRow(icon: "checkmark.shield", title: "Decision") {
-                Button("Approve") { decide(true) }
-                    .buttonStyle(TronActionButtonStyle(expands: false))
-                    .accessibilityLabel("Approve request")
-                    .accessibilityIdentifier("home-grant-approve-\(request.id)")
-                Button("Deny", role: .destructive) { decide(false) }
-                    .buttonStyle(TronActionButtonStyle(role: .destructive, expands: false))
-                    .accessibilityLabel("Deny request")
-                    .accessibilityIdentifier("home-grant-deny-\(request.id)")
-            }
-            .disabled(!enabled || expiry <= .now)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("home-permission-request-\(request.id)")
-        .contextMenu { Text(request.request.intentDigest) }
-        .tronManagedSheet(item: $editingExpiryComponent, instance: request.id, identity: { "home.grant.\(request.id).expiry.\($0.id)" }) { component in
-            TronDatePickerSheet(title: component == .date ? "Expiry date" : "Expiry time", component: component,
-                                date: $expiry, earliestDate: .now, accent: visualTheme?.accent ?? .tronPrimary)
-        }
-    }
-
-    private func decide(_ approved: Bool) {
-        let milliseconds = expiry.timeIntervalSince1970 * 1000
-        guard milliseconds.isFinite, milliseconds > Date.now.timeIntervalSince1970 * 1000,
-              milliseconds < Double(Int.max) else { return }
-        onDecide(approved, Int(milliseconds))
     }
 }

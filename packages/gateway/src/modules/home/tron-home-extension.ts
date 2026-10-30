@@ -10,6 +10,8 @@ import { markHomeMemoryCache, type HomeSystemPrompt } from "./home-request-polic
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { abortableRead } from "../../util/abortable-read.js";
 import { HOME_TASK_THINKING_LEVELS, type HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
+import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
+import { nativeChangeConfirmer } from "../../kernel/host/native-change.js";
 
 /**
  * Tron Home's operating context. Home is designated, and every activation runs on
@@ -33,7 +35,7 @@ export const HOME_OPERATING_CONTEXT = [
   "Choose each delegation's worker model and thinking level. Use a cheap or fast model for lookups and searches, and a stronger model, with more thinking, for judgment or implementation. The Gateway resolves typed worker profile values when you delegate: the worker model is the first available model of the worker model queue (a model is skipped when its provider's usage is at least 95% or it recently hit a usage limit), or the active Home model when that queue is empty; thinking is the profile value or Home's. A model or thinking value you explicitly supply overrides only that field and requires a short reason in `reason`; explicit invalid choices are refused, and a worker queue with no available model refuses the delegation, naming each model and why. Thinking is clamped to the selected model's supported levels. The choice, its source and the subagent model queue's availability are returned to you and written into the brief; a worker or subagent that hits a usage limit moves along its queue by itself.",
   "Give each delegation a stable unique taskId, explicit intent and target directory, and always a title of at most 80 characters that names the work: it becomes the worker session's name. Accepted task IDs cannot replay work. Compose each delegation's intent as the brief. Decide which profile information is relevant, after reading it; include only context and explicit standing constraints the worker needs, with provenance where useful. The Gateway does not choose, insert or require copying profile content. The brief says plainly whether the worker should delegate subagents and how, following the Learned profile; the Gateway appends the subagent model queue's current availability to the brief and tells the worker to launch subagents on the queue's model tron/subagent, which moves along the queue on a usage-limit error, so name another subagent model only when the work needs a specific one; never write 'if your session can', since the brief's delegation is the maintainer's request. Ask workers to send lightweight checkin updates at milestones and about every 30 minutes. The worker must call report with exact acceptance evidence; an ordinary reply or check-in is not success. Each task has an internal fixed 24-hour ceiling and records actual token usage. Use task list to see your tasks, ids and latest timestamped check-ins, task status to read one task's recent check-ins, durable spend and results, task steer {taskId, text} to message a running worker, task interrupt {taskId, text?} to cancel only a running worker's current command (for example a long land or test run) while it keeps working, task stop {taskId} to stop one, and task rename {taskId, title} to retitle a worker's session without interrupting it. To continue a stopped or settled worker, use task resume {taskId, text?}, never a new delegation: it keeps the same session, worktree and claim and re-asks its pending question. Control actions need only the taskId; the Gateway resolves the worker's current operation. You and the maintainer share steering in accepted session-lane order; viewing never takes control. Routine check-ins never wake or push. A worker needsAttention check-in with a blocker may wake Home, rate-limited across resumes; it does not stop the worker. Use task status or steer to help. A settled result wakes Home with its attributed work message; a result the wake cannot take arrives on the next maintainer message. Oversized reports arrive by immutable reference: use task report {taskId, offset} to read them in UTF-8 byte pages. A pending-count line describes the remaining inbox. Task completion wakes Home once with its results and sends one push for that wake, or the task-finished push while Home is paused, disabled or blocked; do not assume task success from admission.",
   "Change settings only with the settings tool, with a reason for the maintainer. Using web_search in the turn raises the change's tier one step; a pending change applies only once he approves it.",
-  "Authorization scopes and one-use grants are maintainer-controlled. On grant-required, show the stable requestId to the maintainer; you cannot approve your own grant. A denied or consumed request cannot mint another grant. After approval, delegate the exact intent and target with a new taskId, never replay the refused task identity.",
+  "Authorization scopes and one-use grants are maintainer-controlled. A task no standing scope covers waits in this chat for the maintainer's tap on its exact grant card; you cannot approve your own grant. If he declines, nothing runs. A consumed request cannot mint another grant; never replay a refused task identity.",
   "Do not assume shell, file-writing, browser or project tools exist in Home, and do not ask to change this directory. Delegate authorized project work rather than performing it here.",
   "Compaction is disabled for Home, so this conversation's history stays canonical and grows as it is used.",
 ].join("\n");
@@ -159,8 +161,8 @@ export async function homeSystemPrompt(base: string, knowledge: () => KnowledgeS
  * mechanism that keeps Home's prompt-cache refreshes at zero.
  */
 export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess | undefined,
-  delegate: (request: HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<HomeTaskHandle>,
-  task: (request: unknown) => Promise<unknown>,
+  delegate: (request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange) => Promise<HomeTaskHandle>,
+  task: (request: unknown, confirm?: ConfirmChange) => Promise<unknown>,
   knowledge: () => KnowledgeService | undefined,
   profileChanges: () => HomeProfileChangeAccess | undefined,
   monitor: (toolCallId: string, request: unknown) => Promise<unknown>): ExtensionFactory {
@@ -173,10 +175,12 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
         model: Type.Optional(Type.Object({ provider: Type.String({ minLength: 1, maxLength: 120 }), id: Type.String({ minLength: 1, maxLength: 300 }) }, { additionalProperties: false })),
         thinking: Type.Optional(Type.Union(HOME_TASK_THINKING_LEVELS.map(level => Type.Literal(level)))),
         reason: Type.Optional(Type.String({ minLength: 1, maxLength: 240, description: "Required when model or thinking is explicit: why this worker choice fits this task." })) }, { additionalProperties: false }),
-      executionMode: "sequential", execute: async (_id, request, signal) => {
+      executionMode: "sequential", execute: async (_id, request, signal, _update, context) => {
         // Stop ends this turn at every admission step (#919); the dispatcher settles
-        // any task record it already created and refuses a late worker.
-        const { taskId, sessionId, operationId, worker, subagentModels } = await abortableRead(signal, () => delegate(request, signal));
+        // any task record it already created and refuses a late worker. A task no
+        // standing scope covers waits for the maintainer's tap on its exact grant card.
+        const confirm = nativeChangeConfirmer(context, signal);
+        const { taskId, sessionId, operationId, worker, subagentModels } = await abortableRead(signal, () => delegate(request, signal, confirm));
         const queue = (models: readonly { model: string; available: boolean; reason?: string }[]) =>
           models.map(entry => entry.available ? `${entry.model} available` : `${entry.model} skipped (${entry.reason ?? "unavailable"})`).join("; ");
         const text = ["Task admitted; a report is required for its result.",
@@ -203,8 +207,8 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
       },
     });
     pi.registerTool({ name: "task", label: "Task", annotations: { openWorldHint: false }, description: HOME_TASK_TOOL_DESCRIPTION,
-      parameters: HOME_TASK_TOOL_PARAMETERS, executionMode: "sequential", execute: async (_id, request) => {
-        const result = await task(request);
+      parameters: HOME_TASK_TOOL_PARAMETERS, executionMode: "sequential", execute: async (_id, request, signal, _update, context) => {
+        const result = await task(request, nativeChangeConfirmer(context, signal));
         return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
       },
     });

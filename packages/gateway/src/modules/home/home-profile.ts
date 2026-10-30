@@ -1,11 +1,13 @@
-import { profileFile, profileLabels, type ProfileLabel, type ProfilePartitionRequest, type ProfileFile } from "../../knowledge/knowledge-notes.js";
+import { profileFile, profileLabels, profileMigrationMembers, type ProfileLabel, type ProfilePartitionRequest, type ProfileFile } from "../../knowledge/knowledge-notes.js";
 import { profileIndex, PROFILE_SECTION_HEADING } from "./home-profile-hierarchy.js";
 import { randomUUID } from "node:crypto";
-import { profilePath, type ProfileMetadata } from "../../knowledge/knowledge-profile-placement.js";
+import { PROFILE_AREAS, profilePath, type ProfileMetadata } from "../../knowledge/knowledge-profile-placement.js";
+import { changeReview } from "../../kernel/settings/settings-types.js";
+import type { ChangeReview } from "../../protocol/types.js";
 import { formatProfileValue } from "../../admin/settings-presentation.js";
 import type { SettingsChangePath, SubjectContext, SubjectWrite, ChangeContext } from "../../kernel/settings/settings-change.js";
 import type { ChangeEntry } from "../../kernel/settings/settings-record.js";
-import type { ChangeResult } from "../../kernel/settings/tool-contract.js";
+import type { ChangeResult, ConfirmChange } from "../../kernel/settings/tool-contract.js";
 import { GatewayError } from "../../errors.js";
 import type { KnowledgeListResponse, KnowledgeProvenance, KnowledgeRecord, KnowledgeRelation, NoteContent } from "../../knowledge/knowledge-contract.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
@@ -330,7 +332,8 @@ function staleConflict(error: unknown, current: HomeProfileItem | undefined): un
  * undo. It holds no state: each call reads the profile through `readHomeProfile`, writes
  * notes through the Knowledge owner with its revision fence, and reads back what it wrote.
  */
-export interface ProfileChangeContext extends SubjectContext { author: HomeProfileAuthor }
+/** `approved` only ever comes from the maintainer's accepted native card. */
+export interface ProfileChangeContext extends SubjectContext { author: HomeProfileAuthor; approved?: true; confirm?: ConfirmChange }
 export interface ProfileChangeResult extends ChangeResult {
   status: "applied";
   saved: HomeProfileSaved[];
@@ -346,12 +349,40 @@ export class HomeProfileItems {
 
   /** Domain effects stay here. Content uses the engine's stripe; partition effects
    * use Knowledge's atomic revision fences and the engine's group publisher. */
-  async change(changes: ProfileChangePath, requests: readonly HomeProfileRequest[], context: ProfileChangeContext): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })> {
+  async change(changes: ProfileChangePath, requests: readonly HomeProfileRequest[], input: ProfileChangeContext): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })> {
+    const { confirm, ...context } = input;
     if (!this.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
     if (requests.some(op => op.action === "reorganize" && op.assignments.length > 8)) throw new GatewayError("invalid_request", "Sort at most 8 profile notes per batch");
+    if (context.author.kind === "home" && !context.approved) {
+      const read = await this.read();
+      const own = (id: string) => {
+        const item = read.items.find(item => item.id === id);
+        return item && !item.confirmed && item.record.content.privacyScope !== "private" && item.record.provenance.actor === "agent"
+          && item.record.provenance.source === "home" && item.record.content.profile !== undefined;
+      };
+      // Home acts alone only on its own unconfirmed, non-private proposals; every
+      // other edit waits for the maintainer's tap on the exact before/after.
+      const needsReview = requests.some(op => op.action === "retry" ? false : op.action === "learn" ? false
+        : op.action === "retire" ? !own(op.id) : op.action === "reorganize" ? op.assignments.some(({ id }) => {
+          const item = read.items.find(candidate => candidate.id === id);
+          return !item || !homeMayOrganize(item.record);
+        }) : true);
+      if (needsReview) {
+        if (!context.reason?.trim()) throw new GatewayError("invalid_request", "An exact profile review requires a reason");
+        if (!confirm) throw new GatewayError("invalid_request", "This profile change needs the maintainer's tap on its exact card; original notes remain unchanged");
+        const pinned = requests.map(op => "id" in op ? { ...op, expectedRevision: op.expectedRevision ?? read.items.find(item => item.id === op.id)?.revisionId } : op) as HomeProfileRequest[];
+        const review = profileReview(read, pinned, context.reason);
+        const applied = await confirm(review, async acceptance => {
+          // The card is current only if the profile still yields the exact same review.
+          if (profileReview(await this.read(), pinned, context.reason!).digest !== review.digest) throw new GatewayError("conflict", "The profile changed since this exact card; nothing was applied");
+          return this.change(changes, pinned, { ...context, approved: true, commandId: acceptance.commandId });
+        });
+        return applied ?? { status: "declined", changes: [], saved: [], items: [] };
+      }
+    }
     const partition = requests.find(op => op.action === "migrate" || op.action === "reorganize" || op.action === "retry");
     if (partition && (partition.action === "migrate" || partition.action === "reorganize" || partition.action === "retry")) {
-      if (requests.length !== 1) throw new GatewayError("invalid_request", "Organization is one explicit Home operation");
+      if (requests.length !== 1 || (context.author.kind !== "home" && !context.approved)) throw new GatewayError("invalid_request", "Organization is one explicit Home operation");
       return partition.action === "retry" ? this.retryPartition(changes, partition.commandId, context.actor.kind)
         : this.partition(changes, { commandId: context.commandId, mode: partition.action, assignments: partition.assignments }, context);
     }
@@ -363,7 +394,7 @@ export class HomeProfileItems {
         ...write, direction: ops[applied.findIndex(done => done.writes.includes(write))]?.action === "retire" ? "narrow" : "widen",
       });
       try {
-        for (const [index, op] of ops.entries()) applied.push(await this.apply(op, context.author, `${context.commandId}:${index}`));
+        for (const [index, op] of ops.entries()) applied.push(await this.apply(op, context.approved ? { kind: "maintainer" } : context.author, `${context.commandId}:${index}`));
       } catch (error) {
         for (const [index, done] of [...applied].reverse().entries()) {
           await this.restore(done.writes.map(write => ({ id: write.id, value: write.before })), context.author, `${context.commandId}:rollback:${index}`)
@@ -389,7 +420,7 @@ export class HomeProfileItems {
       restoring: undoOf !== undefined,
       create: (originals, prepared, visibleProfile) => {
         const read = classifyProfile(visibleProfile);
-        if (!undoOf && context.actor.kind === "home" && originals.some(note => !homeMayOrganize(note))) throw new GatewayError("invalid_request", "Home may organize only its unconfirmed proposals; original notes remain unchanged");
+        if (!undoOf && context.actor.kind === "home" && !(context as ProfileChangeContext).approved && originals.some(note => !homeMayOrganize(note))) throw new GatewayError("invalid_request", "This organization needs the maintainer tap on exact before/after; original notes remain unchanged");
         if (!undoOf && !context.reason?.trim()) throw new GatewayError("invalid_request", "Profile organization requires a reason");
         return { version: 1, replayAt: new Date().toISOString(), context: { commandId: context.commandId, actor: context.actor,
         ...(context.reason !== undefined ? { reason: context.reason } : {}) },
@@ -500,8 +531,8 @@ export class HomeProfileItems {
     const existing = "id" in op ? before.items.find(item => item.id === op.id) : undefined;
     // The previous contract made confirmed standing rules binding. Home may propose
     // a new inferred item, but cannot rewrite or retire that existing authority.
-    if (author.kind === "home" && existing && (existing.confirmed || existing.record.content.privacyScope === "private" || existing.record.provenance.actor !== "agent" || existing.record.provenance.source !== "home")) {
-      throw new GatewayError("invalid_request", "Only the maintainer may edit confirmed, private or non-Home-owned profile items; Home edits stay inferred");
+    if (author.kind === "home" && existing && (existing.confirmed || existing.record.content.privacyScope === "private" || existing.record.provenance.actor !== "agent" || existing.record.provenance.source !== "home" || op.action !== "retire")) {
+      throw new GatewayError("invalid_request", "This change needs the maintainer tap on exact before/after; Home may only retire its own unconfirmed proposals");
     }
     const result = await this.write(owner, op, author, confirmed, before, commandId);
     const after = await readHomeProfile(owner);
@@ -621,11 +652,65 @@ export class HomeProfileItems {
 
 /** What the Home runtime gives the tool: the change path, as Home. */
 function homeMayOrganize(note: Extract<KnowledgeRecord, { kind: "note" }>): boolean {
-  return !note.content.confirmed && note.content.privacyScope !== "private"
+  return note.content.profile !== undefined && !note.content.confirmed && note.content.privacyScope !== "private"
     && note.provenance.actor === "agent" && note.provenance.source === "home"
     && !note.content.tags?.some(tag => ["kind-standing-decision", "kind-delegation-default", "kind-correction"].includes(tag));
 }
 export interface HomeProfileChangeAccess {
   deferSorting(commandId: string, version: string): Promise<{ status: "deferred"; version: string }>;
-  change(ops: HomeProfileRequest[], input: { toolCallId: string; author: HomeProfileAuthor; commandId: string; reason?: string }): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })>;
+  change(ops: HomeProfileRequest[], input: { toolCallId: string; author: HomeProfileAuthor; commandId: string; reason?: string; confirm?: ConfirmChange }): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })>;
+}
+
+/** The note as the maintainer knows it: its own words, within the row's label bound. */
+function excerpt(text: string): string {
+  const line = text.replace(/\s+/gu, " ").trim();
+  return line.length <= 80 ? line : `${line.slice(0, 79).trimEnd()}…`;
+}
+
+/** A placement in the profile's own area names: "Communication › Questions". */
+function placement(profile: ProfileMetadata | undefined): string {
+  if (!profile) return "Prior organization";
+  const [root, ...rest] = profile.path;
+  const area = root === "inferred" ? "Unsorted" : PROFILE_AREAS[root as keyof typeof PROFILE_AREAS] ?? root!;
+  return [area, ...rest.map(segment => segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/gu, " "))].join(" › ");
+}
+
+/** The exact card for Home's request: each note's current text/placement and its
+ * exact source revision bind the tap. Text, confirmation and provenance outside the
+ * named change stay as they are. */
+function profileReview(read: HomeProfileRead, requests: readonly HomeProfileRequest[], reason: string): ChangeReview {
+  const items: ChangeReview["items"] = [];
+  for (const op of requests) {
+    if (op.action === "retry" || op.action === "learn") throw new GatewayError("invalid_request", "This profile action needs no review");
+    if (op.action === "migrate" || op.action === "reorganize") {
+      if (requests.length !== 1 || !op.assignments.length || op.assignments.length > (op.action === "migrate" ? 500 : 8)) throw new GatewayError("invalid_request", "Review holds one migration or at most 8 sorting assignments");
+      const members = profileMigrationMembers(read.items.map(item => item.record));
+      if (op.action === "migrate" && (read.unclassified || op.assignments.length !== members.length || members.some(note => !op.assignments.some(assignment => assignment.id === note.id)))) throw new GatewayError("conflict", "Migration review needs exactly the active legacy Core/Home notes; inactive and scoped originals stay unchanged");
+      for (const assignment of op.assignments) {
+        const item = read.items.find(item => item.id === assignment.id);
+        if (!item || item.revisionId !== assignment.expectedRevision || assignment.path === undefined) throw new GatewayError("conflict", "Profile changed since this exact organization was proposed");
+        const target = profilePath(assignment.path);
+        if (item.kind === "correction" && target.path[0] !== "corrections") throw new GatewayError("invalid_request", "Corrections stay in the Corrections area");
+        const before = item.record.content.profile ?? { legacyLabels: profileLabels(item.record.content.tags) };
+        items.push({ label: excerpt(item.text), before: placement(item.record.content.profile), after: placement(target),
+          exact: JSON.stringify({ id: item.id, revision: item.revisionId, before, after: target }) });
+      }
+      items.at(-1)!.detail = "Only placement and revision identity change. Text, confirmation, provenance, authority, status and historical revisions remain exact.";
+      continue;
+    }
+    if (requests.length > 8) throw new GatewayError("invalid_request", "Review holds at most 8 exact profile changes");
+    if (!("id" in op)) throw new GatewayError("invalid_request", "Review holds one kind of profile change");
+    const item = read.items.find(item => item.id === op.id);
+    if (!item || op.expectedRevision !== item.revisionId || item.status !== "active") throw new GatewayError("conflict", "Profile changed since this exact edit was proposed");
+    const before = profileValue(item)!;
+    const after = op.action === "supersede"
+      ? { existing: { id: item.id, revisionId: item.revisionId, state: "superseded" }, replacement: { kind: op.kind, text: op.text, confirmed: true, profile: item.record.content.profile, supersedes: { id: item.id, revisionId: item.revisionId } } }
+      : { ...before, ...(op.action === "retire" ? { state: "retired" } : { confirmed: true }),
+        ...("text" in op && op.text !== undefined ? { text: op.text } : {}), ...("kind" in op && op.kind !== undefined ? { kind: op.kind } : {}) };
+    const text = "text" in op && op.text !== undefined ? `“${op.text}”` : undefined;
+    items.push({ label: excerpt(item.text), before: `${item.confirmed ? "Confirmed" : "Inferred"} ${item.kind.replace(/-/gu, " ")}`,
+      after: op.action === "retire" ? "Retired" : op.action === "supersede" ? `Replaced with ${text}` : text ? `Confirmed as ${text}` : "Confirmed as written",
+      exact: JSON.stringify({ id: item.id, revision: item.revisionId, before, after }) });
+  }
+  return changeReview({ subject: "home.profile", requests }, { title: "Review exact profile changes", requiresTap: true, reason, items });
 }
