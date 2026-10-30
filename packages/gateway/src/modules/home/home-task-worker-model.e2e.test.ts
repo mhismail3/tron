@@ -540,8 +540,14 @@ describe("Home task budget", () => {
     { stopReason: "toolUse", usage: { input: 2, output, cacheRead: 0, cacheWrite: 0 } } as never);
   const install = (f: Awaited<ReturnType<typeof fixture>>) =>
     f.settings.settingsChanges;
-  const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
-    changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "session", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
+  /** The maintainer's paired iPhone answers a spend widening's exact review with
+   * its digest; any other actor receives only the review. */
+  const setBudget = async (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) => {
+    const request = [{ key: "permissions.budget.task", layer: "session" as const, op: value ? "set" as const : "unset" as const, ...(value ? { value } : {}) }];
+    const result = await changes.change({ kind: "home" }, request, context);
+    return result.status === "review" && context.actor.kind === "ui"
+      ? changes.change({ kind: "home" }, request, { ...context, confirmationDigest: result.review!.digest }) : result;
+  };
 
   it("stops a task at the turn boundary that reaches its budget: limited, budget, no further model request", async () => {
     const f = await fixture();
@@ -581,9 +587,9 @@ describe("Home task budget", () => {
     expect(await lowered.completion).toMatchObject({ budget: { outputTokens: 100 }, terminalEvidence: { outcome: "limited", reason: "budget" } });
     expect(calls).toBe(2);
 
-    // Home asking to raise it widens spending: it waits for the maintainer's tap.
+    // Home asking to raise it widens spending: it gets only the exact review for the maintainer's tap.
     const held = await setBudget(changes, { outputTokens: 1_000 }, { actor: { kind: "home", id: "home" }, reason: "Longer research tasks" });
-    expect(held).toMatchObject({ status: "pending", tier: "approve" });
+    expect(held).toMatchObject({ status: "review", review: { requiresTap: true }, changes: [] });
 
     // A raise after start never reaches the running task: it still stops at its start budget.
     entered = false; calls = 0;

@@ -1,6 +1,6 @@
 {
   "retry": {
-    "maxRetries": 6
+    "maxRetries": 2
   },
   "images": {
     "blockImages": true

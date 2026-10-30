@@ -12,3 +12,13 @@ export async function reviewedMutation(service: GatewayService, client: ClientCo
   return await service.invoke(client, method, { ...params, commandId: `${String(params.commandId)}-native`,
     confirmationDigest: result.review.digest }) as unknown as ChangeResult;
 }
+
+/** The same paired-iPhone tap over a real wire client: an exact review is
+ * answered once with its digest under a new command ID; other results return. */
+export async function reviewedRequest(client: { request(method: string, params: Record<string, unknown>): Promise<{ ok: boolean; result?: any }> },
+  method: "settings.change" | "settings.undo" | "settings.applyAgain", params: Record<string, unknown>, commandId: () => string) {
+  const response = await client.request(method, params);
+  if (!response.ok || response.result?.status !== "review" || params.dryRun) return response;
+  if (!response.result.review?.requiresTap) throw new Error("Expected an exact paired-native settings review");
+  return client.request(method, { ...params, commandId: commandId(), confirmationDigest: response.result.review.digest });
+}

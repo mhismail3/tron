@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../kernel/run/run-persistence.js";
+import type { SettingsChangePath } from "../kernel/settings/settings-change.js";
 /**
  * Tron Home's request seam inside the real Gateway runtime (`RuntimeRegistry` +
  * `RuntimeSlot`), with the pinned Pi SDK, a faux provider and the real episodic
@@ -277,6 +279,20 @@ async function open(label: string, options: FixtureOptions = {}) {
   disposals.push(item.dispose);
   fixtures.push(item);
   return item;
+}
+
+/** Home's Session-scope image choice as the paired iPhone makes it through the
+ * real change path: a widening returns its exact review and applies only with
+ * that digest, as the Gateway's paired-native admission supplies it. */
+async function chooseHomeImages(item: Awaited<ReturnType<typeof homeFixture>>, blocked: boolean): Promise<void> {
+  const changes = (item.registry as unknown as { settingsOwners: { changes: SettingsChangePath } }).settingsOwners.changes;
+  const request = [{ key: "context.images.block", layer: "session" as const, op: "set" as const, value: blocked }];
+  const context = { actor: { kind: "ui" as const, id: "device:home-seam" }, homeChapter: item.slot.homeSettingsChapter() };
+  const first = await changes.change({ kind: "home" }, request, { ...context, commandId: randomUUID() });
+  const applied = first.status === "review"
+    ? await changes.change({ kind: "home" }, request, { ...context, commandId: randomUUID(), confirmationDigest: first.review!.digest })
+    : first;
+  expect(applied.status).toBe("applied");
 }
 
 /** Control the real Home state producer, not a retired slot dependency. */
@@ -620,7 +636,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     item.faux.setResponses([item.response("blocked image response"), item.response("visible image response")]);
     for (const blocked of [true, false]) {
       // The Session scope, as Manage Session sets it: Tron applies it at each request.
-      await item.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
+      await chooseHomeImages(item, blocked);
       const text = `C21 image input blocked=${blocked}`;
       const before = item.requests.length;
       await item.slot.prompt(text, [image]);
@@ -679,7 +695,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
     const cases = [] as Array<Record<string, unknown>>;
     for (const blocked of [true, false]) {
-      await item.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
+      await chooseHomeImages(item, blocked);
       await ordinary.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
       const text = `C23 default image input blocked=${blocked}`;
       const homeStart = item.requests.length;

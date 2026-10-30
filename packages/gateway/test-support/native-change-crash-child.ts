@@ -19,7 +19,7 @@ process.env.PI_CODING_AGENT_DIR = agentDir;
 process.env.PI_OFFLINE = "1";
 const model = { provider: "native-crash-faux", id: "chat" };
 const faux = fauxProvider({ provider: model.provider, models: [{ id: model.id }], tokensPerSecond: 1_000_000 });
-if (mode === "kill") await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id }));
+if (mode === "kill") await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id, images: { blockImages: true } }));
 const createRuntime = async () => {
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
@@ -54,9 +54,9 @@ const phone = { id: "phone", identity: "device:native-crash", isLocal: false, is
 if (mode === "kill") {
   const slot = await registry.create(project);
   await slot.setModel(model.provider, model.id);
-  faux.setResponses([fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Exact crash-cut tool selection",
-    changes: [{ key: "tools.active", layer: "global", op: "set", value: ["read"] }] })], { stopReason: "toolUse" }), fauxAssistantMessage("Done")]);
-  await slot.prompt("Choose the exact tools");
+  faux.setResponses([fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Exact crash-cut image access",
+    changes: [{ key: "context.images.block", layer: "global", op: "set", value: false }] })], { stopReason: "toolUse" }), fauxAssistantMessage("Done")]);
+  await slot.prompt("Allow images");
   const card = await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions[0], "child native card").catch(error => {
     process.stderr.write(JSON.stringify(slot.snapshot())); throw error;
   });
@@ -73,6 +73,6 @@ try {
   try { replay = { result: await service.invoke(phone, "extension.respond", params) }; }
   catch (error) { const failure = error as { code?: string; details?: unknown }; replay = { error: { code: failure.code, details: failure.details } }; }
   const document = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
-  const history = (await settings.settingsChanges.history({ key: "tools.active" })).entries;
-  await writeFile(join(root, "recovered.json"), JSON.stringify({ replay, tools: document.defaultTools ?? null, history }));
+  const history = (await settings.settingsChanges.history({ key: "context.images.block" })).entries;
+  await writeFile(join(root, "recovered.json"), JSON.stringify({ replay, blockImages: document.images?.blockImages ?? null, history }));
 } finally { await registry.dispose(); await receipts.dispose(); }

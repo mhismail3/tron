@@ -71,7 +71,7 @@ export interface KeyDeclaration {
   defaultValueFor?: (qualifiers: Partial<Record<QualifierName, string>>) => unknown;
   timing: TimingDeclaration;
   effect: Effect;
-  /** Trust/authority, privacy widening, spend, install or irreversible effects require a native tap. */
+  /** Trust/authority, privacy or spend widening, and any install or irreversible effect, require a native tap. */
   tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
   /** How a change's direction is read; undeclared directions default to widening. */
   direction?: (before: unknown, after: unknown) => Direction;
@@ -311,7 +311,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     },
     // Tools ---------------------------------------------------------------
     {
-      tap: "trust", id: "tools.active", sessionOverridable: true, projectSettable: false, group: "tools", type: toolSelectionType(),
+      id: "tools.active", sessionOverridable: true, projectSettable: false, group: "tools", type: toolSelectionType(),
       optionsSource: { name: "catalog.tools", dependsOn: [] },
       layers: { session: { store: "session", field: "tools" }, home: { store: "home", path: ["tools"] }, ...both(pi("defaultTools")) },
       home: { layers: ["session", "home"], defaultValue: homeToolNames },

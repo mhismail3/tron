@@ -175,7 +175,7 @@ export class SettingsChangePath {
         errors.set(index, error instanceof GatewayError ? error : new GatewayError("invalid_request", String(error)));
       }
     }
-    const requiresTap = planned.some(plan => plan.key.tap && (plan.key.tap !== "spend" && plan.key.tap !== "privacy" || plan.direction === "widen"));
+    const requiresTap = planned.some(plan => plan.key.tap && (plan.key.tap === "install" || plan.key.tap === "irreversible" || plan.direction === "widen"));
     const review = changeReview({ target, undoOf: context.undoOf, applyAgainOf: context.applyAgainOf, planned: planned.map(plan => ({
       key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null })) },
       { title: planned.map(plan => plan.key.label).join(", "), requiresTap, ...(context.reason ? { reason: context.reason } : {}),

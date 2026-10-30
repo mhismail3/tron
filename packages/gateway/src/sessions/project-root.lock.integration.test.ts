@@ -1,3 +1,4 @@
+import { reviewedRequest } from "../../test-support/native-change.js";
 import { spawnSync } from "node:child_process";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -91,10 +92,10 @@ describe("gateway/session-catalog project-root lock", () => {
 
     const undecided = await phone.request("trust.inspect", { cwd: nested });
     const refused = await phone.request("session.create", { commandId: gateway.commandId(), cwd: nested });
-    const decided = await phone.request("settings.change", {
+    const decided = await reviewedRequest(phone, "settings.change", {
       commandId: gateway.commandId(), target: { kind: "global" }, reason: "Trust the lock project",
       changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: nested } }],
-    });
+    }, () => gateway.commandId());
     const rootInspection = await phone.request("trust.inspect", { cwd: project });
     const nestedInspection = await phone.request("trust.inspect", { cwd: nested });
     const created = await phone.request("session.create", { commandId: gateway.commandId(), cwd: nested });

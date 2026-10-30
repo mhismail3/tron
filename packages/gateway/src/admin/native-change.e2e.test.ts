@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { spawn, execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { once } from "node:events";
@@ -20,6 +20,8 @@ import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry
 import { SemanticUIBroker } from "../kernel/host/semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../kernel/host/presentation/extension-presentation-store.js";
 import { changeReview } from "../kernel/settings/settings-types.js";
+import { SettingsChangeRecord } from "../kernel/settings/settings-record.js";
+import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 
 afterEach(disposeFixtures);
 const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true,
@@ -135,14 +137,22 @@ describe("typed changes and exact native acceptance", () => {
       }, `native response durable ${cut} cut`, { boundMs: 15_000 });
       child.kill("SIGKILL");
       expect((await exited)[1]).toBe("SIGKILL");
+      // The kill may land inside the SDK's synchronous trust/settings lock while
+      // the accepted run continues. A restart honors proper-lockfile's own 10 s
+      // stale window; the fixture neither erases nor shortens that owner's lock.
+      const agentDir = join(root, "agent");
+      for (const name of (await readdir(agentDir)).filter(entry => entry.endsWith(".lock"))) {
+        const age = Date.now() - (await stat(join(agentDir, name))).mtimeMs;
+        if (age < 10_500) await new Promise(resolve => setTimeout(resolve, 10_500 - age));
+      }
       await promisify(execFile)(process.execPath, [...args, "recover"], { env: { ...process.env, PI_OFFLINE: "1" }, timeout: 20_000 });
       const recovered = JSON.parse(await readFile(join(root, "recovered.json"), "utf8"));
       if (cut === "completion") expect(recovered.replay).toEqual({ result: { answered: true } });
       else expect(recovered.replay).toMatchObject({ error: { code: "conflict", details: { outcomeUnknown: true } } });
-      expect(recovered.tools).toEqual(cut === "pending" ? null : ["-bash", "-edit", "-write"]);
+      expect(recovered.blockImages).toBe(cut === "pending");
       expect(recovered.history).toHaveLength(cut === "pending" ? 0 : 1);
       if (cut !== "pending") expect(recovered.history[0]).toMatchObject({ status: "applied", commandId: "native-crash-response",
-        actor: { kind: "ui", id: "device:native-crash" }, after: ["-bash", "-edit", "-write"] });
+        actor: { kind: "ui", id: "device:native-crash" }, before: true, after: false });
       await saveCase(`receipt-crash-${cut}`, recovered);
     } finally {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
@@ -150,12 +160,11 @@ describe("typed changes and exact native acceptance", () => {
     }
   }, 30_000);
 
-  it("refuses an internal Home tool recipe change instead of silently treating a native review as application", async () => {
+  it("an internal Home tool recipe change is applied and logged, never reported from an unapplied result", async () => {
     const f = await fixture(), home = await f.registry.acquire(f.home.sessionId);
-    const before = (await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["tools.active"])).keys[0]!.value;
-    await expect(home.setTools(["settings"])).rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("native change card") });
-    expect((await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["tools.active"])).keys[0]!.value).toEqual(before);
-    expect((await f.settings.settingsChanges.history({ key: "tools.active" })).entries).toEqual([]);
+    await home.setTools(["settings"]);
+    expect((await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["tools.active"])).keys[0]!.value).toEqual(["settings"]);
+    expect((await f.settings.settingsChanges.history({ key: "tools.active" })).entries).toMatchObject([{ status: "applied", after: ["settings"] }]);
   });
 
   it("keeps the canonical receipt pending after a real observer I/O failure, without reapplying the same command", async () => {
@@ -318,7 +327,8 @@ describe("typed changes and exact native acceptance", () => {
   it("the shared card retains complete long text, raw tool selections and exact target scope", async () => {
     const instructions = "Keep every detail " + "x".repeat(120) + " [label](https://example.test/full-target) ![image](https://example.test/raw.png)";
     const tools = ["read", "write", "edit", "bash", "settings"];
-    const f = await nativeChange([{ key: "context.compaction.instructions", layer: "session", op: "set", value: instructions }, { key: "tools.active", layer: "session", op: "set", value: tools }], true);
+    const f = await nativeChange([{ key: "context.compaction.instructions", layer: "session", op: "set", value: instructions }, { key: "tools.active", layer: "session", op: "set", value: tools },
+      { key: "context.images.block", layer: "session", op: "set", value: false }], true);
     try {
       const exact = f.interaction.review.items.map(item => JSON.parse(item.exact!));
       expect(exact.find(item => item.key === "context.compaction.instructions").after).toBe(instructions);
@@ -334,7 +344,7 @@ describe("typed changes and exact native acceptance", () => {
     ["visible\u061c\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\ufeffend", "visible\\u061c\\u200b\\u200c\\u200d\\u200e\\u200f\\u202a\\u202b\\u202c\\u202d\\u202e\\u2066\\u2067\\u2068\\u2069\\ufeffend", "Visible reason", "Visible reason"],
     ["visible\u{e0041}\u2060\u00ad\u180e\u115f\u1160\u3164\ufff9\ufffa\ufffbend", "visible\\udb40\\udc41\\u2060\\u00ad\\u180e\\u115f\\u1160\\u3164\\ufff9\\ufffa\\ufffbend", "Reason\u{e0041}\u2060tail", "Reason\\udb40\\udc41\\u2060tail"],
   ])("discloses controls, bidi and astral tags without hiding exact value or reason (%s)", async (value, expected, reason, expectedReason) => {
-    const f = await nativeChange([{ key: "context.compaction.instructions", layer: "session", op: "set", value }, { key: "tools.active", layer: "session", op: "set", value: ["read", "bash"] }], true, reason);
+    const f = await nativeChange([{ key: "context.compaction.instructions", layer: "session", op: "set", value }, { key: "context.images.block", layer: "session", op: "set", value: false }], true, reason);
     try {
       expect(f.interaction.review.reason).toContain(expectedReason);
       expect(f.interaction.review.items[0]!.after).toContain(expected);
@@ -379,6 +389,47 @@ describe("typed changes and exact native acceptance", () => {
     await expect(record.recover()).rejects.toMatchObject({ code: "conflict" });
     await expect(record.group("complete-group", 2)).rejects.toMatchObject({ code: "conflict" });
     await saveCase("truncated-group", { indexedRows: 500, actualRows: 499, missing: "member-a" });
+  });
+
+  it("reads pre-retirement audit rows, including approval facts, as immutable history without an Undo", async () => {
+    const f = await fixture(), directory = join(f.root, "stable-home", "gateway", "settings", "changes");
+    // Exact rows a Stable Gateway wrote before typed writes: a pending approval and its decline.
+    const rows = [
+      "{\"changeId\":\"00000005-0000-4000-8000-000000000000\",\"at\":\"2026-01-01T00:00:00.000Z\",\"actor\":{\"kind\":\"agent\",\"id\":\"01a00000-0000-7000-8000-00000000c0a1\",\"sessionId\":\"01a00000-0000-7000-8000-00000000c0a1\"},\"target\":{\"kind\":\"global\"},\"layer\":\"global\",\"key\":\"run.retry.maxRetries\",\"op\":\"set\",\"before\":6,\"after\":2,\"reason\":\"Corpus: an agent asks to retry less\",\"tier\":\"approve\",\"tierBasis\":{\"direction\":\"widen\",\"floor\":\"approve\",\"floorSource\":\"override\",\"web\":false,\"risk\":null},\"status\":\"pending\",\"requestId\":\"00000006-0000-4000-8000-000000000000\"}",
+      "{\"changeId\":\"00000007-0000-4000-8000-000000000000\",\"at\":\"2026-01-01T00:00:00.000Z\",\"actor\":{\"kind\":\"agent\",\"id\":\"01a00000-0000-7000-8000-00000000c0a1\",\"sessionId\":\"01a00000-0000-7000-8000-00000000c0a1\"},\"target\":{\"kind\":\"global\"},\"layer\":\"global\",\"key\":\"context.images.block\",\"op\":\"set\",\"before\":true,\"after\":false,\"reason\":\"Corpus: an agent asks to allow images\",\"tier\":\"approve\",\"tierBasis\":{\"direction\":\"widen\",\"floor\":\"approve\",\"floorSource\":\"code\",\"web\":false,\"risk\":null},\"status\":\"pending\",\"requestId\":\"00000008-0000-4000-8000-000000000000\"}",
+      "{\"changeId\":\"00000009-0000-4000-8000-000000000000\",\"at\":\"2026-01-01T00:00:00.000Z\",\"actor\":{\"kind\":\"agent\",\"id\":\"01a00000-0000-7000-8000-00000000c0a1\",\"sessionId\":\"01a00000-0000-7000-8000-00000000c0a1\"},\"target\":{\"kind\":\"global\"},\"layer\":\"global\",\"key\":\"run.retry.maxRetries\",\"op\":\"set\",\"before\":6,\"after\":2,\"reason\":\"Corpus: an agent asks to retry less\",\"tier\":\"approve\",\"tierBasis\":{\"direction\":\"widen\",\"floor\":\"approve\",\"floorSource\":\"override\",\"web\":false,\"risk\":null},\"status\":\"declined\",\"requestId\":\"00000006-0000-4000-8000-000000000000\",\"refersTo\":\"00000005-0000-4000-8000-000000000000\",\"decidedBy\":{\"kind\":\"ui\",\"id\":\"device:corpus-phone\"}}",
+    ];
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "000000.jsonl"), rows.map(row => row + "\n").join(""));
+    await writeFile(join(directory, "index.json"), JSON.stringify({ version: 1, segments: [{ name: "000000", count: rows.length }] }));
+    const record = new SettingsChangeRecord(join(f.root, "stable-home"));
+    expect((await record.page({ limit: 10 })).entries).toEqual(rows.map(row => JSON.parse(row)).reverse());
+    const pending = JSON.parse(rows[0]!) as { changeId: string };
+    expect(await record.entry(pending.changeId)).toEqual({ entry: JSON.parse(rows[0]!), facts: [JSON.parse(rows[2]!)] });
+    const changes = new SettingsChangePath(f.settings.settingsModel, record, {});
+    await expect(changes.undo(pending.changeId, { actor: { kind: "ui", id: phone.identity }, commandId: "stable-pending-undo" })).rejects.toMatchObject({ code: "conflict", message: "Only an applied change can be undone" });
+    await record.append([{ ...JSON.parse(rows[0]!), changeId: "after-retirement", status: "applied", tier: undefined, tierBasis: undefined, requestId: undefined }]);
+    expect((await record.page({ limit: 10 })).entries.map(entry => entry.changeId)).toEqual(["after-retirement", ...rows.map(row => JSON.parse(row).changeId).reverse()]);
+  });
+
+  it("history reads observe one published audit cut while real appends replace the tail segment", async () => {
+    const f = await fixture(), record = f.settings.settingsChanges.record;
+    const seed = { at: new Date().toISOString(), actor: { kind: "ui" as const, id: phone.identity }, target: { kind: "global" as const }, layer: "global" as const,
+      key: "run.retry.maxRetries", op: "set" as const, before: 1, after: 2, status: "applied" as const };
+    await record.append([{ ...seed, changeId: "race-seed" }]);
+    let writing = true, reads = 0;
+    const writer = (async () => {
+      try { for (let index = 0; index < 150; index += 1) await record.append([{ ...seed, changeId: `race-${index}` }]); }
+      finally { writing = false; }
+    })();
+    const readers = Array.from({ length: 4 }, async () => {
+      while (writing) {
+        await record.find("race-absent"); await record.entry("race-seed"); reads += 2;
+      }
+    });
+    await Promise.all([writer, ...readers]);
+    expect(reads).toBeGreaterThan(0);
+    expect((await record.page({ limit: 200, filter: entry => entry.changeId.startsWith("race-") })).entries).toHaveLength(151);
   });
 
   it("a synchronous trusted callback throw settles both the original request and the response", async () => {

@@ -107,7 +107,7 @@ describe("settings worker changes and Session fences", () => {
       .rejects.toMatchObject({ code: "invalid_request", message: expect.stringMatching(/revision/) });
     // Active tools never needed a fence (the iPhone sends none), so they are still admitted without one.
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, dryRun: true,
-      changes: [{ key: "tools.active", layer: "session", op: "set", value: ["read"] }] })).resolves.toMatchObject({ dryRun: true, status: "review", review: { requiresTap: true } });
+      changes: [{ key: "tools.active", layer: "session", op: "set", value: ["read"] }] })).resolves.toMatchObject({ dryRun: true, status: "applied" });
     // With the fence it read, the same dry run and change pass.
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence, changes, dryRun: true })).resolves.toMatchObject({ dryRun: true, status: "applied" });
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence, changes })).resolves.toMatchObject({ status: "applied" });

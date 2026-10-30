@@ -339,12 +339,25 @@
               "changeId": "<id>",
               "key": "run.retry.maxRetries",
               "layer": "global",
-              "status": "applied",
-              "tier": "quiet"
+              "status": "applied"
             }
           ],
-          "status": "applied",
-          "tier": "quiet"
+          "review": {
+            "digest": "<base64:64>",
+            "items": [
+              {
+                "after": "6 retries",
+                "before": "4 retries",
+                "detail": "Global stored value\nglobal",
+                "exact": "{\"target\":{\"kind\":\"global\"},\"key\":\"run.retry.maxRetries\",\"layer\":\"global\",\"qualifiers\":{},\"op\":\"set\",\"before\":4,\"after\":6}",
+                "label": "Retries"
+              }
+            ],
+            "reason": "Retry transient provider failures longer",
+            "requiresTap": false,
+            "title": "Retries"
+          },
+          "status": "applied"
         }
       }
     },
@@ -536,14 +549,6 @@
               "status": "applied",
               "target": {
                 "kind": "global"
-              },
-              "tier": "quiet",
-              "tierBasis": {
-                "direction": "widen",
-                "floor": "quiet",
-                "floorSource": "code",
-                "risk": null,
-                "web": false
               }
             }
           ]
