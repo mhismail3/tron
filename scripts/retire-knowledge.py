@@ -53,8 +53,8 @@ def put(path, data):
 
 
 def safe_tree(root):
-    if root.is_symlink() or not root.is_dir():
-        raise ValueError('Expected a real, owned directory')
+    if root.is_symlink() or not root.is_dir() or root.stat().st_mode & 0o077:
+        raise ValueError('Expected a real, owner-only directory')
     for path in [root, *root.rglob('*')]:
         info = path.lstat()
         if path.is_symlink() or info.st_uid != os.getuid() or not (path.is_dir() or path.is_file()):
