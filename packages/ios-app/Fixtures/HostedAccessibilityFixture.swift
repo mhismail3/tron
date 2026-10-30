@@ -80,7 +80,7 @@ struct HostedAccessibilityFixtureView: View {
         .environment(state.model)
         .environment(\.tronPresentationActivityCoordinator, state.presentation)
         .environment(\.scenePhase, .active)
-        .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
+        .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-xxxl") ? .xxxLarge : ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-fixture-light") ? .light : .dark)
         .tronPresentation()
     }

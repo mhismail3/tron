@@ -141,6 +141,32 @@ class Retirement(unittest.TestCase):
                 self.assertFalse(self.files.exists())
                 self.assertTrue((self.store/'records'/'source'/'source-rev-1.json').exists())
                 shutil.rmtree(self.backup)
+    def test_normal_file_search_citations_and_explicit_export_deletion(self):
+        import shutil
+        self.run_command()
+        found=subprocess.run(['rg','--files-with-matches','Café',str(self.files/'sources')],capture_output=True,text=True,check=True)
+        paths=[pathlib.Path(line) for line in found.stdout.splitlines()]
+        self.assertEqual(len(paths),4)  # readable Markdown and exact JSON, two revisions
+        for path in paths:
+            self.assertIn('https://example.com/source',path.read_text())
+        self.assertEqual(self.files.stat().st_mode & 0o077,0)
+        for path in self.files.rglob('*'):
+            if path.is_file():self.assertEqual(path.stat().st_mode & 0o077,0)
+        # Ordinary tools own deliberate file deletion after export. The recovery
+        # archive is separate and intentionally retained, never a runtime reader.
+        shutil.rmtree(self.files/'sources'/'source')
+        (self.files/'attachments'/hashlib.sha256(self.source_object).hexdigest()).unlink()
+        absent=subprocess.run(['rg','--files-with-matches','Café',str(self.files/'sources')],capture_output=True,text=True)
+        self.assertEqual(absent.returncode,1)
+        self.assertTrue((self.backup/'records'/'source'/'source-rev-1.json').exists())
+        self.assertEqual((self.store/'records'/'profile'/'profile-rev-1.json').read_bytes(),self.payloads[('profile','profile-rev-1')])
+    def test_existing_public_output_refuses_private_publication(self):
+        self.files.mkdir(mode=0o755)
+        self.files.chmod(0o755)
+        before=self.catalog.read_bytes()
+        self.run_command(ok=False)
+        self.assertEqual(self.catalog.read_bytes(),before)
+        self.assertEqual(list(self.files.iterdir()),[])
     def test_count_drift_refuses_before_backup_or_mutation(self):
         before=self.catalog.read_bytes();self.run_command('--expected-notes','2',ok=False)
         self.assertEqual(self.catalog.read_bytes(),before);self.assertFalse(self.backup.exists());self.assertFalse(self.files.exists())
