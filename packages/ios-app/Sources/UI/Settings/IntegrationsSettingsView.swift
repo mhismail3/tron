@@ -131,7 +131,6 @@ struct IntegrationsSettingsView: View {
                     TronSheetLoadingState(label: "Loading integrations…", accent: .tronCyan)
                 }
                 if let error { TronSettingsNotice(message: error, accent: .tronError) }
-                KnowledgeSettingsGroup(accent: accent, onOpenSession: onOpenSession).padding(.top, snapshot == nil ? 0 : TronSpacing.section)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)

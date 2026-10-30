@@ -2,21 +2,18 @@
 
 ## Purpose
 
-The Tron menu and the two sheets it opens over the Sessions dashboard: Automations (list, detail,
-run detail, create/edit) and Knowledge.
+The Tron menu and the Automations sheet (list, detail, run detail, create/edit) over the Sessions dashboard.
 
 ## Owns
 
 `DashboardModeMenuButton`, `DashboardChrome`, `AutomationsSheet`, `AutomationDetailView`,
 `AutomationRunDetailView`, `AutomationFormView`, `AutomationPresentation`,
-`AutomationStatusPresentation`, `KnowledgeDashboardView` (`KnowledgeSheet`, the Knowledge settings
-editors), `KnowledgeFormSheet`, `KnowledgeMutation`,
-`KnowledgeObservationPresentation`.
+`AutomationStatusPresentation`, `KnowledgeFormSheet` and `KnowledgeMutation` (shared form/mutation primitives still used by Connected Services).
 
 ## Contract
 
 - **Tron menu.** Sessions is the only dashboard. The Tron logo opens one native menu: Settings;
-  Automations and Knowledge, each a sheet over the dashboard; New Session. On the Home dashboard
+  Automations and Apps, each a sheet over the dashboard; New Session. On the Home dashboard
   the one floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold
   (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
   presenter.
@@ -52,39 +49,18 @@ editors), `KnowledgeFormSheet`, `KnowledgeMutation`,
   provenance fails closed to the ordinary prompt. Receipt-attributed Home trigger messages
   reuse the inbound context chip as **Automation · name**, opening the full request and
   technical details. They never render as maintainer prompts or approval outcomes.
-- **Knowledge sheet.** A bounded, Gateway-authoritative projection with the `Color.tronKnowledge`
-  accent, in the Automations sheet's pattern. It lists Sources (thumbnail, title, domain · type),
-  Syntheses or Legacy history, filtered by visibility and Personal/Research scope from the toolbar
-  Filter, with the shared floating search. iOS creates no Knowledge itself: capture belongs to the
-  share extension and agents. One cancellable reconciliation flight plus one continuation; each read fences the
-  surface token, Gateway identity, filter/query key and generation. `knowledge.changed` (revision and
-  changed IDs, coalesced) drives targeted refresh of up to 64 identities, otherwise a full pass over
-  the retained window; reconciliation acknowledges only its captured cut. Search rebuilds to the
-  reader's loaded depth in one fresh cursor cut.
-- **Knowledge detail.** `KnowledgeDetailSheet` opens at medium, shows one originating-session row,
-  and puts revision, range, digest and attribution behind its info button. Source objects load via
-  `knowledge.object.read` for the exact record and revision. Citations open the cited entry through
-  the history owner. **Needs attention** opens `KnowledgeCoverageDetailSheet` with only pending,
-  failed and unavailable cuts (`knowledge-coverage-filter.v1`); Clear uses a revision-fenced receipt.
-  Mutations publish the returned record into the open detail before refreshing. Note confirmation
-  is explicit. Starting a session from an entry opens New Session and seeds only an unsent draft.
-  Source assessment calls `knowledge.source.assess` with `assessor: "model"`. A detail action
-  dismisses the Knowledge sheet before New Session or the cited chat presents.
-- **Knowledge settings.** Connected Services' Knowledge group opens Current interests
-  (`KnowledgeConfigurationView`, `knowledge.config`) and Needs attention
-  (`KnowledgeCoverageSheetHost`); a cited session opens through Settings' own route callback.
+- **Research files.** No Knowledge library, search, source detail or coverage settings route exists. Profile keeps its separate Home sheets and command owner.
 
 ## Invariants
 
-- No local automation journal, schedule engine or Knowledge corpus cache; Gateway reads are the
+- No local automation journal or schedule engine; Gateway reads are the
   only authority and are fenced per surface.
 - Handoffs carry explicit untrusted-evidence wording and never replay or auto-send a prompt.
 - Accepted mutations remain with the confirmed executor across dismissal.
 
 ## Entry points
 
-`DashboardModeMenuButton.swift`, `DashboardChrome.swift`, `AutomationsSheet.swift`, `AutomationFormView.swift`,
-`KnowledgeDashboardView.swift`.
+`DashboardModeMenuButton.swift`, `DashboardChrome.swift`, `AutomationsSheet.swift`, `AutomationFormView.swift`.
 
 ## Signals
 
@@ -94,21 +70,15 @@ None of its own; catalog reads report through the State owners.
 
 ```bash
 scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronKnowledgeDetailUITests \
   --only-testing TronMobileUITests/TronAccessibilityUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
   --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates
 ```
 
-`TronKnowledgeDetailUITests` mounts the production Knowledge sheet over a held byte/socket Gateway
-(refresh, continuation, filter-sheet cover, Legacy history, summary and correction receipts).
-`TronAccessibilityUITests` drives the real Sessions dashboard: menu entries, the Knowledge sheet
-over it, and Knowledge settings in Connected Services. The Automations fixture accepts no
-mutations.
+`TronAccessibilityUITests` drives the real dashboard destinations and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
 
 ## Not here
 
-`AutomationCatalogCoordinator`, `KnowledgeRPCClient` and the Knowledge stores:
-[State](../../State/README.md). Knowledge source handling:
+`AutomationCatalogCoordinator`: [State](../../State/README.md). Ordinary research files:
 [knowledge sources](../../../docs/knowledge-sources.md).

@@ -3270,17 +3270,18 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         app.buttons["Begin updates"].tap()
         app.buttons["dashboard.menu"].tap()
-        let knowledge = app.buttons["Knowledge"]
-        XCTAssertTrue(knowledge.waitForExistence(timeout: 3))
+        let automations = app.buttons["Automations"]
+        XCTAssertTrue(automations.waitForExistence(timeout: 3))
         // The fixture performs thirty controlled parent updates. Wait for its
         // completion while the actual tapped menu remains presented.
         let finished = NSPredicate(format: "label == %@", "Revision 30")
         let updates = expectation(for: finished, evaluatedWith: app.staticTexts["menu-fixture-revision"])
         wait(for: [updates], timeout: 10)
-        XCTAssertTrue(knowledge.isHittable, "Parent updates must not dismiss the native menu")
-        XCTAssertTrue(app.buttons["Automations"].exists && app.buttons["New Session 0"].exists, app.debugDescription)
+        XCTAssertTrue(automations.isHittable, "Parent updates must not dismiss the native menu")
+        XCTAssertTrue(app.buttons["Apps"].exists && app.buttons["New Session 0"].exists, app.debugDescription)
+        XCTAssertFalse(app.buttons["Knowledge"].exists, "Retired Knowledge has no dashboard entry")
         keepScreenshot(named: "dashboard-menu-after-updates")
-        knowledge.tap()
+        automations.tap()
         XCTAssertTrue(app.staticTexts["menu-fixture-selection"].waitForExistence(timeout: 3))
     }
 

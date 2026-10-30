@@ -11,11 +11,11 @@ struct HostedDashboardMenuFixtureView: View {
         VStack {
             Text("Revision \(revision)").accessibilityIdentifier("menu-fixture-revision")
             Button("Begin updates") { updating = true }
-            if selected { Text("Knowledge selected").accessibilityIdentifier("menu-fixture-selection") }
+            if selected { Text("Automations selected").accessibilityIdentifier("menu-fixture-selection") }
             Spacer()
             HStack {
                 Spacer()
-                DashboardModeMenuButton(onOpenAutomations: {}, onOpenKnowledge: { selected = true }, onOpenApps: {}, actions: .init(
+                DashboardModeMenuButton(onOpenAutomations: { selected = true }, onOpenApps: {}, actions: .init(
                     settings: {},
                     creation: [.init(title: "New Session \(revision)", symbol: "plus", perform: {})]
                 ))
@@ -46,8 +46,8 @@ struct HostedDashboardMenuFixtureView: View {
     private var menuIsRendered: Bool {
         func containsMenu(_ view: UIView) -> Bool {
             guard !view.isHidden else { return false }
-            if view.accessibilityLabel == "Knowledge"
-                || (view as? UILabel)?.text == "Knowledge" { return true }
+            if view.accessibilityLabel == "Automations"
+                || (view as? UILabel)?.text == "Automations" { return true }
             return view.subviews.contains(where: containsMenu)
         }
         return UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }

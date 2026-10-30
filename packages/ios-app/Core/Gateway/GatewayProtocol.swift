@@ -177,8 +177,6 @@ package enum GatewayEventPreparation: Sendable, Equatable {
     case sessionEvent(PreparedSessionEvent)
     case processTranscriptChanged(ProcessTranscriptChanged)
     case automationChanged(AutomationChanged)
-    case knowledgeChanged(KnowledgeChanged)
-    case knowledgeCurationJob(KnowledgeCurationJob)
     case notificationInboxChanged(NotificationInboxChanged)
 }
 
@@ -273,8 +271,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                 runtimeGeneration: event.envelope.runtimeGeneration,
                 eventSequence: event.envelope.eventSequence
             )
-        case .none, .sessionSummary, .processTranscriptChanged, .automationChanged,
-             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged:
+        case .none, .sessionSummary, .processTranscriptChanged, .automationChanged, .notificationInboxChanged:
             return nil
         }
     }
@@ -290,8 +287,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
             return true
         case .none:
             return !topic.hasPrefix("session.")
-        case .sessionSummary, .processTranscriptChanged, .automationChanged,
-             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged:
+        case .sessionSummary, .processTranscriptChanged, .automationChanged, .notificationInboxChanged:
             return true
         }
     }
@@ -321,10 +317,6 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? adapter.decode(SessionSummaryUpdate.self)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "automation.changed":
             return (try? adapter.decode(AutomationChanged.self)).map(GatewayEventPreparation.automationChanged) ?? .none
-        case "knowledge.changed":
-            return (try? adapter.decode(KnowledgeChanged.self)).map(GatewayEventPreparation.knowledgeChanged) ?? .none
-        case "knowledge.curation.job":
-            return (try? adapter.decode(KnowledgeCurationJob.self)).map(GatewayEventPreparation.knowledgeCurationJob) ?? .none
         case "notification.inbox.changed":
             guard let change = try? adapter.decode(NotificationInboxChanged.self),
                   NotificationInboxAdmissionPolicy.admits(change) else { return .none }

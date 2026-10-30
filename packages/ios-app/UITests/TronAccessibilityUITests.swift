@@ -175,7 +175,7 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertFalse(app.buttons["Search"].exists)
             XCTAssertFalse(app.buttons["Filter"].exists)
             // Sessions is the only dashboard: the menu offers no dashboard switch.
-            let titles = ["Settings", "Automations", "Knowledge", "New Session"]
+            let titles = ["Settings", "Automations", "Apps", "New Session"]
             for label in titles { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
             XCTAssertFalse(app.buttons["Sessions"].exists, "The menu has no Sessions entry")
             let frames = titles.map { app.buttons[$0].frame }
@@ -184,7 +184,7 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertTrue(app.buttons["New Session"].isHittable, "Creation must not require scrolling the popup")
             // Dismiss the native menu outside it, leaving the dashboard as it was.
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
-            XCTAssertTrue(app.buttons["Knowledge"].waitForNonExistence(timeout: 3), app.debugDescription)
+            XCTAssertTrue(app.buttons["Automations"].waitForNonExistence(timeout: 3), app.debugDescription)
             let scroll = app.collectionViews.firstMatch
             let viewport = scroll.frame
             app.buttons["Scroll 40"].tap()
@@ -219,7 +219,7 @@ final class TronAccessibilityUITests: XCTestCase {
     func testDashboardActionsPresentTheirExistingDestinations() {
         let destinations = [
             ("New Session", "New Session"), ("Automations", "Automations"),
-            ("Knowledge", "Knowledge"), ("Settings", "Global Settings"),
+            ("Settings", "Global Settings"),
         ]
         for (action, expected) in destinations {
             let app = launch(["-fixture-dashboard"])
@@ -263,56 +263,27 @@ final class TronAccessibilityUITests: XCTestCase {
         XCTAssertTrue(menu.isHittable, "Done returns to the dashboard, not a duplicate Settings owner")
     }
 
-    /// Knowledge is a sheet over the Sessions dashboard, not a dashboard of its
-    /// own: it opens at the medium detent with its search, offers no manual
-    /// capture or note creation, and Done returns to the same dashboard.
-    func testKnowledgeOpensAsSheetOverDashboard() {
-        let app = launch(["-fixture-dashboard", "-fixture-light", "-fixture-large-type"])
-        defer { app.terminate() }
-        let menu = app.buttons["dashboard.menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
-        menu.tap()
-        XCTAssertFalse(app.buttons["Capture URL"].exists)
-        XCTAssertFalse(app.buttons["New note"].exists)
-        app.buttons["Knowledge"].tap()
-        let bar = app.navigationBars.containing(.staticText, identifier: "Knowledge").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 5), "Knowledge opens as a titled sheet: \(app.debugDescription)")
-        XCTAssertGreaterThan(bar.frame.minY, app.frame.height * 0.35, "The sheet opens at the medium detent over the dashboard")
-        for removed in ["Capture URL", "New note", "Knowledge settings"] {
-            XCTAssertFalse(app.buttons[removed].exists, "\(removed) is not offered")
-        }
-        XCTAssertTrue(app.buttons["knowledge.filter"].exists, app.debugDescription)
-        app.buttons["knowledge.search"].tap()
-        XCTAssertTrue(app.buttons["Close search"].waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(app.textFields.firstMatch.exists)
-        app.buttons["Close search"].tap()
-        app.buttons["Done"].firstMatch.tap()
-        XCTAssertTrue(bar.waitForNonExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Tron"].exists, "Done returns to the Sessions dashboard")
-        XCTAssertTrue(menu.isHittable)
-    }
-
-    /// Knowledge settings live in Connected Services and open their existing
-    /// editors there.
-    func testKnowledgeSettingsFromConnectedServices() {
-        let app = launch(["-fixture-dashboard"])
-        defer { app.terminate() }
-        let menu = app.buttons["dashboard.menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
-        menu.tap()
-        app.buttons["Settings"].tap()
-        let services = app.buttons["settings-link-Connected Services"]
-        XCTAssertTrue(services.waitForExistence(timeout: 5), app.debugDescription)
-        services.tap()
-        for (row, title) in [("integrations.knowledge.currentInterests", "Current interests"),
-                             ("integrations.knowledge.needsAttention", "Observation coverage")] {
-            let link = app.buttons[row]
-            XCTAssertTrue(link.waitForExistence(timeout: 5), app.debugDescription)
-            link.tap()
-            let bar = app.navigationBars.containing(.staticText, identifier: title).firstMatch
-            XCTAssertTrue(bar.waitForExistence(timeout: 5), "\(title): \(app.debugDescription)")
-            bar.buttons.matching(NSPredicate(format: "label IN %@", ["Cancel", "Done"])).firstMatch.tap()
-            XCTAssertTrue(bar.waitForNonExistence(timeout: 3), app.debugDescription)
+    func testKnowledgeProductIsAbsentFromDashboardAndConnectedServices() {
+        for variant in ["-fixture-light", "-fixture-dark", "-fixture-large-type"] {
+            let app = launch(["-fixture-dashboard", variant])
+            defer { app.terminate() }
+            let menu = app.buttons["dashboard.menu"]
+            XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
+            menu.tap()
+            XCTAssertFalse(app.buttons["Knowledge"].exists)
+            for title in ["Settings", "Automations", "Apps", "New Session"] {
+                XCTAssertTrue(app.buttons[title].exists, app.debugDescription)
+            }
+            let capture = XCTAttachment(screenshot: app.screenshot())
+            capture.name = "knowledge-removed-menu-\(variant)"
+            capture.lifetime = .keepAlways
+            add(capture)
+            app.buttons["Settings"].tap()
+            let services = app.buttons["settings-link-Connected Services"]
+            XCTAssertTrue(services.waitForExistence(timeout: 5), app.debugDescription)
+            services.tap()
+            XCTAssertFalse(app.buttons["integrations.knowledge.currentInterests"].exists)
+            XCTAssertFalse(app.buttons["integrations.knowledge.needsAttention"].exists)
         }
     }
 

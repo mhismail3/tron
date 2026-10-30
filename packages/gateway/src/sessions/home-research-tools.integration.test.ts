@@ -22,6 +22,9 @@ import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-regi
  * The retained artifact is `test-results/home-research-tools/report.json`.
  */
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
@@ -40,7 +43,6 @@ import { TrustService } from "../kernel/resources/trust-service.js";
 import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
 import type { HomeResearchToolDetails } from "../modules/home/home-research-tools.js";
 import type { WebResearchTransport } from "../knowledge/web-research.js";
-import { legacyEntriesDigest, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
@@ -432,9 +434,11 @@ describe("Tron Home research tools", () => {
   it("runs web, search, Knowledge and trusted-file tools inside Home activations with zero seam refusals", async () => {
     const f = await fixture("all-tools");
 
-    // Seed Knowledge with a note the read-only tool must find (the write goes
-    // through the service directly, exactly as an ordinary session's tool would).
-    await f.knowledge.tool({ action: "createNote", commandId: "seed-note-0001", title: "Research fixture note", noteBody: "the research fixture body", scope: "research" });
+    // Profile remains active note storage. Source capture is no longer a tool.
+    await f.store.createNote({ commandId: "seed-note-0001", record: {
+      id: "profile-fixture", kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [],
+      content: { title: "Profile fixture note", body: "the profile fixture body", role: "fact", confirmed: true },
+    } });
 
     // Seed another chat for session search, then release its runtime.
     const ordinary = await f.registry.create(f.project);
@@ -480,9 +484,9 @@ describe("Tron Home research tools", () => {
     expect(sessions!.text).toContain("RESEARCH-NEEDLE-ALPHA");
     expect(sessions!.text).toContain("untrusted content");
 
-    const [knowledge] = await toolAnswers(f, "what do we know", [{ name: "knowledge", args: { action: "search", query: "fixture" } }]);
+    const [knowledge] = await toolAnswers(f, "what do we know", [{ name: "knowledge", args: { action: "read", id: "profile-fixture" } }]);
     expect(knowledge!.details).toEqual({ status: "ok" });
-    expect(knowledge!.text).toContain("Research fixture note");
+    expect(knowledge!.text).toContain("Profile fixture note");
 
     const [file] = await toolAnswers(f, "read the notes", [{ name: "read", args: { path: filePath, offset: 2, limit: 3 } }]);
     expect(file!.isError).toBe(false);
@@ -555,8 +559,7 @@ describe("Tron Home research tools", () => {
     // the SDK refuses the arguments before the service is ever reached.
     const [write] = await toolAnswers(f, "try a knowledge write", [{ name: "knowledge", args: { action: "createNote", commandId: "evil-note-0001", title: "evil", scope: "personal" } }]);
     expect(write!.isError).toBe(true);
-    const search = await f.knowledge.tool({ action: "search", query: "evil" });
-    expect(search.text).toContain("No knowledge match.");
+    expect((await f.store.list({ kind: "note" })).records.some(record => record.content.title === "evil")).toBe(false);
 
     // None of these refusals is a seam refusal: the activation always completed.
     expect(refusals(f)).toEqual([]);
@@ -770,41 +773,37 @@ describe("Tron Home research tools", () => {
     recordCase("search-publication-edit", { staleCitationDropped: true, canonicalEditReadable: true, localEmbeddings: embedded.length });
   }, 60_000);
 
-  it("retrieves a preserved Chronicle revision and verifies its source through the existing Home tools", async () => {
-    const f = await fixture("legacy-chronicle-citation");
-    const ordinary = await f.registry.create(f.project);
-    await ordinary.setModel(PROVIDER, MODEL_ID);
-    f.faux.setResponses([fauxAssistantMessage("LEGACY-UNIQUE-DECISION was accepted, not merely proposed")]);
-    await ordinary.prompt("record the historical decision");
-    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "legacy source settled");
-    const cut = await f.registry.readSearchCut(ordinary.id);
-    const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
-    if (!anchor) throw new Error("fixture has no historical answer");
-    const range = { sessionId: ordinary.id, fromEntryId: anchor.id, toEntryId: anchor.id, entryIds: [anchor.id], entryDigest: legacyEntriesDigest([anchor]) };
-    // A pre-#1315 observer's record; Chronicle generation itself is retired.
-    const published = await seedLegacyChronicle(f.registry.moduleHost.contract(workspaceModule), f.store, { groups: [{ coverageId: "legacy-fixture-cut", range,
-      records: [{ id: "legacy-chronicle-record", item: { text: "LEGACY-UNIQUE-DECISION was accepted", attribution: "assistant", certainty: "certain", observedAt: anchor.timestamp } }] }] });
-    const legacy = published.records[0]!;
-    const before = JSON.stringify(await f.store.read(legacy.id, legacy.revisionId));
-    const source = await readFile(ordinary.persistedSessionFile!, "utf8");
-    const [recall, record, search, read] = await toolAnswers(f, "find and verify the historical decision without regenerating it", [
-      { name: "knowledge", args: { action: "recall", query: "LEGACY-UNIQUE-DECISION", limit: 3 } },
-      { name: "knowledge", args: { action: "read", id: legacy.id, revisionId: legacy.revisionId } },
-      { name: "session_search", args: { query: "LEGACY-UNIQUE-DECISION", maxResults: 3 } },
-      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 0, after: 0 } },
-    ]);
-    expect(recall!.text).toContain(legacy.id);
-    expect(recall!.text).toContain(legacy.revisionId);
-    expect(record!.text).toContain(range.entryDigest);
-    expect(record!.text).toContain(anchor.id);
-    expect(search!.details).toMatchObject({ hits: [expect.objectContaining({ sessionId: ordinary.id, entryId: anchor.id })] });
-    expect(read!.text).toContain("was accepted, not merely proposed");
-    expect(JSON.stringify(await f.store.read(legacy.id, legacy.revisionId))).toBe(before);
-    expect(await readFile(ordinary.persistedSessionFile!, "utf8")).toBe(source);
-    expect((await f.store.search({ kind: "observation", query: "LEGACY-UNIQUE-DECISION" })).hits).toHaveLength(1);
+  it("reads every exported source revision and citation through the existing Home file tool", async () => {
+    const f = await fixture("plain-source-citation");
+    const exported = join(f.project, "research");
+    // Reuse the converter's sole synthetic persisted-store fixture, then invoke
+    // its real CLI subprocess. No source bytes or conversion logic are copied.
+    const fixtureScript = fileURLToPath(new URL("../../../../scripts/test-retire-knowledge.py", import.meta.url));
+    await promisify(execFile)("python3", ["-c", [
+      "import runpy,shutil,sys",
+      "fixture=runpy.run_path(sys.argv[1])['Retirement']()",
+      "fixture.setUp()",
+      "try:",
+      " fixture.run_command()",
+      " shutil.copytree(fixture.files,sys.argv[2])",
+      "finally: fixture.doCleanups()",
+    ].join("\n"), fixtureScript, exported]);
+    const manifest = JSON.parse(await readFile(join(exported, "MANIFEST.json"), "utf8"));
+    expect(manifest.counts.sourceRevisions).toBe(2);
+    for (const revision of ["source-rev-0", "source-rev-1"]) {
+      const path = join(exported, "sources", "source", revision, "source.md");
+      const original = await readFile(path, "utf8");
+      const [answer] = await toolAnswers(f, "read the saved source with its original citation", [
+        { name: "read_file", args: { path, offset: 1, limit: 1000 } },
+      ]);
+      expect(answer!.details).toEqual({ status: "ok" });
+      for (const text of ["Café", "second line", "https://example.com/source", revision]) {
+        expect(answer!.text).toContain(text);
+      }
+      expect(await readFile(path, "utf8")).toBe(original);
+    }
     expect(refusals(f)).toEqual([]);
-    recordCase("legacy-chronicle-citation", { record: legacy.id, revision: legacy.revisionId, sourceSession: ordinary.id,
-      sourceEntry: anchor.id, sourceDigest: range.entryDigest, sourceUnchanged: true, revisionUnchanged: true, observations: 1 });
+    recordCase("plain-source-citation", { revisions: 2, ordinaryFileTool: true, citationsRetained: true });
   }, 60_000);
 
   it("opens a cited root entry with redacted neighbours, refuses Home and foreign ids, and keeps the prefix constant", async () => {
