@@ -3781,6 +3781,8 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             arguments = (*arguments, *(arg for journey in self.owned_ui_journeys()
                                        for arg in ("--only-testing", journey)))
         environment = dict(environment or self.environment)
+        if arguments and arguments[0] in {"build", "prepare", "run", "run-ui"} and not environment.get("TRON_NODE_BIN"):
+            environment = self.readiness_node_environment(environment)
         return subprocess.run(
             [str(harness), *arguments], env=environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
@@ -3939,9 +3941,21 @@ exec "{real_node}" "$@"
         use the repository's pinned resolver, retaining the host NVM location
         while every writable fixture path stays inside the isolated environment.
         """
+        probe_environment = {
+            **environment,
+            "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm")),
+        }
+        # XcodeGen fixtures name their synthetic cache in TRON_CI_TOOLS_DIR.
+        # The read-only Node probe must resolve the host's pinned Node instead,
+        # while keeping all fixture HOME and writable roots contained.
+        host_tools = os.environ.get("TRON_CI_TOOLS_DIR")
+        if host_tools is None:
+            probe_environment.pop("TRON_CI_TOOLS_DIR", None)
+        else:
+            probe_environment["TRON_CI_TOOLS_DIR"] = host_tools
         resolved = subprocess.run(
             [str(ROOT / "scripts/tron-node"), "exec", "node", "-p", "process.execPath"],
-            env={**environment, "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))},
+            env=probe_environment,
             check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         return resolved.stdout.strip()
@@ -4755,8 +4769,9 @@ exit 1
         directory = self.root / "build-gates"
         directory.mkdir()
         gate = directory / "open"
+        environment = self.readiness_node_environment({**self.environment, "FAKE_BUILD_GATE": str(gate)})
         command = subprocess.Popen(
-            [str(E2E), "build"], env={**self.environment, "FAKE_BUILD_GATE": str(gate)},
+            [str(E2E), "build"], env=environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         )
         try:
@@ -4780,7 +4795,7 @@ exit 1
     def test_a_killed_e2e_build_leaves_its_lane_to_the_next_sweep(self) -> None:
         """Failure mode 5: a crash leaves the lane booted and any tool reclaims it."""
         gate = self.root / "build-gate"
-        environment = {**self.environment, "FAKE_BUILD_GATE": str(gate)}
+        environment = self.readiness_node_environment({**self.environment, "FAKE_BUILD_GATE": str(gate)})
         command = subprocess.Popen(
             [str(E2E), "build"], env=environment, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
