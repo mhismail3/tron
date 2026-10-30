@@ -15,7 +15,6 @@
     "sessions/locks/catalog-metadata-index-paths.golden.json",
     "sessions/session-settings.ts",
     "sessions/fork-boundary.ts",
-    "sessions/legacy-chronicle.integration.test.ts",
     "sessions/locks/store-session-archive-attention.golden.json",
     "sessions/project-root.lock.integration.test.ts",
     "sessions/locks/project-root-trust.golden.json",

@@ -4,7 +4,7 @@ import { writeFile, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { waitFor } from "./wait-for.js";
-import type { ProfileAssignment } from "../src/knowledge/knowledge-notes.js";
+import type { ProfileAssignment } from "../src/modules/home/profile-notes.js";
 
 /** A real process heap ceiling proves deep-history admission is incremental,
  * rather than merely checking the final encoded backup after unbounded loading. */
@@ -14,18 +14,18 @@ export async function boundedProfilePartition(root: string, home: string, assign
   await writeFile(hook, `import { registerHooks } from 'node:module';
 registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });
 `);
-  const storeModule = fileURLToPath(new URL("../src/knowledge/knowledge-store.ts", import.meta.url));
+  const storeModule = fileURLToPath(new URL("../src/modules/home/profile-store.ts", import.meta.url));
   const workspaceModule = fileURLToPath(new URL("../src/workspace/tron-workspace.ts", import.meta.url));
   await writeFile(program, `import fs from 'node:fs/promises';
 const [home,input] = process.argv.slice(2);
-const { KnowledgeStore } = await import(${JSON.stringify(storeModule)});
+const { ProfileStore } = await import(${JSON.stringify(storeModule)});
 const { TronWorkspace } = await import(${JSON.stringify(workspaceModule)});
 const workspace = new TronWorkspace(home);
 await workspace.initialize();
 let result;
 try {
   const { assignments, mode } = JSON.parse(await fs.readFile(input,'utf8'));
-  await new KnowledgeStore(workspace).partitionProfile({commandId:'partition-bounded-command',mode,assignments});
+  await new ProfileStore(workspace).partitionProfile({commandId:'partition-bounded-command',mode,assignments});
   result = {status:'unexpected-commit'};
 } catch (error) {
   if (error.code !== 'conflict') throw error;
@@ -48,9 +48,9 @@ export async function crashProfilePartition(root: string, home: string, assignme
   await writeFile(hook, `import { registerHooks } from 'node:module';
 registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });
 `);
-  const storeModule = fileURLToPath(new URL("../src/knowledge/knowledge-store.ts", import.meta.url));
+  const storeModule = fileURLToPath(new URL("../src/modules/home/profile-store.ts", import.meta.url));
   const workspaceModule = fileURLToPath(new URL("../src/workspace/tron-workspace.ts", import.meta.url));
-  const modules = Object.fromEntries(Object.entries({ profile: "../src/modules/home/home-profile.ts", service: "../src/knowledge/knowledge-service.ts", change: "../src/kernel/settings/settings-change.ts", model: "../src/kernel/settings/settings-model.ts", record: "../src/kernel/settings/settings-record.ts", adapter: "../src/admin/settings-model.ts", schema: "./settings-schema.ts", trust: "../src/kernel/resources/trust-service.ts" }).map(([key, path]) => [key, fileURLToPath(new URL(path, import.meta.url))]));
+  const modules = Object.fromEntries(Object.entries({ profile: "../src/modules/home/home-profile.ts", change: "../src/kernel/settings/settings-change.ts", model: "../src/kernel/settings/settings-model.ts", record: "../src/kernel/settings/settings-record.ts", adapter: "../src/admin/settings-model.ts", schema: "./settings-schema.ts", trust: "../src/kernel/resources/trust-service.ts" }).map(([key, path]) => [key, fileURLToPath(new URL(path, import.meta.url))]));
   const sdk = import.meta.resolve("@earendil-works/pi-coding-agent");
   await writeFile(program, `import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -77,16 +77,15 @@ DatabaseSync.prototype.exec = function(sql) {
   return result;
 };
 syncBuiltinESMExports();
-const { KnowledgeStore } = await import(${JSON.stringify(storeModule)});
+const { ProfileStore } = await import(${JSON.stringify(storeModule)});
 const { TronWorkspace } = await import(${JSON.stringify(workspaceModule)});
 const workspace = new TronWorkspace(home);
 await workspace.initialize();
-const store = new KnowledgeStore(workspace);
+const store = new ProfileStore(workspace);
 if (forget) await store.forget('partition-child-forget',forget.recordId,'Explicit fixture forget',forget.expectedRevision);
 else if (audit) {
   const modules = ${JSON.stringify(modules)};
   const { HomeProfileItems } = await import(modules.profile);
-  const { KnowledgeService } = await import(modules.service);
   const { SettingsChangePath } = await import(modules.change);
   const { SettingsModel } = await import(modules.model);
   const { SettingsChangeRecord } = await import(modules.record);
@@ -95,7 +94,7 @@ else if (audit) {
   const { TrustService } = await import(modules.trust);
   const { ModelRuntime } = await import(${JSON.stringify(sdk)});
   const modelRuntime = await ModelRuntime.create({authPath:home+'/child-auth.json',modelsPath:null,refreshOnCreate:false});
-  const knowledge = new KnowledgeService(store);
+  const knowledge = store;
   const profile = new HomeProfileItems(() => knowledge);
   const model = new SettingsModel(new SettingsStoreAdapter({schema:TEST_SETTINGS_SCHEMA,agentDir:home+'/agent',tronHome:home,trust:new TrustService(home+'/agent'),modelRuntime}));
   const changes = new SettingsChangePath(model,new SettingsChangeRecord(home),{setTrust:async()=>{throw new Error('Not used');},undoSubject:(entry,context)=>profile.undo(changes,entry,context)});

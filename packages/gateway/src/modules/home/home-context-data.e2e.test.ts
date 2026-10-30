@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { disposeFixtures, dispatch, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import type { HomeContextBreakdown } from "../../protocol/types.js";
-import { KnowledgeService } from "../../knowledge/knowledge-service.js";
-import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
+
+import { ProfileStore } from "./profile-store.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
 afterEach(async () => {
@@ -127,7 +127,7 @@ describe("Home request breakdown (home.context)", () => {
 
 describe("Home learned profile in the breakdown", () => {
   it("counts the active profile notes the section lists, from the next activation on", async () => {
-    let knowledge: KnowledgeService | undefined;
+    let knowledge: ProfileStore | undefined;
     const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
     await configure(f);
     // A conversation file exists only after its first message, which a cold registry needs to find Home.
@@ -139,8 +139,8 @@ describe("Home learned profile in the breakdown", () => {
     // Knowledge installed first, as gateway-main does, and Home's runtime is built after it.
     const registry = await f.restartToReadiness();
     f.registry = registry;
-    const store = new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {});
-    knowledge = new KnowledgeService(store);
+    const store = new ProfileStore(registry.moduleHost.contract(workspaceModule));
+    knowledge = store;
     // Home's profile tool writes through the settings change path the restarted fixture installed,
     // as gateway-main wires it, with this Knowledge owner.
     await registry.catalog("all");

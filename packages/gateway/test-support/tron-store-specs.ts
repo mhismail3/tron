@@ -18,11 +18,11 @@ import { DisplayArtifactStore } from "../src/display/display-artifact-store.js";
 import { EPISODIC_DEFAULTS } from "../src/episodic/episodic-contract.js";
 import { EpisodicMemory } from "../src/episodic/episodic-memory.js";
 import { EpisodicStore } from "../src/episodic/episodic-store.js";
-import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
+
 import { episodicHostAssigned, singleChapterSource } from "./episodic-chapter-source.js";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { KnowledgeStore } from "../src/knowledge/knowledge-store.js";
+import { ProfileStore } from "../src/modules/home/profile-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
 import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import { RecentModelStore } from "../src/providers/recent-models.js";
@@ -83,7 +83,7 @@ async function withWorkspace<T>(home: string, use: (workspace: TronWorkspace) =>
   try { return await use(value); } finally { await value.dispose(); }
 }
 
-async function settingsPath(home: string, knowledge?: KnowledgeService) {
+async function settingsPath(home: string, knowledge?: ProfileStore) {
   const agentDir = join(home, "agent");
   await mkdir(agentDir, { recursive: true });
   const trust = new TrustService(agentDir);
@@ -304,30 +304,6 @@ export const STORES: readonly StoreSpec[] = [
     },
   },
   {
-    module: "gateway/knowledge", name: "store-knowledge",
-    paths: ["workspace/state/knowledge"],
-    record: (home) => withWorkspace(home, async (workspace) => {
-      const store = new KnowledgeStore(workspace, () => {});
-      await store.createNote({ commandId: "corpus-note-0001", record: {
-        kind: "note", id: CORPUS_IDS.note, scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [],
-        content: { title: "Corpus preference", body: "Prefers concise answers.", role: "preference", confirmed: true },
-      } });
-      await store.captureSource({ commandId: "corpus-source-0001", record: {
-        kind: "source", id: CORPUS_IDS.source, scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
-        content: { title: "Corpus source", text: "A synthetic research source.", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" },
-      } });
-    }),
-    read: (home) => withWorkspace(home, async (workspace) => {
-      const store = new KnowledgeStore(workspace, () => {});
-      return {
-        status: await store.status(),
-        list: await store.list({ limit: 50 }),
-        note: await store.read(CORPUS_IDS.note),
-        source: await store.read(CORPUS_IDS.source),
-      };
-    }),
-  },
-  {
     module: "gateway/home", name: "store-home-tasks",
     paths: ["gateway/home/tasks", "workspace/state/home"],
     record: (home) => withWorkspace(home, async (workspace) => {
@@ -421,13 +397,13 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/home", name: "store-home-profile",
-    paths: ["workspace/state/knowledge", "gateway/settings"],
+    paths: ["workspace/state/profile", "gateway/settings"],
     // The learned profile is personal Knowledge notes (its bytes are the Knowledge
     // corpus's format) plus their settings record entries; recorded live so this
     // lock owns no second copy of the Knowledge store.
     live: "profile notes are Knowledge records; the Knowledge store lock owns their committed bytes",
     record: (home) => withWorkspace(home, async (workspace) => {
-      const knowledge = new KnowledgeService(new KnowledgeStore(workspace, () => {}));
+      const knowledge = new ProfileStore(workspace);
       const { path } = await settingsPath(home, knowledge);
       const profile = new HomeProfileItems(() => knowledge);
       const context = (commandId: string) => ({ actor: { kind: "ui" as const, id: IDENTITY }, author: { kind: "maintainer" as const }, commandId, reason: "Corpus profile" });
@@ -444,7 +420,7 @@ export const STORES: readonly StoreSpec[] = [
       await profile.change(path, [{ action: "retire", id: fact!, reason: "No longer true" }], context("corpus-profile-0004"));
     }),
     read: (home) => withWorkspace(home, async (workspace) => {
-      const knowledge = new KnowledgeService(new KnowledgeStore(workspace, () => {}));
+      const knowledge = new ProfileStore(workspace);
       const profile = await readHomeProfile(knowledge);
       return { items: profile.items.map(({ record: _record, ...item }) => item), unclassified: profile.unclassified };
     }),

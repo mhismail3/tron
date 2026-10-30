@@ -1,6 +1,6 @@
 import type { ClassifierContext } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
-import { JEV_CLASSIFIER } from "../providers/jev-model-pricing.js";
+import { JEV_CLASSIFIER } from "./jev-model-pricing.js";
 
 export const JEV_DEFAULT_MODEL = JEV_CLASSIFIER.model;
 export const JEV_MAX_STATE_BYTES = 24_000;

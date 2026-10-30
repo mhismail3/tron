@@ -2,18 +2,17 @@ import { attributeExtensions } from "../extensions/owner-attribution.js";
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
 import { createTronCoreExtension, tronContext } from "./tron-core-extension.js";
 import { workspaceModule } from "./workspace-module.js";
-import { JevDecisionClient } from "../knowledge/jev-client.js";
-import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { JevDecisionClient } from "../providers/jev-client.js";
 import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
-export interface CoreModuleServices { knowledge: KnowledgeService | undefined; connections: Pick<ConnectionAccess, "snapshot"> | undefined }
+export interface CoreModuleServices { connections: Pick<ConnectionAccess, "snapshot"> | undefined }
 
 /** Gateway owners are resolved when the runtime assembles its extension, not at start. */
 export function createCoreModule(services: () => CoreModuleServices): ModuleDescriptor {
   return {
     name: "tron-core",
-    purpose: "Adds Tron's operating context and the knowledge, connections and Jev tools.",
-    tools: ["knowledge", "connections", "jev"], commands: [], dependsOn: [workspaceModule],
+    purpose: "Adds Tron's operating context and the connections and Jev tools.",
+    tools: ["connections", "jev"], commands: [], dependsOn: [workspaceModule],
     start: host => {
       const workspace = host.contract(workspaceModule);
       return { hooks: {
@@ -22,7 +21,7 @@ export function createCoreModule(services: () => CoreModuleServices): ModuleDesc
           { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
       }, extension: session => {
         const owners = services();
-        return createTronCoreExtension(workspace, owners.knowledge, new JevDecisionClient(session.modelRuntime), owners.connections);
+        return createTronCoreExtension(workspace, new JevDecisionClient(session.modelRuntime), owners.connections);
       } };
     },
   };

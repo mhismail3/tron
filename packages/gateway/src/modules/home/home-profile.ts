@@ -1,7 +1,7 @@
-import { profileFile, profileLabels, profileMigrationMembers, type ProfileLabel, type ProfilePartitionRequest, type ProfileFile } from "../../knowledge/knowledge-notes.js";
+import { profileFile, profileLabels, profileMigrationMembers, type ProfileLabel, type ProfilePartitionRequest, type ProfileFile } from "./profile-notes.js";
 import { profileIndex, PROFILE_SECTION_HEADING } from "./home-profile-hierarchy.js";
 import { randomUUID } from "node:crypto";
-import { PROFILE_AREAS, profilePath, type ProfileMetadata } from "../../knowledge/knowledge-profile-placement.js";
+import { PROFILE_AREAS, profilePath, type ProfileMetadata } from "./profile-placement.js";
 import { changeReview } from "../../kernel/settings/settings-types.js";
 import type { ChangeReview } from "../../protocol/types.js";
 import { formatProfileValue } from "../../admin/settings-presentation.js";
@@ -9,9 +9,9 @@ import type { SettingsChangePath, SubjectContext, SubjectWrite, ChangeContext } 
 import type { ChangeEntry } from "../../kernel/settings/settings-record.js";
 import type { ChangeResult, ConfirmChange } from "../../kernel/settings/tool-contract.js";
 import { GatewayError } from "../../errors.js";
-import type { KnowledgeListResponse, KnowledgeProvenance, KnowledgeRecord, KnowledgeRelation, NoteContent } from "../../knowledge/knowledge-contract.js";
-import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
-import type { KnowledgeMutationResult, ProfileSortingState } from "../../knowledge/knowledge-store.js";
+import type { ProfileNoteListResponse, ProfileNoteProvenance, ProfileNoteRecord, ProfileNoteRelation, NoteContent } from "./profile-note-contract.js";
+import type { ProfileStore } from "./profile-store.js";
+import type { ProfileMutationResult, ProfileSortingState } from "./profile-store.js";
 
 /*
  * Tron Home's learned profile (#731): the maintainer's durable preferences,
@@ -42,7 +42,7 @@ const KIND_ROLE: Record<HomeProfileKind, NoteContent["role"]> = {
 export const HOME_PROFILE_BOUND_BYTES = 8 * 1_024;
 const PROFILE_PAGE_LIMIT = 50;
 export type HomeProfileStatus = "active" | "superseded" | "retired";
-export type ProfileNote = KnowledgeRecord & { kind: "note" };
+export type ProfileNote = ProfileNoteRecord & { kind: "note" };
 
 export interface HomeProfileItem {
   id: string;
@@ -72,13 +72,13 @@ export interface HomeProfileRead {
  * list owner: it never admits a model call. Superseded status is derived, not stored: a
  * profile note is superseded when another profile note's current revision names it in a
  * `supersedes` relation. A superseding note that is itself retired still supersedes. */
-export async function readHomeProfile(knowledge: KnowledgeService): Promise<HomeProfileRead> {
+export async function readHomeProfile(knowledge: ProfileStore): Promise<HomeProfileRead> {
   const notes: ProfileNote[] = [];
   let cursor: string | undefined;
   do {
-    const page = await knowledge.invoke({ operation: "knowledge.list", request: {
+    const page = await knowledge.list({
       kind: "note", scope: "personal", limit: PROFILE_PAGE_LIMIT, ...(cursor ? { cursor } : {}),
-    } }) as KnowledgeListResponse;
+    }) as ProfileNoteListResponse;
     for (const record of page.records) {
       if (record.kind === "note" && record.content.tags?.includes(HOME_PROFILE_TAG) === true) notes.push(record as ProfileNote);
     }
@@ -125,8 +125,8 @@ export interface HomeProfileIndexRead {
   diagnostics: HomeProfileRead["diagnostics"];
 }
 /** Mechanical SQL-head discovery; only the historical reader loads old bodies. */
-export async function readHomeProfileIndex(knowledge: KnowledgeService): Promise<HomeProfileIndexRead> {
-  const { rows, sorting } = await knowledge.store.profileMetadata();
+export async function readHomeProfileIndex(knowledge: ProfileStore): Promise<HomeProfileIndexRead> {
+  const { rows, sorting } = await knowledge.profileMetadata();
   const superseded = new Set(rows.flatMap(row => row.supersedes));
   const items: HomeProfileIndexRead["items"] = [], diagnostics: HomeProfileRead["diagnostics"] = [];
   for (const row of rows) {
@@ -149,7 +149,7 @@ function kindTag(kind: HomeProfileKind): string {
   return `kind-${kind}`;
 }
 
-export async function homeProfileSection(knowledge: () => KnowledgeService | undefined, activation: "user" | "wake"): Promise<{ text: string; notes: number }> {
+export async function homeProfileSection(knowledge: () => ProfileStore | undefined, activation: "user" | "wake"): Promise<{ text: string; notes: number }> {
   const owner = knowledge();
   if (!owner) return { text: unavailableSection("Knowledge is not available on this Gateway"), notes: 0 };
   try {
@@ -302,7 +302,7 @@ function validateProfileOp(op: HomeProfileOp, author: HomeProfileAuthor["kind"])
   return undefined;
 }
 
-function provenance(author: HomeProfileAuthor, reason?: string): KnowledgeProvenance {
+function provenance(author: HomeProfileAuthor, reason?: string): ProfileNoteProvenance {
   if (author.kind === "maintainer") return { actor: "user", source: "home-profile", evidence: [], ...(reason ? { reason } : {}) };
   return {
     actor: "agent",
@@ -341,7 +341,7 @@ export interface ProfileChangeResult extends ChangeResult {
 }
 
 export class HomeProfileItems {
-  constructor(private readonly knowledge: () => KnowledgeService | undefined) {}
+  constructor(private readonly knowledge: () => ProfileStore | undefined) {}
 
   available(): boolean {
     return this.knowledge() !== undefined;
@@ -416,7 +416,7 @@ export class HomeProfileItems {
    * identities. The existing backup owns recovery; no domain replay runs on open. */
   async partition(changes: ProfileChangePath, request: ProfilePartitionRequest, context: SubjectContext, undoOf?: ReadonlyMap<string, string>): Promise<ProfileChangeResult> {
     if (request.commandId !== context.commandId || !["home", "ui"].includes(context.actor.kind)) throw new GatewayError("invalid_request", "Profile partition needs its original Home or maintainer command");
-    const result = await this.owner().store.partitionProfile(request, {
+    const result = await this.owner().partitionProfile(request, {
       restoring: undoOf !== undefined,
       create: (originals, prepared, visibleProfile) => {
         const read = classifyProfile(visibleProfile);
@@ -442,11 +442,11 @@ export class HomeProfileItems {
   /** An explicit retry either resumes the backed-up precommit domain intent or
    * repairs ONLY its audit, even after a later canonical edit. */
   async retryPartition(changes: ProfileChangePath, commandId: string, actor: SubjectContext["actor"]["kind"]): Promise<ProfileChangeResult> {
-    const recovery = await this.owner().store.profilePartitionRecovery(commandId);
+    const recovery = await this.owner().profilePartitionRecovery(commandId);
     const envelope = validatePartitionEnvelope(changes, recovery.envelope, commandId, recovery.originals, recovery.prepared);
     if (!recovery.committed) {
       if (envelope.context.actor.kind === "ui" && actor !== "ui") throw new GatewayError("invalid_request", "Only the maintainer resumes an uncommitted Undo");
-      await this.owner().store.partitionProfile(recovery.request, {
+      await this.owner().partitionProfile(recovery.request, {
         restoring: envelope.writes.every(write => write.undoOf !== undefined),
         create: () => { throw new GatewayError("conflict", "The original profile backup is missing"); },
         validate: (raw, originals, prepared) => { validatePartitionEnvelope(changes, raw, commandId, originals, prepared); },
@@ -467,7 +467,7 @@ export class HomeProfileItems {
       const commandId = context.commandId ?? randomUUID();
       // A retry after a committed domain/failed audit must not apply Undo twice.
       try {
-        const recovery = await this.owner().store.profilePartitionRecovery(commandId);
+        const recovery = await this.owner().profilePartitionRecovery(commandId);
         const envelope = validatePartitionEnvelope(changes, recovery.envelope, commandId, recovery.originals, recovery.prepared);
         if (!envelope.writes.some(write => write.undoOf === entry.changeId)) throw new GatewayError("conflict", "Command ID belongs to a different profile Undo");
         return this.retryPartition(changes, commandId, "ui");
@@ -510,7 +510,7 @@ export class HomeProfileItems {
     });
   }
 
-  private owner(): KnowledgeService {
+  private owner(): ProfileStore {
     const owner = this.knowledge();
     if (!owner) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
     return owner;
@@ -542,20 +542,20 @@ export class HomeProfileItems {
     })) };
   }
 
-  private async write(owner: KnowledgeService, op: HomeProfileOp, author: HomeProfileAuthor, confirmed: boolean, profile: HomeProfileRead, commandId: string): Promise<HomeProfileSaved> {
-    const create = async (kind: HomeProfileKind, text: string, relations: KnowledgeRelation[], reason?: string) => {
+  private async write(owner: ProfileStore, op: HomeProfileOp, author: HomeProfileAuthor, confirmed: boolean, profile: HomeProfileRead, commandId: string): Promise<HomeProfileSaved> {
+    const create = async (kind: HomeProfileKind, text: string, relations: ProfileNoteRelation[], reason?: string) => {
       const privacyScope = op.action === "learn" ? op.sensitive ? "private" : undefined : profile.items.find(item => item.id === op.id)?.record.content.privacyScope;
-      const { record } = await owner.invoke({ operation: "knowledge.note.create", request: {
+      const { record } = await owner.createNote({
         commandId, ...(confirmed ? { confirmedByUser: true } : {}),
         record: { kind: "note", scope: "personal", provenance: provenance(author, reason), relations,
           content: { title: text, role: KIND_ROLE[kind], confirmed, tags: [HOME_PROFILE_TAG, kindTag(kind)], ...(privacyScope ? { privacyScope } : {}),
             profile: op.action === "learn" ? profilePath(op.path ?? (kind === "correction" ? "corrections" : "inferred/review")) : profile.items.find(item => item.id === op.id)!.record.content.profile! } },
-      } }) as KnowledgeMutationResult;
+      }) as ProfileMutationResult;
       return record;
     };
     if (op.action === "learn") {
       if (op.corrects) {
-        const claim = await owner.store.read(op.corrects.id, op.corrects.revisionId);
+        const claim = await owner.read(op.corrects.id, op.corrects.revisionId);
         if (!claim) throw new GatewayError("invalid_request", "The correction must link an available exact wrong claim");
       }
       const record = await create(op.kind, op.text.trim(), op.corrects ? [{ type: "corrects", recordId: op.corrects.id, revisionId: op.corrects.revisionId }] : []);
@@ -572,10 +572,10 @@ export class HomeProfileItems {
     if (!current.content.profile) throw new GatewayError("conflict", "Prior organization is read-only; review an explicit v2 placement before a new content edit");
     const update = async (content: NoteContent, reason?: string) => {
       try {
-        const { record } = await owner.invoke({ operation: "knowledge.note.update", request: {
+        const { record } = await owner.updateNote({
           commandId, recordId: current.id, expectedRevision: current.revisionId, ...(content.confirmed ? { confirmedByUser: true } : {}),
           record: { kind: "note", scope: "personal", provenance: provenance(author, reason), relations: current.relations, content },
-        } }) as KnowledgeMutationResult;
+        }) as ProfileMutationResult;
         return record;
       } catch (error) {
         throw staleConflict(error, (await readHomeProfile(owner)).items.find(candidate => candidate.id === current.id));
@@ -635,10 +635,10 @@ export class HomeProfileItems {
           === JSON.stringify(relations.filter(relation => relation.type === "supersedes").map(relation => relation.recordId));
       if (unchanged) continue;
       try {
-        await owner.invoke({ operation: "knowledge.note.update", request: {
+        await owner.updateNote({
           commandId: `${commandId}:${index}`, recordId: note.id, expectedRevision: note.revisionId, ...(content.confirmed ? { confirmedByUser: true } : {}),
           record: { kind: "note", scope: "personal", provenance: provenance(author, reason), relations, content },
-        } });
+        });
       } catch (error) {
         throw staleConflict(error, item);
       }
@@ -651,7 +651,7 @@ export class HomeProfileItems {
 }
 
 /** What the Home runtime gives the tool: the change path, as Home. */
-function homeMayOrganize(note: Extract<KnowledgeRecord, { kind: "note" }>): boolean {
+function homeMayOrganize(note: Extract<ProfileNoteRecord, { kind: "note" }>): boolean {
   return note.content.profile !== undefined && !note.content.confirmed && note.content.privacyScope !== "private"
     && note.provenance.actor === "agent" && note.provenance.source === "home"
     && !note.content.tags?.some(tag => ["kind-standing-decision", "kind-delegation-default", "kind-correction"].includes(tag));

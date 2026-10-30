@@ -7,7 +7,7 @@ import { homeMemoryTools } from "./home-memory-tools.js";
 import { homeProfileSection, type HomeProfileChangeAccess } from "./home-profile.js";
 import { homeProfileTool } from "./home-profile-tool.js";
 import { markHomeMemoryCache, type HomeSystemPrompt } from "./home-request-policy.js";
-import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
+import type { ProfileStore } from "./profile-store.js";
 import { abortableRead } from "../../util/abortable-read.js";
 import { HOME_TASK_THINKING_LEVELS, type HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
@@ -133,7 +133,7 @@ export function admitHomeTaskToolRequest(value: unknown): HomeTaskToolRequest {
  * request of that activation (#749), so no SDK `before_agent_start` hook is
  * involved: a wake starts a run without one.
  */
-export async function homeSystemPrompt(base: string, knowledge: () => KnowledgeService | undefined, choice: Required<HomeTaskWorkerChoice>, activation: "user" | "wake"): Promise<HomeSystemPrompt> {
+export async function homeSystemPrompt(base: string, knowledge: () => ProfileStore | undefined, choice: Required<HomeTaskWorkerChoice>, activation: "user" | "wake"): Promise<HomeSystemPrompt> {
   const profile = await homeProfileSection(knowledge, activation);
   return {
     instructions: `${base}\n\n${HOME_OPERATING_CONTEXT}\n\nCurrent Home chat model: ${choice.model.provider}/${choice.model.id}\nCurrent Home thinking level: ${choice.thinking}`,
@@ -163,7 +163,7 @@ export async function homeSystemPrompt(base: string, knowledge: () => KnowledgeS
 export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess | undefined,
   delegate: (request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange) => Promise<HomeTaskHandle>,
   task: (request: unknown, confirm?: ConfirmChange) => Promise<unknown>,
-  knowledge: () => KnowledgeService | undefined,
+  knowledge: () => ProfileStore | undefined,
   profileChanges: () => HomeProfileChangeAccess | undefined,
   monitor: (toolCallId: string, request: unknown) => Promise<unknown>): ExtensionFactory {
   return (pi) => {

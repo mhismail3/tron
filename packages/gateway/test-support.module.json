@@ -28,7 +28,6 @@
     "test-support/home-task-subagent-child.ts",
     "test-support/home-task-subagents-support.ts",
     "test-support/late-runner-terminal-status-preload.mjs",
-    "test-support/legacy-chronicle.ts",
     "test-support/mcp-oauth-fixture.mjs",
     "test-support/nested-vitest-payload.ts",
     "test-support/network-isolation.ts",

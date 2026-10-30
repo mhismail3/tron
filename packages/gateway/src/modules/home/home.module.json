@@ -9,7 +9,6 @@
     "gateway/episodic",
     "gateway/extensions",
     "gateway/host",
-    "gateway/knowledge",
     "gateway/notifications",
     "gateway/pi",
     "gateway/projection",

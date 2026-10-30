@@ -15,8 +15,6 @@ const gatewayWorkKinds = [
   "provider-login",
   "automation-dispatch",
   "automation-terminal-persistence",
-  "knowledge-observation",
-  "knowledge-curation",
 ] as const;
 
 export type GatewayWorkKind = typeof gatewayWorkKinds[number];

@@ -3,16 +3,16 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
-import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { KnowledgeService } from "../knowledge/knowledge-service.js";
+
+import { ProfileStore } from "../modules/home/profile-store.js";
 import { HomeProfileItems } from "../modules/home/home-profile.js";
 import type { SubjectWrite } from "../kernel/settings/settings-change.js";
 import * as durability from "../foundation/durable-json.js";
 
 const evidence: unknown[] = [];
-let knowledge: KnowledgeService | undefined;
+let knowledge: ProfileStore | undefined;
 afterEach(async () => {
-  vi.restoreAllMocks(); knowledge?.dispose(); knowledge = undefined;
+  vi.restoreAllMocks();  knowledge = undefined;
   await disposeFixtures();
   await fs.mkdir("test-results", { recursive: true });
   await fs.writeFile("test-results/settings-subject-audit.json", JSON.stringify(evidence, null, 2));
@@ -20,7 +20,7 @@ afterEach(async () => {
 
 it("publishes one original Home audit group through file/parent faults, cold retry and real grouped undo", async () => {
   const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
-  knowledge = new KnowledgeService(new KnowledgeStore(f.registry.moduleHost.contract(workspaceModule), () => {}));
+  knowledge = new ProfileStore(f.registry.moduleHost.contract(workspaceModule));
   const profile = new HomeProfileItems(() => knowledge);
   const changes = f.settings.settingsChanges;
   const context = { commandId: "original-home-audit", actor: { kind: "ui" as const, id: "fixture" }, reason: "Original label plan", web: false };
@@ -63,9 +63,9 @@ it("publishes one original Home audit group through file/parent faults, cold ret
   await expect(changes.publishSubjectAudit([...writes].reverse(), context, replayAt)).rejects.toMatchObject({ code: "conflict" });
   expect((await changes.history({ key: "home.profile.item" })).entries).toEqual(original);
 
-  vi.restoreAllMocks(); knowledge.dispose();
+  vi.restoreAllMocks();
   const cold = await f.restartToReadiness();
-  knowledge = new KnowledgeService(new KnowledgeStore(cold.moduleHost.contract(workspaceModule), () => {}));
+  knowledge = new ProfileStore(cold.moduleHost.contract(workspaceModule));
   const current = f.settings.settingsChanges;
   expect(await current.publishSubjectAudit(writes, context, replayAt)).toEqual(published);
   expect((await current.history({ key: "home.profile.item" })).entries).toEqual(original);

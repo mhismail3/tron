@@ -13,7 +13,7 @@ import { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { ManagedSubagents } from "../src/kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/kernel/delegation/delegated-provider.js";
 import { settingsDependencies } from "./settings-dependencies.js";
-import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
+import type { ProfileStore } from "../src/modules/home/profile-store.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extension.js";
 import { modelQueueProjectionPath, type ModelQueueRecord } from "../src/providers/model-queue.js";
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
@@ -86,7 +86,7 @@ export interface FixtureOptions {
   providerUsage?: Pick<ProviderUsageOwner, "read">;
   /** Run Home memory on the real background-queue summarizer instead of a fixed summary. */
   queueSummarizer?: boolean;
-  knowledge?: () => KnowledgeService | undefined;
+  knowledge?: () => ProfileStore | undefined;
   settingsNow?: Parameters<typeof settingsDependencies>[0]["now"];
   homeDiagnostic?: import("../src/modules/home/home-diagnostic.js").HomeDiagnostic;
 }

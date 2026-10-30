@@ -2,7 +2,7 @@ import { homeOwnerOf } from "../../test-support/gateway-registry.js";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
+import type { ProfileNoteRecord } from "../modules/home/profile-note-contract.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { PROVIDER, MODEL_ID, PROFILE_HEADING, readProfilePage, profileReadResult, report, retireFixtures, holdTerminalWrite, recordCase, Step, fixture, homeActivation, profileResults, profileCall, say, profileSection, latestMaintainerEntryId, profileNotes, noteAt, maintainer, command, listed, itemText, history, change, undo } from "../../test-support/home-profile-fixture.js";
 
@@ -161,32 +161,18 @@ describe("Tron Home learned profile", () => {
       say("saved"),
     ]);
     const [item] = await profileNotes(f);
-    // The native owner edits from its typed draft, which models neither tags nor retirement.
-    const { tags: _tags, ...typedContent } = item!.content;
-    await f.knowledge.invoke({ operation: "knowledge.note.update", request: {
-      commandId: "native-confirm-0001",
-      recordId: item!.id,
-      expectedRevision: item!.revisionId,
-      confirmedByUser: true,
-      record: { kind: "note", scope: item!.scope, provenance: item!.provenance, relations: item!.relations, content: { ...typedContent, confirmed: true } },
-    } });
+    // The native Profile operation uses HomeProfileItems.change and its revision fence.
+    await change(f, [{ action: "confirm", id: item!.id, expectedRevision: item!.revisionId }], "native-confirm");
     const next = await homeActivation(f, "after confirm", [say("ok")]);
     expect(next.first.systemPrompt).not.toContain(item!.id);
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, kind: "delegation-default", confirmed: true, status: "active" })]);
     expect((await noteAt(f, item!.id)).content.tags).toEqual(["home-profile", "kind-delegation-default"]);
     expect((await noteAt(f, item!.id)).content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
 
-    // A native correction, from the same typed model, keeps the item too, now corrected.
+    // Refinement takes the same surviving native owner; Profile labels and placement stay intact.
     const confirmed = await noteAt(f, item!.id);
-    await f.knowledge.invoke({ operation: "knowledge.correction", request: {
-      commandId: "native-correct-0001",
-      confirmedByUser: true,
-      recordId: item!.id,
-      expectedRevision: confirmed.revisionId,
-      replacement: { kind: "note", scope: confirmed.scope, provenance: confirmed.provenance, relations: confirmed.relations,
-        content: { title: "Delegate reviews to a cheaper model, by default.", role: "workflow", confirmed: true } },
-      relation: { type: "corrects", recordId: item!.id, revisionId: confirmed.revisionId },
-    } });
+    await change(f, [{ action: "refine", id: item!.id, expectedRevision: confirmed.revisionId,
+      text: "Delegate reviews to a cheaper model, by default." }], "native-refine");
     const corrected = await homeActivation(f, "after correction", [say("ok")]);
     expect(corrected.first.systemPrompt).not.toContain("Delegate reviews to a cheaper model, by default.");
     expect((await readProfilePage(f)).items).toEqual([expect.objectContaining({ id: item!.id, text: "Delegate reviews to a cheaper model, by default.", confirmed: true, status: "active" })]);
@@ -199,13 +185,13 @@ describe("Tron Home learned profile", () => {
     const f = await fixture("bound");
     const ids: string[] = [];
     for (let index = 0; index < 40; index += 1) {
-      const { record } = await f.knowledge.invoke({ operation: "knowledge.note.create", request: {
+      const { record } = await f.knowledge.createNote({
         commandId: `bound-note-${String(index).padStart(4, "0")}-seed`,
         record: {
           kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", sessionId: f.sessionId, evidence: [] }, relations: [],
           content: { title: `Bound item ${index} ${"x".repeat(280)}`, role: "preference", confirmed: false, tags: ["home-profile", "kind-preference"], profile: { version: 2, path: ["inferred", "review"] } },
         },
-      } }) as { record: KnowledgeRecord };
+      }) as { record: ProfileNoteRecord };
       ids.push(record.id);
     }
     const next = await homeActivation(f, "over the bound", [say("ok")]);

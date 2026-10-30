@@ -9,19 +9,15 @@ import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.
 /** The capabilities that record their namespace's initialization beside the
  * workspace root. Adding one here is what lets a missing namespace be reported
  * as lost state instead of a fresh installation. */
-export type TronWorkspaceFeature = "knowledge" | "episodic" | "home-tasks" | "apps";
+export type TronWorkspaceFeature = "profile" | "episodic" | "home-tasks" | "apps";
 
 export type TronWorkspaceUnavailableCause =
   | "invalid-record" | "unsafe-directory" | "missing-root"
   | "owned-elsewhere" | "record-write-failed" | "root-changed";
 
-// Frozen at the shipped schema: a rolled-back build must accept our writes.
-function validSharedRecord(value: unknown): value is { version: 1; knowledgeInitialized?: boolean } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return Object.keys(record).every(key => key === "version" || key === "knowledgeInitialized")
-    && record.version === 1
-    && (record.knowledgeInitialized === undefined || typeof record.knowledgeInitialized === "boolean");
+function validInitializationRecord(value: unknown): value is { version: 1 } {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === 1 && (value as { version?: unknown }).version === 1;
 }
 
 /** Only owns internal-workspace initialization and availability. It neither
@@ -103,7 +99,7 @@ export class TronWorkspace {
       const marker = join(state, "initialized.json");
       cause = "invalid-record";
       const read = await readSecureJson<unknown>(marker, 128);
-      if (read.present && !validSharedRecord(read.value)) throw new Error("Invalid workspace initialization record");
+      if (read.present && !validInitializationRecord(read.value)) throw new Error("Invalid workspace initialization record");
       // A missing established root is loss of data, not a new installation.
       cause = "unsafe-directory";
       try { this.identity = await this.directory(this.root, !read.present); }
@@ -152,12 +148,7 @@ export class TronWorkspace {
     try {
       const read = await readSecureJson<unknown>(marker, 128);
       if (!read.present) return false;
-      if (feature === "knowledge") {
-        if (!validSharedRecord(read.value)) throw new Error("Invalid shared initialization record");
-        return read.value.knowledgeInitialized === true;
-      }
-      if (!read.value || typeof read.value !== "object" || Array.isArray(read.value)
-        || Object.keys(read.value).length !== 1 || (read.value as { version?: unknown }).version !== 1) {
+      if (!validInitializationRecord(read.value)) {
         throw new Error("Invalid initialization record");
       }
       return true;
@@ -165,17 +156,16 @@ export class TronWorkspace {
   }
 
   private featureMarker(feature: TronWorkspaceFeature): string {
-    return join(this.home, "gateway", "workspace-state", feature === "knowledge" ? "initialized.json" : `${feature}-initialized.json`);
+    return join(this.home, "gateway", "workspace-state", `${feature}-initialized.json`);
   }
 
   async markFeatureInitialized(feature: TronWorkspaceFeature): Promise<void> {
     // Separate feature files remove cross-feature lost updates. This queue
     // serializes same-feature check/publication so concurrent initialization
-    // does not republish valid evidence. Knowledge alone writes the frozen record.
+    // does not republish valid evidence.
     const write = this.markerWrites.then(async () => {
       if (await this.featureInitialized(feature)) return;
-      await durableAtomicWriteJson(this.featureMarker(feature), feature === "knowledge"
-        ? { version: 1, knowledgeInitialized: true } : { version: 1 });
+      await durableAtomicWriteJson(this.featureMarker(feature), { version: 1 });
     });
     this.markerWrites = write.catch(() => {});
     await write;

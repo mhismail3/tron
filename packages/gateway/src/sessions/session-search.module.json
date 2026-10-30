@@ -13,7 +13,7 @@
     "session-search.md"
   ],
   "verify": [
-    "scripts/tron test gateway src/sessions/home-research-tools.integration.test.ts src/sessions/legacy-chronicle.integration.test.ts"
+    "scripts/tron test gateway src/sessions/home-research-tools.integration.test.ts"
   ],
   "dependsOn": [
     "gateway/pi"

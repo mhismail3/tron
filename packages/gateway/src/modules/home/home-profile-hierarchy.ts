@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PROFILE_AREAS } from "../../knowledge/knowledge-profile-placement.js";
+import { PROFILE_AREAS } from "./profile-placement.js";
 import type { HomeProfileIndexRead } from "./home-profile.js";
 
 export const PROFILE_SECTION_HEADING = "## Learned profile";
