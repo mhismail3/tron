@@ -103,6 +103,27 @@ kill a draining helper. Retired identities may be removed with System Settings' 
 `com.tron.qualification.native-observer`, `com.tron.qualification.native-capture`. Never reset
 TCC globally or edit its databases.
 
+## Scripted checkpoint
+
+`scripts/tron checkpoint` fetches current main, reuses the signed Mac full-build path
+(including its bundled Gateway), and prints PASS/FAIL for each of five stage-current
+smoke groups. Existing real-Gateway simulator journeys own pairing, fixture state,
+leases and the three host slots; supplementary real Registry/socket/process tests
+cover Home memory/Profile, settings approvals, display persistence, SSH and protocol.
+Each group names its executed probes in `test-results/checkpoint/<sha>/report.json`;
+logs and xcresults survive failures, and later groups still run after a failed probe.
+This is a smoke selection, not exhaustive product or deployed-device qualification:
+future Profile/Knowledge/approval stages update their probes as those features ship.
+It does not measure the five program metrics or claim real APNs/device validation.
+
+Agents use `scripts/tron checkpoint --test-mode`: committed HEAD instead of fetched
+main, a disposable signed-build checkout and isolated Gateway/state, no reinstall
+preparation, install, live restart or live-state mutation. Normal mode invokes existing
+`mac reinstall --app` preparation only after every smoke group passes. That existing
+command does **not** install or restart anything: Finder replacement, launch and live
+verification remain the maintainer's manual actions below; rebuild the iPhone if its
+slice changed. A green simulator checkpoint alone is not a deployed-cohort claim.
+
 ## Reinstall a local Release build
 
 A manual developer installation, not a deployment. It is also the bootstrap for a lockstep

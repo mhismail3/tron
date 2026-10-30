@@ -7,6 +7,7 @@
     "test-cua-assets.sh",
     "test-tron-mac-replace.py",
     "test-verify-mac-install.py",
+    "tron_checkpoint.py",
     "tron_mac_reinstall.py",
     "tron_mac_replace.py",
     "tron_mac_replace_journal.py",

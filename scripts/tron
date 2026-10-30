@@ -50,6 +50,7 @@ Commands:
   mac reinstall --recovery-verify --operation-id <id>
                                     Resumable preparation or archive-only recovery
                                     registration (manual path)
+  checkpoint [--test-mode]          Rebuild main and run five isolated simulator/Gateway smoke outcomes
   version                           Print the canonical Tron version
   measure <base> [<head>]         Advisory moved/rewrite line counts between commits;
                                     JSON in test-results/measure/, never gates
@@ -196,6 +197,9 @@ case "$cmd" in
       exit 66
     fi
     exec node "$GATEWAY/dist/admin/diagnose.js" "$@"
+    ;;
+  checkpoint)
+    exec python3 "$ROOT/scripts/tron_checkpoint.py" "$@"
     ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
