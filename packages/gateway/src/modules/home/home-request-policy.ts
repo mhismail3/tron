@@ -557,7 +557,7 @@ export class HomeRequestPolicy {
       const finish = this.responseTiming.model(activation.operationId);
       try {
         const result = stream(model, context, options);
-        void result.result().then(finish, finish);
+        void Promise.resolve(result).then((stream) => stream.result()).then(finish, finish);
         return result;
       } catch (error) {
         finish();

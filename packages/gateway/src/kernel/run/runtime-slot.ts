@@ -2419,6 +2419,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     // the frame itself follows the no-audience rule of `flushPendingProgress`.
     if (this.dependencies.sessionAudience(this.id) > 0) {
       this.emit("session.progress", safeJson({ message: boundStreamingProgressItem(projected) }));
+      if (message.content.some(part => part.type === "text" && part.text.length > 0)) {
+        this.homeRequestPolicy?.responseTiming.visible(this.activeOperationId);
+      }
     }
     const lastToolIndex = projected.content.findLastIndex(part => part.type === "toolCall");
     const lastBarrierIndex = projected.content.findLastIndex(part => part.type !== "toolCall");
