@@ -120,7 +120,10 @@ persist and send: one faux-provider scenario through the real `RuntimeRegistry`/
 with codemode, tool search and MCP (text and thinking, direct and nested tools,
 `models.classify()` and `image()`, MCP tools, steer and follow-up, abort, manual compaction, a
 Chat model change), normalized and compared with
-`test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`; a busy-loop replay must match too. Run
+`test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`; a busy-loop replay must match too. The
+scenario-lock projection omits shared tool descriptions and parameter schemas already covered by
+the Home activation lock; this changes only the compared projection, not the captured runtime
+transcript or provider schemas. Run
 `npm run test:sdk-behavior-trace` (a mismatch keeps `test-results/sdk-behavior-trace.diff`);
 update deliberately with `npm run update:sdk-behavior-trace` ([scenario locks](scenario-locks.md)).
 The golden is darwin-specific and includes Tron prompt text, so tool snippet changes update it in
