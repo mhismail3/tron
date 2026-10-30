@@ -118,8 +118,11 @@ It does not measure the five program metrics or claim real APNs/device validatio
 
 Agents use `scripts/tron checkpoint --test-mode`: committed HEAD instead of fetched
 main, a disposable signed-build checkout and isolated Gateway/state, no reinstall
-preparation, install, live restart or live-state mutation. Normal mode invokes existing
-`mac reinstall --app` preparation only after every smoke group passes. That existing
+preparation, install, live restart or live-state mutation. Default mode is also validation
+only. The maintainer may run `scripts/tron checkpoint --prepare-reinstall` to invoke existing
+`mac reinstall --app` preparation only after every smoke group passes; this writes the
+existing live maintenance receipt/active pointer and can block other replacements until
+finished or abandoned. It is mutually exclusive with test mode. That existing
 command does **not** install or restart anything: Finder replacement, launch and live
 verification remain the maintainer's manual actions below; rebuild the iPhone if its
 slice changed. A green simulator checkpoint alone is not a deployed-cohort claim.

@@ -39,7 +39,10 @@ OUTCOMES = [
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test-mode", action="store_true", help="committed HEAD, disposable build/state; no reinstall preparation")
+    parser.add_argument("--prepare-reinstall", action="store_true", help="maintainer: prepare existing mac reinstall receipt after a green checkpoint; never installs")
     args = parser.parse_args()
+    if args.test_mode and args.prepare_reinstall:
+        parser.error("--test-mode cannot prepare a live reinstall")
     if not args.test_mode:
         git(ROOT, "fetch", "--no-tags", "origin", "refs/heads/main:refs/remotes/origin/main")
     revision = git(ROOT, "rev-parse", "HEAD" if args.test_mode else "origin/main")
@@ -59,11 +62,18 @@ def main():
             # The existing harness owns its processes, simulator lease and the
             # three host slots. Forward cancellation and wait for its cleanup.
             child = subprocess.Popen(list(map(str, argv)), cwd=source, env=env, stdout=stream, stderr=subprocess.STDOUT)
+            interrupted = []
             def forward(signum, _frame):
+                interrupted.append(signum)
                 child.send_signal(signum)
             previous = {s: signal.signal(s, forward) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
             try:
-                return child.wait()
+                status = child.wait()
+                if interrupted:
+                    report["interrupted_signal"] = interrupted[0]
+                    save()
+                    raise KeyboardInterrupt
+                return status
             finally:
                 for s, handler in previous.items():
                     signal.signal(s, handler)
@@ -102,7 +112,7 @@ def main():
                 outcome["status"] = "PASS" if all(s == 0 for s in statuses) else "FAIL"
                 print(f'{outcome["status"]} S{index}: {name}', flush=True)
                 save()
-            if not args.test_mode and report["build"] == "PASS" and all(o["status"] == "PASS" for o in report["outcomes"]):
+            if args.prepare_reinstall and report["build"] == "PASS" and all(o["status"] == "PASS" for o in report["outcomes"]):
                 report["reinstall_preparation"] = run(source, [source / "scripts/tron", "mac", "reinstall", "--app", app], "reinstall.log")
                 save()
         finally:
@@ -110,6 +120,11 @@ def main():
             # harness's clean owns fixture shutdown and lane/product removal.
             if (fixture / "results").exists():
                 shutil.copytree(fixture / "results", result / "journeys", symlinks=True, dirs_exist_ok=True)
+                latest = result / "journeys/latest-ui"
+                if latest.is_symlink():
+                    name = latest.readlink().name
+                    latest.unlink()
+                    latest.symlink_to(name)
             cleanup = run(source, [source / "scripts/ios-gateway-e2e-test", "clean"], "cleanup.log", environment)
             report["cleanup_exit"] = cleanup
             if args.test_mode:
@@ -123,5 +138,7 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except KeyboardInterrupt:
+        raise SystemExit(130)
     except (Failure, OSError, subprocess.SubprocessError) as error:
         raise SystemExit(str(error))

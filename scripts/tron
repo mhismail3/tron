@@ -50,7 +50,9 @@ Commands:
   mac reinstall --recovery-verify --operation-id <id>
                                     Resumable preparation or archive-only recovery
                                     registration (manual path)
-  checkpoint [--test-mode]          Rebuild main and run five isolated simulator/Gateway smoke outcomes
+  checkpoint [--test-mode|--prepare-reinstall]
+                                    Rebuild main; five isolated simulator/Gateway smoke outcomes
+                                    --prepare-reinstall writes a manual maintenance receipt, never installs
   version                           Print the canonical Tron version
   measure <base> [<head>]         Advisory moved/rewrite line counts between commits;
                                     JSON in test-results/measure/, never gates
