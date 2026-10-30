@@ -129,7 +129,9 @@ cd packages/gateway && npm run test:mac-terminal   # needs the tailnet and Swift
 server and faux model (`test-results/project-root-864.json`). `test:mac-terminal`
 enrolls through a real Gateway into a real sshd and logs in with the app's SSH client,
 then proves same-PID tmux reattachment after transport/network loss and refuses
-missing tmux (`test-results/mac-terminal.json`). Installed XPC and
+missing tmux (`test-results/mac-terminal.json`). Its test-only probe observes
+`stty size` for up to five seconds after fire-and-forget SSH window-change; a
+missed resize fails with the last observed size. Installed XPC and
 real-window capture remain manual qualification.
 
 ## Not here

@@ -67,7 +67,9 @@ function run(command: string, args: string[], input?: string): Promise<string> {
 
 async function connect(endpoint: { hosts: string[]; port: number; username: string; hostKeys: string[] }, privateKeyPEM: string,
   input = "echo TRON_MAC_TERMINAL_$((40+2)); stty size; exit\n"): Promise<ProbeResult> {
-  return JSON.parse(await run(probe, ["connect"], JSON.stringify({ endpoint, privateKeyPEM, sessionName, input, resize: [100, 30] }))) as ProbeResult;
+  const result = JSON.parse(await run(probe, ["connect"], JSON.stringify({ endpoint, privateKeyPEM, sessionName, input, resize: [100, 30] }))) as ProbeResult;
+  if (result.error === "resizeTimeout") throw new Error(result.message);
+  return result;
 }
 
 async function freePort(): Promise<number> {
