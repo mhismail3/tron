@@ -612,9 +612,18 @@ export interface ExtensionFormQuestion {
   allowOther: boolean;
 }
 
+/** The shared before/after projection; values are display text, never secret material. */
+export interface ChangeReview {
+  digest: string;
+  title: string;
+  requiresTap: boolean;
+  items: Array<{ label: string; before: string; after: string; detail?: string; exact?: string }>;
+}
+
+/** Server-owned context of an admitted paired-native response; never parsed from its value. */
+export interface NativeChangeAcceptance { deviceId: string; commandId: string }
+
 export interface ExtensionFormDescriptor {
-  /** One canonical approve/deny question answered directly from the sheet toolbar. */
-  presentation?: "approval";
   version: 1;
   title: string;
   questions: ExtensionFormQuestion[];
@@ -646,6 +655,7 @@ interface ExtensionInteractionBase {
 
 /** Closed method discriminant. Cross-method fields are rejected at the Gateway boundary. */
 export type ExtensionInteraction =
+  | (ExtensionInteractionBase & { method: "change"; review: ChangeReview; options?: never; placeholder?: never; prefill?: never; form?: never })
   | (ExtensionInteractionBase & {
       method: "select";
       options: string[];
@@ -686,6 +696,7 @@ export type ExtensionInteraction =
 type ExtensionInteractionOwnedFields = "id" | "hostEpoch" | "presentationRevision"
   | "expiresAt" | "owner" | "invocationId" | "operationId";
 export type ExtensionInteractionInput =
+  | Omit<Extract<ExtensionInteraction, { method: "change" }>, ExtensionInteractionOwnedFields>
   | Omit<Extract<ExtensionInteraction, { method: "select" }>, ExtensionInteractionOwnedFields>
   | Omit<Extract<ExtensionInteraction, { method: "confirm" }>, ExtensionInteractionOwnedFields>
   | Omit<Extract<ExtensionInteraction, { method: "input" }>, ExtensionInteractionOwnedFields>

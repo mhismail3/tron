@@ -4,17 +4,19 @@ import { lstat, mkdir, opendir, realpath, rename, rmdir } from "node:fs/promises
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { GatewayError } from "../../errors.js";
+import { asUncertainOutcome, GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import type { TrustInspection, TrustService } from "../../kernel/resources/trust-service.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import type { Actor } from "../../kernel/settings/settings-record.js";
-import type { ApprovalActionPreview, ApprovalPresenter, ChangeResult } from "../../kernel/settings/tool-contract.js";
-import { awaitApprovalDecision } from "../../kernel/settings/settings-approval-review.js";
+import type { ChangeResult, ConfirmChange } from "../../kernel/settings/tool-contract.js";
+import type { ChangeReview } from "../../protocol/types.js";
+import { changeReview } from "../../kernel/settings/settings-types.js";
 
 const exec = promisify(execFile);
 export const PROJECT_ACTION = "project.lifecycle";
-type Operation = "trust" | "rename" | "archive" | "untrust";
+type Operation = "create" | "trust" | "rename" | "archive" | "untrust";
+export type ProjectChangeResult = ChangeResult & { intent?: Action };
 interface Action { operation: Operation; name: string; destination?: string; github?: boolean; identity: string }
 export interface ProjectRequest { action: "create" | "trust" | "rename" | "archive" | "untrust"; name: string; newName?: string; github?: boolean; reason: string }
 export type ProjectEligibility = { allowed: true } | { allowed: false; code: string; reason: string };
@@ -52,10 +54,6 @@ export class ProjectLifecycle {
   register(changes: SettingsChangePath): void {
     if (this.changes === changes) return;
     if (this.changes) throw new Error("Project lifecycle already has a settings owner");
-    changes.registerAction(PROJECT_ACTION, {
-      plan: params => this.mutex.run(() => this.plan(this.action(params))),
-      apply: params => this.mutex.run(() => this.apply(this.action(params))),
-    });
     this.changes = changes;
   }
 
@@ -120,13 +118,9 @@ export class ProjectLifecycle {
     return row;
   }
 
-  /** An agent's tool waits in its chat for the decision on its own request (#2050). */
-  wait(requestId: string, requesterSessionId: string, present: ApprovalPresenter, signal?: AbortSignal): Promise<ChangeResult> {
-    if (!this.changes) throw new GatewayError("busy", "Project lifecycle settings are not available");
-    return awaitApprovalDecision({ path: this.changes, requestId, requesterSessionId, present, ...(signal ? { signal } : {}) });
-  }
-
-  async request(input: ProjectRequest, actor: Actor, commandId: string): Promise<ChangeResult> {
+  /** A disposable exact review, or an authenticated native execution. No pending store or outbox. */
+  async request(input: ProjectRequest, actor: Actor, commandId: string,
+    options: { confirmation?: { digest: string; intent: unknown }; confirm?: ConfirmChange } = {}): Promise<ProjectChangeResult> {
     const changes = this.changes;
     if (!changes) throw new GatewayError("busy", "Project lifecycle settings are not available");
     this.name(input.name);
@@ -134,42 +128,52 @@ export class ProjectLifecycle {
     if (!["create", "trust", "rename", "archive", "untrust"].includes(input.action)) throw new GatewayError("invalid_request", "Unknown project action");
     if (input.newName !== undefined && input.action !== "rename") throw new GatewayError("invalid_request", "newName is only for rename");
     if (input.github !== undefined && input.action !== "create" && input.action !== "trust") throw new GatewayError("invalid_request", "github is only for create or trust");
-    // Local creation has no executable authority. Record intent before mkdir, and
-    // leave any partial directory for inspection rather than deleting user work.
-    if (input.action === "create") await this.mutex.run(async () => {
-      await this.root();
-      const path = join(this.workspace, input.name);
-      await this.absent(path);
+    if (options.confirmation && actor.kind !== "ui") throw new GatewayError("invalid_request", "Only paired native UI can confirm a reviewed action");
+    const action = options.confirmation ? this.action(options.confirmation.intent) : {
+      operation: input.action, name: input.name,
+      identity: await this.directory(input.action === "create" ? this.workspace : join(this.workspace, input.name)),
+      ...(input.action === "rename" ? { destination: this.name(input.newName) } : input.action === "archive" ? { destination: input.name + "-" + randomUUID() } : {}),
+      ...(input.github ? { github: true } : {}),
+    };
+    if (action.operation !== input.action || action.name !== input.name || !!action.github !== !!input.github
+      || input.action === "rename" && action.destination !== input.newName) throw new GatewayError("invalid_request", "Project review intent does not match its typed action");
+    const review = await this.mutex.run(() => this.review(action));
+    if (options.confirmation) return this.execute(action, options.confirmation.digest, actor, commandId, input.reason);
+    if (!options.confirm) return { status: "review", review, intent: action, changes: [] };
+    return await options.confirm(review, accepted => this.execute(action, review.digest,
+      { kind: "ui", id: accepted.deviceId }, accepted.commandId, input.reason)) ?? { status: "declined", changes: [] };
+  }
+
+  private async review(action: Action): Promise<ChangeReview> {
+    const preview = await this.plan(action);
+    return changeReview(action, { ...preview, requiresTap: true });
+  }
+
+  private execute(action: Action, digest: string, actor: Actor, commandId: string, reason: string): Promise<ProjectChangeResult> {
+    if (actor.kind !== "ui") throw new GatewayError("invalid_request", "Project effects require the paired native tap");
+    const changes = this.changes!;
+    return changes.withTarget({ kind: "project", cwd: join(this.workspace, action.name) }, () => this.mutex.run(async () => {
+      const review = await this.review(action);
+      if (review.digest !== digest) throw new GatewayError("conflict", "Project changed since review; nothing was applied");
+      await changes.record.recover();
       const changeId = randomUUID();
-      await changes.record.append([{ changeId, commandId, at: new Date().toISOString(), actor,
-        target: { kind: "global" }, layer: "global", key: "project.create", op: "set", after: { path }, reason: input.reason,
-        tier: "quiet", tierBasis: { direction: "narrow", floor: "quiet", floorSource: "code", web: false, risk: null }, status: "pending", action: true }]);
-      try {
-        await mkdir(path, { mode: 0o700 });
-        const identity = await this.directory(path);
-        // An explicit false shadows an inherited/default-always decision before
-        // any resource can load. Only the later approved action grants trust.
-        await this.trust().reserveUntrustedDirectory(path);
-        await this.git(path, ["-c", "init.templateDir=", "init", "--initial-branch=main"]);
-        await this.same(path, identity);
-        await changes.record.append([{ changeId: randomUUID(), refersTo: changeId, commandId, at: new Date().toISOString(), actor,
-          target: { kind: "global" }, layer: "global", key: "project.create", op: "set", after: { path },
-          tier: "quiet", tierBasis: { direction: "narrow", floor: "quiet", floorSource: "code", web: false, risk: null }, status: "applied", action: true }]);
-      } catch (error) {
-        await changes.record.append([{ changeId: randomUUID(), refersTo: changeId, commandId, at: new Date().toISOString(), actor,
-          target: { kind: "global" }, layer: "global", key: "project.create", op: "set", after: { path },
-          tier: "quiet", tierBasis: { direction: "narrow", floor: "quiet", floorSource: "code", web: false, risk: null }, status: "failed", action: true,
-          failure: "Creation did not complete; inspect the retained path before retrying" }]);
-        throw error;
+      const entry = { commandId, actor, target: { kind: "project" as const, cwd: join(this.workspace, action.name) },
+        layer: "global" as const, key: PROJECT_ACTION, op: "set" as const, after: review, reason, action: true as const };
+      await changes.record.append([{ ...entry, changeId, at: new Date().toISOString(), status: "started" }]);
+      let result: { summary: string };
+      try { result = await this.apply(action); }
+      catch (error) {
+        await changes.record.append([{ ...entry, changeId: randomUUID(), refersTo: changeId, at: new Date().toISOString(),
+          status: "failed", failure: "Project effect did not complete cleanly; inspect canonical filesystem, Git and trust state before another action" }]);
+        throw asUncertainOutcome(error, "Project effect may have occurred; inspect before retrying");
       }
-    });
-    const operation = input.action === "create" ? "trust" : input.action;
-    const path = join(this.workspace, input.name);
-    const identity = await this.directory(path);
-    const destination = operation === "rename" ? this.name(input.newName)
-      : operation === "archive" ? `${input.name}-${randomUUID()}` : undefined;
-    return changes.requestAction(PROJECT_ACTION, { operation, name: input.name, identity,
-      ...(destination ? { destination } : {}), ...(input.github ? { github: true } : {}) }, { actor, commandId, reason: input.reason });
+      const appliedId = randomUUID();
+      await changes.record.append([{ ...entry, changeId: appliedId, refersTo: changeId, at: new Date().toISOString(), status: "applied" }])
+        .catch(error => { throw asUncertainOutcome(error, "Project applied but history publication failed"); });
+      return { status: "applied", summary: result.summary, review, changes: [{
+        changeId: appliedId, key: PROJECT_ACTION, layer: "global", status: "applied", undoable: false, result,
+      }] };
+    }));
   }
 
   private name(value: unknown): string {
@@ -182,7 +186,7 @@ export class ProjectLifecycle {
     if (!params || typeof params !== "object" || Array.isArray(params)) throw new GatewayError("invalid_request", "Invalid project action");
     const p = params as Record<string, unknown>;
     if (Object.keys(p).some(key => !["operation", "name", "destination", "github", "identity"].includes(key))
-      || !["trust", "rename", "archive", "untrust"].includes(String(p.operation))
+      || !["create", "trust", "rename", "archive", "untrust"].includes(String(p.operation))
       || typeof p.identity !== "string" || !/^\d+:\d+$/.test(p.identity)
       || p.github !== undefined && p.github !== true) throw new GatewayError("invalid_request", "Invalid project action");
     this.name(p.name);
@@ -190,7 +194,7 @@ export class ProjectLifecycle {
     else if (p.operation === "archive") {
       if (typeof p.destination !== "string" || !p.destination.startsWith(`${p.name}-`) || !/^[A-Za-z0-9_-]{1,110}$/.test(p.destination)) throw new GatewayError("invalid_request", "Invalid archive destination");
     } else if (p.destination !== undefined) throw new GatewayError("invalid_request", "Unexpected destination");
-    if (p.github && p.operation !== "trust") throw new GatewayError("invalid_request", "GitHub creation requires a trust action");
+    if (p.github && p.operation !== "trust" && p.operation !== "create") throw new GatewayError("invalid_request", "GitHub creation requires a trust action");
     return p as unknown as Action;
   }
   private async root(): Promise<void> {
@@ -267,16 +271,27 @@ export class ProjectLifecycle {
     await this.same(path, action.identity);
     return { path, destination, trust, state, hasRemotes: remotes.length > 0, occupancy };
   }
-  private async plan(action: Action): Promise<ApprovalActionPreview> {
-    const { path, destination, trust, state } = await this.inspect(action);
-    return { title: `${action.operation[0]!.toUpperCase()}${action.operation.slice(1)} project ${action.name}`,
-      target: { kind: "project", cwd: path }, items: [
-        { label: "Project", value: path }, { label: "Identity", value: `${action.identity} / ${state}` },
-        { label: "Trust", value: `${trust.effectiveDecision === true ? "Trusted" : "Not trusted"} → ${action.operation === "trust" || action.operation === "rename" && trust.effectiveDecision === true ? "Trusted" : "Not trusted"}` },
-        ...(destination ? [{ label: "Destination", value: destination }] : []),
-        ...(action.github ? [{ label: "GitHub", value: `Create private repository ${action.name} using existing gh authentication; set origin; do not push` }] : []),
-        { label: "Implications", value: action.operation === "trust" ? "Trust loads executable project resources with your Mac user's authority; it is not a sandbox." : "Changes location or executable authority. Release active work first." },
+  private async plan(action: Action): Promise<Omit<ChangeReview, "digest" | "requiresTap">> {
+    if (action.operation === "create") {
+      await this.root();
+      if (await this.directory(this.workspace) !== action.identity) throw new GatewayError("conflict", "Workspace identity changed");
+      const path = join(this.workspace, action.name);
+      await this.absent(path);
+      return { title: "Create and trust project " + action.name, items: [
+        { label: "Project", before: "Absent", after: path, exact: action.identity },
+        { label: "Repository", before: "Absent", after: "Git repository on main" },
+        { label: "Authority", before: "None", after: "Trusted executable project resources", detail: "Trust is not a sandbox; code runs with your Mac user's authority." },
+        ...(action.github ? [{ label: "GitHub", before: "No repository", after: "Create private repository and origin; do not push" }] : []),
       ] };
+    }
+    const { path, destination, trust, state } = await this.inspect(action);
+    return { title: action.operation[0]!.toUpperCase() + action.operation.slice(1) + " project " + action.name, items: [
+      { label: "Project", before: path, after: destination ?? path, exact: action.identity + " / " + state },
+      { label: "Trust", before: trust.effectiveDecision === true ? "Trusted" : "Not trusted",
+        after: action.operation === "trust" || action.operation === "rename" && trust.effectiveDecision === true ? "Trusted" : "Not trusted",
+        detail: "Trust permits executable resources with your Mac user's authority. Revocation cannot undo code already run." },
+      ...(action.github ? [{ label: "GitHub", before: "No remotes", after: "Create private repository " + action.name + " and origin; do not push" }] : []),
+    ] };
   }
   private async setTrust(path: string, value: boolean): Promise<void> {
     await this.trust().setAndApply(path, value,
@@ -285,6 +300,16 @@ export class ProjectLifecycle {
       inspection => this.runtimes.abort(inspection.projectDir));
   }
   private async apply(action: Action): Promise<{ summary: string }> {
+    if (action.operation === "create") {
+      await this.plan(action);
+      const path = join(this.workspace, action.name);
+      await mkdir(path, { mode: 0o700 });
+      const identity = await this.directory(path);
+      await this.trust().reserveUntrustedDirectory(path);
+      await this.git(path, ["-c", "init.templateDir=", "init", "--initial-branch=main"]);
+      await this.same(path, identity);
+      return this.apply({ ...action, operation: "trust", identity });
+    }
     const { path, destination, trust } = await this.inspect(action);
     if (!destination) {
       if (action.github) {

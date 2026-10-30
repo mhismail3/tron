@@ -1,53 +1,7 @@
-import { approvalWaitParameter, settingsOutcomeRequestIds, type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
-import { approvalFormPresenter } from "../kernel/host/approval-form.js";
+import { type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
+import { nativeChangeConfirmer } from "../kernel/host/native-change.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
-import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
-
-/**
- * The `settings` tool and the turn's web mark (docs/settings-model.md 5.1, 5.4).
- *
- * The tool is a thin client of `settings.resolve` and `settings.change` for an
- * agent: Home, a task worker or an ordinary chat's agent, each recorded as that
- * actor. It targets the chat it runs in, so it reaches that chat's layers
- * (Project > Session/Home override > Global). Project is read-only.
- * Home alone may name a delegated
- * worker with `taskId` (#1336): the target is then that worker's session, and
- * the change is still Home's, through the same path, floors and approvals.
- *
- * The web mark is set by the Gateway from the tool calls it executes, never from
- * the model's own account. A tool marks the run unless it declares
- * `annotations.openWorldHint: false` (Mohsin, 2026-10-11): an undeclared tool is
- * untrusted. The mark belongs to the run (the prompt to the agent's final
- * answer): content a tool returned stays in context for the rest of it.
- */
-
-
-
-
-
-
-
-
-/**
- * pi's own tools carry no annotations, so Tron declares the closed-world ones
- * here, bound to their built-in source so a third-party tool of the same name
- * declares for itself. `bash` is trusted (decision 33): Tron passes pi's bash
- * definition as its direct bash tool (`DirectBashProcessOwner`), so its source
- * is `<sdk:bash>`, and owner attribution reserves the name from extensions.
- */
-const PI_CLOSED_WORLD: Readonly<Record<string, readonly string[]>> = {
-  read: ["builtin:read"], edit: ["builtin:edit"], write: ["builtin:write"], grep: ["builtin:grep"], find: ["builtin:find"], ls: ["builtin:ls"],
-  bash: ["builtin:bash", "<sdk:bash>"],
-  // codemode's own call reads nothing; each tool it calls is marked by its own declaration.
-  codemode: ["builtin:codemode"], tool_search: ["builtin:tool-search"],
-};
-
-/** Whether a call to this tool marks the run as having read open-world content. */
-export function marksTurn(tool: Pick<ToolInfo, "name" | "annotations" | "sourceInfo"> | undefined): boolean {
-  if (!tool) return true;
-  if (tool.annotations?.openWorldHint === false) return false;
-  return !(Object.hasOwn(PI_CLOSED_WORLD, tool.name) && PI_CLOSED_WORLD[tool.name]!.includes(tool.sourceInfo.path));
-}
+import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 
 const CHANGE = Type.Object({
   key: Type.String({ minLength: 1, maxLength: 200, description: "A key id from resolve, e.g. run.retry.maxRetries." }),
@@ -58,38 +12,32 @@ const CHANGE = Type.Object({
   expected: Type.Optional(Type.Unknown({ description: "The value read at that layer (null when unset); refused if it changed." })),
 }, { additionalProperties: false });
 
-/**
- * One flat object: providers keep only a tool's top-level `properties`, so a
- * top-level union reached Anthropic models as an empty schema (as the `task`
- * tool found, #961). Per-action requirements are checked by `admitSettingsCall`.
- */
 const PARAMETERS = Type.Object({
-  action: StringEnum(["resolve", "change", "request"] as const, { description: "resolve: read values and where each comes from. change: set or unset keys at their normal tier. request: ask the maintainer to approve and wait for his decision." }),
+  action: StringEnum(["resolve", "change"] as const, { description: "resolve: read current values and scopes. change: apply/log/Undo reversible edits; trust, spend, install and irreversible effects show the shared native card." }),
   keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
   taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
     description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
-  changes: Type.Optional(Type.Array(CHANGE, { minItems: 1, maxItems: 50, description: "change/request (required): the changes, applied together." })),
-  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change/request (required): why, for the maintainer." })),
-  dryRun: Type.Optional(Type.Boolean({ description: "change/request: validate and return the tier without applying or creating a request." })),
-  wait: approvalWaitParameter(true),
+  changes: Type.Optional(Type.Array(CHANGE, { minItems: 1, maxItems: 50, description: "change (required): the changes, applied together." })),
+  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change (required): why, for the maintainer." })),
+  dryRun: Type.Optional(Type.Boolean({ description: "change: validate and return exact before/after without applying." })),
 }, { additionalProperties: false });
 
 type SettingsCall =
   | { action: "resolve"; keys?: string[]; taskId?: string }
-  | { action: "change" | "request"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; wait: boolean; taskId?: string };
+  | { action: "change"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string };
 
 /** Admits one call with a message naming the field, so a model corrects it in one step. */
-function admitSettingsCall(input: { action: "resolve" | "change" | "request"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean; wait?: boolean }): SettingsCall {
+function admitSettingsCall(input: { action: "resolve" | "change"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean }): SettingsCall {
   if (input.action === "resolve") {
-    for (const field of ["changes", "reason", "dryRun", "wait"] as const) {
-      if (input[field] !== undefined) throw new Error(`settings resolve: "${field}" is used only by change/request; resolve takes keys? and taskId?`);
+    for (const field of ["changes", "reason", "dryRun"] as const) {
+      if (input[field] !== undefined) throw new Error(`settings resolve: "${field}" is used only by change; resolve takes keys? and taskId?`);
     }
     return { action: "resolve", ...(input.keys ? { keys: input.keys } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
   }
-  if (input.keys !== undefined) throw new Error(`settings ${input.action}: "keys" is used only by resolve; ${input.action} takes changes, reason, dryRun?, wait? and taskId?`);
+  if (input.keys !== undefined) throw new Error(`settings ${input.action}: "keys" is used only by resolve; ${input.action} takes changes, reason, dryRun? and taskId?`);
   if (!input.changes?.length) throw new Error(`settings ${input.action}: "changes" is required (1 to 50 changes)`);
   if (!input.reason?.trim()) throw new Error(`settings ${input.action}: "reason" is required, written for the maintainer`);
-  return { action: input.action, changes: input.changes as ChangeRequest[], reason: input.reason, wait: input.wait ?? true,
+  return { action: input.action, changes: input.changes as ChangeRequest[], reason: input.reason,
     ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
 }
 
@@ -103,33 +51,17 @@ function signalText(result: ChangeResult): string {
 }
 
 export function createTronSettingsExtension(access: () => SettingsToolAccess | undefined): ExtensionFactory {
-  return (pi) => {
-    let marked = false;
-    pi.on("agent_start", () => { marked = false; });
-    // `tool_call` runs before each call executes, nested codemode calls
-    // included, and before any call of a parallel batch runs.
-    pi.on("tool_call", (event) => {
-      if (marked) return;
-      marked = marksTurn(pi.getAllTools().find(tool => tool.name === event.toolName));
-    });
-    pi.on("before_agent_start", async (_event, context) => {
-      const message = await access()?.takeOutcomes(settingsOutcomeRequestIds(context.sessionManager.getEntries()));
-      return message ? { message } : undefined;
-    });
+  return pi => {
     pi.registerTool({
-      name: "settings",
-      label: "Settings",
-      description: "Read (resolve), change or request approval for Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve needs his tap. Request always asks for his approval. A request needing approval shows in this chat: by default the call waits for his decision (Stop cancels the request); wait false returns pending at once and the outcome arrives later. Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+      name: "settings", label: "Settings",
+      description: "Read and change Tron settings through typed writes. Reversible changes apply, are logged and can be undone. Only irreversible effects, trust/authority, spend and installs need the exact shared native tap. dryRun validates and returns before/after without effects. Home may target its task worker; running workers adopt from the next model request and are signalled.",
       promptSnippet: "Change settings with the settings tool, never by editing settings files.",
       promptGuidelines: [
         "Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.",
-        "Give every change a reason written for the maintainer. A pending change is not applied until the maintainer approves it.",
-        "When a change needs the maintainer's approval, use settings request; the chat shows it to him. Never ask him to open Settings.",
+        "Give every change a reason. Do not use generic forms to authorize effects; native change cards bind their exact before/after.",
       ],
-      parameters: PARAMETERS,
-      annotations: { openWorldHint: false },
-      executionMode: "sequential",
-      execute: async (toolCallId, raw, signal, _onUpdate, context): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> => {
+      parameters: PARAMETERS, annotations: { openWorldHint: false }, executionMode: "sequential",
+      execute: async (toolCallId, raw, signal, _onUpdate, context) => {
         const input = admitSettingsCall(raw);
         const owner = access();
         if (!owner) throw new Error("Settings are not available in this chat");
@@ -141,18 +73,14 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
           }));
           return { content: [{ type: "text", text: JSON.stringify({ ...(resolution.worker ? { worker: resolution.worker } : {}), layers: resolution.layers, keys: summary }) }], details: resolution };
         }
-        let result = await owner.change(input.changes, {
-          reason: input.reason, ...(input.dryRun ? { dryRun: true } : {}), ...(input.action === "request" ? { request: true } : {}), toolCallId, web: marked, ...(input.taskId ? { taskId: input.taskId } : {}),
+        const confirm = nativeChangeConfirmer(context, signal);
+        const result = await owner.change(input.changes, {
+          reason: input.reason, toolCallId, ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}),
+          ...(confirm ? { confirm } : {}),
         });
-        if (result.status === "pending" && !result.dryRun && input.wait) {
-          const worker = result.worker;
-          result = { ...await owner.wait(result.approval!.requestId, approvalFormPresenter(context), signal), ...(worker ? { worker } : {}) };
-        }
-        const text = result.dryRun ? result.status === "failed" ? "Dry run refused; nothing changed." : `Dry run: tier ${result.tier}.`
-          : result.status === "approved" || result.status === "applied" ? `Applied at tier ${result.tier}.${signalText(result)}`
-          : result.status === "pending" ? "Waiting for the maintainer's approval in this chat; nothing changed yet. The outcome arrives as a later message."
-          : `Settings approval ${result.status}; nothing changed.`;
-        return { content: [{ type: "text", text: `${text}\n${JSON.stringify(result)}` }], details: result };
+        const text = result.dryRun ? "Dry run; nothing changed." : result.status === "applied"
+          ? `Applied and logged.${signalText(result)}` : result.status === "review" ? "A paired native change card is required; nothing changed." : `Change ${result.status}.`;
+        return { content: [{ type: "text" as const, text: text + "\n" + JSON.stringify(result) }], details: result };
       },
     });
   };

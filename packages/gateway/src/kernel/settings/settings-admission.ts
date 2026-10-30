@@ -17,7 +17,7 @@ export function compactionAdmission(schema: SettingsSchema, settings: SettingsMa
   const result = resolveSettings(schema, { kind: "session", sessionId: "compaction" }, {
     layers: ["project", "session", "global", "default"], session: { settings: session, ...(ref ? { model: ref } : {}) },
     project: { root: "", document: settings.getProjectSettings() as Record<string, unknown>, applied: settings.isProjectTrusted() },
-    global: settings.getGlobalSettings() as Record<string, unknown>, gateway: {}, floors: {}, trust: {}, macTerminal: {},
+    global: settings.getGlobalSettings() as Record<string, unknown>, gateway: {}, trust: {}, macTerminal: {},
   }, { keys: Object.values(fields), format: { modelName: () => undefined }, options: { clamp: (_source, _dependency, value) => value } });
   const configuration: Record<string, unknown> = {}, source: Record<string, string> = {};
   for (const [field, key] of Object.entries(fields)) {

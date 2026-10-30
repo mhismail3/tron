@@ -17,13 +17,11 @@ import type { SettingsStoreAdapter } from "../admin/settings-model.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath } from "../kernel/settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../kernel/settings/settings-model.js";
 import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_NAMES, type Qualifiers } from "../kernel/settings/tool-contract.js";
-import type { ApprovalRequest } from "../kernel/settings/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SECTIONS, recordSubject } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileOp } from "../modules/home/home-profile.js";
 import type { ObservedStore } from "../kernel/settings/settings-types.js";
-import { actorLabel, approvalProjection, presentHistoryEntry, presentResolution } from "../admin/settings-presentation.js";
-import { maxTier } from "../kernel/settings/settings-types.js";
+import { presentHistoryEntry, presentResolution } from "../admin/settings-presentation.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
@@ -436,7 +434,6 @@ export class GatewayService {
     // `settings` tool reach the same after-apply effects, broadcasts and pushes.
     dependencies.settingsChanges?.observe({
       applied: (target, changes, context) => this.settingsChanged(target, changes, context),
-      approvals: (event) => this.settingsApprovalsChanged(event),
     });
     // Outside changes reach the same after-apply effects and broadcast, one store at a time.
     dependencies.settingsModel?.owner.outsideChanges?.observe({
@@ -447,8 +444,8 @@ export class GatewayService {
           const group = outside.filter(entry => entry.actor.id === file);
           await this.settingsChanged(group[0]!.target, group.map(entry => ({
             changeId: entry.changeId, key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}),
-            layer: entry.layer, status: entry.status, tier: entry.tier,
-          })), { actor: group[0]!.actor, tier: maxTier(...group.map(entry => entry.tier)) });
+            layer: entry.layer, status: entry.status,
+          })), { actor: group[0]!.actor });
         }
         const committed = entries.filter(entry => entry.status === "committed");
         if (committed.length) dependencies.broadcast("settings.changed", safeJson({
@@ -465,16 +462,6 @@ export class GatewayService {
   private recordSubjectsChangedOutside(entries: readonly ChangeEntry[]): void {
     for (const file of new Set(entries.map(entry => entry.actor.id))) {
       const group = entries.filter(entry => entry.actor.id === file);
-      const loud = group.filter(entry => entry.tier !== "quiet");
-      if (loud.length) {
-        const what = [...new Set(loud.map(entry => {
-          const subject = recordSubject(entry.key)!;
-          const name = entry.qualifiers?.[subject.qualifier];
-          return `${subject.label}${name ? ` ${name}` : ""}`;
-        }))].join(", ");
-        void this.settingsPush(group[0]!.actor, `settings-outside:${group[0]!.changeId}`, "explicit", "Changed outside Tron",
-          `${what} changed outside Tron in ${file}. Review it in Tron.`);
-      }
       this.dependencies.broadcast("settings.changed", safeJson({
         changeIds: group.map(entry => entry.changeId), keys: [...new Set(group.map(entry => entry.key))], layer: group[0]!.layer, target: group[0]!.target,
       }));
@@ -1935,12 +1922,13 @@ export class GatewayService {
         });
       case "extension.respond":
         return this.mutation(client, method, params, async () => {
-          (await this.openedSlot(client, params)).respondToInteraction(
+          await (await this.openedSlot(client, params)).respondToInteraction(
             string(params.interactionId, "interactionId", { max: 100 }),
             string(params.hostEpoch, "hostEpoch", { max: 100 }),
             integer(params.presentationRevision, "presentationRevision", 0, Number.MAX_SAFE_INTEGER),
             params.value,
             params.cancelled === undefined ? false : boolean(params.cancelled, "cancelled"),
+            { deviceId: client.identity, commandId: string(params.commandId, "commandId", { max: 160 }) },
           );
           return { answered: true };
         }, true);
@@ -2116,7 +2104,7 @@ export class GatewayService {
       }
       case "settings.change":
         return this.mutation(client, method, params, async (workToken) => {
-          rejectUnknownFields(params, ["commandId", "target", "fence", "changes", "reason", "dryRun"], method);
+          rejectUnknownFields(params, ["commandId", "target", "fence", "changes", "reason", "dryRun", "confirmationDigest"], method);
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
@@ -2135,6 +2123,7 @@ export class GatewayService {
             ...(params.reason === undefined ? {} : { reason: boundedText(params.reason, "reason", 2_000) }),
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(params.dryRun === true ? { dryRun: true } : {}),
+            ...(params.confirmationDigest === undefined ? {} : { confirmationDigest: string(params.confirmationDigest, "confirmationDigest", { min: 64, max: 64 }) }),
             ...(session ? { session } : {}),
             ...(homeChapter ? { homeChapter } : {}),
           });
@@ -2168,45 +2157,6 @@ export class GatewayService {
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(homeChapter ? { homeChapter } : {}),
-          }));
-        });
-      case "settings.approvals": {
-        rejectUnknownFields(params, [], method);
-        return safeJson({ requests: (await this.dependencies.settingsChanges.pendingApprovals()).map(request => approvalProjection(this.dependencies.settingsModel.schema, request)) });
-      }
-      case "settings.decide":
-        // The maintainer's decision on a pending change, bound to the exact diff
-        // he saw (docs/settings-model.md 5.5) is its fence, re-checked against the
-        // stores: no client fence; the slot's own appliers and lane guards (#1642).
-        return this.mutation(client, method, params, async (workToken) => {
-          rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved"], method);
-          const requestId = string(params.requestId, "requestId", { max: 100 });
-          const request = await this.dependencies.settingsChanges.approvals.get(requestId);
-          const pending = request?.target;
-          let running: ReturnType<RuntimeSlot["settingsApprovalContext"]>;
-          let session: ChangeContext["session"];
-          try {
-            running = request?.actor.sessionId && request.actor.toolCallId && !request.action && params.approved === true
-              ? (await this.slot({ sessionId: request.actor.sessionId })).settingsApprovalContext(requestId) : undefined;
-            session = pending?.kind === "session" && params.approved === true
-              ? pending.sessionId === request?.actor.sessionId && running?.session ? running.session
-                : (await this.slot({ sessionId: pending.sessionId })).taskWorkerSettingsSession() : undefined;
-          } catch (error) {
-            // The diff's target chat is gone, so it can never be approved: retire
-            // it (its waiting tool hears superseded) rather than orphan it (#2015).
-            if (request?.status === "pending" && request.actor.sessionId && error instanceof GatewayError && error.code === "not_found") {
-              await this.dependencies.settingsChanges.cancelApproval(requestId, request.actor.sessionId, "decision-failed");
-            }
-            throw error;
-          }
-          const homeChapter = pending?.kind === "home" && params.approved === true ? running?.homeChapter ?? await this.settingsHomeChapter(workToken) : undefined;
-          return safeJson(await this.dependencies.settingsChanges.decide(requestId, {
-            ...(homeChapter ? { homeChapter } : {}),
-            digest: string(params.digest, "digest", { max: 64 }),
-            approved: boolean(params.approved, "approved"),
-            decidedBy: { kind: "ui", id: client.identity },
-            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
-            ...(session ? { session } : {}),
           }));
         });
       case "settings.history": {
@@ -2460,29 +2410,15 @@ export class GatewayService {
 
   /** After-apply effects by each key's effect point, then the broadcast (doc 5.2
    * step 6), and for a notify-tier change an agent made, the push with Undo (5.4). */
-  private async settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: string; reason?: string; approved?: true }): Promise<void> {
+  private async settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; reason?: string }): Promise<void> {
     if (changes.length === 0) return;
-    if (context.actor.kind === "outside") {
-      // An outside change is already in its store: its floor decides only
-      // whether it pushes (docs/settings-model.md 5.6, F3).
-      const loud = changes.filter(change => change.tier !== "quiet");
-      if (loud.length) {
-        const what = [...new Set(loud.map(change => this.dependencies.settingsModel.schema.auditSubject(change.key)?.label ?? change.key))].join(", ");
-        void this.settingsPush(context.actor, `settings-outside:${changes[0]!.changeId}`, "explicit", "Changed outside Tron",
-          `${what} changed outside Tron in ${context.actor.id}. Review it in Tron.`);
-      }
-    } else if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
-      const what = [...new Set(changes.map(change => this.dependencies.settingsModel.schema.auditSubject(change.key)?.label ?? change.key))].join(", ");
-      void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
-        `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
-    }
     // Project-layer effects address every live chat of the changed store's
     // Project root (TrustInspection.projectDir), not only chats at one cwd; a chat
     // target's project layer is its own root.
     const projectDir = target.kind === "project" ? (await this.dependencies.trust.inspect(target.cwd)).projectDir
       : target.kind === "session" && changes.some(change => change.layer === "project")
         ? (await this.slot({ sessionId: target.sessionId })).projectDir : undefined;
-    if (context.actor.kind === "ui" || context.actor.kind === "outside" || context.approved === true) {
+    if (changes.some(change => change.key === "context.images.block")) {
       // A chat/Home requester can edit a default layer. Scope follows the
       // changed store, not the target through which the request arrived.
       const imageLayers = new Set(changes.filter(change => change.key === "context.images.block").map(change => change.layer));
@@ -2517,34 +2453,6 @@ export class GatewayService {
     for (const change of changes) {
       if (change.key === "permissions.projectTrust" && change.result !== undefined) this.dependencies.broadcast("trust.changed", safeJson(change.result));
     }
-  }
-
-  /** A pending change asks the maintainer (push "Waiting for you"); every change
-   * to the pending set is broadcast so open clients refresh it (doc 5.5). */
-  private settingsApprovalsChanged(event: { kind: "pending" | "resolved"; request: ApprovalRequest }): void {
-    if (event.kind === "pending") {
-      // One wording for every request kind (#2050): what it is, then why.
-      const what = event.request.action?.preview.title
-        ?? event.request.changes.map(change => this.dependencies.settingsModel.schema.schemaKey(change.key).label).join(", ");
-      void this.settingsPush(event.request.actor, `settings-approval:${event.request.requestId}`, "waiting", "Approval needed",
-        `${actorLabel(event.request.actor)} asks for your approval: ${what}${event.request.reason ? ` — ${event.request.reason}` : ""}`, "settings-approval");
-    }
-    this.dependencies.broadcast("settings.approvalsChanged", safeJson({ kind: event.kind, requestId: event.request.requestId, status: event.request.status }));
-  }
-
-  /** Pushes are advisory: an unavailable relay leaves the pending change and the record as they are. */
-  private async settingsPush(actor: Actor, sourceId: string, kind: "explicit" | "waiting", title: string, message: string, category?: "settings-approval"): Promise<void> {
-    const notifications = this.dependencies.notifications;
-    if (!notifications) return;
-    const sessionId = actor.sessionId ?? "settings";
-    const machineId = this.dependencies.config?.machineId;
-    await notifications.enqueue({
-      sessionId, sourceId, kind, title, message: message.slice(0, 512),
-      ...(category ? { category } : {}),
-      ...(actor.sessionId && machineId ? { route: { sessionId: actor.sessionId, machineId } } : {}),
-    }).catch((error: unknown) => this.dependencies.logger?.log("warning", "Settings notification was not queued", {
-      event: "settings.notification.failed", source: "settings", error: error instanceof Error ? error.message : String(error),
-    }));
   }
 
   private configurationExpectation(params: Record<string, unknown>) {

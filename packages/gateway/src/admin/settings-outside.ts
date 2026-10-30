@@ -8,9 +8,9 @@ import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { readJsonDocument } from "../foundation/json.js";
 import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from "./project-settings-writer.js";
 import type { ChangeEntry, SettingsChangeRecord } from "../kernel/settings/settings-record.js";
-import { type GitResult, type Qualifiers, type Tier } from "../kernel/settings/tool-contract.js";
-import type { OutsideMark, FloorOverrides, ObservedStore, PlannedWrite } from "../kernel/settings/settings-types.js";
-import { keyDefault, floorFor, recordSubject, type SettingsSchema, type Binding, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
+import { type GitResult, type Qualifiers } from "../kernel/settings/tool-contract.js";
+import type { OutsideMark, ObservedStore, PlannedWrite } from "../kernel/settings/settings-types.js";
+import { recordSubject, type SettingsSchema, type Binding, type KeyDeclaration } from "../kernel/settings/settings-schema.js";
 import { readPath } from "../kernel/settings/settings-resolver.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
@@ -70,7 +70,6 @@ export interface ObservedReaders {
   /** pi's own reader for the Mac `settings.json`, so parse rules match the runtime. */
   global(): Promise<Record<string, unknown>>;
   project(root: string): Promise<Record<string, unknown> | undefined>;
-  floors(): Promise<FloorOverrides>;
 }
 
 
@@ -496,7 +495,6 @@ export class OutsideChanges {
       state = document.stores[id]!;
     }
     const entries: ChangeEntry[] = [];
-    const floors = await this.readers.floors().catch(() => ({} as FloorOverrides));
     const instances = new Set([...Object.keys(state.values), ...current.keys()]);
     for (const instance of instances) {
       const before = state.values[instance];
@@ -517,7 +515,7 @@ export class OutsideChanges {
         continue;
       }
       if (fingerprint(before) === fingerprint(after)) continue;
-      const entry = this.outsideEntry(store, (after ?? before)!, before, after, state.tron[instance], floors, git, at);
+      const entry = this.outsideEntry(store, (after ?? before)!, before, after, state.tron[instance], git, at);
       entries.push(entry);
       state.outside[instance] = {
         changeId: entry.changeId, applyAgain: state.tron[instance] !== undefined,
@@ -537,16 +535,11 @@ export class OutsideChanges {
   }
 
   private outsideEntry(store: ObservedStore, value: ObservedValue, before: ObservedValue | undefined, after: ObservedValue | undefined,
-    replaced: string | undefined, floors: FloorOverrides, git: { head: string | null; branch: string | null; root: string; path: string } | undefined, at: string): ChangeEntry {
+    replaced: string | undefined, git: { head: string | null; branch: string | null; root: string; path: string } | undefined, at: string): ChangeEntry {
     const key = this.schemaKeyOrUndefined(value.key);
     const subject = recordSubject(value.key);
     const qualifiers = value.qualifiers ?? {};
-    const defaultValue = key ? keyDefault(key, qualifiers) : undefined;
     const redacted = key?.redacted === true || subject !== undefined;
-    const direction = key?.direction && !redacted ? key.direction(before?.value ?? defaultValue, after?.value ?? defaultValue) : "widen";
-    // An outside change cannot be gated: its tier, the key's (or record
-    // subject's) floor for its direction, decides only whether it pushes (doc 5.6).
-    const { floor, source } = key ? floorFor(key, direction, floors) : { floor: subject?.floor ?? "notify" as Tier, source: "code" as const };
     const file = observedFile(store, this.agentDir);
     return {
       changeId: randomUUID(), at, actor: { kind: "outside", id: file },
@@ -558,7 +551,6 @@ export class OutsideChanges {
       ...(redacted ? { changed: true as const, redacted: true as const } : {
         ...(before?.value === undefined ? {} : { before: before.value }), ...(after?.value === undefined ? {} : { after: after.value }),
       }),
-      tier: floor, tierBasis: { direction, floor, floorSource: source, web: false, risk: null },
       status: "outside",
       ...(replaced ? { refersTo: replaced } : {}),
       ...(git ? { git: { root: git.root, path: git.path, staged: false, ...(git.head ? { head: git.head } : {}), ...(git.branch ? { branch: git.branch } : {}) } } : {}),

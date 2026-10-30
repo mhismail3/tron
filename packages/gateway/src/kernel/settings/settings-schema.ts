@@ -1,7 +1,7 @@
 import { GatewayError } from "../../errors.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../../util/validation.js";
-import { type FloorOverrides, type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
-import { TIERS, MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Tier, type Direction } from "./tool-contract.js";
+import { type Control, type Effect, type Timing, type ValueType, type Writer, DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types } from "./settings-types.js";
+import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Direction } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
 
 /**
@@ -18,7 +18,6 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "workers", title: "Workers & delegation", description: "Task budget and retained overrides", order: 15, harness: true, chatInline: true },
   { id: "context", title: "Compaction", description: "Automatic summaries and retained context", order: 20, harness: true },
   { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
-  { id: "approvals", title: "Agent changes", description: "Which setting changes need your OK", order: 45, harness: true },
   { id: "run", title: "Connection", description: "Proxy and retained overrides", order: 50, harness: true },
   { id: "trust", title: "Trusted Projects", description: "Project trust decisions and default policy", order: 55, harness: true },
   { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58, harness: false },
@@ -45,14 +44,10 @@ export type Binding =
    * one Mac Terminal key per paired iPhone, qualified by `device`. */
   | { store: "mac-terminal" }
   | { store: "mac-terminal-service" }
-  /** `<tronHome>/gateway/settings/floors.json`: the maintainer's floor
-   * overrides, `{ [keyId]: { widen?, narrow? } }` (doc 5.4). */
-  | { store: "floors" }
   /** `<tronHome>/gateway/settings/gateway.json`: Gateway-owned behaviour no pi
    * file holds, by path (Global scope only; only the change path writes it). */
   | { store: "gateway"; path: readonly string[] };
 
-export type Floor = Tier | { widen: Tier; narrow: Tier };
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
 export interface KeyDeclaration {
@@ -76,7 +71,8 @@ export interface KeyDeclaration {
   defaultValueFor?: (qualifiers: Partial<Record<QualifierName, string>>) => unknown;
   timing: TimingDeclaration;
   effect: Effect;
-  floor: Floor;
+  /** Only trust/authority, spend, install or irreversible effects require a native tap. */
+  tap?: "trust" | "spend" | "install" | "irreversible";
   /** How a change's direction is read. Keys without one use their single floor. */
   direction?: (before: unknown, after: unknown) => Direction;
   /** Who may request a change. This list is the grant (decision 34): there is
@@ -209,16 +205,6 @@ const sessionPi = (...path: string[]) => ({ session: { store: "session-settings"
 
 const thinkingType = types.choice(THINKING, true);
 
-const TIER_LABELS = [
-  { value: "quiet", label: "Quiet", detail: "The change applies without telling you" },
-  { value: "notify", label: "Notify", detail: "The change applies, and you are told" },
-  { value: "approve", label: "Approve", detail: "The change waits for your approval" },
-] as const;
-function tierType(): ValueType { return types.choice(TIER_LABELS, true); }
-/** A floor change lowers (widens) when the new tier is below the one it replaces. */
-const lowers = (before: unknown, after: unknown): Direction =>
-  TIERS.indexOf(String(after) as Tier) < TIERS.indexOf(String(before) as Tier) ? "widen" : "narrow";
-
 export function createSettingsSchema(homeToolNames: readonly string[], compactionInstructionLimit: number, validateTerminalKey: (value: unknown, label: string) => string) {
   const KEYS: readonly KeyDeclaration[] = ([
     // Model ---------------------------------------------------------------
@@ -226,7 +212,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       id: "model.ref[role=chat]", sessionOverridable: true, projectSettable: true, group: "model", fixed: { role: "chat" }, type: types.modelRef(),
       optionsSource: { name: "catalog.models", dependsOn: [] },
       layers: { session: { store: "session", field: "model" }, home: { store: "home", path: ["model", "chat"] }, ...both({ store: "pi-model-ref" }) },
-      timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
+      timing: "fixed", effect: "next-turn", writers: ANY_ACTOR,
       label: "Model", help: "The model this chat runs.", order: 10, importance: "essential", control: "catalog", fallback: "readOnly",
     },
     {
@@ -237,7 +223,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         session: { store: "session", field: "thinking" }, home: { store: "home", path: ["thinking", "chat"] },
         ...both({ store: "pi", path: ["defaultThinkingLevel"], qualified: ["modelThinkingLevels", "{model}"] }),
       },
-      timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
+      timing: "fixed", effect: "next-turn", writers: ANY_ACTOR,
       label: "Thinking", help: "How much the model reasons before it answers.",
       order: 20, importance: "essential", control: "choice",
     },
@@ -245,19 +231,19 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       id: "model.contextWindow", sessionOverridable: true, projectSettable: true, group: "model", qualifier: "model", type: types.integer(1_024, 100_000_000, "tokens"),
       optionsSource: { name: "catalog.contextWindow", dependsOn: ["model.ref[role=chat]"] },
       layers: { session: { store: "session", field: "contextWindow" }, ...both(pi("modelContextWindows", "{model}")) },
-      timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
+      timing: "fixed", effect: "next-turn", writers: ANY_ACTOR,
       label: "Context window", help: "Tokens of conversation the model is given.",
       order: 30, importance: "essential",
     },
     {
       id: "model.thinkingBudgets", sessionOverridable: false, projectSettable: false, group: "workers", type: thinkingBudgetsType(),
-      layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
+      layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", writers: ANY_ACTOR,
       label: "Thinking budgets", help: "Token budget per thinking level, for models that take one.", order: 60, importance: "advanced",
     },
     {
       id: "model.thinking[role=summarizer]", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
       type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
-      layers: both(pi("compaction", "thinkingLevel")), defaultValue: "inherit", timing: "live", effect: "next-compaction", floor: "quiet",
+      layers: both(pi("compaction", "thinkingLevel")), defaultValue: "inherit", timing: "live", effect: "next-compaction", 
       writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
       importance: "advanced",
     },
@@ -269,14 +255,14 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       layers: { ...(role === "background" ? {} : { session: { store: "session-launch" as const } }),
         home: { store: "home", path: ["modelQueue", role] }, global: { store: "gateway", path: ["modelQueues", role] } },
       timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
-      floor: "notify", writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
+      writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
       order: 40 + index * 2, importance: "essential", control: "list", fallback: "readOnly",
       optionsSource: { name: "catalog.models", dependsOn: [] },
     })),
     {
       id: "model.thinking[role=worker]", sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role: "worker" }, type: sameAsHomeChoice(thinkingType),
       layers: { home: { store: "home", path: ["thinking", "worker"] }, global: { store: "gateway", path: ["workerThinking"] } }, defaultValue: { sameAs: "home" },
-      timing: "fixed", effect: "delegate", floor: "notify", writers: ["ui", "home"],
+      timing: "fixed", effect: "delegate", writers: ["ui", "home"],
       label: "Worker thinking", help: "The thinking level Home's task workers start with.", order: 41, importance: "essential",
     },
     // Context -------------------------------------------------------------
@@ -284,52 +270,52 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       id: "context.compaction.enabled", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.boolean(),
       // The compaction owner captures the shared resolver's Project > Session >
       // Global result at the operation boundary.
-      layers: sessionPi("compaction", "enabled"), defaultValue: true, timing: "live", effect: "next-compaction", floor: "quiet",
+      layers: sessionPi("compaction", "enabled"), defaultValue: true, timing: "live", effect: "next-compaction", 
       writers: ANY_ACTOR, label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
       order: 10, importance: "essential",
     },
     {
       id: "context.compaction.reserveTokens", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
       layers: { session: { store: "session-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
-      defaultValue: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
+      defaultValue: 16_384, timing: "live", effect: "next-compaction", writers: ANY_ACTOR,
       label: "Response reserve", help: "Tokens kept free for the reply. Compaction starts once the conversation fills the context window minus this.", order: 20, importance: "advanced",
     },
     {
       id: "context.compaction.keepRecentTokens", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
       layers: { session: { store: "session-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
-      defaultValue: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
+      defaultValue: 20_000, timing: "live", effect: "next-compaction", writers: ANY_ACTOR,
       label: "Kept after compaction", help: "The latest tokens of conversation kept word for word; older turns become a summary.", order: 30, importance: "advanced",
     },
     {
       id: "context.compaction.instructions", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.text(compactionInstructionLimit, { raw: true }),
-      layers: sessionPi("compaction", "instructions"), defaultValue: "", timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
+      layers: sessionPi("compaction", "instructions"), defaultValue: "", timing: "live", effect: "next-compaction", writers: ["ui", "home"],
       label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced",
     },
     {
       id: "context.branchSummary.reserveTokens", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
-      layers: both(pi("branchSummary", "reserveTokens")), defaultValue: 16_384, timing: "live", effect: "next-compaction", floor: "quiet",
+      layers: both(pi("branchSummary", "reserveTokens")), defaultValue: 16_384, timing: "live", effect: "next-compaction", 
       writers: ANY_ACTOR, label: "Branch summary reserve", help: "Tokens reserved when summarizing an abandoned branch.",
       order: 50, importance: "advanced",
     },
     {
       id: "context.images.autoResize", sessionOverridable: true, projectSettable: true, group: "tools", subgroup: "Images", type: types.boolean(),
-      layers: sessionPi("images", "autoResize"), defaultValue: true, timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("images", "autoResize"), defaultValue: true, timing: "fixed", effect: "new-chat", writers: ANY_ACTOR,
       label: "Resize images", help: "Shrink large images before they are sent.", order: 60, importance: "advanced",
     },
     {
       id: "context.images.block", sessionOverridable: true, projectSettable: false, group: "tools", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
       layers: sessionPi("images", "blockImages"), defaultValue: false, timing: { narrow: "live", widen: "fixed" }, effect: "next-request",
-      floor: { widen: "approve", narrow: "quiet" }, direction: turnsOn, writers: ANY_ACTOR,
+      direction: turnsOn, writers: ANY_ACTOR,
       label: "Block images", help: "Replace images with a placeholder for the model.", order: 70, importance: "advanced", control: "toggle",
       confirm: "Allowing images again lets the model see image content.",
     },
     // Tools ---------------------------------------------------------------
     {
-      id: "tools.active", sessionOverridable: true, projectSettable: false, group: "tools", type: toolSelectionType(),
+      tap: "trust", id: "tools.active", sessionOverridable: true, projectSettable: false, group: "tools", type: toolSelectionType(),
       optionsSource: { name: "catalog.tools", dependsOn: [] },
       layers: { session: { store: "session", field: "tools" }, home: { store: "home", path: ["tools"] }, ...both(pi("defaultTools")) },
       home: { layers: ["session", "home"], defaultValue: homeToolNames },
-      defaultValue: DEFAULT_TOOL_NAMES, timing: "fixed", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
+      defaultValue: DEFAULT_TOOL_NAMES, timing: "fixed", effect: "next-turn", 
       direction: toolsDirection, writers: ANY_ACTOR,
       label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "checklist",
     },
@@ -338,30 +324,30 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "on", label: "On", detail: "The model calls tools directly or from a script" },
         { value: "only", label: "Only code mode", detail: "The model calls tools only from scripts" },
       ]),
-      layers: both(pi("codemode", "mode")), timing: "fixed", effect: "new-chat", floor: { widen: "notify", narrow: "quiet" },
+      layers: both(pi("codemode", "mode")), timing: "fixed", effect: "new-chat", 
       writers: ["ui", "home"], label: "Code mode", help: "Let the model call tools from a script.", order: 20, importance: "advanced", control: "choice",
     },
     {
       id: "tools.codemode.inlineBudget", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "tools", type: types.integer(0, 1_000_000, "bytes"),
-      layers: both(pi("codemode", "inlineBudget")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home"],
+      layers: both(pi("codemode", "inlineBudget")), timing: "fixed", effect: "new-chat", writers: ["ui", "home"],
       label: "Inline budget", help: "Bytes of script output returned inline.", order: 30, importance: "advanced",
     },
     {
-      id: "tools.shell.path", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "tools", type: types.text(4_096),
-      layers: both(pi("shellPath")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
+      tap: "trust", id: "tools.shell.path", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "tools", type: types.text(4_096),
+      layers: both(pi("shellPath")), timing: "fixed", effect: "new-chat", writers: ["ui", "home"],
       label: "Shell", help: "The shell the bash tool runs.", order: 40, importance: "advanced", control: "text",
       entry: { hint: "The path to a Bash executable on the Mac. ~ is allowed.", example: "/opt/homebrew/bin/bash" },
     },
     {
-      id: "tools.shell.commandPrefix", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "tools", type: types.text(4_096),
-      layers: both(pi("shellCommandPrefix")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
+      tap: "trust", id: "tools.shell.commandPrefix", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "tools", type: types.text(4_096),
+      layers: both(pi("shellCommandPrefix")), timing: "fixed", effect: "new-chat", writers: ["ui", "home"],
       label: "Command prefix", help: "Text run before every shell command.", order: 50, importance: "advanced", control: "text",
       entry: { hint: "Shell code run before each command, on one line.", example: "shopt -s expand_aliases" },
     },
     // Permissions ---------------------------------------------------------
     {
-      id: "permissions.projectTrust", sessionOverridable: false, projectSettable: false, group: "trust", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
-      layers: { global: { store: "trust" } }, timing: "live", effect: "reload", floor: { widen: "approve", narrow: "notify" }, direction: grants,
+      tap: "trust", id: "permissions.projectTrust", sessionOverridable: false, projectSettable: false, group: "trust", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
+      layers: { global: { store: "trust" } }, timing: "live", effect: "reload", direction: grants,
       writers: ["ui", "home"], label: "Trust for this project", help: "Lets this project's extensions, hooks and settings load.",
       order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
     },
@@ -369,7 +355,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       // A paired iPhone's key in the private native SSH service, after host trust.
       // Adding one lets that iPhone's Secure Enclave key log in over Tailscale,
       // so it is a credential addition (approve); removing it is a revocation.
-      id: "permissions.macTerminalKey", sessionOverridable: false, projectSettable: false, group: "connections", subgroup: "Mac Terminal", qualifier: "device",
+      tap: "trust", id: "permissions.macTerminalKey", sessionOverridable: false, projectSettable: false, group: "connections", subgroup: "Mac Terminal", qualifier: "device",
       type: {
         kind: "text",
         validate: (value: unknown, label: string) => validateTerminalKey(value, label),
@@ -379,91 +365,80 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         },
       },
       layers: { global: { store: "mac-terminal" } }, timing: "live", effect: "next-change",
-      floor: { widen: "approve", narrow: "notify" }, direction: (_before, after) => after === undefined ? "narrow" : "widen",
+      direction: (_before, after) => after === undefined ? "narrow" : "widen",
       writers: ANY_ACTOR, label: "Mac Terminal key",
       help: "Lets this paired iPhone open a shell through Tron’s private Tailscale-only SSH service, even without the Gateway.",
       order: 15, importance: "advanced", control: "readOnly",
       confirm: "This iPhone’s key will authorize your Mac account through the private Tron SSH service, after you trust its host fingerprint.",
     },
     {
-      id: "permissions.macTerminalServer", sessionOverridable: false, projectSettable: false,
+      tap: "trust", id: "permissions.macTerminalServer", sessionOverridable: false, projectSettable: false,
       group: "connections", subgroup: "Mac Terminal", type: types.boolean(["Enabled", "Stopped"]),
       layers: { global: { store: "mac-terminal-service" } }, defaultValue: false,
-      timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "notify" }, direction: grants,
+      timing: "live", effect: "next-change", direction: grants,
       writers: ANY_ACTOR, label: "Private Mac SSH service", order: 16, importance: "advanced", control: "toggle",
       help: "A user-level native SSH server bound only to this Mac’s Tailscale IPv4. Stock Remote Login is unchanged.",
       confirm: "Start Tron’s private user SSH server and create or reuse its host identity. No iPhone key is added until you explicitly trust the fingerprint.",
     },
     {
-      id: "permissions.defaultProjectTrust", sessionOverridable: false, projectSettable: false, group: "trust",
+      tap: "trust", id: "permissions.defaultProjectTrust", sessionOverridable: false, projectSettable: false, group: "trust",
       type: types.choice([
         { value: "ask", label: "Ask", detail: "Asks you the first time a project opens" },
         { value: "always", label: "Always trust", detail: "Loads every project's extensions and hooks" },
         { value: "never", label: "Never trust", detail: "Never loads a project's extensions or hooks" },
       ]),
       layers: { global: pi("defaultProjectTrust") }, defaultValue: "ask", timing: "live", effect: "next-change",
-      floor: { widen: "approve", narrow: "notify" }, direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui"],
+      direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui"],
       label: "Default trust policy", help: "What happens with a project that has no trust decision.", order: 20, importance: "advanced",
       control: "choice", confirm: "Always trust loads every new project's extensions and hooks without asking.",
     },
     {
-      // Lowering a floor widens what agents may do, so it is this key's widen
-      // direction and its floor is approve; only the maintainer's tap writes it,
-      // and that tap is the approval (doc 4.2, F3). Nothing else is special.
-      id: "permissions.floor", sessionOverridable: false, projectSettable: false, group: "approvals", subgroup: "Floors", qualifier: "key", type: tierType(),
-      layers: { global: { store: "floors" } }, defaultValueFor: (qualifiers) => codeFloor(qualifiers),
-      timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "quiet" }, direction: lowers, writers: ["ui"],
-      label: "Agent approvals", help: "Which setting changes need your OK.",
-      order: 90, importance: "advanced", control: "choice",
-      confirm: "Lowering a floor lets agents make this change with less of your attention.",
-    },
-    {
       // Home's tasks read it at dispatch: a raise waits for the next task, a lower applies next turn.
-      id: "permissions.budget.task", sessionOverridable: true, projectSettable: false, group: "workers", type: taskBudgetType(),
+      tap: "spend", id: "permissions.budget.task", sessionOverridable: true, projectSettable: false, group: "workers", type: taskBudgetType(),
       layers: { home: { store: "home", path: ["budget", "task"] }, global: { store: "gateway", path: ["taskBudget"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
-      floor: { widen: "approve", narrow: "quiet" }, direction: raisesBudget, writers: ["ui", "home"],
+      direction: raisesBudget, writers: ["ui", "home"],
       label: "Task budget", help: "Tokens one Home task may use, cached included. Empty is no limit.",
       order: 50, importance: "essential", control: "list", confirm: "Raising a task budget lets Home's tasks spend more.",
     },
     // Run -----------------------------------------------------------------
     {
       id: "run.queue.steeringMode", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Queue", type: types.choice(QUEUE),
-      layers: sessionPi("steeringMode"), defaultValue: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("steeringMode"), defaultValue: "one-at-a-time", timing: "live", effect: "next-turn", writers: ANY_ACTOR,
       label: "Steering delivery", help: "How queued steering messages reach a running turn.", order: 10, importance: "advanced",
     },
     {
       id: "run.queue.followUpMode", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Queue", type: types.choice(QUEUE),
-      layers: sessionPi("followUpMode"), defaultValue: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("followUpMode"), defaultValue: "one-at-a-time", timing: "live", effect: "next-turn", writers: ANY_ACTOR,
       label: "Follow-up delivery", help: "How queued follow-up messages are delivered after a turn.", order: 20, importance: "advanced",
     },
     {
       id: "run.retry.enabled", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.boolean(),
-      layers: sessionPi("retry", "enabled"), defaultValue: true, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("retry", "enabled"), defaultValue: true, timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "Retry", help: "Retry a failed model request.", order: 30, importance: "advanced",
     },
     {
       id: "run.retry.maxRetries", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
-      layers: sessionPi("retry", "maxRetries"), defaultValue: 3, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("retry", "maxRetries"), defaultValue: 3, timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "Retries", help: "How many times a failed request is retried.", order: 40, importance: "essential",
     },
     {
       id: "run.retry.baseDelayMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
-      layers: sessionPi("retry", "baseDelayMs"), defaultValue: 2_000, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("retry", "baseDelayMs"), defaultValue: 2_000, timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "Retry delay", help: "The first delay between retries; later delays grow.", order: 50, importance: "advanced",
     },
     {
       id: "run.retry.provider.timeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(1_000, 3_600_000, "ms"),
-      layers: sessionPi("retry", "provider", "timeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("retry", "provider", "timeoutMs"), timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "Provider timeout", help: "The provider client's request timeout.", order: 60, importance: "advanced",
     },
     {
       id: "run.retry.provider.maxRetries", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
-      layers: sessionPi("retry", "provider", "maxRetries"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("retry", "provider", "maxRetries"), timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "Provider retries", help: "Retries inside the provider client.", order: 70, importance: "advanced",
     },
     {
       id: "run.retry.provider.maxRetryDelayMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
-      layers: sessionPi("retry", "provider", "maxRetryDelayMs"), defaultValue: 60_000, timing: "live", effect: "next-request", floor: "quiet",
+      layers: sessionPi("retry", "provider", "maxRetryDelayMs"), defaultValue: 60_000, timing: "live", effect: "next-request", 
       writers: ANY_ACTOR, label: "Provider retry delay cap", help: "The longest delay the provider client waits.",
       order: 80, importance: "advanced",
     },
@@ -475,22 +450,22 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "websocket", label: "WebSocket", detail: "A WebSocket for each request" },
         { value: "websocket-cached", label: "WebSocket (cached)", detail: "One WebSocket reused between requests" },
       ]),
-      layers: sessionPi("transport"), defaultValue: "auto", timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("transport"), defaultValue: "auto", timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "Transport", help: "How requests reach the provider.", order: 90, importance: "essential",
     },
     {
       id: "run.httpIdleTimeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection", type: types.integer(1_000, 3_600_000, "ms"),
-      layers: sessionPi("httpIdleTimeoutMs"), defaultValue: 300_000, timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("httpIdleTimeoutMs"), defaultValue: 300_000, timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "Idle timeout", help: "How long a silent HTTP stream may idle.", order: 100, importance: "advanced",
     },
     {
       id: "run.websocketConnectTimeoutMs", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Connection", type: types.integer(1_000, 300_000, "ms"),
-      layers: sessionPi("websocketConnectTimeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
+      layers: sessionPi("websocketConnectTimeoutMs"), timing: "live", effect: "next-request", writers: ANY_ACTOR,
       label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced",
     },
     {
       id: "run.httpProxy", sessionOverridable: false, projectSettable: false, group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
-      layers: { global: pi("httpProxy") }, timing: "live", effect: "restart", floor: "notify", writers: ["ui"],
+      layers: { global: pi("httpProxy") }, timing: "live", effect: "restart", writers: ["ui"],
       label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
     },
     {
@@ -500,14 +475,14 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "streaming", label: "While running", detail: "Caches stay warm while a turn runs" },
         { value: "idle", label: "Also between runs", detail: "Also kept warm between turns; costs more" },
       ]),
-      layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "fixed", effect: "new-chat", floor: { widen: "notify", narrow: "quiet" },
+      layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "fixed", effect: "new-chat", 
       direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced",
     },
     // Sources -------------------------------------------------------------
     ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
-      id: `sources.${name}`, sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
-      layers: both(pi(name)), timing: "fixed", effect: "reload", floor: { widen: "notify", narrow: "quiet" }, direction: toolsDirection,
+      ...(name === "extensions" || name === "skills" ? { tap: "trust" as const } : {}), id: `sources.${name}`, sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
+      layers: both(pi(name)), timing: "fixed", effect: "reload", direction: toolsDirection,
       writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
       order: 10 + index * 10, importance: "advanced",
       ...(name === "extensions" ? {
@@ -516,13 +491,13 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       } : {}),
     })),
     {
-      id: "sources.packages", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
-      floor: { widen: "notify", narrow: "quiet" }, direction: (b, a) => larger(Array.isArray(b) ? b.length : 0, Array.isArray(a) ? a.length : 0),
+      tap: "install", id: "sources.packages", sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
+      direction: (b, a) => larger(Array.isArray(b) ? b.length : 0, Array.isArray(a) ? a.length : 0),
       writers: ["ui", "home"], label: "Packages", help: "Installed pi packages.", order: 50, importance: "essential", control: "readOnly",
     },
     {
-      id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
-      floor: "notify", writers: ["ui"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
+      tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
+      writers: ["ui"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       // pi runs the first value as the program and passes the rest before its own npm arguments.
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
@@ -531,13 +506,13 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       // No writer: the runtime snapshots its session folder under the ownership
       // lock at start, so it changes only while the Gateway is stopped.
       id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { global: pi("sessionDir") }, timing: "live", effect: "restart",
-      floor: "notify", writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
+      writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
       order: 10, importance: "advanced", control: "text",
       entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
     },
     {
-      id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,
-      timing: "live", effect: "next-request", floor: "quiet", writers: ["ui"], label: "Install telemetry",
+      tap: "irreversible", id: "setup.installTelemetry", sessionOverridable: false, projectSettable: false, group: "setup", type: types.boolean(), layers: { global: pi("enableInstallTelemetry") }, defaultValue: true,
+      timing: "live", effect: "next-request", writers: ["ui"], label: "Install telemetry",
       help: "Send pi's anonymous install attribution header.", order: 20, importance: "advanced", control: "toggle",
     },
   ] satisfies readonly KeyDeclaration[]);
@@ -550,18 +525,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     return key;
   }
 
-  /** The instances of the floor key: one per key, or one per direction for a
-   * key whose floor differs by direction. */
-  function floorInstances(): Array<{ key: string; direction?: Direction }> {
-    return KEYS.flatMap(key => typeof key.floor === "string" ? [{ key: key.id }] : [{ key: key.id, direction: "widen" as const }, { key: key.id, direction: "narrow" as const }]);
-  }
-
-  function codeFloor(qualifiers: Partial<Record<QualifierName, string>>): Tier | undefined {
-    const key = qualifiers.key === undefined ? undefined : byId.get(qualifiers.key);
-    if (!key) return undefined;
-    return typeof key.floor === "string" ? key.floor : key.floor[qualifiers.direction === "narrow" ? "narrow" : "widen"];
-  }
-
   /** The section group and label of a recorded key or subject, or undefined for one this
    * Gateway no longer declares. */
   function auditSubject(id: string): { label: string; group: string } | undefined {
@@ -569,17 +532,11 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     return KEYS.find(key => key.id === id) ?? recordSubject(id);
   }
 
-  return { KEYS, RECORD_SUBJECTS, schemaKey, floorInstances, auditSubject } as const;
+  return { KEYS, RECORD_SUBJECTS, schemaKey, auditSubject } as const;
 }
 
 export type SettingsSchema = ReturnType<typeof createSettingsSchema>;
 
-/** A key's floor for a direction: the maintainer's override, else the code floor (doc 5.4). */
-export function floorFor(key: KeyDeclaration, direction: Direction, overrides?: FloorOverrides): { floor: Tier; source: "code" | "override" } {
-  const override = overrides?.[key.id]?.[direction];
-  if (override) return { floor: override, source: "override" };
-  return { floor: typeof key.floor === "string" ? key.floor : key.floor[direction], source: "code" };
-}
 
 
 
@@ -632,12 +589,11 @@ export interface RecordSubject {
   container: string;
   qualifier: QualifierName;
   /** Fixed in code; decision 13: Tools and credential-bearing changes push. */
-  floor: Tier;
 }
 
 export const RECORD_SUBJECTS: readonly RecordSubject[] = [
-  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", floor: "notify" },
-  { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", floor: "notify" },
+  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", },
+  { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", },
 ];
 
 export function recordSubject(id: string): RecordSubject | undefined {
@@ -650,7 +606,7 @@ export function recordSubject(id: string): RecordSubject | undefined {
  * one instance per note (qualifier `note`). Not a key: an item never resolves as a
  * setting, and Knowledge stays its store.
  */
-export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, floor: "notify" as Tier };
+export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, };
 
 
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {

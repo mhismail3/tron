@@ -1,4 +1,4 @@
-import { type Resolution, type SettingsTarget, TIERS, type Qualifiers, type Tier, type GitResult } from "../kernel/settings/tool-contract.js";
+import { type Resolution, type SettingsTarget, type Qualifiers, type GitResult } from "../kernel/settings/tool-contract.js";
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource, type SettingsOptionsRequest, type SettingsOptionsResult } from "../kernel/settings/settings-model.js";
 import type { ChangeContext, SettingsWriters, Planned } from "../kernel/settings/settings-change.js";
@@ -18,7 +18,7 @@ import { observedInstance, projectStores, type ObservedReaders, type OutsideChan
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
-import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type FloorOverrides, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
+import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
 
 export interface SettingsModelDependencies {
   schema: SettingsSchema;
@@ -64,7 +64,6 @@ export class SettingsStoreAdapter {
     return {
       global: async () => this.piDocuments(this.dependencies.agentDir).global,
       project: async (root) => (await readProjectDocument(root)).document,
-      floors: () => this.floorOverrides(),
     };
   }
 
@@ -78,7 +77,7 @@ export class SettingsStoreAdapter {
     return join(this.dependencies.tronHome, "gateway", "home", "profile.json");
   }
 
-  /** The maintainer's floor overrides (doc 5.4); only the change path writes it. */
+
   get floorsPath(): string {
     return join(this.dependencies.tronHome, "gateway", "settings", "floors.json");
   }
@@ -216,7 +215,6 @@ export class SettingsStoreAdapter {
       trust,
       macTerminal,
       macTerminalServerEnabled: await this.macTerminalKeys?.enabled() ?? false,
-      floors: await stage("settings.store.floors", () => this.floorOverrides()),
       gateway: await stage("settings.store.gateway-settings", () => this.gatewaySettings()),
       ...(outside ? { outside } : {}),
       ...(project ? { project } : {}),
@@ -287,17 +285,6 @@ export class SettingsStoreAdapter {
       }
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };
-      case "floors":
-        await updateJsonLocked<Record<string, Record<string, Tier>>>(this.floorsPath, {}, document => {
-          const entry = { ...(document[qualifiers.key!] ?? {}) };
-          // A key with one floor keeps both directions equal.
-          for (const direction of qualifiers.direction ? [qualifiers.direction] : ["widen", "narrow"]) {
-            if (unset) delete entry[direction]; else entry[direction] = value as Tier;
-          }
-          if (Object.keys(entry).length === 0) delete document[qualifiers.key!]; else document[qualifiers.key!] = entry;
-          return document;
-        });
-        return {};
       case "gateway":
         await updateJsonLocked<Record<string, unknown>>(this.gatewaySettingsPath, {}, document => {
           if (unset) unsetPath(document, binding.path); else setPath(document, binding.path, value);
@@ -312,7 +299,7 @@ export class SettingsStoreAdapter {
         return {};
       case "session-settings": {
         if (!context.session || target.kind !== "session") throw new GatewayError("invalid_request", "A Session-scope change needs its open session");
-        return { revision: await context.session.appliers.setSetting(plan.key.id, value, context.actor.kind === "ui" || context.approved === true, plan.fixedAt) };
+        return { revision: await context.session.appliers.setSetting(plan.key.id, value, true, plan.fixedAt) };
       }
       case "session": {
         const appliers = context.session?.appliers;
@@ -365,21 +352,6 @@ export class SettingsStoreAdapter {
 
   private async gatewaySettings(): Promise<Record<string, unknown>> {
     return this.validatedStore(await readJsonObject(this.gatewaySettingsPath), "global", "Gateway settings");
-  }
-
-  private async floorOverrides(): Promise<FloorOverrides> {
-    const document = await readJsonObject(this.floorsPath);
-    const result: FloorOverrides = {};
-    for (const [key, value] of Object.entries(document)) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const entry: { widen?: Tier; narrow?: Tier } = {};
-      for (const direction of ["widen", "narrow"] as const) {
-        const tier = (value as Record<string, unknown>)[direction];
-        if (typeof tier === "string" && (TIERS as readonly string[]).includes(tier)) entry[direction] = tier as Tier;
-      }
-      result[key] = entry;
-    }
-    return result;
   }
 
   private async trustDecisions(): Promise<Record<string, boolean>> {

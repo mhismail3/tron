@@ -6,7 +6,6 @@ import type { HomeMemoryToolAccess } from "./home-memory.js";
 import { homeMemoryTools } from "./home-memory-tools.js";
 import { homeProfileSection, type HomeProfileChangeAccess } from "./home-profile.js";
 import { homeProfileTool } from "./home-profile-tool.js";
-import { marksTurn } from "../../admin/tron-settings-extension.js";
 import { markHomeMemoryCache, type HomeSystemPrompt } from "./home-request-policy.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { abortableRead } from "../../util/abortable-read.js";
@@ -165,14 +164,7 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
   profileChanges: () => HomeProfileChangeAccess | undefined): ExtensionFactory {
   return (pi) => {
     for (const tool of homeMemoryTools(memoryTools)) pi.registerTool(tool);
-    // The run's web mark, as the settings tool keeps it (docs/settings-model.md 5.4a):
-    // a profile change after open-world content is recorded and pushed one tier up.
-    let web = false;
-    pi.on("agent_start", () => { web = false; });
-    pi.on("tool_call", (event) => {
-      if (!web) web = marksTurn(pi.getAllTools().find(tool => tool.name === event.toolName));
-    });
-    pi.registerTool(homeProfileTool(profileChanges, () => web, knowledge));
+    pi.registerTool(homeProfileTool(profileChanges, knowledge));
     pi.registerTool({ name: "delegate", label: "Delegate", annotations: { openWorldHint: false }, description: "Dispatch finite work once in a trusted project. Optional model and thinking override the typed Home worker profile field by field and require a short reason. Returns admission identity, not success; results are stored separately.",
       parameters: Type.Object({ taskId: Type.String({ minLength: 1, maxLength: 160 }), title: Type.Optional(Type.String({ minLength: 1, maxLength: 80, description: "A short name for the work, at most 80 characters. It becomes the worker session's name." })),
         intent: Type.String({ minLength: 1, maxLength: 65536 }), target: Type.String({ minLength: 1, maxLength: 4096 }),
