@@ -665,6 +665,7 @@ export class RuntimeRegistry implements SessionOperations {
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       stopSteeringDiagnostic?: RuntimeSlotDependencies["stopSteeringDiagnostic"];
       manualCompactionAdopted?: RuntimeSlotDependencies["manualCompactionAdopted"];
+      capabilityDiagnostic?: RuntimeSlotDependencies["capabilityDiagnostic"];
       codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       /** Handled catalog-index write failures. The index write is fire-and-forget
@@ -1594,6 +1595,7 @@ export class RuntimeRegistry implements SessionOperations {
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       ...(this.options.stopSteeringDiagnostic ? { stopSteeringDiagnostic: this.options.stopSteeringDiagnostic } : {}),
       ...(this.options.manualCompactionAdopted ? { manualCompactionAdopted: this.options.manualCompactionAdopted } : {}),
+      ...(this.options.capabilityDiagnostic ? { capabilityDiagnostic: this.options.capabilityDiagnostic } : {}),
       ...(this.options.codemodeDiagnostic ? { codemodeDiagnostic: this.options.codemodeDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       sessionAudience: (sessionId: string) => this.subscribers.get(sessionId)?.size ?? 0,

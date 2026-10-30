@@ -165,37 +165,62 @@ class TierTests(fixture.VerifyCase):
     def test_interrupted_step_preserves_partial_report_and_stops_descendant(self):
         import signal
         import subprocess
+        import sys
         import time
         r = self.repo
-        r.write('mods/alpha/test-alpha.py', "import subprocess,time\nfrom pathlib import Path\np=subprocess.Popen(['sleep','300'])\nPath('test-results/child.pid').write_text(str(p.pid))\ntime.sleep(300)\n")
+        held = "import subprocess,time\nfrom pathlib import Path\nPath('test-results').mkdir(exist_ok=True)\np=subprocess.Popen(['sleep','300'])\nPath('test-results/child.pid').write_text(str(p.pid))\ntime.sleep(300)\n"
+        r.write('mods/alpha/test-alpha.py', held)
         r.commit('held test')
-        process = subprocess.Popen([str(r.path / 'scripts/tron'), 'verify', '--base', 'base'], cwd=r.path,
-                                   env=r.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        try:
-            pid_file = r.path / 'test-results/child.pid'
-            deadline = time.monotonic() + 60
-            while not pid_file.exists() and time.monotonic() < deadline:
-                time.sleep(.05)
-            self.assertTrue(pid_file.exists(), 'the real child process never started')
-            self.assertEqual(r.report()['verdict'], 'running')
-            process.send_signal(signal.SIGTERM)
-            output, _ = process.communicate(timeout=30)
-            self.assertNotEqual(process.returncode, 0, output)
-            self.assertEqual(r.report()['verdict'], 'interrupted')
-            child = int(pid_file.read_text())
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
+        for owner in ('verify', 'health'):
+            with self.subTest(owner=owner):
+                pid_file = r.path / 'test-results/child.pid'
+                pid_file.unlink(missing_ok=True)
+                env = r.env
+                args = ['verify', '--base', 'base']
+                if owner == 'health':
+                    # A real held Git child exercises health's reuse of batch's
+                    # process group owner, not a mock of cancellation logic.
+                    r.write('test-results/bin/git', f'#!{sys.executable}\n' + held)
+                    (r.path / 'test-results/bin/git').chmod(0o755)
+                    env = {**r.env, 'PATH': str(r.path / 'test-results/bin') + os.pathsep + r.env['PATH']}
+                    args = ['health', '--sha', 'HEAD']
+                process = subprocess.Popen([str(r.path / 'scripts/tron'), *args], cwd=r.path,
+                                           env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 try:
-                    os.kill(child, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(.05)
-            else:
-                self.fail('interrupted verify left its test descendant alive')
-        finally:
-            if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
-                process.communicate(timeout=30)
+                    deadline = time.monotonic() + 60
+                    while not pid_file.exists() and time.monotonic() < deadline:
+                        time.sleep(.05)
+                    self.assertTrue(pid_file.exists(), 'the real child process never started')
+                    if owner == 'verify':
+                        self.assertEqual(r.report()['verdict'], 'running')
+                    process.send_signal(signal.SIGTERM)
+                    output, _ = process.communicate(timeout=30)
+                    self.assertEqual(process.returncode, 130, output)
+                    if owner == 'verify':
+                        self.assertEqual(r.report()['verdict'], 'interrupted')
+                        card = r.health()
+                        self.assertEqual(card['fields']['mainReds']['verifierOutcomes'], {'interrupted': 1})
+                        self.assertIsNone(card['fields']['flakeRate']['rate'])
+                    else:
+                        card = json.loads(output)
+                        self.assertEqual(card['status'], 'interrupted')
+                        self.assertIn(card, [json.loads(p.read_text()) for p in (r.path / 'test-results/health').glob('aggregate-*.json')])
+                    fixture.ARTIFACTS.mkdir(parents=True, exist_ok=True)
+                    (fixture.ARTIFACTS / f'health-interrupted-{owner}.json').write_text(json.dumps(card, indent=2))
+                    child = int(pid_file.read_text())
+                    deadline = time.monotonic() + 10
+                    while time.monotonic() < deadline:
+                        try:
+                            os.kill(child, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(.05)
+                    else:
+                        self.fail(f'interrupted {owner} left its descendant alive')
+                finally:
+                    if process.poll() is None:
+                        process.send_signal(signal.SIGTERM)
+                        process.communicate(timeout=30)
 
 
 class BatchTests(fixture.VerifyCase):

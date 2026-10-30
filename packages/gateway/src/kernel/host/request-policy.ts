@@ -1,11 +1,23 @@
 import type { Agent, AgentMessage, PrepareRequest, StreamFn } from "../pi/agent-core.js";
 import type { AgentSession } from "../pi/coding-agent.js";
 
+/** Content-free observations; the profile owns their aggregation and export. */
+export interface ResponseTiming {
+  accepted(operation: string): void;
+  transfer(from: string, to: string): void;
+  retire(): void;
+  started(operation: string | undefined): void;
+  visible(operation: string | undefined): void;
+  tool(operation: string | undefined, id: string, started: boolean): void;
+  terminal(operation: string, outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown"): void;
+}
+
 /** The request stages and activation lifecycle one profile owns. Its evidence
  * remains module-owned; the kernel never interprets or persists that view. */
 export interface RequestPolicy {
   /** Native cancellation survives physical runtime retirement with this request lifetime. */
   readonly inputCancellation: { epoch: number };
+  readonly responseTiming: ResponseTiming;
   admit(operationId: string, boundaryEntryId: string | null, systemBase: string, kind: "user" | "wake"): void;
   settle(operationId: string | undefined): void;
   cancel(operationId: string | undefined): void;

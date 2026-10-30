@@ -106,6 +106,13 @@ class Repo:
             log.write(f"$ scripts/tron verify {' '.join(args)}\nexit {result.returncode}\n{result.stdout}{result.stderr}\n")
         return result
 
+    def health(self, *args: str) -> dict:
+        result = subprocess.run([str(self.path / 'scripts/tron'), 'health', '--sha', 'HEAD', *args],
+                                cwd=self.path, env=self.env, capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
     def report(self) -> dict:
         sha = self.git("rev-parse", "HEAD")
         return json.loads((self.path / "test-results" / "verify" / f"{sha}.json").read_text())
@@ -223,6 +230,7 @@ class ExternalVerificationTests(VerifyCase):
         incomplete = r.verify("--module", "repo/alpha")
         self.assertEqual(incomplete.returncode, 1, incomplete.stdout + incomplete.stderr)
         self.assertEqual(r.report()["verdict"], "incomplete")
+        self.assertEqual(r.health()['fields']['mainReds']['verifierOutcomes'], {'incomplete': 1})
         skipped = r.verify("--module", "repo/alpha", "--skip", "ios")
         self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
         self.assertEqual(r.report()["groups"]["ios-lanes"], ["packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift"])
@@ -311,6 +319,11 @@ class QuarantineTests(VerifyCase):
         self.assertEqual(report["passingTests"], 1)
         self.assertTrue((r.path / "packages/gateway/test-results-executed").exists())
         self.assertIn(entry["expires"], result.stdout)
+        card = r.health()['fields']
+        self.assertEqual(card['mainReds']['verifierOutcomes'], {'quarantined': 1})
+        self.assertEqual(card['mainReds']['quarantinedCases'], 1)
+        self.assertIsNone(card['flakeRate']['rate'], 'one attempt is unknown, never zero')
+        self.assertEqual((card['flakeRate']['failingAttempts'], card['flakeRate']['totalAttempts']), (1, 2))
         original = (r.path / "packages/gateway/report-input.json").read_text()
         # All executed cases may be quarantined; zero passing is not zero executed.
         raw = json.loads(original)
@@ -345,6 +358,9 @@ class QuarantineTests(VerifyCase):
                 result = r.verify("--module", "gateway/sample")
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertEqual(r.report()["verdict"], "failed")
+                card = r.health()['fields']['mainReds']
+                self.assertEqual(card['verifierOutcomes'], {'failed': 1})
+                self.assertNotEqual(card['status'], 'available')
 
     def test_expired_duplicate_and_malformed_entries_fail_loudly(self):
         r = self.repo
@@ -358,6 +374,90 @@ class QuarantineTests(VerifyCase):
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("known-failures", result.stdout + result.stderr)
                 self.assertFalse((r.path / "packages/gateway/test-results-executed").exists())
+                card = r.health()['fields']['mainReds']
+                self.assertEqual(card['verifierOutcomes'], {'failed': 1})
+                expected = 'registry-expired' if entries[0].get('expires') == '2000-01-01' else 'registry-invalid'
+                self.assertEqual(card['sourceRefusals'], {expected: 1})
+                self.assertIsNone(card['numerator'])
+
+    def test_health_repeated_attempts_privacy_identity_and_owned_cleanup(self):
+        r = self.repo
+        self.fixture()
+        # Environmental producer input is ignored: SHA/config stay identical.
+        r.write('.gitignore', (r.path / '.gitignore').read_text() + 'packages/gateway/report-input.json\n')
+        r.git('rm', '--cached', 'packages/gateway/report-input.json')
+        r.commit('external report producer inputs')
+        raw = json.loads((r.path / 'packages/gateway/report-input.json').read_text())
+        self.assertEqual(r.verify('--module', 'gateway/sample').returncode, 1)
+        first = r.report()
+        r.write('test-results/first.json', json.dumps(first))
+        raw['numPassedTests'], raw['numFailedTests'] = 2, 0
+        raw['testResults'][0]['status'] = 'passed'
+        raw['testResults'][0]['assertionResults'][0].update(status='passed', failureMessages=[])
+        r.write('packages/gateway/report-input.json', json.dumps(raw))
+        # Producer exit remains an observed harness failure, not a clean pass.
+        r.verify('--module', 'gateway/sample')
+        second = r.report()
+        self.assertEqual(first['commit'], second['commit'])
+        self.assertEqual(first['configDigest'], second['configDigest'])
+        r.write('test-results/second.json', json.dumps(second))
+        args = ('--verify-report', 'test-results/first.json', '--verify-report', 'test-results/second.json')
+        card = r.health(*args)
+        flake = card['fields']['flakeRate']
+        self.assertEqual((flake['numerator'], flake['denominator']), (1, 2))
+        self.assertEqual((flake['failingAttempts'], flake['totalAttempts']), (1, 4))
+        duplicate = r.health('--verify-report', 'test-results/first.json', '--verify-report', 'test-results/first.json')
+        self.assertIsNone(duplicate['fields']['flakeRate']['rate'])
+        r.write('test-results/identities.json', json.dumps({'sourceRevision': first['commit'], 'payloadFingerprint': 'a' * 64, 'protocolVersion': '1',
+            'query': 'PRIVATE_SENTINEL', 'prompt': 'PRIVATE_SENTINEL', 'credentials': 'PRIVATE_SENTINEL'}))
+        card = r.health(*args, '--mac-identity', 'test-results/identities.json')
+        self.assertEqual(card['fields']['deployLag']['status'], 'partial')
+        self.assertEqual(card['fields']['deployLag']['denominator'], 2)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        rows = [
+            {'event': 'home.task.history-summary', 'taskHash': 'a' * 16,
+             'counts': {'lineages': 1, 'operations': 3, 'resumes': 2, 'complete': 1, 'rootCreatedAtMs': int(now.timestamp() * 1000)}},
+            {'event': 'home.task.history-summary', 'taskHash': 'b' * 16,
+             'counts': {'lineages': 1, 'operations': 2, 'resumes': 1, 'complete': 0, 'rootCreatedAtMs': int(now.timestamp() * 1000)}},
+            {'event': 'home.response-timing', 'counts': {'calls': 1, 'complete': 1, 'firstVisibleMs': 20, 'terminalMs': 50, 'queueMs': 5, 'modelMs': 20, 'toolMs': 10}},
+            *[{'event': 'capability.usage', 'step': 'read', 'outcome': status, 'stage': 'unknown', 'counts': {'calls': 1}} for status in ('ok', 'refused', 'error', 'unknown')],
+        ]
+        # Repeated history pages contain the same source-owned root summary.
+        rows.append(rows[0])
+        r.write('test-results/owner.json', json.dumps({'records': [{**row, 'timestamp': now.isoformat(), 'prompt': 'PRIVATE_SENTINEL', 'arguments': {'query': 'PRIVATE_SENTINEL'}} for row in rows]}))
+        card = r.health(*args, '--owner-summary', 'test-results/owner.json')
+        lineage = card['fields']['resumesPerTask']
+        self.assertEqual((lineage['numerator'], lineage['denominator'], lineage['status']), (2, 1, 'partial'))
+        self.assertEqual(lineage['observedLineages'], 2)
+        self.assertEqual(card['supplemental']['homeResponseTiming']['firstVisibleMs']['median'], 20)
+        self.assertEqual(len(card['supplemental']['capabilityUsage']), 4)
+        # A new failure signature at the same SHA/config is not merged into a
+        # flaky case. The unchanged repeatedly-passing case remains comparable.
+        raw['numPassedTests'], raw['numFailedTests'] = 1, 1
+        raw['testResults'][0]['assertionResults'][0].update(status='failed', failureMessages=['Error: different signature'])
+        r.write('packages/gateway/report-input.json', json.dumps(raw))
+        r.verify('--module', 'gateway/sample')
+        r.write('test-results/third.json', json.dumps(r.report()))
+        changed = r.health(*args, '--verify-report', 'test-results/third.json')['fields']['flakeRate']
+        self.assertEqual(changed['changedSignatureCases'], 1)
+        self.assertEqual((changed['numerator'], changed['denominator']), (0, 1))
+        self.assertEqual(changed['status'], 'partial')
+        directory = r.path / 'test-results/health'
+        old = {**card, 'runId': 'expired', 'expiresAt': '2000-01-01T00:00:00+00:00'}
+        r.write('test-results/health/aggregate-expired.json', json.dumps(old))
+        r.write('test-results/health/foreign.json', json.dumps(old))
+        r.write('test-results/health/aggregate-foreign.json', '{"schema":"foreign"}')
+        r.health('--cleanup')
+        self.assertFalse((directory / 'aggregate-expired.json').exists())
+        self.assertTrue((directory / 'foreign.json').exists())
+        self.assertTrue((directory / 'aggregate-foreign.json').exists())
+        for path in directory.glob('aggregate-*.json'):
+            text = path.read_text()
+            for forbidden in ('PRIVATE_SENTINEL', 'failureMessages', 'fullName', 'arguments', 'prompt', 'credentials', str(r.path), 'packages/gateway/src/'):
+                self.assertNotIn(forbidden, text)
+        ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        (ARTIFACTS / 'health-sample.json').write_text(json.dumps(card, indent=2))
 
 
 class GatewayDependenciesTests(VerifyCase):

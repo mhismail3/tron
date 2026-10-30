@@ -193,12 +193,14 @@ detached descendants, timeout, Stop and environment boundaries.
 
 ## Signals
 
-Existing aborted/timed-out command errors and bounded-tool cancellation results;
-no additional logging or persisted state. Compaction diagnostics remain with the
+Existing aborted/timed-out command errors and bounded-tool cancellation results.
+Tool completion exports one content-free count into the existing logger, not a new store.
+Compaction diagnostics remain with the
 [session run owner](../../sessions/README.md#signals).
 
 | Signal | Meaning / diagnosis |
 |---|---|
+| `capability.usage` | info: actual SDK completion count, registered capability name (otherwise `unknown`), execution `ok`/`error`, preparation `refused`, or unknown tool; execute-latency bucket only (`lt100ms`, `lt1s`, `lt10s`, `gte10s`, `unknown`). Preparation refusals have no execute duration. Includes nested calls; never records arguments, results, paths, queries or call/session IDs. |
 | `runtime-prompt-failed` with repeated [`home.task.inbox`](../../modules/home/README.md#signals) `admission-aborted`/claim transitions | With zero provider calls and no intervening user activation, memory resume or new source event, diagnose premature pre-append wake acceptance. `input-admission.integration.test.ts` in Home injects SDK rejection, proves retained pending input and then explicit-resume delivery. |
 | `terminal-receipt-persistence-failed` | A completion ownership write failed. For a terminal Home task whose socket snapshot still says `running` without an operation, compare its canonical replies and task marker: a root task marker must not own an individual reply completion. `home-task-continuity.e2e.test.ts` reproduces the conflicting-stamp ordering and proves same-session resume. |
 

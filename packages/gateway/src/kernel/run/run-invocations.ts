@@ -23,6 +23,7 @@ export class RunInvocations {
     if (this.handedOffInvocations.has(receipt.invocationId)) return;
     await this.operations.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
     if (receipt.receiptKind === "terminal" && this.operations.homeRequestPolicy) {
+      this.operations.homeRequestPolicy.responseTiming.terminal(receipt.operationId, receipt.lifecycle as "completed" | "failed" | "interrupted" | "outcomeUnknown");
       // The terminal receipt is already canonical. A failed settlement leaves its
       // delivery admitted for the next activation to re-prove; it must not strand
       // this operation's work entry or its terminal observers.

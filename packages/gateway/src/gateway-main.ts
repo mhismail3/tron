@@ -287,6 +287,16 @@ const homeComposition: HomeComposition = {
   // both affordable and the only place a turn's effective size and the readiness
   // wait it took are visible. No message text, entry id or nonce is included.
   homeRequestDiagnostic: (record) => {
+    if (record.event === "response-timing") {
+      logger.log("info", "Tron Home response timing", {
+        event: "home.response-timing", source: "home", outcome: record.outcome,
+        counts: { calls: record.count, complete: Number(record.complete), terminalMs: record.terminalMs,
+          modelMs: record.modelMs, toolMs: record.toolMs,
+          ...(record.firstVisibleMs === null ? {} : { firstVisibleMs: record.firstVisibleMs }),
+          ...(record.queueMs === null ? {} : { queueMs: record.queueMs }) },
+      });
+      return;
+    }
     if (record.event === "activation") {
       logger.log("info", "Tron Home activation", {
         event: "home.activation", source: "home",
@@ -424,6 +434,10 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
     "Queued manual compaction adopted by an active compaction",
     { event: "session.compaction.manual-adopted", source: "session", ...diagnostic },
   ),
+  capabilityDiagnostic: aggregate => logger.log("info", "Capability usage aggregate", {
+    event: "capability.usage", source: "runtime", step: aggregate.name, outcome: aggregate.status,
+    stage: aggregate.latencyBucket, counts: { calls: aggregate.count },
+  }),
   codemodeDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "completed" ? "info" : "warning",
     `Codemode execution ${diagnostic.outcome}`,

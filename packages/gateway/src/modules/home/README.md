@@ -226,6 +226,18 @@ changes keep its store, cursors and spend.
 `HomeOwner` (`home-owner.ts`), `RuntimeRegistry.create(cwd, "home")`, the `home.*` handlers,
 `tron-home` and `tron-home-research` extensions, `HomeTaskDispatcher`, `WakeInboxOwner`.
 
+## Health aggregates
+
+`home-response-timing.ts` correlates only live accepted maintainer inputs. SDK acceptance,
+run start, emitted visible text and the durable terminal receipt are the timing cuts.
+Provider stream completion measures model time; tool lifecycle intervals measure tool time
+(union across parallel/nested calls). Queue/model/tool durations do not partition all wall time.
+Missing visibility (including no audience), open intervals and missing run-start proof are partial.
+The existing logger exports anonymous scalar samples; no prompt, result, ID or path is included.
+`home.taskHistory` exports a whole-lineage count before pagination: refused admissions and
+copied check-ins cannot add resumes; an incomplete or live root is not a complete denominator.
+These are bounded diagnostics, not durable per-input telemetry or a complete 30-day census.
+
 ## Signals
 
 | Signal | Level | Meaning |
@@ -237,6 +249,7 @@ changes keep its store, cursors and spend.
 | `home.task.control`; `home.task.runaway-stop`; `home.task.detached-work`; `home.task.subagents`; `home.taskStatus.subagentRuns`; `home.taskStatus.ownerSettlement` | info; runaway stop and detached work warn; `home.taskStatus.*` are read-only status fields | Steer, interrupt and Stop `disposition` (`accepted`, `persisted`, `refused` with a finite `reason`; interrupt `calls`); the deadline cancel-and-join outcome; detached work outliving settlement (outcome unknown); subagent `started`, `stoppedAtEnd`, `noticesUndelivered`; the exact live runs that report and Stop select; the owner-settlement proof (`null` is unproven) |
 | `home.task.inbox`; `home.wake`; `home.inbox.admission-slow`; `home-inbox-settlement-failed` code on `session.diagnostic`; `home-worker-attention-failed` | info; refused wakes, slow admission (≥ 2 s) and failures warn | Wake-inbox transitions (`eventHash`, `state`, coded `reason`); each wake decision (`admitted`, `deferred`, `refused` with `reason`); result delivery into an activation (`delivery`, `durationMs`); a durable terminal whose inbox settlement rejected (session event); a failed acknowledgement of a new worker's earlier completion |
 | `TRON_SETTINGS_OUTCOME_PROOF_DEFERRED` | warning | A settings delivery's canonical proof failed; its outbox remains retained for later proof, without exposing request IDs or paths |
+| `home.response-timing`; `home.task.history-summary` | info | Content-free accepted-input→visible/terminal scalar sample with queue/model/tool durations and completeness; authoritative admitted operation/resume counts with root hash and root-created time for page deduplication. A crash loses live timing correlation; a bounded log export is partial coverage |
 | `host.pressure` | info; warning at `critical` | A Home-status read saw the host-pressure level change: `state`, `transition`, CPU busy, loop utilization and load per CPU; it informs and never holds a worker back |
 
 ## Verify

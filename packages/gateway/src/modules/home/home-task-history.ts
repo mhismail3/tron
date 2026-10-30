@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { GatewayError } from "../../errors.js";
 import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
 import { parseHomeTaskCheckin, parseHomeTaskCheckinRequest } from "../../kernel/delegation/task-checkin.js";
@@ -13,7 +14,9 @@ const compare = (a: Pick<HomeTaskHistoryItem, "at" | "id">, b: Pick<HomeTaskHist
 /** Recent task snapshots are capped at twelve. Canonical accepted tool results,
  * not the snapshots copied on resume, own the complete progress history. */
 export async function readHomeTaskHistory(store: HomeTaskStore, sessions: SessionOperations,
-  input: { taskId: string; limit?: number; cursor?: string }, signal?: AbortSignal): Promise<HomeTaskHistoryPage> {
+  input: { taskId: string; limit?: number; cursor?: string }, signal?: AbortSignal,
+  summary?: (value: { taskHash: string; counts: { lineages: number; operations: number; resumes: number; complete: number; rootCreatedAtMs: number } }) => void,
+): Promise<HomeTaskHistoryPage> {
   const limit = input.limit ?? 20;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new GatewayError("invalid_request", "Invalid history limit");
   const epoch = await store.restoreEpoch();
@@ -107,6 +110,12 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
       items.push({ ...operation, id: checkin.id, at: checkin.at, checkin });
   }
   items.sort(compare);
+  // Export after the authoritative whole-lineage read, before pagination. A
+  // repeated read has the same root digest; copied check-ins never add resumes.
+  summary?.({ taskHash: createHash("sha256").update(root).digest("hex").slice(0, 16),
+    counts: { lineages: 1, operations: operations.length, resumes: Math.max(0, operations.length - 1),
+      complete: Number(complete && operations.length > 0 && operations.every(task => task.lifecycle === "terminal")),
+      rootCreatedAtMs: lineage[0]!.createdAt } });
   const page = items.filter(item => !after || compare(item, after) > 0).slice(0, limit + 1);
   const last = page[Math.min(page.length, limit) - 1];
   return { items: page.slice(0, limit), total: items.length, complete, ...(page.length > limit && last

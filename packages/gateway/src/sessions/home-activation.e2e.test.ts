@@ -264,6 +264,7 @@ interface Fixture {
   memoryFaux: FauxProviderHandle;
   /** Every record the seam reported (activation sizes and refusals). */
   requestRecords: HomeRequestRecord[];
+  capabilityRecords: Array<{ name: string; count: 1; status: string; latencyBucket: string }>;
   /** Every record Home's memory reported. */
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
   homeDiagnostics: Array<Record<string, unknown>>;
@@ -284,6 +285,7 @@ async function openRegistry(f: Fixture): Promise<void> {
     sessionListChanged: () => {},
     homeMemorySummarizer: () => f.summarizer,
     homeRequestDiagnostic: (record) => f.requestRecords.push(record),
+    capabilityDiagnostic: record => f.capabilityRecords.push(record),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
     homeDiagnostic: (record) => { f.homeDiagnostics.push(record); logHomeDiagnostic(f.homeLogger, record); },
   });
@@ -353,7 +355,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
   const f: Fixture = {
     root, agentDir, tronHome, faux, runtime, compactor, memoryFaux,
     summarizer: options.summarizer ?? (memoryQueue ? createQueueSummarizer(memoryQueue) : deterministicSummarizer(compactor)),
-    requestRecords: [],
+    requestRecords: [], capabilityRecords: [],
     memoryDiagnostics: [],
     homeDiagnostics: [],
     homeLogger: new GatewayLogger(join(root, "home-signals.jsonl")),
@@ -477,6 +479,39 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
 }
 
 describe("Tron Home activations end to end", () => {
+  it("exports content-free Home response timings and actual capability completion buckets", async () => {
+    const f = await fixture("health-aggregates");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "health-home");
+    f.registry.subscribe("health-audience", slot.id);
+    const secret = "HEALTH_PRIVATE_CONTENT_SENTINEL";
+    f.faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("memory_search", { query: secret })),
+      fauxAssistantMessage(fauxToolCall("date", { id: "invalid" })),
+      fauxAssistantMessage(fauxToolCall("read", { path: `${secret}/missing.txt` })),
+      fauxAssistantMessage(fauxToolCall("unregistered_capability", {})),
+      fauxAssistantMessage(`visible ${secret}`),
+    ]);
+    await slot.prompt(`input ${secret}`);
+    await waitUntil(() => !slot.isBusy && f.requestRecords.some(record => record.event === "response-timing"));
+    const timings = f.requestRecords.filter(record => record.event === "response-timing");
+    expect(timings).toHaveLength(1);
+    const timing = timings[0]!;
+    expect(timing.outcome).toBe("completed");
+    expect(timing.terminalMs).toBeGreaterThanOrEqual(timing.firstVisibleMs ?? 0);
+    expect(timing.firstVisibleMs).not.toBeNull();
+    expect(timing.queueMs).not.toBeNull();
+    expect(timing.modelMs).toBeGreaterThanOrEqual(0);
+    expect(timing.toolMs).toBeGreaterThanOrEqual(0);
+    expect(f.capabilityRecords.map(record => record.status)).toEqual(["ok", "refused", "error", "unknown"]);
+    for (const record of f.capabilityRecords) {
+      expect(Object.keys(record).sort()).toEqual(["count", "latencyBucket", "name", "status"]);
+      expect(record.count).toBe(1);
+    }
+    expect(JSON.stringify({ timings, capabilities: f.capabilityRecords })).not.toContain(secret);
+    expect(JSON.stringify({ timings, capabilities: f.capabilityRecords })).not.toContain(f.root);
+    report.cases.push({ case: "health-source-aggregates", timings, capabilities: f.capabilityRecords });
+  });
   it("reopens and searches the exact Home file when its cwd came through a symlink alias", async () => {
     const f = await fixture("aliased-cwd", { aliasedRoot: true });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });

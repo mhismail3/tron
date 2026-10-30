@@ -257,6 +257,7 @@ export interface RuntimeSlotDependencies {
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
   stopSteeringDiagnostic?: (diagnostic: { sessionId: string; queuedSteerCount: number; outcome: "started" | "completed" | "stopped" | "failed" | "unknown" }) => void;
   manualCompactionAdopted?: NonNullable<RunOperations<FixedSetting>["dependencies"]["manualCompactionAdopted"]>;
+  capabilityDiagnostic?: (aggregate: { name: string; count: 1; status: "ok" | "error" | "refused" | "unknown"; latencyBucket: "lt100ms" | "lt1s" | "lt10s" | "gte10s" | "unknown" }) => void;
   codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
@@ -2368,6 +2369,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     this.emit("session.progress", safeJson({
       message: projected === undefined ? undefined : boundStreamingProgressItem(projected),
     }));
+    if (projected && message.content.some(part => part.type === "text" && part.text.length > 0)) {
+      this.homeRequestPolicy?.responseTiming.visible(this.activeOperationId);
+    }
     return true;
   }
 
@@ -2695,10 +2699,23 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
 
   public resetToolExecutionProjection(): void {
+    for (const state of this.toolExecutions.values()) {
+      if (state.status === "running") this.recordCapabilityUsage(state.toolName, "unknown", undefined);
+    }
     this.toolExecutions.clear();
     this.toolInvocationGroups.clear();
     this.toolStartedAtMonotonicMs.clear();
     this.nextToolOrder = 0;
+  }
+
+  private recordCapabilityUsage(name: string, status: "ok" | "error" | "refused" | "unknown", duration: number | undefined): void {
+    const registered = this.runtime.session.getAllTools().some(tool => tool.name === name);
+    this.dependencies.capabilityDiagnostic?.({
+      name: registered && /^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(name) ? name : "unknown", count: 1,
+      status: registered ? status : "unknown",
+      latencyBucket: duration === undefined || !Number.isFinite(duration) ? "unknown"
+        : duration < 100 ? "lt100ms" : duration < 1_000 ? "lt1s" : duration < 10_000 ? "lt10s" : "gte10s",
+    });
   }
 
   public resetStreamingProjection(): void {
@@ -2873,6 +2890,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       }
       case "tool_execution_start": {
         if (!this.hasActiveAgentRun) break;
+        this.homeRequestPolicy?.responseTiming.tool(this.activeOperationId, event.toolCallId, true);
         if ("parentToolCallId" in event && event.parentToolCallId) {
           updateNestedExtensionActivity(this.ownedTurns, event, "running");
           this.projectNestedToolExecution(event, "running");
@@ -2990,6 +3008,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       }
       case "tool_execution_end": {
         if (!this.hasActiveAgentRun) break;
+        this.homeRequestPolicy?.responseTiming.tool(this.activeOperationId, event.toolCallId, false);
+        const duration = event.durationMs;
+        // The SDK supplies execute duration only after execution. A registered
+        // call ending without it was refused during preparation, not executed.
+        // Never inspect result text/arguments to guess a reason or status.
+        this.recordCapabilityUsage(event.toolName, duration === undefined ? "refused" : event.isError ? "error" : "ok", duration);
         if (!("parentToolCallId" in event && event.parentToolCallId) && event.toolName === "codemode") {
           const details = event.result && typeof event.result === "object" && "details" in event.result
             ? event.result.details as Record<string, unknown> | undefined : undefined;
@@ -4645,6 +4669,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   private async disposeRuntime(): Promise<void> {
     this.shuttingDown = true;
+    this.resetToolExecutionProjection();
+    this.homeRequestPolicy?.responseTiming.retire();
     this.runAbort.cancelPreparations();
     this.runTerminal.operationObservations.clear();
     // Borrowed Home views have no attachment to detach; the shared Gateway

@@ -488,6 +488,34 @@ def gateway_failures(report: Path, output: str) -> tuple[dict[str, str], bool]:
         return {}, False
 
 
+def case_outcomes(report: Path) -> tuple[list[dict], bool]:
+    """Privacy-safe observations from this invocation's actual Vitest report."""
+    try:
+        data = json.loads(report.read_text())
+        failed, failure_complete = gateway_failures(report, '')
+        cases = []
+        for suite in data['testResults']:
+            file = Path(suite['name']).resolve().relative_to(ROOT).as_posix()
+            for test in suite['assertionResults']:
+                if test['status'] not in ('passed', 'failed'):
+                    continue
+                case = {'caseDigest': hashlib.sha256(f"{file}::{test['fullName']}".encode()).hexdigest(),
+                        'status': test['status']}
+                if test['status'] == 'failed':
+                    identity = f"{file}::{test['fullName']}"
+                    if identity not in failed:
+                        return [], False
+                    case['failureDigest'] = failed[identity]
+                cases.append(case)
+        complete = failure_complete if data['numFailedTests'] else not any(
+            suite.get('message') or suite.get('testExecError') or suite.get('errors') or suite.get('status') == 'failed'
+            for suite in data['testResults'])
+        complete = complete and not data.get('numRuntimeErrorTestSuites') and not data.get('unhandledErrors')
+        return cases, bool(complete and len(cases) == data['numPassedTests'] + data['numFailedTests'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return [], False
+
+
 def vitest_count(output_path: Path):
     def count(_output: str):
         # A missing report counts zero, which fails the group: vitest must have written it this run.
@@ -581,6 +609,20 @@ def main(argv: list[str]) -> int:
         known = known_failures()
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
+        if not args.plan:
+            # Validation is an actual refused invocation. Retain that exact-SHA
+            # outcome too; health must not confuse expiry with an absent run.
+            import batch
+            directory = ROOT / 'test-results/verify'
+            directory.mkdir(parents=True, exist_ok=True)
+            refusal = 'registry-expired' if 'expired quarantine:' in str(error) else 'registry-invalid'
+            batch.save(directory / f'{sha}.json', {
+                'schema': 'tron.verify.v1', 'commit': sha, 'verdict': 'failed',
+                'sourceRefusal': refusal, 'message': refusal, 'selection': selection, 'steps': [], 'groups': {},
+                'resultDigest': hashlib.sha256(json.dumps({'commit': sha, 'selection': selection, 'refusal': refusal}, sort_keys=True).encode()).hexdigest(),
+                'skipped': sorted(skip), 'passingTests': 0, 'caseEvidenceComplete': False,
+                'attemptId': str(time.time_ns()),
+            })
         return 1
     nested, mac_terminal = nested_files()
     groups: dict[str, list[str]] = {}
@@ -661,6 +703,13 @@ def main(argv: list[str]) -> int:
             return 2
 
     run = Run(sha, len(plan_steps))
+    started_at = datetime.now(timezone.utc).isoformat()
+    attempt_id = str(time.time_ns())
+    environment = {'platform': sys.platform, 'architecture': os.uname().machine,
+                   'python': list(sys.version_info[:3])}
+    config_digest = hashlib.sha256(json.dumps({'selection': selection, 'groups': groups, 'skip': sorted(skip),
+        'environment': environment, 'updateLocks': args.update_locks,
+        'runnerOverrides': {key: value for key, value in os.environ.items() if key.startswith(('TEST_', 'TRON_', 'VITEST_')) or key in ('CI', 'NODE_OPTIONS')}}, sort_keys=True).encode()).hexdigest()
     report_path = ROOT / "test-results" / "verify" / f"{sha}.json"
 
     def finish(verdict: str, message: str, announce: bool = True) -> int:
@@ -669,7 +718,11 @@ def main(argv: list[str]) -> int:
             verdict = "quarantined"
             message += f"; {len(quarantined)} known failure(s), NOT an unqualified pass"
         comparable = {"commit": sha, "selection": selection, "steps": [{k: v for k, v in step.items() if k not in ("seconds", "log", "detail")} for step in run.steps], "verdict": verdict}
+        case_steps = [step for step in run.steps if step['name'].startswith('tests:')]
         report = {"schema": "tron.verify.v1", "commit": sha, "verdict": verdict, "message": message,
+                  "attemptId": attempt_id, "configDigest": config_digest, "environment": environment, "startedAt": started_at,
+                  "endedAt": datetime.now(timezone.utc).isoformat() if verdict != 'running' else None,
+                  "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}
@@ -726,6 +779,8 @@ def main(argv: list[str]) -> int:
             report.unlink(missing_ok=True)
             env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if group == "ios" and args.update_locks else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
+            if group in ('gateway', 'gateway-nested'):
+                result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
             if group in ("gateway", "gateway-nested") and result["status"] == "failed":
                 failed, complete = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
                 result["failedTests"] = list(failed)

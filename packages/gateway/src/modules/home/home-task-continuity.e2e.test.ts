@@ -256,7 +256,15 @@ describe("resuming a stopped Home worker in place", () => {
     expect(items.filter(row => !row.checkin).map(row => row.taskId)).toEqual([third.taskId, second.taskId, first.taskId]);
     const newest = await service.invoke(client, "home.taskHistory", { taskId: third.taskId, limit: 4 }) as any;
     expect(newest.items).toEqual(items.slice(0, 4));
-    evidence.push({ case: "all-operation-checkin-history", items });
+    const summaries = f.signals.filter(record => record.event === "home.task.history-summary");
+    expect(summaries.length).toBeGreaterThan(1);
+    expect(new Set(summaries.map(record => record.taskHash)).size).toBe(1);
+    for (const summary of summaries) {
+      expect(summary.counts).toMatchObject({ lineages: 1, operations: 3, resumes: 2, complete: 1 });
+      expect(JSON.stringify(summary)).not.toContain(request.done);
+      expect(JSON.stringify(summary)).not.toContain(f.cwd);
+    }
+    evidence.push({ case: "all-operation-checkin-history", items, healthSummaries: summaries });
   }, 60_000);
 
   it("does not present an inherited blocker as the current resumed operation's check-in", async () => {
@@ -301,6 +309,8 @@ describe("resuming a stopped Home worker in place", () => {
     expect(page.items).toHaveLength(2);
     expect(page.items.map((row: any) => [row.taskId, row.operationNumber])).toEqual([[resumed.taskId, 2], [first.taskId, 1]]);
     expect((await owner.taskStatus("refused-history.resume-1")).operationId).toBeNull();
+    expect(f.signals.filter(record => record.event === "home.task.history-summary").at(-1)?.counts)
+      .toMatchObject({ lineages: 1, operations: 2, resumes: 1, complete: 1 });
     evidence.push({ case: "refused-admission-not-a-worker-operation", page });
   }, 60_000);
 
@@ -358,6 +368,8 @@ describe("resuming a stopped Home worker in place", () => {
     await task.completion;
     const page = await service.invoke(client, "home.taskHistory", { taskId: task.taskId, limit: 50 }) as any;
     expect(page.complete).toBe(false);
+    expect(f.signals.filter(record => record.event === "home.task.history-summary").at(-1)?.counts)
+      .toMatchObject({ complete: 0, operations: 1, resumes: 0 });
     expect(page.items.filter((row: any) => row.checkin)).toHaveLength(12);
     evidence.push({ case: "unrecoverable-nested-history-is-explicit", page });
   }, 60_000);

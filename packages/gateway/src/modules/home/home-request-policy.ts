@@ -11,6 +11,7 @@ import { markAnthropicBlocks } from "../../episodic/cache-layout.js";
 import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
 import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
+import { HomeResponseTiming, type HomeResponseSample } from "./home-response-timing.js";
 
 /*
  * Tron Home's request seam (gist §7).
@@ -191,6 +192,7 @@ export interface HomeActivationView {
  * carries message text, an entry id or the activation nonce.
  */
 export type HomeRequestRecord =
+  | HomeResponseSample
   | {
     event: "activation";
     /** Effective-size estimate of the request this activation sent, in tokens. */
@@ -299,7 +301,11 @@ export class HomeRequestPolicy {
    * messages by object identity, oldest first. Bounded, and surviving settlement. */
   private readonly transformIdentities: boolean[] = [];
 
-  constructor(private readonly options: HomeRequestPolicyOptions) {}
+  readonly responseTiming: HomeResponseTiming;
+
+  constructor(private readonly options: HomeRequestPolicyOptions) {
+    this.responseTiming = new HomeResponseTiming(sample => options.onRecord?.(sample));
+  }
 
   /** The SDK's context stage clones messages, so this is the one place the
    * identity claim is observed rather than inferred (the fidelity check's
@@ -391,6 +397,7 @@ export class HomeRequestPolicy {
    */
   transferOperation(from: string | undefined, to: string): void {
     if (!from || from === to) return;
+    this.responseTiming.transfer(from, to);
     if (this.activation?.operationId !== from) return;
     this.activation.operationId = to;
   }
@@ -547,7 +554,15 @@ export class HomeRequestPolicy {
           "the outgoing request no longer matches the request the context handlers prepared",
         );
       }
-      return stream(model, context, options);
+      const finish = this.responseTiming.model(activation.operationId);
+      try {
+        const result = stream(model, context, options);
+        void result.result().then(finish, finish);
+        return result;
+      } catch (error) {
+        finish();
+        throw error;
+      }
     };
   }
 

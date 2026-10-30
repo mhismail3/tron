@@ -51,6 +51,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string; failureCause?: HomeTaskFailureCause }
+  | { event: "home.task.history-summary"; taskHash: string; counts: { lineages: number; operations: number; resumes: number; complete: number; rootCreatedAtMs: number } }
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
@@ -1074,7 +1075,8 @@ export class HomeTaskDispatcher {
 
   async history(input: { taskId: string; limit?: number; cursor?: string }, signal?: AbortSignal) {
     await this.assertAvailable();
-    return readHomeTaskHistory(this.store, this.sessions, input, signal);
+    return readHomeTaskHistory(this.store, this.sessions, input, signal,
+      summary => this.diagnostic?.({ event: "home.task.history-summary", ...summary }));
   }
 
   /** A task's display. A worker's name is read from its canonical session, never a transcript scan. */

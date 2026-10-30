@@ -122,6 +122,7 @@ export class RunEventsOwner {
             if (usedModel) this.operations.dependencies.modules.policy("modelUsed")?.(this.operations.id, { provider: usedModel.provider, id: usedModel.id });
           } else this.operations.prepareAssistantOwnedToolSegment();
         }
+        this.operations.homeRequestPolicy?.responseTiming.started(this.operations.activeOperationId);
         const activeInvocation = this.operations.runInvocations.invocationForOperation(this.operations.activeOperationId);
         // A public session_compact hook can start the next Agent turn before
         // compaction_end. Keep the captured compaction owner for its cleanup,

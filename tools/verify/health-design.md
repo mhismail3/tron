@@ -1,9 +1,10 @@
-# Lightweight health reporting — proposal
+# Lightweight health reporting
 
-Design only (#2135). The five scorecard fields are decided; their collection and
-scheduling below need maintainer design approval. No executable module, schedule,
-telemetry, provider call, gate or automatic deployment is added by this document.
-Use outcomes to test whether deletion reduces waiting at equal/lower regression
+The implemented scope is the on-demand `scripts/tron health` scorecard and approved
+content-free Home response/capability completion diagnostics (#2135). Approval timestamp
+recording awaits the settings owner. Scheduling/time remains undecided: no nightly
+batch, dependency report or weekly digest is implemented. The future-output table below
+is design context, not enabled jobs or authority to run them. Use outcomes to test whether deletion reduces waiting at equal/lower regression
 rate. LOC is diagnostic trailing evidence, never a quota or acceptance threshold.
 
 ## Small scorecard
@@ -91,10 +92,10 @@ collection below must expose missing data before any implementation is accepted.
 
 ## One owner, reuse first
 
-One host script in `tools/verify/health.py` (prospective; `repo/verify`) consumes
+One host script in `tools/verify/health.py` (`repo/verify`) consumes
 existing exact-SHA reports and approved aggregate projections. No Gateway service,
-new database, queue, model judge or parallel runner. Add its command to
-`scripts/tron` only after approval; `verify.module.json` already owns that directory.
+new database, queue, model judge or parallel runner. Its command is wired in
+`scripts/tron`; `verify.module.json` owns that directory.
 `tools/verify/batch.py` remains the sole owner of batch children/cancellation/logs
 and last-green state. Do not duplicate its process manager or cleanup journal.
 
@@ -112,8 +113,8 @@ ready monotonic timing; `gateway/home` for accepted maintainer input→first vis
 response and terminal outcome (separate queue/model/tool durations); `gateway/delegation`
 for complete admitted lineage counts; existing Mac/iOS identity projections for
 installed cohort. Never open live canonical sessions in a second client. Proposed
-Home/usage projections are new collection and require the design/privacy decision,
-not permission to scan private stores during this task.
+Home/usage collection exports only approved scalars through the existing logger;
+health reads an explicit aggregate export, never private stores or canonical sessions.
 
 Proposed local records: SHA/range, run ID, command/config digest, start/end/status,
 coverage, scalar samples and source artifact references. Result path stays under
@@ -152,5 +153,5 @@ Estimated incremental cost: seconds to parse bounded local JSON, zero provider s
 nightly suites keep their measured existing lane cost, currently unknown here.
 No promised nightly runtime until a complete authorized batch supplies it. Paid
 or model-driven evals require a separate explicit budget, not silent fallback.
-Approve/adjust collection boundaries, retention and scheduler/time before code;
-none of these proposed jobs or projections is implemented by landing this design.
+Collection and retention follow the approved scorecard scope. Scheduler/time and
+all proposed jobs remain undecided and unimplemented; they need separate authorization.

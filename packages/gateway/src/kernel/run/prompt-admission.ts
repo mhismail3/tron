@@ -243,6 +243,7 @@ operations: RunOperations<unknown>,
           invocation.lifecycle = "accepted";
           operations.runInvocations.invocations.set(invocationId, invocation);
           operations.noteAcceptedSteering(operationId);
+          if (!ownership) operations.homeRequestPolicy?.responseTiming.accepted(operationId);
           acceptedResolve(true);
         },
       }));
@@ -251,6 +252,7 @@ operations: RunOperations<unknown>,
       // and started its SDK promise, so release the RPC response while this
       // session lane continues to serialize the handler and its side effects.
       if (isExactExtensionCommand) {
+        if (!ownership) operations.homeRequestPolicy?.responseTiming.accepted(operationId);
         ownership?.onAdmitted?.(invocationId);
         onAdmitted?.({ operationId });
       }
