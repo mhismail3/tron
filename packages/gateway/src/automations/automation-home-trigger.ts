@@ -10,7 +10,9 @@ import { AUTOMATION_HOME_COOLDOWN_MS, type AutomationRecord, type AutomationRun 
 
 const runs = (record: AutomationRecord) => [...(record.currentRun ? [record.currentRun] : []), ...record.pendingHomeRuns ?? []];
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-const eligible = (record: AutomationRecord, run: AutomationRun) => record.activation !== "blocked" && (run.manual || record.activation === "enabled");
+const eligible = (record: AutomationRecord, run: AutomationRun) => record.activation !== "blocked"
+  && (record.provenance.kind !== "home" || record.activation === "enabled" && Date.parse(record.provenance.expiresAt) > Date.now())
+  && (run.manual || record.activation === "enabled");
 const stale = (run: AutomationRun, route: InputTriggerRoute | undefined) => run.homeDelivery && route && run.targetSnapshot.kind === "home"
   && (run.targetSnapshot.homeId !== route.homeId || run.targetSnapshot.routeGeneration !== route.routeGeneration || run.executionSessionId !== route.sessionId);
 

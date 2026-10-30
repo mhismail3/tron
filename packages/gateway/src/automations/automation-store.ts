@@ -12,6 +12,7 @@ import {
   MAXIMUM_AUTOMATION_RECORD_BYTES,
   MAXIMUM_AUTOMATIONS,
   admitsAutomationRecord,
+  admitsHomeMonitor, admitsAutomationProvenance, HOME_MONITOR_LIMIT,
 } from "./automation-contract.js";
 import { firstAutomationOccurrence, nextAutomationOccurrence } from "./schedule.js";
 import type {
@@ -288,6 +289,7 @@ export class AutomationStore {
         const nextOccurrenceAt = firstAutomationOccurrence(input.trigger, Date.now());
         if (nextOccurrenceAt !== undefined) record.nextOccurrenceAt = nextOccurrenceAt;
       }
+      this.assertHomeMonitorAdmission(record);
       await this.publishNew(record);
       return clone(record);
     });
@@ -477,10 +479,21 @@ export class AutomationStore {
       next.revision = current.revision + 1;
       next.stateRevision = current.stateRevision + 1;
       next.updatedAt = new Date(Date.now()).toISOString();
+      if (next.activation === "enabled" || next.activation === "draft") this.assertHomeMonitorAdmission(next);
       const normalized = JSON.parse(JSON.stringify(next)) as AutomationRecord;
       await this.publishReplacement(current, normalized);
       return clone(normalized);
     });
+  }
+
+  private assertHomeMonitorAdmission(record: AutomationRecord): void {
+    if (record.provenance.kind !== "home") return;
+    if (!admitsAutomationProvenance(record.provenance) || !admitsHomeMonitor(record) || Date.parse(record.provenance.expiresAt) <= Date.now()) {
+      throw new GatewayError("invalid_request", "Home monitors require a Home message, interval of at least 5 minutes and a future expiry within 24 hours of creation");
+    }
+    const active = [...this.records.values()].filter(other => other.id !== record.id && other.provenance.kind === "home"
+      && other.activation === "enabled" && Date.parse(other.provenance.expiresAt) > Date.now()).length;
+    if (record.activation === "enabled" && active >= HOME_MONITOR_LIMIT) throw new GatewayError("conflict", "At most 3 Home monitors may be active");
   }
 
   private async publishNew(record: AutomationRecord): Promise<void> {
@@ -497,6 +510,23 @@ export class AutomationStore {
   }
 
   private async publishReplacement(current: AutomationRecord, next: AutomationRecord, notify = true): Promise<void> {
+    if (next.provenance.kind === "home") {
+      const expired = Date.parse(next.provenance.expiresAt) <= Date.now();
+      if (expired) next.activation = "completed";
+      if (expired || next.activation !== "enabled") {
+        delete next.nextOccurrenceAt;
+        delete next.homeWakeAfter;
+        const runs = [...(next.currentRun ? [next.currentRun] : []), ...next.pendingHomeRuns ?? []];
+        // Already claimed deliveries keep their proof owner; pause/expiry cannot
+        // undo accepted input. Unclaimed messages must not outlive their lease.
+        const cancelled = runs.filter(run => !run.homeDelivery).map(run => ({ ...run, state: "cancelled" as const,
+          reason: expired ? "monitor-expired" : "monitor-paused", terminalAt: new Date(Date.now()).toISOString() }));
+        const retained = runs.filter(run => run.homeDelivery);
+        if (retained[0]) next.currentRun = retained[0]; else delete next.currentRun;
+        next.pendingHomeRuns = retained.slice(1);
+        if (cancelled.length) { next.lastRun = cancelled.at(-1)!; next.history.push(...cancelled); }
+      }
+    }
     this.trimHistoryToRecordBound(next);
     if (!admitsAutomationRecord(next)) throw new Error("Automation record failed its canonical contract");
     const bytes = serializedBytes(next);

@@ -53,6 +53,7 @@ export interface HomeModuleServices {
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle>;
   task(sessionId: string, request: unknown): Promise<unknown>;
+  monitor(sessionId: string, toolCallId: string, request: unknown): Promise<unknown>;
   profileChanges(session: SessionContext): HomeProfileChangeAccess | undefined;
   knowledge: KnowledgeService | undefined;
   search(): ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
@@ -63,6 +64,7 @@ export interface HomeModuleServices {
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
 export interface HomeComposition {
   triggerSources?: HomeOwnerOptions["triggerSources"];
+  monitor?: (sessionId: string, toolCallId: string, request: unknown) => Promise<unknown>;
   runtime: HomeSessionProfileServices["runtime"];
   settings(): Readonly<{ model: SettingsModel; changes: SettingsChangePath }> | undefined;
   knowledge(): KnowledgeService | undefined;
@@ -203,6 +205,10 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     availability: (role, signal, queue) => platform.modelQueue?.availability(role, signal, queue),
   };
   return {
+    monitor: (sessionId, toolCallId, request) => {
+      if (!platform.monitor) throw new GatewayError("unsupported", "Home monitors need the automations service");
+      return platform.monitor(sessionId, toolCallId, request);
+    },
     knowledge: platform.knowledge(), read: (request, signal) => readHomeSessionEntry(sessions, owner, request, signal),
     delegate: (sessionId, request, signal) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
@@ -309,7 +315,7 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
   return {
     name: "tron-home",
     purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
-    tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [], dependsOn: [workspaceModule],
+    tools: ["zoom", "date", "memory_search", "delegate", "task", "monitor", "profile"], commands: [], dependsOn: [workspaceModule],
     start: host => { started(host); return { profiles: [homeSessionProfile(() => services().profile)], hooks: {
       profileDecision: (sessionId, cwd) => { const name = services().profile.decision(sessionId, cwd); return name === "unnamed" ? "unrecorded" : name; },
       runSettled: () => services().runSettled, sessionLineage: () => services().lineage, kernelLifecycle: () => services().lifecycle, taskLedger: () => services().taskLedger, requestPolicy: () => services().requestPolicy,
@@ -318,7 +324,8 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
         (request, signal) => owners.delegate(session.sessionId(), request, signal),
         request => owners.task(session.sessionId(), request),
-        () => owners.knowledge, () => owners.profileChanges(session));
+        () => owners.knowledge, () => owners.profileChanges(session),
+        (id, request) => owners.monitor(session.sessionId(), id, request));
     } }; },
   };
 }

@@ -264,6 +264,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     ...(options.automations ? {
       beforeSessionRekey: (previousId: string, nextId: string) => automations!.rekeySessionTarget(previousId, nextId),
       beforeSessionDelete: (sessionId: string) => automations!.blockSessionTarget(sessionId),
+      monitor: (sessionId, id, request) => scheduleTool!.monitor(sessionId, id, request),
       scheduleToolOperations: { execute: (sessionId, toolCallId, request) => scheduleTool!.execute(sessionId, toolCallId, request) },
     } satisfies Partial<Parameters<typeof createTestRegistry>[0]> : {}),
     ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),

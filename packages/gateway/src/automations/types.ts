@@ -24,7 +24,8 @@ export type AutomationAction =
 
 export type AutomationProvenance =
   | { kind: "mobile" | "local" }
-  | { kind: "assistant"; sessionId: string; sourceId: string };
+  | { kind: "assistant"; sessionId: string; sourceId: string }
+  | { kind: "home"; homeId: string; expiresAt: string };
 
 export type AutomationRunState =
   | "queued"

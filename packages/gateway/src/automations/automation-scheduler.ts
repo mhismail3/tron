@@ -405,6 +405,10 @@ export class AutomationScheduler {
   private async materializeDueRuns(): Promise<void> {
     const now = this.now();
     for (const record of this.store.snapshot()) {
+      if (record.provenance.kind === "home" && record.activation !== "completed" && Date.parse(record.provenance.expiresAt) <= now) {
+        await this.store.mutateState(record.id, current => current); // Store retires expired, unclaimed Home messages.
+        continue;
+      }
       if (record.activation !== "enabled" || !record.nextOccurrenceAt || Date.parse(record.nextOccurrenceAt) > now) continue;
       const classified = classifyDueOccurrence(record.trigger, record.nextOccurrenceAt, now, record.misfirePolicy);
       await this.store.mutateState(record.id, (current) => {
@@ -794,6 +798,10 @@ export class AutomationScheduler {
     const records = this.store.snapshot();
     let nearest: number | undefined;
     for (const record of records) {
+      if (record.provenance.kind === "home" && record.activation !== "completed") {
+        const expires = Date.parse(record.provenance.expiresAt);
+        if (nearest === undefined || expires < nearest) nearest = expires;
+      }
       if (record.homeWakeAfter) {
         const due = Date.parse(record.homeWakeAfter);
         if (nearest === undefined || due < nearest) nearest = due;

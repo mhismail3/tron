@@ -292,11 +292,15 @@ package struct GatewayAutomationProvenance: Codable, Hashable, Sendable {
     package let kind: String
     let sessionId: String?
     let sourceId: String?
+    package let homeId: String?
+    package let expiresAt: String?
 
-    package init(kind: String, sessionId: String?, sourceId: String?) {
+    package init(kind: String, sessionId: String?, sourceId: String?, homeId: String? = nil, expiresAt: String? = nil) {
         self.kind = kind
         self.sessionId = sessionId
         self.sourceId = sourceId
+        self.homeId = homeId
+        self.expiresAt = expiresAt
     }
 }
 
@@ -508,6 +512,10 @@ package enum AutomationAdmissionPolicy {
 
     package static func admits(_ provenance: GatewayAutomationProvenance) -> Bool {
         switch provenance.kind {
+        case "home":
+            return provenance.sessionId == nil && provenance.sourceId == nil
+                && provenance.homeId.map({ boundedText($0, maximum: 200) }) == true
+                && provenance.expiresAt.flatMap(GatewayTimestamp.parse) != nil
         case "mobile", "local":
             return provenance.sessionId == nil && provenance.sourceId == nil
         case "assistant":

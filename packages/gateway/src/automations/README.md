@@ -5,7 +5,7 @@
 The Gateway is the sole scheduler and canonical owner of durable automations:
 definitions, triggers, the run ledger, dispatch into sessions and settlement. Pi
 extensions and subagents may run inside a scheduled turn but own no timer,
-definition, retry or ledger. iOS and the first-party `schedule` tool are clients.
+definition, retry or ledger. iOS, the first-party `schedule` tool and Home’s curated `monitor` tool are clients.
 
 ## Owns
 
@@ -57,6 +57,24 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   inputs join one recovery batch. A singleton uses a hidden native resume input, bound to
   the existing canonical message before acknowledging it, rather than appending it twice.
   The execution chapter and operation bind only at actual admission, not while queued.
+- **Home monitors.** Home can create/list/pause/resume/delete only definitions with
+  immutable `home` provenance for its logical Home, never maintainer definitions.
+  `monitor create {name, message, everyMinutes, expiresAt}` enables a Home-message
+  interval; the message carries the authorized objective, refs and stop conditions.
+  Intervals are whole minutes from 5–1440; expiry is required, future, and at most
+  24 hours from creation. At most three Home monitors may be enabled installation-wide;
+  create and enable check the bound under the store mutex. First firing is one
+  interval after creation. `list` returns definitions/revisions; `pause|resume|delete`
+  require `automationId, expectedRevision`. Expiry cannot be extended by editing or
+  resuming. The existing scheduler completes expired monitors; pause/expiry cancels
+  unclaimed messages, while claimed inputs retain their proof owner. Unlike ordinary
+  Home automations, paused/expired monitors cannot deliver even manual Run Now.
+  Maintainer Stop of Home through `session.abort` pauses its enabled monitors before
+  acknowledgement, not maintainer automations. They remain visible/pausable in
+  Automations, attributed **Tron Home**, with expiry in detail. No approval is needed:
+  only a bounded trigger is created, never settings, trust, profile or grant authority.
+  Home resumes authorized unblocked progress on result wakes, arms a monitor before
+  leaving open work idle, and pauses/deletes it on completion or a maintainer blocker.
 - **Dispatch.** Ordinary runs snapshot their target and concrete session ID before dispatch
   (workspace runs get a predetermined UUID created through
   `RuntimeRegistry`/`RuntimeSlot`). Existing-session leases, prompt admission and canonical

@@ -40,6 +40,13 @@ the outbox without scanning sealed chapter files.
 
 ## Contract
 
+Home’s `monitor` tool uses the [existing automation owner](../../automations/README.md)
+for finite Home triggers (5-minute minimum, three active, 24-hour maximum expiry),
+visible and pausable in Automations. It manages only Home-created definitions.
+A result wake resumes authorized unblocked unfinished work in the same worker;
+Home arms a monitor before leaving open work idle and disarms it when done or
+blocked on the maintainer. Trigger turns never approve or renew grants.
+
 ### Designation and chapters
 
 Home receives the canonical native `SessionOperations` implementation, not a

@@ -203,6 +203,16 @@ export class AutomationService {
     return resolved;
   }
 
+  async pauseHomeMonitors(sessionId: string): Promise<void> {
+    const route = this.homeTarget?.();
+    if (route?.sessionId !== sessionId) return;
+    for (const record of this.store.snapshot()) {
+      if (record.provenance.kind === "home" && record.provenance.homeId === route.homeId && record.activation === "enabled") {
+        await this.pause(record.id, record.revision);
+      }
+    }
+  }
+
   async blockSessionTarget(sessionId: string): Promise<void> {
     await this.store.blockTarget(sessionId);
     this.scheduler.wake();

@@ -56,6 +56,46 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     private readonly now: () => number = Date.now,
   ) {}
 
+  /** Home can manage only its own finite message automations, never the
+   * maintainer's definitions (even when those target this Home). */
+  async monitor(sessionId: string, toolCallId: string, raw: unknown): Promise<unknown> {
+    const route = this.service.homeRoute();
+    if (route.sessionId !== sessionId) throw new GatewayError("not_found", "Monitor requires the current Home");
+    const input = raw as Record<string, unknown>;
+    const action = input?.action;
+    const fields = action === "create" ? ["action", "name", "message", "everyMinutes", "expiresAt"]
+      : action === "list" ? ["action"] : ["action", "automationId", "expectedRevision"];
+    if (!input || !["create", "list", "pause", "resume", "delete"].includes(action as string)
+      || Object.keys(input).some(key => !fields.includes(key))
+      || fields.some(key => input[key] === undefined)) throw new GatewayError("invalid_request", "Invalid monitor fields for this action");
+    const owns = (record: AutomationRecord) => record.provenance.kind === "home" && record.provenance.homeId === route.homeId;
+    if (action === "list") return { monitors: this.service.store.snapshot().filter(owns) };
+    return this.receipts.execute(
+      `home:${route.homeId}`, `tool.monitor.${action}`, commandId(sessionId, toolCallId, `monitor.${action}`), async () => {
+        if (action === "create") {
+          if (!Number.isSafeInteger(input.everyMinutes) || (input.everyMinutes as number) < 5 || (input.everyMinutes as number) > 1440) {
+            throw new GatewayError("invalid_request", "Monitor interval must be 5 to 1440 whole minutes");
+          }
+          const created = await this.service.create({
+            name: input.name, activation: "enabled",
+            target: { kind: "home", homeId: route.homeId, routeGeneration: route.routeGeneration },
+            trigger: { kind: "interval", everySeconds: (input.everyMinutes as number) * 60, anchorAt: new Date(this.now() + (input.everyMinutes as number) * 60_000).toISOString() },
+            misfirePolicy: "latest", overlapPolicy: "skip", action: { kind: "sessionPrompt", text: input.message },
+          }, { kind: "home", homeId: route.homeId, expiresAt: input.expiresAt as string });
+          return created as unknown as JsonValue;
+        }
+        if (typeof input.automationId !== "string" || !Number.isSafeInteger(input.expectedRevision)) throw new GatewayError("invalid_request", "Monitor requires automationId and expectedRevision");
+        const current = this.service.get(input.automationId);
+        if (!owns(current)) throw new GatewayError("not_found", "Monitor was not created by this Home");
+        if (action === "delete") {
+          await this.service.delete(current.id, input.expectedRevision as number);
+          return { automationId: current.id, deleted: true };
+        }
+        return await (action === "resume" ? this.service.enable(current.id, input.expectedRevision as number)
+          : this.service.pause(current.id, input.expectedRevision as number)) as unknown as JsonValue;
+      });
+  }
+
   private belongsToSession(automation: AutomationRecord, sessionId: string): boolean {
     if (automation.target.kind === "home") {
       try { const route = this.service.homeRoute(); if (route.sessionId === sessionId && route.homeId === automation.target.homeId && route.routeGeneration === automation.target.routeGeneration) return true; }

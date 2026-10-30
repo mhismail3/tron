@@ -248,12 +248,16 @@ struct AutomationDetailMetadata: Identifiable {
         case "mobile": creator = "iPhone"
         case "local": creator = "Mac"
         case "assistant": creator = "Tron assistant"
+        case "home": creator = "Tron Home"
         default: creator = record.provenance.kind
         }
         sections.append(Self(title: "About", rows: [
             row("Created", AutomationDateFormatting.date(record.createdAt)),
             row("Created by", creator), row("Revision", "\(record.revision)"),
         ]))
+        if let expiresAt = record.provenance.expiresAt {
+            sections.append(Self(title: "Monitor", rows: [row("Expires", AutomationDateFormatting.date(expiresAt))]))
+        }
         return sections
     }
 }
