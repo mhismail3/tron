@@ -205,8 +205,8 @@ class TierTests(fixture.VerifyCase):
                         card = json.loads(output)
                         self.assertEqual(card['status'], 'interrupted')
                         self.assertIn(card, [json.loads(p.read_text()) for p in (r.path / 'test-results/health').glob('aggregate-*.json')])
-                    fixture.ARTIFACTS.mkdir(parents=True, exist_ok=True)
-                    (fixture.ARTIFACTS / f'health-interrupted-{owner}.json').write_text(json.dumps(card, indent=2))
+                    fixture.HEALTH_ARTIFACTS.mkdir(parents=True, exist_ok=True)
+                    (fixture.HEALTH_ARTIFACTS / f'health-interrupted-{owner}.json').write_text(json.dumps(card, indent=2))
                     child = int(pid_file.read_text())
                     deadline = time.monotonic() + 10
                     while time.monotonic() < deadline:
@@ -217,6 +217,10 @@ class TierTests(fixture.VerifyCase):
                         time.sleep(.05)
                     else:
                         self.fail(f'interrupted {owner} left its descendant alive')
+                    (fixture.HEALTH_ARTIFACTS / f'health-interrupted-{owner}-proof.json').write_text(json.dumps({
+                        'owner': owner, 'returnCode': process.returncode, 'descendantExited': True,
+                        'partialRecordRetained': True,
+                    }, indent=2))
                 finally:
                     if process.poll() is None:
                         process.send_signal(signal.SIGTERM)

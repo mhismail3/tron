@@ -42,6 +42,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
+HEALTH_ARTIFACTS = ROOT / "test-results" / "health-cli"
 COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", ".github/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs")
@@ -456,8 +457,8 @@ class QuarantineTests(VerifyCase):
             text = path.read_text()
             for forbidden in ('PRIVATE_SENTINEL', 'failureMessages', 'fullName', 'arguments', 'prompt', 'credentials', str(r.path), 'packages/gateway/src/'):
                 self.assertNotIn(forbidden, text)
-        ARTIFACTS.mkdir(parents=True, exist_ok=True)
-        (ARTIFACTS / 'health-sample.json').write_text(json.dumps(card, indent=2))
+        HEALTH_ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        (HEALTH_ARTIFACTS / 'health-sample.json').write_text(json.dumps(card, indent=2))
 
 
 class GatewayDependenciesTests(VerifyCase):
