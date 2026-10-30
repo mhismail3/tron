@@ -1,5 +1,5 @@
 import { workspaceModule } from "./workspace/workspace-module.js";
-import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
+import { MacTerminalService } from "./security/mac-terminal-service.js";
 import { ManagedSubagents } from "./kernel/delegation/managed-subagents.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -201,8 +201,8 @@ const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions);
-// Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
-const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
+// Security owns the private user SSH service; composition has no lifecycle logic.
+const macTerminalKeys = new MacTerminalService(config.tronHome);
 const settingsSchema = createGatewaySettingsSchema();
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
@@ -845,7 +845,7 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
-  macTerminal: new MacTerminalHost(macTerminalKeys),
+  macTerminal: macTerminalKeys,
   modelConfig,
   packages,
   hookResources,

@@ -22,7 +22,7 @@ func caseName(_ error: MacTerminalError) -> String {
     switch error {
     case .notOnTailnet: "notOnTailnet"
     case .macUnreachable: "macUnreachable"
-    case .remoteLoginOff: "remoteLoginOff"
+    case .serviceStopped: "serviceStopped"
     case .hostKeyMismatch: "hostKeyMismatch"
     case .authenticationRefused: "authenticationRefused"
     case .noPinnedHostKey: "noPinnedHostKey"

@@ -58,8 +58,9 @@ export interface SettingsStores {
   global: Record<string, unknown>;
   /** Saved trust decisions by canonical project path. */
   trust: Record<string, boolean>;
-  /** Mac Terminal keys in ~/.ssh/authorized_keys, by paired device id. */
+  /** Private Mac Terminal authorizations, by paired device id. */
   macTerminal: Record<string, string>;
+  macTerminalServerEnabled?: boolean;
   /** The maintainer's floor overrides (Global policy, doc 5.4). */
   floors: FloorOverrides;
   /** The Gateway-owned settings document (`gateway/settings/gateway.json`). */

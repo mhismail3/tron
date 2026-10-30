@@ -27,7 +27,7 @@ struct MacTerminalSettingsRow: View {
 }
 
 /// Mac Terminal (Settings › System): login shells on the paired
-/// Mac over Tailscale through macOS Remote Login, in the session terminal's
+/// Mac over the private user SSH service on Tailscale, in the session terminal's
 /// chrome and emulator. Only enabling and removing it use the Gateway; the
 /// shell lives in tmux, so it keeps running when this sheet
 /// closes or the app leaves the foreground, and while Tron.app or the Gateway
@@ -79,7 +79,7 @@ struct MacTerminalSheet: View {
                 }
             }
         } message: {
-            Text("This iPhone's key is removed from ~/.ssh/authorized_keys on the Mac and deleted here. Shells already open on the Mac keep running until they exit. You can enable Mac Terminal again while the Gateway is running.")
+            Text("This iPhone's key is removed from the private SSH service on the Mac and deleted here. Shells already open on the Mac keep running until they exit. You can enable Mac Terminal again while the Gateway is running.")
         }
     }
 
@@ -92,6 +92,21 @@ struct MacTerminalSheet: View {
         switch controller.stage {
         case .loading:
             TronSheetLoadingState(label: "Checking your Mac…", accent: accent)
+        case .preparing:
+            TronSheetLoadingState(label: "Preparing private SSH…", accent: accent)
+        case .trust(let status):
+            ScrollView {
+                VStack(spacing: 20) {
+                    TronPlaceholderState(title: "Trust this Mac’s private SSH identity?",
+                        detail: "\(status.username) at \(status.hosts.first ?? "your Mac"):\(status.port). Verify the fingerprint on the Mac. Your previous enrollment stays unchanged until you trust it.",
+                        icon: "lock.shield", accent: accent)
+                    Text(status.fingerprint).font(.caption.monospaced()).textSelection(.enabled)
+                        .accessibilityIdentifier("mac-terminal-host-fingerprint")
+                    Button("Trust and Enroll") { Task { await controller.trustHost(model: model) } }
+                        .buttonStyle(.borderedProminent).tint(accent)
+                    Button("Decline", role: .cancel) { controller.declineHost() }
+                }.padding()
+            }
         case .enrolling:
             TronSheetLoadingState(label: "Adding this iPhone's key…", accent: accent)
         case .setup(let notice):
@@ -143,16 +158,9 @@ struct MacTerminalSheet: View {
         case .ready(let username):
             Placeholder(
                 title: "Open a shell on your Mac",
-                detail: "Mac Terminal signs in as \(username) with a key that stays in this iPhone's Secure Enclave. It connects over Tailscale through Remote Login, so it works even when Tron on the Mac is not running. Enabling it adds this iPhone's key to ~/.ssh/authorized_keys, for Tailscale addresses only.",
+                detail: "Mac Terminal signs in as \(username) through Tron’s private user SSH server, bound only to the Mac’s Tailscale IPv4. It works without the Gateway and does not change Remote Login. Enable prepares its identity; only Trust and Enroll publishes this iPhone’s Secure Enclave key.",
                 actionTitle: "Enable Mac Terminal"
             ) { Task { await controller.enroll(model: model) } }
-        case .remoteLoginOff:
-            Placeholder(
-                icon: "lock.shield",
-                title: "Turn on Remote Login",
-                detail: "On the Mac, open System Settings › General › Sharing and turn on Remote Login. Tron never changes this setting for you.",
-                actionTitle: "Check Again"
-            ) { Task { await controller.refreshSetup(model: model) } }
         case .needsGateway:
             Placeholder(
                 icon: "desktopcomputer.trianglebadge.exclamationmark",
@@ -167,13 +175,9 @@ struct MacTerminalSheet: View {
                 detail: "Mac Terminal connects over your tailnet. Open Tailscale on the Mac, sign in to the same tailnet as this iPhone, then check again.",
                 actionTitle: "Check Again"
             ) { Task { await controller.refreshSetup(model: model) } }
-        case .noHostKeys:
-            Placeholder(
-                icon: "lock.trianglebadge.exclamationmark",
-                title: "The Mac has no SSH host key",
-                detail: "Mac Terminal pins the Mac's host key so it can never connect to an impostor, and the Mac reported none in /etc/ssh. Turn Remote Login off and on again on the Mac, then check again.",
-                actionTitle: "Check Again"
-            ) { Task { await controller.refreshSetup(model: model) } }
+        case .serviceIssue(let message):
+            Placeholder(icon: "lock.trianglebadge.exclamationmark", title: "Private SSH needs attention",
+                detail: message, actionTitle: "Check Again") { Task { await controller.refreshSetup(model: model) } }
         case .unpaired:
             Placeholder(
                 icon: "iphone.slash",
@@ -187,8 +191,12 @@ struct MacTerminalSheet: View {
     private var menu: some View {
         if let endpoint = controller.enrollment?.endpoint {
             Button("Reconnect", systemImage: "arrow.clockwise") { controller.reconnect() }
+                .disabled(controller.isChangingAuthorization)
+            Button("Refresh SSH Enrollment", systemImage: "key") { Task { await controller.refreshSetup(model: model) } }
+                .disabled(controller.isChangingAuthorization || model.connectionState != .connected)
             Section("\(endpoint.username) on \(endpoint.hosts.first ?? "your Mac")") {}
             Button("Remove Mac Terminal", systemImage: "key.slash", role: .destructive) { confirmRemove = true }
+                .disabled(controller.isChangingAuthorization)
         } else {
             Button("Check Again", systemImage: "arrow.clockwise") {
                 Task { await controller.refreshSetup(model: model) }

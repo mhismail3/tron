@@ -2,6 +2,7 @@ import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
 import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
 import { generateKeyPairSync } from "node:crypto";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
+import { MacTerminalService } from "../security/mac-terminal-service.js";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
@@ -420,8 +421,11 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
   });
   owner.registries.push(registry);
   await registry.initialize();
-  const macTerminalKeys = new MacTerminalKeys(join(root, "home", ".ssh"));
-  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys }));
+  const privateService = new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") });
+  // Real private-store seeding arranges read-only enrollment metadata; generic
+  // tests never fake a running native listener or bypass the mutation owner.
+  const macTerminalKeys = new MacTerminalKeys(privateService.root);
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   // Production wiring: every read reconciles outside changes (doc 5.6).
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
@@ -1163,7 +1167,9 @@ describe("outside changes to MCP servers and custom models", () => {
  * `settings.change` as the maintainer, the effective value and source on a target
  * whose top layer that is, the value in the real store bytes through the schema
  * binding, and `settings.undo` restoring the prior value. Keys added later are
- * covered automatically. The per-instance report is a retained artifact.
+ * covered automatically. Native Mac mutation rows run the named real-sshd
+ * round trips; this generic boundary retains their read/type/floor previews.
+ * The per-instance report is a retained artifact.
  */
 describe("every key at every allowed layer", () => {
   // One case per layer: each owns its budget and failure, and the per-instance
@@ -1257,6 +1263,18 @@ describe("every key at every allowed layer", () => {
           report.push({ ...instance, result: "verified read-only" });
           continue;
         }
+        if (key.id === "permissions.macTerminalKey" || key.id === "permissions.macTerminalServer") {
+          // These rows cross a native user sshd/launchd boundary. Their actual
+          // replacement+undo and enable+undo run in mac-terminal.e2e.test.ts,
+          // not a hosted runner with no Mac/Tailscale. Reads, typing and floors
+          // still cross this real Gateway preview; no fake listener is injected.
+          const actor = key.id === "permissions.macTerminalKey"
+            ? { ...client([slot.id]), identity: ENROLLED_IPHONE } as ClientContext : client([slot.id]);
+          expect(await f.change(targets[layer]!, request, { ...extra, dryRun: true }, actor))
+            .toMatchObject({ dryRun: true, status: "applied", changes: [{ tier: "approve" }] });
+          report.push({ ...instance, result: "native mutation: real sshd Gateway round trips" });
+          continue;
+        }
         let applied: Awaited<ReturnType<typeof f.change>>;
         try {
           // An iPhone enrolls only its own Mac Terminal key, so that key is changed as its device.
@@ -1288,7 +1306,7 @@ describe("every key at every allowed layer", () => {
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
     await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
     await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
-    const gaps = report.filter(entry => entry.layer === only && !["round-trip", "verified read-only", "verified masked by Project", "verified unserved: no writer"].includes(String(entry.result)) && !String(entry.result).startsWith("Home applier"));
+    const gaps = report.filter(entry => entry.layer === only && !["round-trip", "verified read-only", "verified masked by Project", "verified unserved: no writer", "native mutation: real sshd Gateway round trips"].includes(String(entry.result)) && !String(entry.result).startsWith("Home applier"));
     expect(gaps).toEqual([]);
   }, 60_000);
 });

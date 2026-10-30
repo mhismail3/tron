@@ -34,26 +34,43 @@ and Project settings changes reload every live chat of the root.
 
 ### Mac Terminal
 
-SSH login shells on this Mac through macOS Remote Login over Tailscale, independent of
-the Gateway, so they keep working while Tron.app or the Gateway is down. The Gateway
-only enrolls and revokes keys (`src/security/mac-terminal.ts`):
+SSH/tmux shells use a private ordinary-user native `/usr/sbin/sshd`, independent
+of the Gateway. Security's `MacTerminalService` owns the service, not the machine
+module or a Gateway child. Stock Remote Login, system SSH files and PF are untouched.
 
-- **`macTerminal.status`** (paired iPhones, no parameters): login `username`, `port`
-  22, `hosts` (MagicDNS name, then Tailscale addresses), `hostKeys`, `remoteLogin`
-  (`on`/`off`/`unknown` from one loopback connect; Tron never changes it), and `enrolled`.
-- **Shell persistence** uses built-in sshd and tmux on the Mac. The iPhone directly
-  attaches the stable session; no Gateway PTY or custom shell host exists. The
-  maintainer owns the required server-side PF exposure policy.
-- **The key** is the Global setting `permissions.macTerminalKey` (qualified by
-  `device`): one `~/.ssh/authorized_keys` line restricted to Tailscale ranges with no
-  forwarding, admitting only `ecdsa-sha2-nistp256` (Secure Enclave) keys. Adding is
-  an `approve`-floor widening, removing is `notify`; an iPhone enrolls only itself.
-  Tron rewrites the file atomically under its lock, keeps every other line, writes
-  0600 and refuses symlinked, non-regular or oversized files.
-- **Revocation**: unset from the iPhone or any chat's `settings` tool, delete the line
-  by hand, or `device.revoke`, which removes the key first and refuses if that fails.
+- **Endpoint:** port 44222, `AddressFamily inet`, only the locally assigned online
+  Tailscale Self IPv4 in 100.64.0.0/10. No DNS, LAN, loopback, wildcard, IPv6 or
+  alternate-port fallback. CLI and enrollment share one canonical-home lifecycle
+  lock; launchd directly runs sshd in the ordinary user's GUI domain.
+- **Private state:** `<tronHome>/mac-terminal` is 0700; persistent Ed25519 host key,
+  config and authorized_keys are 0600. Missing/corrupt initialized identity fails
+  closed, never regenerates. Configuration binds one address and disables
+  password/PAM/keyboard-interactive login and forwarding.
+- **Enable/trust:** `permissions.macTerminalServer` explicitly prepares/starts
+  the service at approve floor. The iPhone displays the host fingerprint; only
+  **Trust and Enroll** publishes `permissions.macTerminalKey`, device-qualified,
+  P-256 only, restricted to Tailnet IPv4. Decline preserves the old enrollment.
+- **Status:** paired-iPhone `macTerminal.status` returns username, port, numeric
+  hosts, hostKeys/fingerprint, serviceState/detail, enrolled/enrolledKey. It never
+  starts or repairs anything. Running requires owned config/key/job/argv plus
+  exact kernel listener and PID evidence. Passive health checks do not open
+  unauthenticated SSH connections; the client verifies the presented key before auth.
+- **Recovery:** stale address, absent Tailnet, port conflict or job failure is
+  explicit. Recovery validates the newly assigned address and preserves host key
+  and tmux; the iPhone explicitly refreshes enrollment, never silently repins.
+- **Revocation:** unset the device key or revoke its pairing. Authorization is
+  removed first; failure refuses device revocation. Removing the last key stops
+  only the owned daemon. Stopping never kills tmux or unrelated admin sessions.
+- **Persistence:** one tmux shell per Mac/iPhone on `tron-mobile`, /dev/null config,
+  no plain-shell fallback. Closing a link does not terminate that shell.
 
-The iPhone pins the host keys at enrollment
+Prepare the CLI with `scripts/tron build gateway`, then the maintainer may run
+`scripts/tron terminal-ssh status|start|stop|recover --home <existing-tron-home>`.
+Status is read-only. Start requires the user's GUI launchd domain and a free port;
+stop/recover refuse an unknown label, plist, executable or argument list.
+No Gateway startup hook installs or starts the service.
+
+The iPhone pins the private host identity at enrollment
 ([iOS Mac Terminal](../../../ios-app/docs/architecture.md#mac-terminal)).
 
 ### Native capture and computer use

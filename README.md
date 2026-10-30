@@ -57,10 +57,10 @@ state only.
 - Mobile exposure binds explicitly to the detected Tailscale interface. The
   default developer gateway remains loopback-only.
 - Mac Terminal (Settings › System) reattaches the same tmux shell through
-  macOS Remote Login over Tailscale, without the Gateway. Its per-iPhone key
-  stays in the Secure Enclave, is enrolled into `~/.ssh/authorized_keys` only by
-  the maintainer's tap (restricted to Tailscale source addresses), and the Mac's
-  host key is pinned at enrollment
+  a private user SSH server bound only to Tailscale IPv4, without the Gateway.
+  Stock Remote Login and PF stay untouched. Its per-iPhone key stays in the
+  Secure Enclave; explicit Enable prepares the service and **Trust and Enroll**
+  pins its private host identity before publishing that iPhone’s authorization
   ([Mac Terminal](packages/gateway/README.md#mac-terminal)).
 
 Do not open the same session concurrently in another runtime client: the

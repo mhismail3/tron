@@ -178,7 +178,7 @@ const adoptsHomeRuntime = (plan: Planned) => plan.request.layer === "session" &&
 
 /** Applier order across stores (doc 5.2): fixed, so rollback is the reverse. */
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "home": 3, "floors": 4, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "home": 3, "floors": 4, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
 export type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };

@@ -145,6 +145,10 @@ Commands:
                                     --all checks every one under the worktree root,
                                     naming why each other is kept
 
+  terminal-ssh status|start|stop|recover --home <tron-home>
+                                    Own private user SSH service; no root, PF, or
+                                    stock Remote Login changes. Status is read-only.
+
 There is no deploy command. Production deployment is manual-only.
 EOF
 }
@@ -187,6 +191,13 @@ case "$cmd" in
     use_pinned_node
     cd "$GATEWAY"
     exec npm run build
+    ;;
+  terminal-ssh)
+    use_pinned_node
+    [[ -f "$GATEWAY/dist/security/mac-terminal-cli.js" ]] || {
+      echo "Prepare the CLI first: scripts/tron build gateway" >&2; exit 66;
+    }
+    exec node "$GATEWAY/dist/security/mac-terminal-cli.js" "$@"
     ;;
   diagnose)
     use_pinned_node

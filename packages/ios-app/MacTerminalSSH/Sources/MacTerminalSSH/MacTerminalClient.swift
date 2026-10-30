@@ -6,7 +6,7 @@ import NIOSSH
 import NIOTransportServices
 
 /// Mac Terminal's SSH client: one interactive login shell on the paired Mac's
-/// built-in sshd (macOS Remote Login), reached over Tailscale without the
+/// private user-level sshd, reached over Tailscale IPv4 without the
 /// Gateway. The iPhone app and the `mac-terminal-probe` journey binary share
 /// this code, so the real-sshd test exercises the exact handshake, host-key
 /// pin, key authentication and PTY channel the app uses.
@@ -16,14 +16,14 @@ import NIOTransportServices
 
 /// Where and as whom to connect, and which host keys the Mac may present.
 public struct MacTerminalEndpoint: Codable, Equatable, Sendable {
-    /// Dialed in order: the MagicDNS name, then the Tailscale addresses.
+    /// Explicitly pinned numeric Tailscale IPv4 destinations only.
     public var hosts: [String]
     public var port: Int
     public var username: String
     /// The Mac's sshd host public keys in OpenSSH form, pinned at enrollment.
     public var hostKeys: [String]
 
-    public init(hosts: [String], port: Int = 22, username: String, hostKeys: [String]) {
+    public init(hosts: [String], port: Int = 44222, username: String, hostKeys: [String]) {
         self.hosts = hosts
         self.port = port
         self.username = username
@@ -37,7 +37,7 @@ public struct MacTerminalEndpoint: Codable, Equatable, Sendable {
 public enum MacTerminalError: Error, Equatable, Sendable, LocalizedError {
     case notOnTailnet
     case macUnreachable
-    case remoteLoginOff
+    case serviceStopped
     case hostKeyMismatch(presented: String)
     case authenticationRefused
     case noPinnedHostKey
@@ -52,12 +52,12 @@ public enum MacTerminalError: Error, Equatable, Sendable, LocalizedError {
             "This iPhone is not on your tailnet. Open Tailscale, connect, then try again."
         case .macUnreachable:
             "The Mac did not answer over Tailscale. Check that it is awake and connected to Tailscale."
-        case .remoteLoginOff:
-            "Remote Login is off on the Mac. Turn it on in System Settings › General › Sharing › Remote Login, then try again."
+        case .serviceStopped:
+            "Tron’s private SSH service is stopped on the Mac. Enable it through the connected Gateway or recover it on the Mac. Stock Remote Login is not used."
         case .hostKeyMismatch(let presented):
-            "The Mac presented a different SSH host key (\(presented)) than the one pinned when this iPhone was enrolled. Tron did not connect. If you reinstalled macOS or replaced the Mac, remove and re-enable Mac Terminal while the Gateway is running."
+            "The Mac presented a different SSH host key (\(presented)) than the one pinned when this iPhone was enrolled. Tron did not connect. Verify the private service’s fingerprint on the Mac, then explicitly refresh SSH enrollment through the connected Gateway. Tron never repins automatically."
         case .authenticationRefused:
-            "The Mac refused this iPhone's key. It may have been revoked or removed from ~/.ssh/authorized_keys. Enable Mac Terminal again while the Gateway is running."
+            "The Mac refused this iPhone's key. It may have been revoked from the private SSH service. Enable Mac Terminal again while the Gateway is running."
         case .noPinnedHostKey:
             "No Mac host key is pinned. Enable Mac Terminal again while the Gateway is running."
         case .tmuxMissing:
@@ -109,8 +109,7 @@ public func macTerminalFingerprint(_ key: NIOSSHPublicKey) -> String {
     return "SHA256:" + digest.replacingOccurrences(of: "=", with: "")
 }
 
-/// Whether this device holds a Tailscale address (100.64.0.0/10 or
-/// fd7a:115c:a1e0::/48). It is the early, precise "not on tailnet" signal:
+/// Whether this device holds a Tailscale IPv4 address (100.64.0.0/10). It is the early, precise "not on tailnet" signal:
 /// without it every dial would only time out.
 public func macTerminalHasTailnetAddress() -> Bool {
     var head: UnsafeMutablePointer<ifaddrs>?
@@ -123,11 +122,6 @@ public func macTerminalHasTailnetAddress() -> Bool {
             let ipv4 = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }
             let host = UInt32(bigEndian: ipv4)
             if host & 0xFFC0_0000 == 0x6440_0000 { return true }
-        case AF_INET6:
-            let bytes = address.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { pointer in
-                withUnsafeBytes(of: pointer.pointee.sin6_addr) { Array($0) }
-            }
-            if bytes.starts(with: [0xFD, 0x7A, 0x11, 0x5C, 0xA1, 0xE0]) { return true }
         default:
             continue
         }
@@ -141,10 +135,6 @@ public func macTerminalIsTailnetHost(_ host: String) -> Bool {
     var v4 = in_addr()
     if host.withCString({ inet_pton(AF_INET, $0, &v4) }) == 1 {
         return UInt32(bigEndian: v4.s_addr) & 0xFFC0_0000 == 0x6440_0000
-    }
-    var v6 = in6_addr()
-    if host.withCString({ inet_pton(AF_INET6, $0, &v6) }) == 1 {
-        return withUnsafeBytes(of: v6) { $0.starts(with: [0xFD, 0x7A, 0x11, 0x5C, 0xA1, 0xE0]) }
     }
     return false
 }
@@ -219,7 +209,7 @@ public enum MacTerminalClient {
         let pinned = Set(endpoint.hostKeys.compactMap { try? NIOSSHPublicKey(openSSHPublicKey: $0) })
         guard !pinned.isEmpty else { throw MacTerminalError.noPinnedHostKey }
         let hosts = endpoint.hosts.filter(macTerminalIsTailnetHost)
-        guard !hosts.isEmpty, (1...65535).contains(endpoint.port), !endpoint.username.isEmpty else {
+        guard !hosts.isEmpty, (1024...65535).contains(endpoint.port), !endpoint.username.isEmpty else {
             throw MacTerminalError.invalidEndpoint
         }
         var refused = false
@@ -232,14 +222,14 @@ public enum MacTerminalClient {
                 )
             } catch let error as MacTerminalError {
                 switch error {
-                case .remoteLoginOff: refused = true
+                case .serviceStopped: refused = true
                 case .macUnreachable: break
                 default: throw error
                 }
                 lastError = error
             }
         }
-        throw refused ? MacTerminalError.remoteLoginOff : lastError
+        throw refused ? MacTerminalError.serviceStopped : lastError
     }
 
     private static func open(
@@ -328,12 +318,12 @@ public enum MacTerminalClient {
         if let error = error as? NWError {
             switch error {
             case .posix(let code) where code == .ECONNREFUSED:
-                return .remoteLoginOff
+                return .serviceStopped
             default:
                 return .macUnreachable
             }
         }
-        if let error = error as? IOError, error.errnoCode == ECONNREFUSED { return .remoteLoginOff }
+        if let error = error as? IOError, error.errnoCode == ECONNREFUSED { return .serviceStopped }
         return .macUnreachable
     }
 }

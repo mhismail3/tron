@@ -45,6 +45,13 @@ struct HostedMacTerminalFixture: View {
     /// Each launch starts unenrolled (no key, no cached enrollment), once.
     @MainActor private static let startUnenrolled: Void = {
         try? MacTerminalEnrollmentStore().remove(machineID: "mac-terminal-machine")
+        // Each app launch owns a fresh unenrolled fixture. A previous migration
+        // case may have seeded a key in the shared native daemon’s test file.
+        if let path = ProcessInfo.processInfo.environment["TRON_MAC_TERMINAL_FIXTURE"],
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let configuration = try? JSONDecoder().decode(MacTerminalFixtureConfiguration.self, from: data) {
+            try! Data().write(to: URL(fileURLWithPath: configuration.authorizedKeys), options: .atomic)
+        }
     }()
 
     @MainActor private static let seedMigration: Void = {
@@ -167,7 +174,7 @@ private actor MacTerminalFixtureGateway {
     /// says hello again: the Gateway is gone, not flapping.
     private let stopped = OSAllocatedUnfairLock(initialState: false)
     nonisolated var isStopped: Bool { stopped.withLock { $0 } }
-    private var remoteLoginChecks = 0
+    private var serverEnabled = false
 
     init(scenario: String, configuration: MacTerminalFixtureConfiguration?) {
         self.scenario = scenario
@@ -192,28 +199,30 @@ private actor MacTerminalFixtureGateway {
             return (nil, failure("The fixture held its status"))
         case "macTerminal.status":
             guard let configuration else { return (nil, failure("The journey harness did not describe its sshd")) }
-            remoteLoginChecks += 1
-            // `remote-login-off` answers off on the first check only, as if the
-            // maintainer turned Remote Login on before tapping Check Again.
-            let off = scenario == "remote-login-off" && remoteLoginChecks < 2
-            let hostKeys = scenario == "mismatch" ? [configuration.otherHostKey] : configuration.hostKeys
+            let hostKeys = serverEnabled ? (scenario == "mismatch" ? [configuration.otherHostKey] : configuration.hostKeys) : []
             return (.object([
                 "username": .string(configuration.username), "port": .number(Double(configuration.port)),
                 "hosts": .array(configuration.hosts.map(JSONValue.string)), "hostKeys": .array(hostKeys.map(JSONValue.string)),
-                "remoteLogin": .string(off ? "off" : "on"), "enrolled": .bool(false),
+                "serviceState": .string(serverEnabled ? "running" : "unconfigured"), "enrolled": .bool(false),
             ]), nil)
         case "settings.change":
-            guard let configuration,
-                  let change = params["changes"]?.arrayValue?.first?.objectValue,
-                  change["key"]?.stringValue == "permissions.macTerminalKey",
+            guard let configuration, let change = params["changes"]?.arrayValue?.first?.objectValue else {
+                return (nil, failure("Unexpected settings change"))
+            }
+            if change["key"]?.stringValue == "permissions.macTerminalServer" {
+                serverEnabled = change["value"]?.boolValue == true
+                return (fixtureSettingsChangeResult(key: "permissions.macTerminalServer"), nil)
+            }
+            guard change["key"]?.stringValue == "permissions.macTerminalKey",
                   change["qualifiers"]?.objectValue?["device"]?.stringValue == "fixture-iphone" else {
                 return (nil, failure("Unexpected settings change"))
             }
             let line: String? = change["op"]?.stringValue == "set" ? change["value"]?.stringValue.map {
-                "from=\"100.64.0.0/10,fd7a:115c:a1e0::/48\",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc \($0) tron-mac-terminal:fixture-iphone"
+                "from=\"100.64.0.0/10\",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc \($0) tron-mac-terminal:fixture-iphone"
             } : nil
             do {
                 try ((line.map { $0 + "\n" }) ?? "").write(toFile: configuration.authorizedKeys, atomically: true, encoding: .utf8)
+                if line == nil { serverEnabled = false }
             } catch {
                 return (nil, failure("Could not write the journey's authorized_keys: \(error.localizedDescription)"))
             }

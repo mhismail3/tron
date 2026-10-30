@@ -22,7 +22,7 @@ import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js"
 import { OutsideChanges } from "../src/admin/settings-outside.js";
 import { PackageService } from "../src/admin/package-service.js";
 import { HookResources } from "../src/admin/hook-resources.js";
-import { MacTerminalKeys } from "../src/security/mac-terminal.js";
+import { MacTerminalService } from "../src/security/mac-terminal-service.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
 import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/kernel/session/runtime-registry.js";
@@ -280,7 +280,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
 
   if (options.knowledge) knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
   // Production settings wiring (gateway-main.ts): every read reconciles outside changes.
-  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(root, "home", ".ssh")) }));
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") }) }));
   const settingsRecord = new SettingsChangeRecord(tronHome);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, settingsRecord, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
