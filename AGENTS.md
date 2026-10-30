@@ -96,23 +96,26 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   children. Reproduce load in-process; if slow, check swap and report foreign hogs.
 
 ## Validation and landing
-Run `scripts/tron verify --plan`: **none** = no executable tests (docs/static checks remain);
-**partial** = affected owner/consumer checks; unchanged serial tests go to the batch.
-**full** = those checks now + broad coverage in an explicit Mac `verify --batch` after landing.
-Manifests, layers, file kinds and risk determine it ([rule/batches](tools/verify/README.md));
-no queue, gate or auto-revert.
-1. Commit in your own worktree (`git config rerere.enabled true`); fetch/rebase `origin/main`,
-   then `scripts/tron verify`. A failure also on base never blocks; cite that base run.
+Run `scripts/tron verify --plan`: **none** = docs/static checks only; **partial** = affected
+owner/consumer checks, unchanged serial tests in batch; **full** = affected checks now + an explicit
+Mac `verify --batch` after landing. [Manifests/layers/file kinds/risk](tools/verify/README.md) decide; no queue, gate or auto-revert.
+1. Commit in your own worktree (`git config rerere.enabled true`); use `scripts/tron verify --changed`
+   while developing; fetch/rebase current main before landing. Run the full Gateway suite once,
+   pre-land, only when shared Gateway runtime/Pi code is touched (`verify --all` is locks, not that suite).
+   Rerun failures only unless changes invalidate passing evidence; exact unexpired quarantine matches
+   excuse known reds. Do not repeat main baselines per worker.
 2. `git push origin HEAD:main`; on non-fast-forward repeat step 1, rerunning tests only if
    integration changed their dependencies. Never force-push main.
 3. Close the issue with the change, actual commands and results, and residual risk;
    link long logs (`test-results/`, internal workspace). Use plain Git to integrate/push. Incidents also name the one-step diagnosing signal, added
    with a test and a row in its module README Signals (`packages/gateway/docs/observability.md`).
+   Each landed slice posts a 3-line #2132 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence.
 
 ## Work tracking
 
 - Issues and the Project coordinate, never approve ([Git/gh skill](.agents/skills/tron-work/SKILL.md)).
-  One writer per issue; use ordinary Git/gh to inspect branches/worktrees/issues.
+  Assign one writer per file before parallel work; use ordinary Git/gh to inspect branches/worktrees/issues.
+  Resume a settled worker for the same unfinished slice before launching its replacement.
   Existing claims are preservation metadata, not locks. Never edit another worker's tree, delete its branch or take over unknown or live
   work; preserve unpublished or parked checkpoints. `release`/`handoff` keep local work;
   `cleanup`/`recover` keep exact-head safeguards. After each issue lands on origin/main, sync primary main
@@ -133,8 +136,7 @@ no queue, gate or auto-revert.
   Mohsin gets subjective product/visual choices (inline PNGs), irreversible/trust/spend
   calls and rebuild taps. Add no gates; reviewers only for security, data loss or
   irreversible changes, and only when they change a decision.
-- Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
-  file-length targets, blanket base-lock runs or pretend feature pauses.
+- Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes, file-length targets or blanket base-lock runs.
 - Follow #2132's cadence: default 2h task timebox, 30-minute SHA/change/blocker
   check-ins, then land green work or settle with at most 25 lines. Build ahead on
   branches; only runtime landings wait for a checkpoint.
