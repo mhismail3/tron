@@ -562,8 +562,10 @@ async function ownedGatewayVerifier(initialPid, port) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const targetPort = Number(process.env.TRON_E2E_UPSTREAM_PORT);
   const verifyTarget = await ownedGatewayVerifier(Number(process.env.TRON_E2E_UPSTREAM_PID), targetPort);
-  const entrypoint = realpathSync(process.env.TRON_E2E_GATEWAY_ENTRY);
-  if (entrypoint !== realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
+  // Keep the caller's launch spelling for its PID ownership proof (/var may
+  // resolve to /private/var). Canonical validation must not rewrite that contract.
+  const entrypoint = process.env.TRON_E2E_GATEWAY_ENTRY;
+  if (realpathSync(entrypoint) !== realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
   const restartGateway = async () => {
     await verifyTarget();
     const oldPid = verifyTarget.pid();

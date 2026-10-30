@@ -140,6 +140,8 @@ PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test sta
 ## Gateway fixture work
 
 Real-Gateway boundaries run against a per-worktree fixture Gateway and fault proxy.
+The proxy validates the canonical Gateway entrypoint but preserves the caller's
+launch path across restarts so the harness's PID ownership proof stays valid.
 Boundary setup writes Home role queues and ordinary-chat model/compaction values to
 their respective Session scopes. Compaction snapshot provenance uses `session`,
 `global`, `project` or `default`; production admission rejects retired `chat` tags.
