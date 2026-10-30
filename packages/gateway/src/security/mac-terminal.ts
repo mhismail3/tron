@@ -1,40 +1,23 @@
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { Socket } from "node:net";
-import { userInfo } from "node:os";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { syncDurably } from "../foundation/durable-json.js";
-import { readTailscaleStatus, runBoundedCommand, type BoundedCommand } from "../platform/tailscale-status.js";
 
-/**
- * Mac Terminal (README "Mac Terminal"): the iPhone opens a login shell on this
- * Mac through macOS Remote Login (the built-in sshd) over Tailscale, without the
- * Gateway. The Gateway's part ends at enrollment:
- *
- * - `MacTerminalKeys` owns this Mac's `~/.ssh/authorized_keys` lines that carry
- *   a `tron-mac-terminal:<device>` comment, one per paired iPhone. They are the
- *   `permissions.macTerminalKey` settings store, so enrolling and revoking go
- *   through the logged change path (approve floor; the maintainer's tap is the
- *   approval). Every other line of the file is preserved byte for byte.
- * - `MacTerminalHost` reports what the iPhone pins and dials: the login user,
- *   the MagicDNS name and Tailscale addresses, sshd's host keys, and whether
- *   Remote Login answers. Tron never turns Remote Login on.
- */
+/** Private authorized_keys store used only by MacTerminalService. Marked
+ * device lines are logged settings resources; unrelated bytes are preserved.
+ * No production caller points this store at the user’s global SSH directory. */
 
 /** The marker that identifies a Tron line. Anything after it is commentary. */
 const MAC_TERMINAL_MARKER = "tron-mac-terminal:";
-/** Tailscale's IPv4 CGNAT range and IPv6 ULA prefix: a Tron key is accepted
- * only from a tailnet source address, never from the LAN, loopback or Internet. */
-export const MAC_TERMINAL_SOURCES = "100.64.0.0/10,fd7a:115c:a1e0::/48";
+/** Defense in depth: the private service accepts device keys only from Tailnet IPv4. */
+export const MAC_TERMINAL_SOURCES = "100.64.0.0/10";
 const KEY_OPTIONS = `from="${MAC_TERMINAL_SOURCES}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc`;
 /** The iPhone's key is a Secure Enclave P-256 key; nothing else is admitted. */
 const KEY_TYPE = "ecdsa-sha2-nistp256";
 const MAXIMUM_AUTHORIZED_KEYS_BYTES = 1024 * 1024;
 const DEVICE_ID = /^[A-Za-z0-9-]{1,100}$/u;
-const SSH_PORT = 22;
-const HOST_KEY_FILES = ["ssh_host_ed25519_key.pub", "ssh_host_ecdsa_key.pub"] as const;
 
 /** A Tron line's public key, validated as an OpenSSH `ecdsa-sha2-nistp256`
  * key whose blob names the same type and curve and holds an uncompressed point. */
@@ -84,8 +67,7 @@ function macTerminalLine(device: string, key: string): string {
 export class MacTerminalKeys {
   private readonly lock = new AsyncMutex();
 
-  /** `sshDirectory` is `~/.ssh` in production. A fixture names its own; a
-   * Gateway built without one has no Mac Terminal store at all. */
+  /** The private service’s authorization directory; fixtures name their own. */
   constructor(readonly sshDirectory: string) {}
 
   get path(): string { return join(this.sshDirectory, "authorized_keys"); }
@@ -163,79 +145,4 @@ export class MacTerminalKeys {
       throw error;
     }
   }
-}
-
-export interface MacTerminalStatus {
-  /** The macOS account the shell logs in as: the Gateway's own user. */
-  username: string;
-  port: number;
-  /** MagicDNS name first, then the Tailscale addresses. Empty off the tailnet. */
-  hosts: string[];
-  /** sshd's host public keys, which the iPhone pins. */
-  hostKeys: string[];
-  /** Whether sshd accepts a TCP connection. Remote Login listens on every
-   * interface, so the loopback answers exactly as the Tailscale address would. */
-  remoteLogin: "on" | "off" | "unknown";
-  /** Whether this device's key is in authorized_keys now. */
-  enrolled: boolean;
-  /** The enrolled key, so the iPhone can tell its own key from a stale one. */
-  enrolledKey?: string;
-
-}
-
-export class MacTerminalHost {
-  constructor(
-    readonly keys: MacTerminalKeys,
-    private readonly options: {
-      hostKeyDirectory?: string;
-      run?: BoundedCommand;
-      port?: number;
-      username?: () => string;
-    } = {},
-  ) {}
-
-  async status(device: string): Promise<MacTerminalStatus> {
-    const port = this.options.port ?? SSH_PORT;
-    const [hostKeys, hosts, keys] = await Promise.all([this.hostKeys(), this.tailnetHosts(), this.keys.read()]);
-    const enrolledKey = keys[device];
-    return {
-      username: (this.options.username ?? (() => userInfo().username))(),
-      port,
-      hosts,
-      hostKeys,
-      remoteLogin: await probeRemoteLogin(port),
-      enrolled: enrolledKey !== undefined,
-      ...(enrolledKey ? { enrolledKey } : {}),
-    };
-  }
-
-  private async hostKeys(): Promise<string[]> {
-    const directory = this.options.hostKeyDirectory ?? "/etc/ssh";
-    const keys: string[] = [];
-    for (const name of HOST_KEY_FILES) {
-      const text = await readFile(join(directory, name), "utf8").catch(() => undefined);
-      const parts = text?.trim().split(/\s+/u);
-      if (parts && parts.length >= 2) keys.push(`${parts[0]} ${parts[1]}`);
-    }
-    return keys;
-  }
-
-  private async tailnetHosts(): Promise<string[]> {
-    const read = await readTailscaleStatus(this.options.run ?? runBoundedCommand, 2_000);
-    if (!read.ok) return [];
-    const name = read.status.selfDNSName?.replace(/\.$/u, "");
-    return [...(name ? [name] : []), ...read.status.self];
-  }
-}
-
-/** One bounded loopback TCP connect: refused is off, an accepted socket is on. */
-function probeRemoteLogin(port: number): Promise<"on" | "off" | "unknown"> {
-  return new Promise(resolve => {
-    const socket = new Socket();
-    const finish = (result: "on" | "off" | "unknown") => { socket.destroy(); resolve(result); };
-    socket.setTimeout(1_500, () => finish("unknown"));
-    socket.once("connect", () => finish("on"));
-    socket.once("error", (error: NodeJS.ErrnoException) => finish(error.code === "ECONNREFUSED" ? "off" : "unknown"));
-    socket.connect(port, "127.0.0.1");
-  });
 }

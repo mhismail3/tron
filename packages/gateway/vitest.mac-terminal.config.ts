@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
  * the host on its tailnet and a Swift 6.2 toolchain. It runs on request
  * (`npm run test:mac-terminal`),
  * not in the hosted `npm test` pass, whose runners have neither. */
-export const macTerminalTestFiles = ["src/security/mac-terminal.e2e.test.ts"];
+export const macTerminalTestFiles = ["src/security/mac-terminal.e2e.test.ts", "src/security/mac-terminal-service.e2e.test.ts"];
 
 export default defineConfig({
   test: {

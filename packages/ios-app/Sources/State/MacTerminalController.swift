@@ -10,9 +10,16 @@ struct MacTerminalStatus: Decodable, Equatable, Sendable {
     let port: Int
     let hosts: [String]
     let hostKeys: [String]
-    let remoteLogin: String
+    let serviceState: String
+    let detail: String?
+    let hostFingerprint: String?
     let enrolled: Bool
     let enrolledKey: String?
+    var fingerprint: String {
+        let parts = hostKeys.first?.split(separator: " ") ?? []
+        guard parts.count >= 2, let blob = Data(base64Encoded: String(parts[1])) else { return "Unavailable" }
+        return "SHA256:" + Data(SHA256.hash(data: blob)).base64EncodedString().replacingOccurrences(of: "=", with: "")
+    }
 }
 
 /// One SSH attachment to a stable tmux session. tmux, not Tron or the Gateway,
@@ -20,10 +27,11 @@ struct MacTerminalStatus: Decodable, Equatable, Sendable {
 @MainActor
 @Observable
 final class MacTerminalController {
-    enum Stage: Equatable { case loading, setup(SetupNotice), enrolling, terminal, failed(String) }
+    enum Stage: Equatable { case loading, setup(SetupNotice), preparing, trust(MacTerminalStatus), enrolling, terminal, failed(String) }
     enum SetupNotice: Equatable {
-        case ready(username: String), remoteLoginOff, needsGateway, macNotOnTailnet, noHostKeys, unpaired
+        case ready(username: String), needsGateway, macNotOnTailnet, serviceIssue(String), unpaired
     }
+    var isChangingAuthorization: Bool { if case .enrolling = stage { return true }; return false }
     enum Link: Equatable { case idle, connecting, connected }
 
     private(set) var stage: Stage = .loading
@@ -34,8 +42,8 @@ final class MacTerminalController {
     var isRunning: Bool { link == .connected }
     var phase: TerminalConnectionPhase {
         switch stage {
-        case .loading, .enrolling: .connecting
-        case .setup: .notConnected
+        case .loading, .preparing, .enrolling: .connecting
+        case .setup, .trust: .notConnected
         case .failed: .unavailable
         case .terminal:
             switch link {
@@ -63,11 +71,20 @@ final class MacTerminalController {
 
     func present(model: AppModel) {
         isPresented = true
+        // An accepted key mutation owns its completion even across presentation/profile changes.
+        guard !isChangingAuthorization else { return }
         guard let profile = model.profiles.selected else { reset(); stage = .setup(.unpaired); return }
         if machineID != profile.machineId { reset(); machineID = profile.machineId }
+        if case .preparing = stage { return }
+        if case .trust = stage { return }
         do {
-            if let enrollment = try enrollment ?? store.enrollment(machineID: profile.machineId) {
+            if let enrollment = try store.enrollment(machineID: profile.machineId) {
                 self.enrollment = enrollment
+                if enrollment.endpoint.port < 1024 {
+                    // Keep the old record and identity intact; never dial stock SSH or silently repin.
+                    Task { await refreshSetup(model: model) }
+                    return
+                }
                 stage = .terminal
                 connect()
             } else if stage == .loading {
@@ -82,70 +99,139 @@ final class MacTerminalController {
     func conceal() {
         isPresented = false
         closeLink()
+        if case .preparing = stage { stage = .loading }
+        if case .trust = stage { stage = .loading }
     }
 
     /// Re-reads the Mac's status for the setup notice ("Check Again").
     func refreshSetup(model: AppModel) async {
+        guard !isChangingAuthorization else { return }
+        closeLink()
+        let accepted = generation
         guard let profile = model.profiles.selected else { stage = .setup(.unpaired); return }
         guard profile.deviceId != nil else { stage = .setup(.unpaired); return }
         guard model.connectionState == .connected else { stage = .setup(.needsGateway); return }
         stage = .loading
         do {
             let status = try await model.macTerminalStatus()
-            guard case .loading = stage else { return }
+            guard accepted == generation, model.profiles.selected?.machineId == profile.machineId,
+                  case .loading = stage else { return }
             stage = .setup(Self.notice(for: status))
         } catch {
-            guard case .loading = stage else { return }
+            guard accepted == generation, case .loading = stage else { return }
             stage = .failed(error.localizedDescription)
         }
     }
 
-    /// The maintainer's tap: creates this iPhone's key, writes it to the Mac's
-    /// authorized_keys through the logged settings path, pins the host keys,
-    /// and opens the first shell.
+    /// Explicit enable prepares the private service and identity only. It does
+    /// not create a client key, publish authorization, or replace an old pin.
     func enroll(model: AppModel) async {
-        guard let profile = model.profiles.selected, let deviceID = profile.deviceId else {
-            stage = .setup(.unpaired)
-            return
+        guard !isChangingAuthorization,
+              let profile = model.profiles.selected, profile.deviceId != nil else { return }
+        closeLink()
+        let accepted = generation
+        stage = .preparing
+        do {
+            try await model.changeSetting(target: .object(["kind": .string("global")]), change: .object([
+                "key": .string("permissions.macTerminalServer"), "layer": .string("global"),
+                "op": .string("set"), "value": .bool(true),
+            ]))
+            guard accepted == generation, model.profiles.selected?.machineId == profile.machineId else {
+                if accepted == generation { stage = .loading; if isPresented { present(model: model) } }
+                return
+            }
+            let status = try await model.macTerminalStatus()
+            guard accepted == generation, model.profiles.selected?.machineId == profile.machineId else {
+                if accepted == generation { stage = .loading; if isPresented { present(model: model) } }
+                return
+            }
+            guard status.serviceState == "running", status.hostKeys.count == 1 else {
+                stage = .setup(Self.notice(for: status)); return
+            }
+            stage = .trust(status)
+        } catch {
+            guard accepted == generation else { return }
+            stage = .failed(error.localizedDescription)
         }
+    }
+
+    func declineHost() {
+        guard case .trust = stage else { return }
+        closeLink()
+        stage = .setup(.ready(username: enrollment?.endpoint.username ?? "your Mac account"))
+    }
+
+    func trustHost(model: AppModel) async {
+        guard case .trust(let trusted) = stage,
+              let profile = model.profiles.selected, let deviceID = profile.deviceId,
+              profile.machineId == machineID else { return }
+        let accepted = generation
         stage = .enrolling
         do {
             let status = try await model.macTerminalStatus()
-            let notice = Self.notice(for: status)
-            guard case .ready = notice else { stage = .setup(notice); return }
+            guard accepted == generation, model.profiles.selected?.machineId == profile.machineId,
+                  model.profiles.selected?.deviceId == deviceID else {
+                stage = .loading
+                if isPresented { present(model: model) }
+                return
+            }
+            guard status.serviceState == "running", status.hostKeys == trusted.hostKeys,
+                  status.hosts == trusted.hosts, status.port == trusted.port, status.username == trusted.username else {
+                stage = .failed("The private SSH endpoint changed before authorization. Check again and explicitly trust its fingerprint.")
+                return
+            }
             let key = try store.key(machineID: profile.machineId)
             try await model.setMacTerminalKey(device: deviceID, publicKey: key.openSSHPublicKey)
-            let enrollment = MacTerminalEnrollment(
-                machineID: profile.machineId, deviceID: deviceID,
-                endpoint: MacTerminalEndpoint(hosts: status.hosts, port: status.port, username: status.username,
-                                              hostKeys: status.hostKeys),
-                publicKey: key.openSSHPublicKey, enrolledAt: Date()
-            )
-            try store.save(enrollment)
+            // Accepted authorization owns this save even if the sheet closed.
+            let record = MacTerminalEnrollment(machineID: profile.machineId, deviceID: deviceID,
+                endpoint: MacTerminalEndpoint(hosts: status.hosts, port: status.port, username: status.username, hostKeys: status.hostKeys),
+                publicKey: key.openSSHPublicKey, enrolledAt: Date())
+            try store.save(record)
+            if model.profiles.selected?.machineId != profile.machineId {
+                reset()
+                if isPresented { present(model: model) }
+                return
+            }
+            enrollment = record
             machineID = profile.machineId
-            self.enrollment = enrollment
             stage = .terminal
             connect()
         } catch {
-            stage = .failed(error.localizedDescription)
+            if model.profiles.selected?.machineId != profile.machineId {
+                reset()
+                if isPresented { present(model: model) }
+            } else { stage = .failed(error.localizedDescription) }
         }
     }
-
 
     /// Revokes this iPhone's key on the Mac, then forgets it here. The Mac
     /// change needs the Gateway; without it nothing local is removed, so the
     /// key cannot be orphaned on the Mac. Shells already open on the Mac keep
     /// running until they exit.
     func removeKey(model: AppModel) async throws {
-        guard let enrollment else { return }
+        guard !isChangingAuthorization, let enrollment else { return }
         guard model.connectionState == .connected else {
             throw MacTerminalRemovalError.needsGateway
         }
-        try await model.setMacTerminalKey(device: enrollment.deviceID, publicKey: nil)
-        try store.remove(machineID: enrollment.machineID)
-        reset()
-        machineID = enrollment.machineID
-        await refreshSetup(model: model)
+        closeLink()
+        stage = .enrolling
+        do {
+            try await model.setMacTerminalKey(device: enrollment.deviceID, publicKey: nil)
+            try store.remove(machineID: enrollment.machineID)
+            reset()
+            if isPresented { present(model: model) }
+        } catch {
+            // A failed accepted mutation still belongs to the original Mac;
+            // never reconnect its cached enrollment under a new selection.
+            if model.profiles.selected?.machineId != enrollment.machineID {
+                reset()
+                if isPresented { present(model: model) }
+            } else {
+                stage = .terminal
+                if isPresented { connect() }
+            }
+            throw error
+        }
     }
 
 
@@ -280,9 +366,13 @@ final class MacTerminalController {
 
     private static func notice(for status: MacTerminalStatus) -> SetupNotice {
         if status.hosts.isEmpty { return .macNotOnTailnet }
-        if status.remoteLogin == "off" { return .remoteLoginOff }
-        // Nothing to pin means nothing to verify: never enroll without it.
-        if status.hostKeys.isEmpty { return .noHostKeys }
+        if status.serviceState == "unavailable" { return .macNotOnTailnet }
+        if status.serviceState == "stale" || status.serviceState == "failed" {
+            return .serviceIssue(status.detail ?? "Recover the private SSH service on the Mac, then explicitly refresh enrollment.")
+        }
+        if status.serviceState == "running" && status.hostKeys.count != 1 {
+            return .serviceIssue("The private service has no verified host identity. Restore its identity on the Mac; Tron never rotates or repins it automatically.")
+        }
         return .ready(username: status.username)
     }
 }
@@ -294,7 +384,7 @@ enum MacTerminalRemovalError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .needsGateway:
-            "Removing this iPhone's key changes the Mac, so it needs the Gateway. Connect to your Mac and try again, or delete the line marked tron-mac-terminal in ~/.ssh/authorized_keys on the Mac."
+            "Removing this iPhone's key changes the Mac, so it needs the Gateway. Connect to your Mac and try again, or revoke this iPhone in the private Mac Terminal service on the Mac."
         case .keyMissing:
             "This iPhone's Mac Terminal key is missing. Remove Mac Terminal and enable it again while the Gateway is running."
         }

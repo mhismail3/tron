@@ -75,6 +75,8 @@ export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: 
       return qualifiers.project === undefined ? undefined : nearestTrustDecision(stores.trust, qualifiers.project);
     case "mac-terminal":
       return qualifiers.device === undefined ? undefined : stores.macTerminal[qualifiers.device];
+    case "mac-terminal-service":
+      return stores.macTerminalServerEnabled ?? false;
     case "gateway":
       return qualifiedOnly || layer !== "global" ? undefined : readPath(stores.gateway, binding.path);
     case "floors":

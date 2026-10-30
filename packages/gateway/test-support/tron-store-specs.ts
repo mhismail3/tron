@@ -28,7 +28,7 @@ import { UploadStore } from "../src/machine/upload-store.js";
 import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import { RecentModelStore } from "../src/providers/recent-models.js";
 import { DeviceStore } from "../src/security/device-store.js";
-import { MacTerminalKeys } from "../src/security/mac-terminal.js";
+import { MacTerminalService } from "../src/security/mac-terminal-service.js";
 import { RunMarkerStore } from "../src/kernel/run/run-markers.js";
 import { SessionArchiveStore } from "../src/sessions/session-archive-store.js";
 import { SessionAttentionStore } from "../src/kernel/projection/session-attention-store.js";
@@ -89,7 +89,7 @@ async function settingsPath(home: string, knowledge?: KnowledgeService) {
   await mkdir(agentDir, { recursive: true });
   const trust = new TrustService(agentDir);
   const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-  const model = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(home, "ssh")) }));
+  const model = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalService(home, { launchAgentDirectory: join(home, "agents") }) }));
   const record = new SettingsChangeRecord(home);
   const approvals = new SettingsApprovals(home);
   const path: SettingsChangePath = new SettingsChangePath(model, record, approvals, {

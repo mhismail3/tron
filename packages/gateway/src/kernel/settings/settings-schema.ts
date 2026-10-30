@@ -41,9 +41,10 @@ export type Binding =
   | { store: "session-launch" }
   | { store: "home"; path: readonly string[] }
   | { store: "trust" }
-  /** `~/.ssh/authorized_keys`, the Tron lines only (security/mac-terminal.ts):
+  /** Private native-service authorized_keys (security/mac-terminal.ts):
    * one Mac Terminal key per paired iPhone, qualified by `device`. */
   | { store: "mac-terminal" }
+  | { store: "mac-terminal-service" }
   /** `<tronHome>/gateway/settings/floors.json`: the maintainer's floor
    * overrides, `{ [keyId]: { widen?, narrow? } }` (doc 5.4). */
   | { store: "floors" }
@@ -365,7 +366,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
     },
     {
-      // A paired iPhone's Mac Terminal key: its line in ~/.ssh/authorized_keys.
+      // A paired iPhone's key in the private native SSH service, after host trust.
       // Adding one lets that iPhone's Secure Enclave key log in over Tailscale,
       // so it is a credential addition (approve); removing it is a revocation.
       id: "permissions.macTerminalKey", sessionOverridable: false, projectSettable: false, group: "connections", subgroup: "Mac Terminal", qualifier: "device",
@@ -380,9 +381,18 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       layers: { global: { store: "mac-terminal" } }, timing: "live", effect: "next-change",
       floor: { widen: "approve", narrow: "notify" }, direction: (_before, after) => after === undefined ? "narrow" : "widen",
       writers: ANY_ACTOR, label: "Mac Terminal key",
-      help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.",
+      help: "Lets this paired iPhone open a shell through Tron’s private Tailscale-only SSH service, even without the Gateway.",
       order: 15, importance: "advanced", control: "readOnly",
-      confirm: "This iPhone's key will be added to ~/.ssh/authorized_keys and can log in to your Mac account over Tailscale.",
+      confirm: "This iPhone’s key will authorize your Mac account through the private Tron SSH service, after you trust its host fingerprint.",
+    },
+    {
+      id: "permissions.macTerminalServer", sessionOverridable: false, projectSettable: false,
+      group: "connections", subgroup: "Mac Terminal", type: types.boolean(["Enabled", "Stopped"]),
+      layers: { global: { store: "mac-terminal-service" } }, defaultValue: false,
+      timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "notify" }, direction: grants,
+      writers: ANY_ACTOR, label: "Private Mac SSH service", order: 16, importance: "advanced", control: "toggle",
+      help: "A user-level native SSH server bound only to this Mac’s Tailscale IPv4. Stock Remote Login is unchanged.",
+      confirm: "Start Tron’s private user SSH server and create or reuse its host identity. No iPhone key is added until you explicitly trust the fingerprint.",
     },
     {
       id: "permissions.defaultProjectTrust", sessionOverridable: false, projectSettable: false, group: "trust",

@@ -30,6 +30,7 @@ final class TronMacTerminalUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Open a shell on your Mac"].waitForExistence(timeout: 15), app.debugDescription)
         try capture(app, "setup")
         app.buttons["Enable Mac Terminal"].tap()
+        trustHost(app)
         waitForPhase(app, "Connected")
         let keys = try String(contentsOf: authorizedKeys, encoding: .utf8)
         XCTAssertTrue(keys.contains("ecdsa-sha2-nistp256 "), keys)
@@ -80,6 +81,7 @@ final class TronMacTerminalUITests: XCTestCase {
         defer { app.terminate() }
         openMacTerminal(app)
         app.buttons["Enable Mac Terminal"].tap()
+        trustHost(app)
         waitForPhase(app, "Connected")
         focusTerminal(app)
         app.typeText("echo \"one=$$\" >> \(marker.path); echo SHELL_ONE_$((6*7))\n")
@@ -119,6 +121,7 @@ final class TronMacTerminalUITests: XCTestCase {
         defer { app.terminate() }
         openMacTerminal(app)
         app.buttons["Enable Mac Terminal"].tap()
+        trustHost(app)
         waitForPhase(app, "Connected")
         app.buttons["Mac Terminal options"].tap()
         app.buttons["Remove Mac Terminal"].tap()
@@ -128,15 +131,20 @@ final class TronMacTerminalUITests: XCTestCase {
     }
 
     @MainActor
-    func testRemoteLoginOffSaysHowToTurnItOnThenEnrolls() throws {
-        let app = launch(scenario: "remote-login-off")
+    func testPrivateServiceEnableRequiresTrustAndDeclinePublishesNoKey() throws {
+        let app = launch(scenario: "enroll")
         defer { app.terminate() }
         openMacTerminal(app)
-        XCTAssertTrue(app.staticTexts["Turn on Remote Login"].waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "General › Sharing")).firstMatch.exists)
-        try capture(app, "remote-login-off")
-        app.buttons["Check Again"].tap()
         app.buttons["Enable Mac Terminal"].tap()
+        XCTAssertTrue(app.buttons["Trust and Enroll"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["mac-terminal-host-fingerprint"].exists)
+        XCTAssertEqual(try String(contentsOf: authorizedKeys, encoding: .utf8), "")
+        try capture(app, "host-trust")
+        app.buttons["Decline"].tap()
+        XCTAssertTrue(app.buttons["Enable Mac Terminal"].waitForExistence(timeout: 15))
+        XCTAssertEqual(try String(contentsOf: authorizedKeys, encoding: .utf8), "")
+        app.buttons["Enable Mac Terminal"].tap()
+        trustHost(app)
         waitForPhase(app, "Connected")
     }
 
@@ -146,6 +154,7 @@ final class TronMacTerminalUITests: XCTestCase {
         defer { app.terminate() }
         openMacTerminal(app)
         app.buttons["Enable Mac Terminal"].tap()
+        trustHost(app)
         XCTAssertTrue(app.staticTexts["Mac Terminal unavailable"].waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "different SSH host key")).firstMatch.exists)
         waitForPhase(app, "Unavailable")
@@ -193,6 +202,12 @@ final class TronMacTerminalUITests: XCTestCase {
     }
 
     @MainActor
+    private func trustHost(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["Trust and Enroll"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Trust and Enroll"].tap()
+    }
+
+    @MainActor
     private func migrationSnapshot(_ name: String, files: URL) throws {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(rawValue: "com.tron.mobile.fixture.mac-terminal.migration-\(name)" as CFString), nil, nil, true)
@@ -207,6 +222,7 @@ final class TronMacTerminalUITests: XCTestCase {
             let app = launch(scenario: "enroll", light: light)
             openMacTerminal(app)
             app.buttons["Enable Mac Terminal"].tap()
+            trustHost(app)
             waitForPhase(app, "Connected")
             focusTerminal(app)
             let label = light ? "LIGHT" : "DARK"

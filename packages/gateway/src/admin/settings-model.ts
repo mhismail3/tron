@@ -1,5 +1,5 @@
 import { type Resolution, type SettingsTarget, TIERS, type Qualifiers, type Tier, type GitResult } from "../kernel/settings/tool-contract.js";
-import type { MacTerminalKeys } from "../security/mac-terminal.js";
+import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { setPath, unsetPath, qualifiedWrite, fillPath, type SessionSettingsSource, type SettingsOptionsRequest, type SettingsOptionsResult } from "../kernel/settings/settings-model.js";
 import type { ChangeContext, SettingsWriters, Planned } from "../kernel/settings/settings-change.js";
 import { stage } from "../util/request-span.js";
@@ -29,9 +29,8 @@ export interface SettingsModelDependencies {
   /** The tools a target's selection can name (`catalog.tools`): a chat's live
    * registry, or the built-in and opt-in extension tools of a scope. */
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
-  /** The Mac Terminal key store (`~/.ssh/authorized_keys`). Absent in a
-   * Gateway that does not own one, such as a fixture that names none. */
-  macTerminalKeys?: MacTerminalKeys;
+  /** One private SSH resource owner, shared with the endpoint and CLI. */
+  macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
@@ -73,7 +72,7 @@ export class SettingsStoreAdapter {
 
   get modelRuntime(): ModelRuntime { return this.dependencies.modelRuntime; }
 
-  get macTerminalKeys(): MacTerminalKeys | undefined { return this.dependencies.macTerminalKeys; }
+  get macTerminalKeys(): SettingsModelDependencies["macTerminalKeys"] { return this.dependencies.macTerminalKeys; }
 
   get profilePath(): string {
     return join(this.dependencies.tronHome, "gateway", "home", "profile.json");
@@ -216,6 +215,7 @@ export class SettingsStoreAdapter {
       global,
       trust,
       macTerminal,
+      macTerminalServerEnabled: await this.macTerminalKeys?.enabled() ?? false,
       floors: await stage("settings.store.floors", () => this.floorOverrides()),
       gateway: await stage("settings.store.gateway-settings", () => this.gatewaySettings()),
       ...(outside ? { outside } : {}),
@@ -272,6 +272,11 @@ export class SettingsStoreAdapter {
           return { git };
         }
         await updateJsonLocked<Record<string, unknown>>(join(this.dependencies.agentDir, "settings.json"), {}, write);
+        return {};
+      }
+      case "mac-terminal-service": {
+        if (!this.macTerminalKeys) throw new GatewayError("unsupported", "This Gateway has no private SSH service");
+        await this.macTerminalKeys.setEnabled(!unset && value === true);
         return {};
       }
       case "mac-terminal": {

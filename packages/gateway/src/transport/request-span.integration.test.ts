@@ -17,7 +17,7 @@ import { SettingsStoreAdapter } from "../admin/settings-model.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
-import { MacTerminalKeys } from "../security/mac-terminal.js";
+import { MacTerminalService } from "../security/mac-terminal-service.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../version.js";
 import { CommandReceiptStore } from "./command-receipts.js";
@@ -339,7 +339,7 @@ describe("settings.resolve request span", () => {
     let mode: "success" | "failure" = "success";
     // The concrete public store supports an owned directory. Override only its
     // read boundary with a real process; do not erase the dependency's type.
-    class FixtureMacTerminalKeys extends MacTerminalKeys {
+    class FixtureMacTerminalService extends MacTerminalService {
       override async read(): Promise<Record<string, string>> {
         try {
           const { stdout } = await execFileAsync(process.execPath, [
@@ -351,7 +351,7 @@ describe("settings.resolve request span", () => {
         }
       }
     }
-    const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
+    const macTerminalKeys = new FixtureMacTerminalService(root, { launchAgentDirectory: join(root, "agents") });
     const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys }));
     const registry = await createTestRegistry({
       agentDir,

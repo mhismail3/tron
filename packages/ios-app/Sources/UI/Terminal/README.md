@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Mac Terminal reaches macOS built-in Remote Login over Tailscale. One stable tmux
+Mac Terminal reaches Tron’s private user-level native sshd over Tailscale IPv4. One stable tmux
 session preserves the same shell across dismissal, backgrounding and reconnect;
 neither Tron.app nor the Gateway owns its process or connection.
 
@@ -18,8 +18,11 @@ neither Tron.app nor the Gateway owns its process or connection.
   needed only to enroll or revoke this iPhone's key, not to reconnect.
 - The physical iPhone uses a non-exportable Secure Enclave P-256 key with
   `AfterFirstUnlockThisDeviceOnly`; only the Simulator uses a software key.
-  Enrollment pins host keys; they are never silently replaced.
-- The client accepts numeric Tailscale IPv4/IPv6 destinations, validates the
+  Enable prepares the server; **Trust and Enroll** pins its displayed private
+  host identity before publishing a phone key. Decline leaves old enrollment
+  untouched. Refresh is explicit; pins and cached endpoints never change silently.
+- The client accepts numeric Tailscale IPv4 destinations on pinned high ports
+  (default 44222), refuses stock port 22 and IPv6, validates the
   endpoint/session name and verifies a pinned host key before authentication.
   Unreachable Mac, refused key and changed host key have distinct errors.
 - An SSH PTY executes tmux `new-session -A` on the dedicated `tron-mobile`
@@ -42,9 +45,9 @@ neither Tron.app nor the Gateway owns its process or connection.
   pins. Subsequent launches do not repeat the migration.
 - Removal revokes the authorized key on the Mac before deleting local enrollment.
   Already-running tmux shells are not terminated by key removal.
-- The maintainer owns Remote Login and the selected PF exposure policy. Client
-  address checks and authorized-key source restrictions do not prove a server
-  firewall boundary or fail-closed boot behavior.
+- Security’s native service owns its private key/config/auth store and per-user
+  launchd job. Exact assigned IPv4 binding is independently checked against the
+  kernel listener/PID; no PF, root or stock Remote Login changes are involved.
 
 ## Verify
 
@@ -55,5 +58,6 @@ scripts/tron test gateway --config vitest.mac-terminal.config.ts
 ```
 
 The journey uses real sshd and the app's SSH client. Physical-device Secure
-Enclave, radio interruption, and privileged PF/reboot/rollback remain separate
-qualification boundaries; simulator screenshots are not device proof.
+Enclave and radio interruption remain separate device boundaries; same-host
+LAN/Tailnet destination checks and simulator captures are not physical-peer
+network-ingress or device proof.

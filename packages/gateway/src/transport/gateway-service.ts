@@ -1,4 +1,4 @@
-import type { MacTerminalHost } from "../security/mac-terminal.js";
+import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { offLoop, stage } from "../util/request-span.js";
 import { join } from "node:path";
@@ -343,7 +343,7 @@ export interface GatewayServiceDependencies {
   settingsChanges: SettingsChangePath;
   /** Mac Terminal's enrollment facts (security/mac-terminal.ts); absent in a
    * Gateway that owns no ~/.ssh. */
-  macTerminal?: MacTerminalHost;
+  macTerminal?: Pick<MacTerminalService, "status">;
   modelConfig: ModelConfigService;
   packages: PackageService;
   /** Session-free hook listings for a scope; never opens or registers a session. */

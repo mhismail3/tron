@@ -41,6 +41,7 @@ export interface TailscaleStatus {
   readonly cli: string;
   /** `Self.TailscaleIPs`, as the status document reported them. */
   readonly self: readonly string[];
+  readonly running: boolean;
   /** `Self.DNSName`, the MagicDNS name (with Tailscale's trailing dot). */
   readonly selfDNSName?: string;
   readonly peers: readonly TailscalePeer[];
@@ -80,9 +81,9 @@ export async function readTailscaleStatus(run: BoundedCommand, timeoutMs: number
     try {
       const parsed: unknown = JSON.parse(result.output);
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-      const document = parsed as { Self?: unknown; Peer?: unknown };
+      const document = parsed as { Self?: unknown; Peer?: unknown; BackendState?: unknown };
       const selfDocument = document.Self !== null && typeof document.Self === "object" && !Array.isArray(document.Self)
-        ? document.Self as { TailscaleIPs?: unknown; DNSName?: unknown }
+        ? document.Self as { TailscaleIPs?: unknown; DNSName?: unknown; Online?: unknown }
         : undefined;
       const selfValue = selfDocument?.TailscaleIPs;
       const selfDNSName = typeof selfDocument?.DNSName === "string" && selfDocument.DNSName.length > 0 ? selfDocument.DNSName : undefined;
@@ -91,6 +92,7 @@ export async function readTailscaleStatus(run: BoundedCommand, timeoutMs: number
         ok: true,
         status: {
           cli: candidate,
+          running: document.BackendState === "Running" && selfDocument?.Online === true,
           self: Array.isArray(selfValue) ? selfValue.filter((address): address is string => typeof address === "string") : [],
           ...(selfDNSName ? { selfDNSName } : {}),
           peers: peerValue !== null && typeof peerValue === "object" && !Array.isArray(peerValue)
