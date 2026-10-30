@@ -89,7 +89,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.httpProxy` | — | run | global | as allowed | live | restart | — |
-| `run.cacheWarming` | — | run | global | none | fixed | new-chat | — |
+| `run.cacheWarming` | — | run | global | none | fixed | new-chat | spend |
 | `sources.extensions` | — | sources | project, global | none | fixed | reload | trust |
 | `sources.skills` | — | sources | project, global | none | fixed | reload | trust |
 | `sources.prompts` | — | sources | project, global | none | fixed | reload | — |
@@ -108,7 +108,7 @@ Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
 <!-- /tron docs -->
 
 Other schema fields: `subgroup`, `type`, `options` or `optionsSource` (`catalog.models`,
-`catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `nativeTap`, `writers`
+`catalog.thinkingLevels(model)`, `catalog.tools`, ...), `defaultValue`, `direction`, `tap`, `writers`
 (`ui`, `home`, `worker`, `agent`: the list is the grant), `redacted`, `applier`, and display
 fields (`label`, `help`, `order`, `importance`, `control`/`fallback`, `unit`/`format`,
 `confirm`, `entry`). MCP and Accounts keep their own RPCs; record subjects compare by digest.

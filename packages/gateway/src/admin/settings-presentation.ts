@@ -183,4 +183,3 @@ export function presentResolution(schema: SettingsSchema, resolution: Resolution
     }] : []);
   return { ...resolution, renderer: { version: RENDERER_CONTRACT_VERSION }, keys, sections };
 }
-
