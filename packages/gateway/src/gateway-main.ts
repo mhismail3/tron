@@ -16,10 +16,8 @@ import { createGatewaySettingsSchema } from "./main/settings-schema.js";
 import { SettingsStoreAdapter } from "./admin/settings-model.js";
 import { SettingsChangePath } from "./kernel/settings/settings-change.js";
 import { SettingsModel } from "./kernel/settings/settings-model.js";
-import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./kernel/settings/settings-record.js";
 import { OutsideChanges } from "./admin/settings-outside.js";
-import { SettingsApprovals } from "./kernel/settings/settings-approvals.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { ScopeToolCatalog } from "./admin/tool-catalog.js";
@@ -71,7 +69,6 @@ import { DisplayOwner } from "./display/display-modules.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { HomeProfileItems } from "./modules/home/home-profile.js";
-import { registerProfileApprovals } from "./modules/home/home-profile-approvals.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, QueueKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
@@ -90,7 +87,6 @@ import { knowledgeModelLimits, type KnowledgeRecord } from "./knowledge/knowledg
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./kernel/delegation/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./kernel/delegation/delegated-root-migration.js";
-import { migrateSettings } from "./admin/settings-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
 
 // Time since process start when this module's import graph finished loading
@@ -340,7 +336,6 @@ const connections = new ConnectionOwner(config.tronHome, undefined, (instanceIds
   { event: "connection.legacy-jev-retired", source: "connections", instanceIds },
 ));
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
-const jevClient = new JevDecisionClient(modelRuntime);
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
 const scheduleToolOperations: ScheduleToolOperations = {
@@ -825,17 +820,7 @@ async function runStopDrain(): Promise<void> {
 }
 
 // The one settings change path (settings-model.md 5), for agents' tool and the slots alike.
-const settingsRisk = new SettingsRiskEvaluator(jevClient);
-settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
-  assessRisk: async (input, signal) => {
-    try { return await settingsRisk.assess(input, signal); }
-    catch (error) {
-      logger.log("warning", "Settings risk evaluation did not complete; deterministic tier retained", {
-        event: "settings.risk.failed", source: "settings", kind: input.key, reason: signal.aborted ? "timeout" : "unavailable",
-      });
-      throw error;
-    }
-  },
+settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
   setTrust: async (project, decision) => trust.setAndApply(
     project,
     decision,
@@ -845,7 +830,6 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new Sett
   ),
   undoSubject: (entry, context) => new HomeProfileItems(() => knowledge).undo(settingsChanges, entry, context),
 });
-registerProfileApprovals(settingsChanges, () => knowledge);
 sessions.setSettings(settingsModel, settingsChanges);
 projects.register(settingsChanges);
 
@@ -930,13 +914,6 @@ await transport.listen(async () => {
   // The shared settings stores move to the three-layer vocabulary while clients
   // see warming-up, before the owners that read them load (sessions.initialize).
   // Never fatal (#1649): a refusal changes nothing, is logged, and retries next start.
-  await migrateSettings({ schema: settingsSchema, tronHome: config.tronHome, agentDir: config.agentDir }).then(
-    ({ inputs, replaced, alreadyComplete }) => logger.log("info", alreadyComplete ? "Settings migration already complete"
-      : `Settings migration published ${replaced} of ${inputs} shared settings file(s)`, {
-      event: "settings.migration", source: "settings", counts: { inputs, replaced } }),
-    (error: unknown) => logger.log("error", "Settings migration refused; shared settings stores are unchanged and it retries next start", {
-      event: "settings.migration-failed", source: "settings", error }));
-  startupCheckpoint("settings-migration");
   // This startup follows a user-initiated Gateway update. Keep Knowledge
   // unavailable on upgrade failure without disabling unrelated chat features.
   await knowledgeStore.upgradeStorage().catch((error: unknown) => {

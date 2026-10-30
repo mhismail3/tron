@@ -114,7 +114,6 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyArchiveUsesCanonicalReason"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentApprovalRequestsAppearInTheirChatAndSettleEverywhere"
 )
 
 ui_journey_is_owned() {

@@ -45,10 +45,12 @@ struct SettingsRendererView: View {
     @PresentationState private var changingID: String?
     @PresentationState private var previewingID: String?
     @PresentationState private var pendingConfirmation: PendingConfirmation?
-    private struct PendingConfirmation {
-        let change: JSONValue
+    private struct PendingConfirmation: Identifiable {
+        let id = UUID().uuidString
+        enum Operation { case change(JSONValue), applyAgain(String) }
+        let operation: Operation
         let rowID: String
-        let message: String
+        let review: ChangeReview
     }
 
     private struct RefreshID: Hashable {
@@ -73,17 +75,15 @@ struct SettingsRendererView: View {
             perform: { try? await model.refreshSettingsSnapshot(for: target) }))
         .tronConfigurationSliderHost(sliderPresentation, inheriting: inheritedSliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
-        .tronConfirmation(
-            "Change this setting?",
-            isPresented: Binding(get: { pendingConfirmation != nil }, set: { if !$0 { pendingConfirmation = nil } }),
-            presenting: pendingConfirmation
-        ) { pending in
-            Button("Change setting") {
+        .tronManagedSheet(item: $pendingConfirmation, identity: { $0.id }) { pending in
+            ChangeReviewSheet(review: pending.review, approve: {
+                guard pendingConfirmation?.id == pending.id else { return }
                 pendingConfirmation = nil
-                commit(pending.change, rowID: pending.rowID)
-            }
-        } message: { pending in
-            Text(pending.message)
+                switch pending.operation {
+                case .change(let change): commit(change, rowID: pending.rowID, confirmationDigest: pending.review.digest)
+                case .applyAgain(let id): applyAgain(id, rowID: pending.rowID, confirmationDigest: pending.review.digest)
+                }
+            }, cancel: { pendingConfirmation = nil })
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active {
@@ -392,8 +392,8 @@ struct SettingsRendererView: View {
                 return
             }
             rowErrors[setting.id] = nil
-            if let confirm = preview.changes.first?.confirm {
-                pendingConfirmation = PendingConfirmation(change: change, rowID: setting.id, message: confirm)
+            if let review = preview.review, review.requiresTap {
+                pendingConfirmation = PendingConfirmation(operation: .change(change), rowID: setting.id, review: review)
                 previewingID = nil
             } else {
                 previewingID = nil
@@ -403,7 +403,7 @@ struct SettingsRendererView: View {
     }
 
     /// Apply again is an accepted command like `commit`: unstructured, then a disposable reload.
-    private func applyAgain(_ changeID: String, rowID: String) {
+    private func applyAgain(_ changeID: String, rowID: String, confirmationDigest: String? = nil) {
         guard changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
         changingID = rowID
         let identity = model.knowledgePresentationIdentity
@@ -412,9 +412,14 @@ struct SettingsRendererView: View {
         Task { @MainActor in
             defer { changingID = nil }
             do {
-                try await model.applySettingsChangeAgain(changeID)
+                let result = try await model.applySettingsChangeAgain(changeID, confirmationDigest: confirmationDigest)
                 guard identity == model.knowledgePresentationIdentity, requestTarget == target,
                       admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
+                if let review = result.review, result.status == "review" {
+                    pendingConfirmation = PendingConfirmation(operation: .applyAgain(changeID), rowID: rowID, review: review)
+                    return
+                }
+                try result.throwIfRefused()
                 rowErrors[rowID] = nil
                 model.noteSettingsChanged()
             } catch is CancellationError {
@@ -436,7 +441,8 @@ struct SettingsRendererView: View {
     }
 
     /// The mutation is unstructured so the view cannot cancel it; the reload is a disposable read.
-    private func commit(_ change: JSONValue, rowID: String) {
+    private func commit(_ change: JSONValue, rowID: String, confirmationDigest: String? = nil) {
+        guard changingID == nil else { return }
         changingID = rowID
         let identity = model.knowledgePresentationIdentity
         let requestTarget = target
@@ -444,7 +450,7 @@ struct SettingsRendererView: View {
         Task { @MainActor in
             defer { changingID = nil }
             do {
-                try await model.changeSetting(target: requestTarget, change: change)
+                try await model.changeSetting(target: requestTarget, change: change, confirmationDigest: confirmationDigest)
                 guard identity == model.knowledgePresentationIdentity, requestTarget == target,
                       admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
                 model.noteSettingsChanged()

@@ -13,12 +13,10 @@ import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../src/knowledge/knowledge-store.js";
 import { workspaceModule } from "../src/workspace/workspace-module.js";
-import { registerProfileApprovals } from "../src/modules/home/home-profile-approvals.js";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
-import { SettingsApprovals } from "../src/kernel/settings/settings-approvals.js";
 import { OutsideChanges } from "../src/admin/settings-outside.js";
 import { PackageService } from "../src/admin/package-service.js";
 import { HookResources } from "../src/admin/hook-resources.js";
@@ -285,14 +283,13 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const settingsRecord = new SettingsChangeRecord(tronHome);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, settingsRecord, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
-  const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(tronHome), {
+  const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
       async (inspection) => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
       async (inspection) => { await registry.commitProjectReload(inspection.projectDir); },
       async (inspection) => { await registry.abortProjectReload(inspection.projectDir); }),
   });
   if (knowledge) {
-    registerProfileApprovals(settingsChanges, () => knowledge);
     profileSettings = { model: settingsModel, changes: settingsChanges };
   }
   registry.setSettings(settingsModel, settingsChanges);

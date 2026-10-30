@@ -11,15 +11,9 @@ import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
 
-/**
- * Settings decisions and submissions at the Gateway RPC boundary (#1642), with
- * real Home, worker and chat runtimes on a faux model. The maintainer decides
- * from the Global Changes sheet, which never opened the requester's chat, so a
- * decision has no client fence: the approval's digest-bound diff is its fence.
- * What a change refuses for a missing fence, its dry run refuses too, before
- * the maintainer is ever asked. Retained at `test-results/settings-approval-decide.json`.
- */
-const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-approval-decide.json");
+/** Real Home/worker routine changes and client Session fences at the Gateway RPC boundary.
+ * Approval decisions are retired; routine changes retain their original domain/SDK assertions. */
+const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-worker-fences.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
 afterEach(async () => { await disposeFixtures(); });
 afterAll(async () => {
@@ -32,7 +26,7 @@ function phone(): ClientContext {
 }
 
 let command = 0;
-const commandId = () => `approval-decide-${String(++command).padStart(4, "0")}`;
+const commandId = () => `worker-fence-${String(++command).padStart(4, "0")}`;
 const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
   : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
 
@@ -50,8 +44,8 @@ async function gateway() {
   return { ...f, service, settingsChanges };
 }
 
-describe("settings approval decisions", () => {
-  it("the maintainer approves Home's change to a settled worker's Session scope without having opened that worker", async () => {
+describe("settings worker changes and Session fences", () => {
+  it("Home applies routine model/thinking changes to a settled worker without a client opening that worker", async () => {
     const f = await gateway();
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
     let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
@@ -81,24 +75,15 @@ describe("settings approval decisions", () => {
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
     const workerSessionId = (await homeOwnerOf(f.registry).taskStatus("settled-worker")).sessionId!;
 
-    // The maintainer raised thinking's floor, so Home's model and thinking change waits for his tap.
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" },
-      changes: [{ key: "permissions.floor", layer: "global", op: "set", value: "approve", qualifiers: { key: "model.thinking[role=chat]" } }] });
     const REASONING = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
-    const pendingTurn = homeSays("Switch settled-worker to reasoning", "settings", { action: "change", taskId: "settled-worker", reason: "Harder step on resume",
+    const applied = await homeSays("Switch settled-worker to reasoning", "settings", { action: "change", taskId: "settled-worker", reason: "Harder step on resume",
       changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: REASONING }, { key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }] });
-    await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "Home blocks for the worker approval");
-
-    // Approved from the Global Changes sheet: the iPhone never opened the worker, so it sends no fence.
-    const [request] = (await f.service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<{ requestId: string; digest: string }> }).requests;
-    const approved = await f.service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId: request!.requestId, digest: request!.digest, approved: true }) as unknown as Record<string, unknown>;
-    expect(approved).toMatchObject({ status: "approved", changes: expect.arrayContaining([expect.objectContaining({ key: "model.thinking[role=chat]", status: "approved", after: "low" })]) });
-    const pending = await pendingTurn;
-    expect(pending.details).toMatchObject({ status: "approved", tier: "approve" });
+    expect(applied.details).toMatchObject({ status: "applied", review: { requiresTap: false } });
+    expect(home.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
     const worker = await f.registry.acquire(workerSessionId);
     expect(worker.snapshot()).toMatchObject({ model: REASONING, thinkingLevel: "low" });
     expect((await f.settingsChanges.history({ key: "model.thinking[role=chat]" })).entries.map(entry => entry.status)).not.toContain("failed");
-    transcript.push({ case: "decide without a client fence", steps: [{ pending: pending.details, approved }] });
+    transcript.push({ case: "routine worker change without a client fence", steps: [{ applied: applied.details }] });
   }, 90_000);
 
   it("a Session-scope change without the fence it read is refused at submission, dry run included", async () => {

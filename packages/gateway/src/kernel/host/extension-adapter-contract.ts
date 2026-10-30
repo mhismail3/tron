@@ -17,6 +17,15 @@ import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../../protoco
  */
 export const TRON_FORM_CAPABILITY = "tron.form.v1";
 
+/** Built-in typed changes only; this is not part of the generic form ABI. */
+export const TRON_CHANGE_CAPABILITY = "tron.change.v1";
+export type NativeChangeRequest = <T>(input: {
+  review: import("../../protocol/types.js").ChangeReview;
+  apply: (acceptance: import("../../protocol/types.js").NativeChangeAcceptance) => Promise<T>;
+  signal?: AbortSignal;
+}) => Promise<T | undefined>;
+export type ChangeCapableUI = { [TRON_CHANGE_CAPABILITY]?: NativeChangeRequest };
+
 interface FormRequestInput {
   form: ExtensionFormDescriptor;
   signal?: AbortSignal;

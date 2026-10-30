@@ -41,11 +41,18 @@ enum ProjectLifecycleOperation: String, Sendable {
     case create, trust, rename, archive, untrust
 }
 
-struct ProjectLifecyclePendingResult: Decodable {
-    struct Approval: Decodable {
-        let requestId: String
-        let digest: String
-    }
+/// `projects.change` without a confirmation: the exact review and the typed
+/// intent the confirmation must return unchanged.
+struct ProjectLifecycleReviewResult: Decodable {
     let status: String
-    let approval: Approval?
+    let review: ChangeReview
+    let intent: JSONValue
+}
+
+/// One reviewed project action, ready for the maintainer's tap on its card.
+struct ProjectLifecycleReview: Identifiable {
+    let params: [String: JSONValue]
+    let review: ChangeReview
+    let intent: JSONValue
+    var id: String { review.digest }
 }

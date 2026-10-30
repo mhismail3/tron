@@ -908,27 +908,6 @@ struct ChatToolPayload: Hashable, Sendable {
     let usage: JSONValue?
 }
 
-/// An approval request an agent tool call made (settings, profile, projects):
-/// every approval-requesting tool reports `{ status, approval: { requestId, title } }`.
-struct ChatToolApproval: Hashable, Sendable {
-    let requestID: String
-    let title: String
-    let status: String
-
-    init(requestID: String, title: String, status: String) {
-        self.requestID = requestID; self.title = title; self.status = status
-    }
-
-    init?(details: JSONValue?) {
-        guard let object = details?.objectValue, let approval = object["approval"]?.objectValue,
-              let requestID = approval["requestId"]?.stringValue, !requestID.isEmpty,
-              let status = object["status"]?.stringValue else { return nil }
-        self.requestID = requestID
-        title = approval["title"]?.stringValue ?? "Approval request"
-        self.status = status
-    }
-}
-
 struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let id: String
     let isDisplayTool: Bool
@@ -957,8 +936,6 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let groupIndex: Int?
     let groupCount: Int?
     let groupFinalized: Bool?
-    /// The approval request a settled call returned (`details.approval`), #2050.
-    let approval: ChatToolApproval?
 
     init(_ tool: ChatToolPresentation) {
         id = tool.id
@@ -990,7 +967,6 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         groupIndex = tool.groupIndex
         groupCount = tool.groupCount
         groupFinalized = tool.groupFinalized
-        approval = ChatToolApproval(details: tool.details)
     }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }

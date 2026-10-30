@@ -1,4 +1,7 @@
-import { TIERS, splitModelRef, type LayerId, type Tier, type FixedSetting } from "./tool-contract.js";
+import { redactCredentials } from "../../util/credential-redaction.js";
+import { createHash } from "node:crypto";
+import type { ChangeReview } from "../../protocol/types.js";
+import { splitModelRef, type LayerId, type FixedSetting } from "./tool-contract.js";
 import { GatewayError } from "../../errors.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from "../../util/validation.js";
 
@@ -13,8 +16,6 @@ export interface PlannedWrite { store: ObservedStore; instance: string; changeId
 /** Private persistence metadata, never an outward settings scope or grant. */
 export type StoreLayer = "session" | "home" | "project" | "global" | "default";
 
-/** The maintainer's floor overrides as `floors.json` holds them. */
-export type FloorOverrides = Record<string, { widen?: Tier; narrow?: Tier }>;
 
 export type ProjectGitState =
   | { kind: "local"; reason: "not in a git repository" | ".pi is ignored by git" }
@@ -61,8 +62,6 @@ export interface SettingsStores {
   /** Private Mac Terminal authorizations, by paired device id. */
   macTerminal: Record<string, string>;
   macTerminalServerEnabled?: boolean;
-  /** The maintainer's floor overrides (Global policy, doc 5.4). */
-  floors: FloorOverrides;
   /** The Gateway-owned settings document (`gateway/settings/gateway.json`). */
   gateway: Record<string, unknown>;
   /** Outside-change marks by layer and key instance (doc 5.6). */
@@ -86,13 +85,23 @@ export const LAYER_LABELS: Record<LayerId, string> = {
 };
 
 
-/** One step up, capped at approve (foundation F3: the web step). */
-export function raiseTier(tier: Tier, steps: number): Tier {
-  return TIERS[Math.min(TIERS.indexOf(tier) + steps, TIERS.length - 1)]!;
+/** Invisible controls are disclosed, not silently stripped from an exact review. */
+export function disclosed(text: string): string {
+  return redactCredentials(text).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
+    character => character === "\n" ? character : character.split("").map(unit => "\\u" + unit.charCodeAt(0).toString(16).padStart(4, "0")).join(""));
 }
-export function maxTier(...tiers: Tier[]): Tier {
-  return TIERS[Math.max(...tiers.map(tier => TIERS.indexOf(tier)))]!;
+
+/** One immutable before/after projection; the digest binds identity AND everything shown. */
+export function changeReview(identity: unknown, input: Omit<ChangeReview, "digest">): ChangeReview {
+  const review = { title: disclosed(input.title), requiresTap: input.requiresTap,
+    ...(input.reason === undefined ? {} : { reason: disclosed(input.reason) }),
+    items: input.items.map(item => Object.freeze({ label: disclosed(item.label), before: disclosed(item.before), after: disclosed(item.after),
+      ...(item.detail === undefined ? {} : { detail: disclosed(item.detail) }), ...(item.exact === undefined ? {} : { exact: disclosed(item.exact) }) })) };
+  const result = { ...review, digest: createHash("sha256").update(JSON.stringify({ identity, review })).digest("hex") };
+  Object.freeze(result.items);
+  return Object.freeze(result);
 }
+
 export type Writer = "ui" | "home" | "worker" | "agent";
 export type Timing = "fixed" | "live";
 export type Effect = "next-turn" | "next-request" | "new-chat" | "reload" | "restart" | "next-memory-pass" | "next-compaction" | "next-change" | "delegate";

@@ -20,10 +20,7 @@ it("migrates exact legacy placement through a real Home activation and Changes U
     profileCall({ action: "migrate", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "communication/questions" }], reason: "File the original inferred capture" }, "you-centred-migrate"), say("sorted"),
   ]);
   const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "you-centred-migrate")?.details as { status: string; approval: { requestId: string; digest: string } };
-  expect(result.status).toBe("pending");
-  expect(await f.store.read(original.id)).toEqual(original);
-  const decision = await f.service.invoke(maintainer, "settings.decide", { commandId: command("approve-migration"), requestId: result.approval.requestId, digest: result.approval.digest, approved: true }) as unknown as { status: string };
-  expect(decision.status).toBe("approved");
+  expect(result.status).toBe("organized");
   const migrated = await f.store.read(original.id) as typeof original;
   expect(migrated.content).toEqual({ ...original.content, tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["communication", "questions"] } });
   expect({ ...migrated, revisionId: original.revisionId, content: original.content }).toEqual(original);
@@ -40,28 +37,37 @@ it("migrates exact legacy placement through a real Home activation and Changes U
   recordCase("v2-migration-exact-v1-undo", { originalId: original.id, originalRevision: original.revisionId, migratedRevision: migrated.revisionId, restoredRevision: restored.revisionId, exactTextAndProvenance: true });
 }, 120_000);
 
-it("supersedes only after an exact tap, preserves placement, and stale approval never overwrites a concurrent native edit", async () => {
-  const f = await fixture("you-centred-approval");
-  const original = (await f.store.createNote({ commandId: command("confirmed-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [], content: { title: "Keep unique work.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"], profile: { version: 2, path: ["engineering", "collaboration"] } } } })).record as Extract<KnowledgeRecord, { kind: "note" }>;
-  const proposed = await homeActivation(f, "Consider moving the note.", [profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "resources/cleanup" }], reason: "Exact organization proposal" }, "stale-approval"), say("waiting")]);
-  const pending = proposed.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "stale-approval")?.details as { status: string; approval: { requestId: string; digest: string } };
-  expect(pending.status).toBe("pending");
+it("Home cannot rewrite confirmed content; concurrent native edits and typed supersede retain provenance and placement", async () => {
+  const f = await fixture("you-centred-native");
+  const original = (await f.store.createNote({ commandId: command("confirmed-seed"), record: { kind: "note", scope: "personal",
+    provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],
+    content: { title: "Keep unique work.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"],
+      profile: { version: 2, path: ["engineering", "collaboration"] } } } })).record as Extract<KnowledgeRecord, { kind: "note" }>;
+  const proposed = await homeActivation(f, "Consider moving the note.", [profileCall({ action: "reorganize",
+    assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "resources/cleanup" }],
+    reason: "Do not infer authority" }, "protected-placement"), say("refused")]);
+  const refused = proposed.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "protected-placement")?.details;
+  expect(refused).toMatchObject({ status: "refused" });
   expect(await f.store.read(original.id)).toEqual(original);
-  const edited = (await f.store.updateNote({ commandId: command("native-concurrent"), recordId: original.id, expectedRevision: original.revisionId, record: { ...original, content: { ...original.content, title: "Keep every unique checkpoint." } } })).record;
-  f.home.push(say("The stale approval was superseded; original placement stays."));
-  await expect(f.service.invoke(maintainer, "settings.decide", { commandId: command("stale-decision"), requestId: pending.approval.requestId, digest: pending.approval.digest, approved: true })).rejects.toThrow(/superseded/);
+  const edited = (await f.store.updateNote({ commandId: command("native-concurrent"), recordId: original.id,
+    expectedRevision: original.revisionId, record: { ...original, content: { ...original.content, title: "Keep every unique checkpoint." } } })).record;
+  // Exact revision admission, not a retired approval digest, protects placement.
+  await expect(f.service.invoke(maintainer, "home.profileChange", { commandId: command("stale-native-placement"), reason: "Exact stale placement",
+    changes: [{ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "resources/cleanup" }] }] }))
+    .rejects.toMatchObject({ code: "conflict" });
   expect(await f.store.read(original.id)).toEqual(edited);
-  await waitFor(() => !f.slot.isBusy && f.slot.snapshot().phase === "idle" && f.home.length === 0 || undefined, "stale outcome delivered and Home idle");
-  const replacement = await homeActivation(f, "Propose a replacement in the same area.", [profileCall({ action: "supersede", id: original.id, kind: "standing-decision", text: "Preserve all unique work and checkpoints.", reason: "Exact replacement reviewed by the maintainer" }, "replacement-approval"), say("waiting")]);
-  const next = replacement.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "replacement-approval")?.details as typeof pending;
-  expect(next.status).toBe("pending");
-  f.home.push(say("The exact replacement was approved."));
-  await f.service.invoke(maintainer, "settings.decide", { commandId: command("replacement-decision"), requestId: next.approval.requestId, digest: next.approval.digest, approved: true });
+  await f.service.invoke(maintainer, "home.profileChange", { commandId: command("native-replacement"), changes: [{
+    action: "supersede", id: original.id, expectedRevision: edited.revisionId, kind: "standing-decision", text: "Preserve all unique work and checkpoints.",
+    reason: "Maintainer's exact replacement",
+  }] });
   const notes = (await f.store.list({ kind: "note", scope: "personal" })).records.filter((note): note is Extract<KnowledgeRecord, { kind: "note" }> => note.kind === "note");
   const successor = notes.find(note => note.id !== original.id)!;
   expect(successor.content.profile).toEqual(original.content.profile);
+  expect(successor.content.confirmed).toBe(true);
+  expect(successor.provenance.actor).toBe("user");
   expect(successor.relations).toContainEqual({ type: "supersedes", recordId: original.id, revisionId: edited.revisionId });
-  recordCase("approval-stale-fence-and-supersede-placement", { unchangedOnStaleApproval: true, successorId: successor.id, pathPreserved: true });
+  expect(await f.store.read(original.id, original.revisionId)).toEqual(original);
+  recordCase("native-stale-fence-and-supersede-placement", { unchangedOnStaleRevision: true, successorId: successor.id, pathPreserved: true });
 }, 120_000);
 
 it("exposes eight unsorted notes at a maintainer turn without bodies, and refuses a nine-note sorting batch without effects", async () => {
@@ -120,6 +126,6 @@ it("discovers SQL profile metadata without immutable bodies, bounds query-fenced
   const confirmed = await f.store.read(correction.id) as typeof correction; expect(confirmed.content.confirmed).toBe(true);
   const attempted = await homeActivation(f, "An inferred rewrite must not override my confirmed correction.", [profileCall({ action: "refine", id: correction.id, text: "A different inferred correction.", reason: "A proposal, not permission" }, "correction-hold"), say("Waiting.")]);
   const hold = attempted.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "correction-hold")?.details as { status: string };
-  expect(hold.status).toBe("pending"); expect(await f.store.read(correction.id)).toEqual(confirmed);
-  recordCase("metadata-pages-and-confirmed-correction", { disjointMissingBodyReadSucceeded: true, pageSizes: [16, 4], staleCursorRefused: true, largeReferenceExact: true, linkedCorrectionHeldForApproval: true });
+  expect(hold.status).toBe("refused"); expect(await f.store.read(correction.id)).toEqual(confirmed);
+  recordCase("metadata-pages-and-confirmed-correction", { disjointMissingBodyReadSucceeded: true, pageSizes: [16, 4], staleCursorRefused: true, largeReferenceExact: true, confirmedCorrectionProtected: true });
 }, 120_000);

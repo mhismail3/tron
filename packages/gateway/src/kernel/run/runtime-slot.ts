@@ -57,11 +57,8 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTas
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
 import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
-import { awaitApprovalDecision } from "../settings/settings-approval-review.js";
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
-import { settingsOutcomeRequestIds, type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
-import { visitCanonicalSessionEntries } from "../session/canonical-reader.js";
-import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
+import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
 import { piBuiltinExtensions } from "../host/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../host/extension-adapters.js";
@@ -529,8 +526,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       presentation,
       (notification) => this.enqueueExtensionNotification(notification),
       (interaction) => {
-        // An approval form's request already pushed once when it was created (#2050).
-        if (interaction.method === "form" && interaction.form.presentation === "approval") return;
         const interactionRequired = this.dependencies.modules.policy("interactionRequired")?.();
         if (!interactionRequired) return;
         // Sample the same token-bound foreground lease at the exact semantic
@@ -745,8 +740,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
    * holds the lane, so lane setters refuse rather than wait; Home's `taskId` targets that worker (#1336). */
   private settingsToolSource() {
     const busy = (): never => { throw new GatewayError("busy", "This chat's own Session-scope settings change between runs, not during one"); };
+    const read = () => this.settingsSessionLayer();
     return {
       ...this.settingsSource(),
+      get session() { return read(); },
       appliers: {
         setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy,
         admit: (key: KeyDeclaration, layer: LayerId) => {
@@ -761,21 +758,14 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
   }
 
-  /** Changes can decide the same diff while its tool is waiting. The exact live
-   * form authorizes the tool's in-turn appliers, without acquiring a second runtime
-   * lane; the settings owner's target stripe still serializes the decision. */
-  settingsApprovalContext(requestId: string): Pick<ChangeContext, "session" | "homeChapter"> | undefined {
-    if (!this.ui.interactions().some(interaction => interaction.method === "form" && interaction.form.questions[0]?.id === requestId)) return undefined;
-    const session = this.settingsToolSource();
-    return { session, ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id,
-      mutate: operation => operation({ appliers: session.appliers }) } } : {}) };
-  }
-
   private settingsToolAccess(): SettingsToolAccess | undefined {
     const owners = this.dependencies.settings();
     if (!owners) return undefined;
     const target = { kind: "session" as const, sessionId: this.id };
     const source = () => this.settingsToolSource();
+    const chapter = (): NonNullable<ChangeContext["homeChapter"]> => ({ ...this.settingsSource(),
+      get session() { return source().session; }, sessionId: this.id,
+      mutate: operation => operation({ appliers: source().appliers }) });
     const actor = (toolCallId: string): Actor => {
       const profileActor = this.liveProfile().settingsActor;
       const kind = profileActor === "agent" && this.ownedTurns.worker ? "worker" : profileActor;
@@ -798,48 +788,21 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       change: async (changes, input) => {
         if (input.taskId === undefined) {
           return owners.changes.change(target, changes, {
-            actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
+            actor: actor(input.toolCallId), reason: input.reason, session: source(), ...(input.confirm ? { confirm: input.confirm } : {}),
             // Home's own tool already owns its running lane: the saved change takes
             // effect through the same in-turn appliers as an ordinary chat's.
-            ...(this.usesHomeSettings ? { homeChapter: { ...this.settingsSource(), sessionId: this.id, mutate: operation => operation({ appliers: source().appliers }) } } : {}),
+            ...(this.usesHomeSettings ? { homeChapter: chapter() } : {}),
             ...(input.dryRun ? { dryRun: true } : {}),
-            ...(input.request ? { request: true } : {}),
           });
         }
         const { task, slot, target: workerTarget } = await worker(input.taskId, "change");
         const result = await owners.changes.change(workerTarget, changes, {
           // Home is the requester: approval outcomes return to Home's session, the task names the worker.
           actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId, taskId: task.taskId },
-          reason: input.reason, web: input.web, session: slot.taskWorkerSettingsSession(),
+          reason: input.reason, session: slot.taskWorkerSettingsSession(), ...(input.confirm ? { confirm: input.confirm } : {}),
           ...(input.dryRun ? { dryRun: true } : {}),
-          ...(input.request ? { request: true } : {}),
         });
         return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
-      },
-      wait: (requestId, present, signal) => awaitApprovalDecision({ path: owners.changes,
-        requestId, requesterSessionId: this.id, present, ...(signal ? { signal } : {}) }),
-      takeOutcomes: async delivered => {
-        // Home admits settings messages through its bounded, cancellable input
-        // envelope for both user turns and wakes; the native hook is ordinary-only.
-        if (this.usesHomeSettings) return undefined;
-        const path = this.sessionFile;
-        if (!path) return delivered?.length ? undefined : owners.changes.takeOutcomes([this.id], []);
-        const durable = new Set<string>();
-        try {
-          await visitCanonicalSessionEntries({ path, sessionId: this.id, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES, durable: true,
-            visit: entry => { for (const id of settingsOutcomeRequestIds([entry.raw])) durable.add(id); } });
-        } catch (error) {
-          // A new conversation has no file until its first prompt is saved. It
-          // can select an untold outcome, but cannot acknowledge any delivery.
-          if ((error as NodeJS.ErrnoException).code === "ENOENT" && !delivered?.length) return owners.changes.takeOutcomes([this.id], []);
-          // An unreadable or unsynchronized cut proves nothing. Keep the outbox
-          // pending, without refusing this prompt or appending a duplicate.
-          return undefined;
-        }
-        // SDK visibility can precede canonical durability. Unproven delivery
-        // IDs cannot retire an outcome or cause its selection a second time.
-        if (delivered?.some(id => !durable.has(id))) return undefined;
-        return owners.changes.takeOutcomes([this.id], delivered ?? [...durable]);
       },
     };
   }
@@ -847,9 +810,15 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** This worker's Session scope and lane appliers for Home's `settings` tool (#1336): no client
    * fence (the caller resolved this slot); a running worker hears changes through `announce`. */
   taskWorkerSettingsSession(): SessionSettingsSource & { appliers: SessionAppliers } {
+    const read = () => {
+      if (this.disposed) throw new GatewayError("not_found", "The worker runtime that owned this settings review has retired");
+      return this.settingsSessionLayer();
+    };
     return {
       ...this.settingsSource(),
+      get session() { return read(); },
       appliers: {
+        admit: (key, layer) => { if (layer === "session" && key.id === "tools.active") this.assertNoLiveTaskConfiguration("active tools"); },
         setModel: (ref, fixedAt) => this.setModel(ref.provider, ref.id, undefined, undefined, fixedAt),
         setThinking: (level, fixedAt) => this.setThinking(level as ThinkingLevel, undefined, undefined, fixedAt),
         setContextWindow: (model, value, fixedAt) => this.setContextWindow(model.provider, model.id, value, this.revision, this.runtimeGeneration, undefined, fixedAt),
@@ -885,7 +854,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     const when = (effect: string) => effect === "next-turn" || effect === "next-request" ? "from your next model request"
       : effect === "next-compaction" ? "at the next compaction" : `at its effect point (${effect})`;
     const text = [
-      `[Tron settings] ${by} changed this session's settings${notice.approved ? " (approved by the maintainer)" : ""} while you work on task ${taskId}${notice.reason ? `. Reason: ${notice.reason}` : ""}.`,
+      `[Tron settings] ${by} changed this session's settings while you work on task ${taskId}${notice.reason ? `. Reason: ${notice.reason}` : ""}.`,
       ...notice.changes.map(change => `- ${change.label}: ${change.before === undefined ? "changed" : `${change.before} → ${change.after}`} (${when(change.effect)}; change ${change.changeId}).`),
       "The response in progress when this arrived kept its earlier settings. The same session, worktree and task continue; no reply is needed.",
     ].join("\n");
@@ -991,8 +960,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       fixed[key] = { ...(fixedAt ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     }
     const requestPins = readSessionRequestPins(branch);
-    // Tier admission and timing are separate: lowering a floor must not make
-    // an unapproved widening live. Only an approval or the maintainer's tap
+    // Admission and timing are separate. Only the maintainer's native action
     // releases the fixed-direction snapshot (including Follow the default).
     if (typeof this.dependencies.settingsSchema.schemaKey(key).timing !== "string" && allowFixedDirection) {
       const owners = this.dependencies.settings();
@@ -3996,8 +3964,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   /** Home's saved settings own its model, thinking and tools: a direct choice is
    * that change, adopted under this lane like any other. */
   protected async changeHomeRecipe(key: string, value: unknown, initiatingWorkToken?: string): Promise<number> {
-    await this.dependencies.settings()!.changes.change({ kind: "home" }, [{ key, layer: "session", op: "set", value }],
+    const result = await this.dependencies.settings()!.changes.change({ kind: "home" }, [{ key, layer: "session", op: "set", value }],
       { actor: { kind: "ui", id: "tron-home" }, commandId: randomUUID(), homeChapter: this.homeSettingsChapter(initiatingWorkToken) });
+    if (result.status !== "applied") throw new GatewayError("invalid_request", "This Home choice requires the exact native change card; nothing changed");
     return this.revision;
   }
 
@@ -4351,9 +4320,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     };
   }
 
-  respondToInteraction(id: string, hostEpoch: string, presentationRevision: number, value: unknown, cancelled: boolean): void {
+  respondToInteraction(id: string, hostEpoch: string, presentationRevision: number, value: unknown, cancelled: boolean, acceptance?: import("../../protocol/types.js").NativeChangeAcceptance): void | Promise<void> {
     this.assertNoTrustReload();
-    this.ui.respond(id, hostEpoch, presentationRevision, value, cancelled);
+    return this.ui.respond(id, hostEpoch, presentationRevision, value, cancelled, acceptance);
   }
 
   updateExtensionEditor(hostEpoch: string, baseRevision: number, operationId: string, text: string): JsonValue {

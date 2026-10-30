@@ -218,21 +218,17 @@ enum ToolRunSegment: Identifiable, Equatable {
     /// A completed inline display whose card spans the transcript width, as it
     /// does when shown alone; it cannot sit inside a chip row.
     case wideDisplay(ChatToolDescriptor)
-    /// A call that asked the maintainer's approval: its request's chip (#2050).
-    case approval(ChatToolDescriptor, ChatToolApproval)
 
     var id: String {
         switch self {
         case .tools(let run): "tools:" + (run.tools.first?.id ?? run.anchorID)
         case .displays(let tools): "displays:" + (tools.first?.id ?? "")
         case .wideDisplay(let tool): "display:" + tool.id
-        case .approval(let tool, _): "approval:" + tool.id
         }
     }
 
-    static func segments(of run: ChatToolRunPresentation, approval: (ChatToolDescriptor) -> ChatToolApproval? = { _ in nil }) -> [ToolRunSegment] {
-        let approvals = Dictionary(uniqueKeysWithValues: run.tools.compactMap { tool in approval(tool).map { (tool.id, $0) } })
-        guard approvals.isEmpty == false || run.tools.contains(where: \.isDisplayTool) else { return [.tools(run)] }
+    static func segments(of run: ChatToolRunPresentation) -> [ToolRunSegment] {
+        guard run.tools.contains(where: \.isDisplayTool) else { return [.tools(run)] }
         var segments: [ToolRunSegment] = []
         var generic: [ChatToolDescriptor] = []
         var displays: [ChatToolDescriptor] = []
@@ -251,10 +247,7 @@ enum ToolRunSegment: Identifiable, Equatable {
             displays.removeAll()
         }
         for tool in run.tools {
-            if let request = approvals[tool.id] {
-                flushGeneric(); flushDisplays()
-                segments.append(.approval(tool, request))
-            } else if !tool.isDisplayTool {
+            if !tool.isDisplayTool {
                 flushDisplays()
                 generic.append(tool)
             } else if DisplayToolView.rendersFullWidth(tool) {
@@ -283,7 +276,7 @@ struct ToolRunView: View {
         if run.tools.count == 1, let tool = run.tools.first, tool.isDisplayTool {
             displayView(tool)
         } else {
-            let segments = ToolRunSegment.segments(of: run, approval: approval)
+            let segments = ToolRunSegment.segments(of: run)
             // A stable stack keeps each segment's identity while streaming calls
             // join the run, so a new chip appends without remounting its siblings.
             VStack(alignment: .leading, spacing: ChatTranscriptLayoutConstants.rowSpacing) {
@@ -301,25 +294,10 @@ struct ToolRunView: View {
                         .accessibilityIdentifier("tool-run-display-strip")
                     case .wideDisplay(let tool):
                         displayView(tool)
-                    case .approval(_, let request):
-                        SettingsApprovalRequestChip(requestID: request.requestID, toolStatus: request.status, fallbackTitle: request.title)
                     }
                 }
             }
         }
-    }
-
-    /// A settled call's own result names its request; a call still waiting names
-    /// it through its approval form, which the shared sheet presents (#2050).
-    private func approval(_ tool: ChatToolDescriptor) -> ChatToolApproval? {
-        if let approval = tool.approval { return approval }
-        guard tool.isRunning, let sessionID,
-              let requestID = PendingExtensionInteractionToolPresentation.approvalRequestID(
-                tool: tool, pendingInteractions: model.authoritativeSnapshot(for: sessionID)?.extensionPresentation.pendingInteractions ?? []
-              ) else { return nil }
-        let form = model.authoritativeSnapshot(for: sessionID)?.extensionPresentation.pendingInteractions
-            .first { $0.form?.questions.first?.id == requestID }?.form
-        return ChatToolApproval(requestID: requestID, title: form?.title ?? tool.title, status: "pending")
     }
 
     private func displayView(_ tool: ChatToolDescriptor) -> some View {

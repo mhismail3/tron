@@ -66,7 +66,6 @@ struct SettingsChangesView: View {
     /// A surface starts loading: its empty state waits for the first read.
     @PresentationState private var loading = true
     @PresentationState private var loadGeneration = 0
-    @PresentationState private var approvalSelection: SettingsApprovalSelection?
 
     /// Empty filtered pages one load follows before it offers Load more.
     private static let maximumPagesPerLoad = 10
@@ -78,7 +77,6 @@ struct SettingsChangesView: View {
         let section: String
         let key: String
         let status: String
-        let approvalsRevision: Int
         let foreground: Int
         let identity: KnowledgePresentationIdentity
         let settingsRevision: Int
@@ -100,14 +98,6 @@ struct SettingsChangesView: View {
                     }
                     if let errorMessage {
                         TronSettingsNotice(message: errorMessage, title: "Changes unavailable", retry: retry)
-                    }
-                    // The same open requests and chip the asking chat shows (#2050).
-                    if !pending.isEmpty {
-                        TronSettingsGroup("Waiting for you", surfaceStyle: .uncontained) {
-                            VStack(alignment: .leading, spacing: TronSpacing.md) {
-                                ForEach(pending) { request in pendingChip(request) }
-                            }
-                        }
                     }
                     // An empty page with a cursor is not the end: only the end is "No changes".
                     if rows.isEmpty && cursor == nil && !loading && errorMessage == nil {
@@ -186,12 +176,8 @@ struct SettingsChangesView: View {
                                          onOpenSession: onOpenSession)
             }
         }
-        .tronManagedSheet(item: $approvalSelection, identity: { "settings.changes.approval.\($0.id)" }) { selection in
-            SettingsApprovalSheet(selection: selection)
-        }
         .task(id: PresentationActivityTaskID(source: loadID, presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }
-            try? await model.refreshSettingsApprovals()
             if lookedStorageKey != lastLookStorageKey {
                 lookedStorageKey = lastLookStorageKey
                 previousLookedAt = UserDefaults.standard.string(forKey: lastLookStorageKey)
@@ -212,7 +198,7 @@ struct SettingsChangesView: View {
 
     private var loadID: LoadID {
         LoadID(scope: activeScope, actor: actorFilter, layer: layerFilter, section: sectionFilter,
-               key: keyFilter, status: statusFilter, approvalsRevision: model.settingsApprovalsRevision,
+               key: keyFilter, status: statusFilter,
                foreground: model.foregroundReconciliationGeneration,
                identity: model.knowledgePresentationIdentity, settingsRevision: model.settingsInvalidationGeneration)
     }
@@ -277,18 +263,6 @@ struct SettingsChangesView: View {
         .accessibilityIdentifier("settings-change-\(row.id)")
         // Visible summaries truncate; VoiceOver and Details retain every fact.
         .accessibilityLabel(isNew ? "\(row.accessibilityLabel), Since you last looked" : row.accessibilityLabel)
-    }
-
-    /// Open requests in this scope, newest first: the shared projection, so a
-    /// decision anywhere removes its row at once.
-    private var pending: [SettingsApprovalRequest] {
-        (model.openSettingsApprovals ?? []).filter { $0.belongs(to: activeScope) }.sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private func pendingChip(_ request: SettingsApprovalRequest) -> some View {
-        SettingsApprovalChip(review: SettingsApprovalReview(request: request), identifier: "settings-changes-pending-\(request.requestId)") {
-            approvalSelection = .request(SettingsApprovalReference(requestID: request.requestId, changeIDs: request.changes.map(\.changeId)))
-        }
     }
 
     private func resetAndLoad() async {
@@ -372,7 +346,13 @@ private struct SettingsChangeDetailView: View {
     @PresentationState private var errorMessage: String?
     @PresentationState private var loading = false
     @PresentationState private var generation = 0
-    @PresentationState private var showingUndo = false
+    @PresentationState private var pendingReview: PendingReview?
+    private struct PendingReview: Identifiable {
+        enum Operation { case undo, applyAgain }
+        let id = UUID().uuidString
+        let review: ChangeReview
+        let operation: Operation
+    }
     @PresentationState private var actionError: String?
     @PresentationState private var undoConflict: (current: String, after: String)?
     @PresentationState private var undoing = false
@@ -391,25 +371,14 @@ private struct SettingsChangeDetailView: View {
         NavigationStack {
             ScrollView {
                 TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
-                    TronGlassCard(accent: statusAccent) {
-                        VStack(spacing: 0) {
-                            TronSettingsRow(icon: "circle.dashed", title: "Before",
-                                            subtitle: entry.presentation?.display.before ?? beforeValue,
-                                            subtitleLineLimit: nil, accent: statusAccent) {
-                                TronStatusPill(text: entry.status.capitalized, accent: statusAccent)
-                            }
-                            .textSelection(.enabled)
-                            TronSettingsDivider(accent: statusAccent)
-                            TronSettingsRow(icon: "checkmark.circle", title: "After",
-                                            subtitle: entry.presentation?.display.after ?? afterValue,
-                                            subtitleLineLimit: nil, accent: statusAccent)
-                            .textSelection(.enabled)
-                            if let undoConflict {
-                                TronSettingsDivider(accent: statusAccent)
-                                detailRow("exclamationmark.triangle", "Current value", undoConflict.current)
-                                TronSettingsDivider(accent: statusAccent)
-                                detailRow("clock.arrow.circlepath", "Value when applied", undoConflict.after)
-                            }
+                    ChangeReviewCard(title: entry.title, reason: entry.reason,
+                                     before: entry.presentation?.display.before ?? beforeValue,
+                                     after: entry.presentation?.display.after ?? afterValue)
+                    TronStatusPill(text: entry.status.capitalized, accent: statusAccent)
+                    if let undoConflict {
+                        TronSettingsGroup("Undo conflict") {
+                            detailRow("exclamationmark.triangle", "Current value", undoConflict.current)
+                            detailRow("clock.arrow.circlepath", "Value when applied", undoConflict.after)
                         }
                     }
                     TronSettingsGroup("Details") {
@@ -420,17 +389,6 @@ private struct SettingsChangeDetailView: View {
                             divider
                             detailRow("clock", "When", whenText)
                             if let reason = entry.reason, !reason.isEmpty { divider; detailRow("text.quote", "Reason", reason) }
-                            divider
-                            detailRow("shield.lefthalf.filled", "Tier", entry.tier.capitalized)
-                            if let basis = entry.tierBasis {
-                                divider
-                                detailRow("scalemass", "How the tier was reached",
-                                          "Floor: \(basis.floor) (\(basis.floorSource)); direction: \(basis.direction). Web/browser raise: \(basis.web ? "one step" : "none"). Risk model: \(basis.risk ?? "not used").")
-                                if let evaluation = basis.riskEvaluation {
-                                    divider
-                                    detailRow("gauge.with.needle", "Risk evaluation", "\(evaluation.status.capitalized): \(evaluation.rationale)")
-                                }
-                            }
                             divider
                             detailRow("scope", "Target", entry.target.sessionId ?? entry.target.cwd ?? entry.target.kind.capitalized)
                             if let git = entry.git {
@@ -485,9 +443,28 @@ private struct SettingsChangeDetailView: View {
                 })
             }
         }
-        .tronConfirmation("Undo this change?", isPresented: $showingUndo) {
-            Button("Undo change", role: .destructive) { Task { await performUndo() } }
+        .tronManagedSheet(item: $pendingReview, identity: { $0.id }) { pending in
+            NavigationStack {
+                ScrollView {
+                    ChangeReviewCard(review: pending.review, approve: {
+                        guard pendingReview?.id == pending.id else { return }
+                        pendingReview = nil
+                        Task {
+                            switch pending.operation {
+                            case .undo: await performUndo(confirmationDigest: pending.review.digest)
+                            case .applyAgain: await performApplyAgain(confirmationDigest: pending.review.digest)
+                            }
+                        }
+                    }, cancel: { pendingReview = nil })
+                    .padding(18)
+                }
+                .tronScrollEdgeChrome()
+                .navigationTitle("Review change")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+            .tronTopBlur(.sheet)
         }
+        .onChange(of: readID) { _, _ in pendingReview = nil }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .task(id: PresentationActivityTaskID(source: readID, presentationActive: presentationActivity.allowsPresentationPublication)) {
@@ -501,7 +478,7 @@ private struct SettingsChangeDetailView: View {
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { generation &+= 1; loading = false }
         }
-        .onDisappear { generation &+= 1; loading = false }
+        .onDisappear { generation &+= 1; loading = false; pendingReview = nil }
     }
 
     private var beforeValue: String {
@@ -562,7 +539,7 @@ private struct SettingsChangeDetailView: View {
                     .disabled(undoing)
                     .accessibilityIdentifier("settings.change.applyAgain")
                 } else if entry.action != true && entry.redacted != true && ["applied", "approved"].contains(entry.status) {
-                    Button { showingUndo = true } label: {
+                    Button { Task { await performUndo() } } label: {
                         TronSettingsRow(icon: "arrow.uturn.backward", title: undoing ? "Undoing…" : "Undo")
                     }
                     .buttonStyle(.plain)
@@ -596,15 +573,20 @@ private struct SettingsChangeDetailView: View {
         }
     }
 
-    private func performApplyAgain() async {
+    private func performApplyAgain(confirmationDigest: String? = nil) async {
         guard !undoing, model.selectedGatewayProfileID() == profileID else { return }
         undoing = true
         actionError = nil; undoConflict = nil
         defer { undoing = false }
         let identity = model.knowledgePresentationIdentity
         do {
-            try await model.applySettingsChangeAgain(entry.changeId)
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            let result = try await model.applySettingsChangeAgain(entry.changeId, confirmationDigest: confirmationDigest)
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
+            if let review = result.review, result.status == "review" {
+                pendingReview = PendingReview(review: review, operation: .applyAgain)
+                return
+            }
+            try result.throwIfRefused()
             dismiss()
         } catch {
             guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
@@ -612,15 +594,20 @@ private struct SettingsChangeDetailView: View {
         }
     }
 
-    private func performUndo() async {
+    private func performUndo(confirmationDigest: String? = nil) async {
         guard !undoing, model.selectedGatewayProfileID() == profileID else { return }
         undoing = true
         actionError = nil; undoConflict = nil
         defer { undoing = false }
         let identity = model.knowledgePresentationIdentity
         do {
-            try await model.undoSettingsChange(entry)
+            let result = try await model.undoSettingsChange(entry, confirmationDigest: confirmationDigest)
             guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
+            if let review = result.review, result.status == "review" {
+                pendingReview = PendingReview(review: review, operation: .undo)
+                return
+            }
+            try result.throwIfRefused()
             dismiss()
         } catch {
             guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }

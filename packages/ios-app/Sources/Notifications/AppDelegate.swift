@@ -1,30 +1,15 @@
 import UIKit
 @preconcurrency import UserNotifications
 
-/// The relay maps the Gateway's allowlisted category to `aps.category`. A tap on
-/// an approval push opens the requesting chat's approval sheet (#2050); the push
-/// itself carries no decision.
-enum SettingsApprovalNotification {
-    static let categoryIdentifier = "settings-approval"
-}
-
 struct PushNotificationTap: Equatable, Sendable {
     let sessionID: String?
     let machineID: String?
     let requestID: String?
-    /// An admitted approval push: its chat opens the approval sheet.
-    let opensApproval: Bool
 
-    init(
-        sessionID: String?,
-        machineID: String?,
-        requestID: String? = nil,
-        opensApproval: Bool = false
-    ) {
+    init(sessionID: String?, machineID: String?, requestID: String? = nil) {
         self.sessionID = sessionID
         self.machineID = machineID
         self.requestID = requestID
-        self.opensApproval = opensApproval
     }
 
     var route: (sessionID: String, machineID: String)? {
@@ -32,21 +17,13 @@ struct PushNotificationTap: Equatable, Sendable {
         return (sessionID, machineID)
     }
 
-    static func admit(
-        _ userInfo: [AnyHashable: Any],
-        categoryIdentifier: String = ""
-    ) -> PushNotificationTap {
+    static func admit(_ userInfo: [AnyHashable: Any]) -> PushNotificationTap {
         let requestID = admitRequestID((userInfo["tron"] as? [AnyHashable: Any])?["requestId"])
         guard let sessionID = admitSessionID(userInfo["sessionId"]),
               let machineID = admitMachineID(userInfo["machineId"]) else {
             return PushNotificationTap(sessionID: nil, machineID: nil, requestID: requestID)
         }
-        return PushNotificationTap(
-            sessionID: sessionID,
-            machineID: machineID,
-            requestID: requestID,
-            opensApproval: categoryIdentifier == SettingsApprovalNotification.categoryIdentifier
-        )
+        return PushNotificationTap(sessionID: sessionID, machineID: machineID, requestID: requestID)
     }
 
     private static func admitSessionID(_ value: Any?) -> String? {
@@ -130,7 +107,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         didReceive response: UNNotificationResponse
     ) async {
         let content = response.notification.request.content
-        let tap = PushNotificationTap.admit(content.userInfo, categoryIdentifier: content.categoryIdentifier)
+        let tap = PushNotificationTap.admit(content.userInfo)
         await deliverNotificationTap(tap)
     }
 }

@@ -540,6 +540,8 @@ describe("Home task budget", () => {
     { stopReason: "toolUse", usage: { input: 2, output, cacheRead: 0, cacheWrite: 0 } } as never);
   const install = (f: Awaited<ReturnType<typeof fixture>>) =>
     f.settings.settingsChanges;
+  /** The maintainer's paired tap applies a spend widening directly; any other
+   * actor receives only the exact review. */
   const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
     changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "session", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
 
@@ -581,9 +583,9 @@ describe("Home task budget", () => {
     expect(await lowered.completion).toMatchObject({ budget: { outputTokens: 100 }, terminalEvidence: { outcome: "limited", reason: "budget" } });
     expect(calls).toBe(2);
 
-    // Home asking to raise it widens spending: it waits for the maintainer's tap.
+    // Home asking to raise it widens spending: it gets only the exact review for the maintainer's tap.
     const held = await setBudget(changes, { outputTokens: 1_000 }, { actor: { kind: "home", id: "home" }, reason: "Longer research tasks" });
-    expect(held).toMatchObject({ status: "pending", tier: "approve" });
+    expect(held).toMatchObject({ status: "review", review: { requiresTap: true }, changes: [] });
 
     // A raise after start never reaches the running task: it still stops at its start budget.
     entered = false; calls = 0;

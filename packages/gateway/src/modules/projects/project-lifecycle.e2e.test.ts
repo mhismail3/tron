@@ -18,9 +18,9 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { UploadStore } from "../../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../../config.js";
-import { APPROVAL_TTL_MS } from "../../kernel/settings/settings-approvals.js";
-import { SETTINGS_OUTCOME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
-import { type ChangeResult } from "../../kernel/settings/tool-contract.js";
+import type { ProjectChangeResult as ChangeResult } from "./project-lifecycle.js";
+import type { ExtensionInteraction } from "../../protocol/types.js";
+import { maintainerChange } from "../../../test-support/native-change.js";
 
 const exec = promisify(execFile);
 const artifact = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/project-lifecycle/report.json");
@@ -70,28 +70,50 @@ async function fixture(github = false) {
   };
   f.faux.setResponses(Array.from({ length: 100 }, () => responder as never));
   const settled = () => waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && home.snapshot().phase === "idle" || undefined, "Home idle");
+  const cards = new Map<string, { key: string; interaction: Extract<ExtensionInteraction, { method: "change" }> }>();
   async function request(args: Record<string, unknown>) {
     await (homeOwnerOf(f.registry) as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
     await settled();
     const key = `project request ${++command}`;
     calls.set(key, { reason: "Lifecycle boundary proof", ...args });
     await home.prompt(key);
-    const result = await waitFor(() => results.get(key), "project tool result");
-    await settled();
+    const result = await waitFor(() => results.get(key) ?? (() => {
+      const interaction = home.snapshot().extensionPresentation.pendingInteractions[0];
+      if (interaction?.method !== "change") return undefined;
+      cards.set(interaction.review.digest, { key, interaction });
+      return { isError: false, text: "Exact native review", details: { status: "review" as const, review: interaction.review, changes: [] } };
+    })(), "project result or exact native review");
+    if (result.details.status !== "review") await settled();
     evidence.push({ args, ...result });
     return result;
   }
-  const decide = (result: ChangeResult, approved = true) => service.invoke(phone, "settings.decide", { commandId: `project-decision-${++command}`, requestId: result.approval!.requestId, digest: result.approval!.digest, approved }) as Promise<ChangeResult>;
-  const outcomes = () => home.canonicalSessionEntries().flatMap(entry => entry.type === "custom_message" && entry.customType === SETTINGS_OUTCOME_MESSAGE ? [entry] : []);
+  const decide = async (result: ChangeResult, approved = true): Promise<ChangeResult> => {
+    const card = cards.get(result.review!.digest);
+    if (card) {
+      const { interaction } = card;
+      await service.invoke(phone, "extension.respond", { commandId: `project-native-${++command}`, sessionId: home.id,
+        interactionId: interaction.id, hostEpoch: interaction.hostEpoch, presentationRevision: interaction.presentationRevision,
+        value: { digest: result.review!.digest, approved } });
+      const answer = await waitFor(() => results.get(card.key), "native project callback result");
+      await settled();
+      if (answer.isError) throw new Error(answer.text);
+      return answer.details;
+    }
+    if (!approved) throw new Error("Direct native review cancellation sends no mutation");
+    const intent = result.intent as { operation: string; name: string; destination?: string; github?: boolean };
+    return service.invoke(phone, "projects.change", { commandId: `project-native-${++command}`, action: intent.operation,
+      name: intent.name, reason: result.review!.reason, ...(intent.operation === "rename" ? { newName: intent.destination } : {}),
+      ...(intent.github ? { github: true } : {}), confirmation: { digest: result.review!.digest, intent } }) as unknown as Promise<ChangeResult>;
+  };
   const path = (name: string) => join(workspace, name);
   const git = async (name: string, args: string[]) => (await exec("git", ["-C", path(name), ...args])).stdout.trim();
   async function create(name: string, github = false) {
     const result = await request({ action: "create", name, github });
     expect(result.isError, result.text).toBe(false);
-    expect(result.details.status).toBe("pending");
+    expect(result.details.status).toBe("review");
     return result.details;
   }
-  return { ...f, root, workspace, path, git, request, create, decide, outcomes, changes, service, settled, advance: (ms: number) => { clock += ms; } };
+  return { ...f, root, workspace, path, git, request, create, decide, changes, service, settled, advance: (ms: number) => { clock += ms; } };
 }
 
 type NativeRow = { name: string; path: string; trust: { effectiveDecision: boolean | null; savedDecision: boolean | null } | null;
@@ -102,24 +124,22 @@ describe("Gateway project lifecycle", () => {
   it("native requests are receipt-backed UI requests and only a separate canonical tap applies each lifecycle effect", async () => {
     const f = await fixture();
     const list = () => f.service.invoke(phone, "projects.list", {}) as unknown as Promise<NativePage>;
-    const ask = (action: string, name: string, extra: Record<string, unknown> = {}) => f.service.invoke(phone, "projects.request",
+    const ask = (action: string, name: string, extra: Record<string, unknown> = {}) => f.service.invoke(phone, "projects.change",
       { commandId: `native-project-${++command}`, action, name, reason: "Native lifecycle boundary", ...extra }) as Promise<ChangeResult>;
     expect((await list()).projects).toEqual([]);
     const args = { commandId: `native-create-${++command}`, action: "create", name: "native-original", reason: "Create from paired iPhone" };
-    const pending = await f.service.invoke(phone, "projects.request", args) as unknown as ChangeResult;
-    expect(pending.status).toBe("pending");
-    expect((await list()).projects[0]?.trust?.effectiveDecision).toBe(false);
-    expect(await f.service.invoke(phone, "projects.request", args)).toEqual(pending);
-    expect(await f.service.invoke(phone, "projects.request", { ...args, reason: "Different payload" })).toEqual(pending);
-    const approval = await f.changes.approvals.get(pending.approval!.requestId);
-    expect(approval?.actor).toEqual({ kind: "ui", id: phone.identity });
-    expect((await f.decide(pending)).status).toBe("approved");
+    const pending = await f.service.invoke(phone, "projects.change", args) as unknown as ChangeResult;
+    expect(pending.status).toBe("review");
+    expect((await list()).projects).toEqual([]);
+    expect(await f.service.invoke(phone, "projects.change", args)).toEqual(pending);
+    expect(await f.service.invoke(phone, "projects.change", { ...args, reason: "Different payload" })).toEqual(pending);
+    expect((await f.decide(pending)).status).toBe("applied");
     await writeFile(f.path("native-original/data"), "retained native bytes");
     const rename = await ask("rename", "native-original", { newName: "native-renamed" });
     expect(await readFile(f.path("native-original/data"), "utf8")).toBe("retained native bytes");
     await f.decide(rename);
     expect(await readFile(f.path("native-renamed/data"), "utf8")).toBe("retained native bytes");
-    const denied = await ask("untrust", "native-renamed");
+    const denied = (await f.request({ action: "untrust", name: "native-renamed" })).details;
     await f.decide(denied, false);
     expect((await list()).projects.find(row => row.name === "native-renamed")?.trust?.effectiveDecision).toBe(true);
     await f.decide(await ask("untrust", "native-renamed"));
@@ -146,7 +166,7 @@ describe("Gateway project lifecycle", () => {
     expect(row.eligibility.untrust.allowed).toBe(true);
     expect(row.eligibility.archive).toMatchObject({ allowed: false, code: "busy" });
     expect(row.eligibility.rename.reason).toMatch(/session/i);
-    await expect(f.service.invoke(phone, "projects.request", { commandId: `native-busy-${++command}`, action: "archive",
+    await expect(f.service.invoke(phone, "projects.change", { commandId: `native-busy-${++command}`, action: "archive",
       name: "native-idle", reason: "Must retain canonical refusal" })).rejects.toMatchObject({ code: "busy", message: row.eligibility.archive.reason });
     await mkdir(f.path("not a supported name"));
     await symlink(f.root, f.path("linked-native"));
@@ -171,7 +191,7 @@ describe("Gateway project lifecycle", () => {
 
   it("native socket cancellation ends the actual Git read process without affecting accepted requests", async () => {
     const f = await fixture();
-    const created = await f.service.invoke(phone, "projects.request", { commandId: `native-socket-${++command}`,
+    const created = await f.service.invoke(phone, "projects.change", { commandId: `native-socket-${++command}`,
       action: "create", name: "native-socket", reason: "Real socket read cancellation" }) as unknown as ChangeResult;
     await f.decide(created);
     const realGit = (await exec("/usr/bin/which", ["git"])).stdout.trim();
@@ -235,22 +255,16 @@ if (args.includes("worktree")) {
     evidence.push({ nativeSocketCancellation: cancelled });
   });
 
-  it("native UI terminal requests retire without a model outbox and keep their canonical audit", async () => {
+  it("Cancel and Stop close the native continuation without filesystem effects or invented audit outcomes", async () => {
     const f = await fixture();
-    const asked = await f.service.invoke(phone, "projects.request", { commandId: `native-outbox-${++command}`,
-      action: "create", name: "native-outbox", reason: "UI outcomes have no model continuation" }) as unknown as ChangeResult;
-    await f.decide(asked, false);
-    expect(await f.changes.approvals.get(asked.approval!.requestId)).toBeUndefined();
-    expect((await f.changes.record.page({ limit: 50 })).entries.some(entry =>
-      entry.requestId === asked.approval!.requestId && entry.status === "declined")).toBe(true);
-    const expiring = await f.service.invoke(phone, "projects.request", { commandId: `native-expire-${++command}`,
-      action: "trust", name: "native-outbox", reason: "UI expiry must not strand an outbox slot" }) as unknown as ChangeResult;
-    f.advance(APPROVAL_TTL_MS + 1);
-    await f.changes.pendingApprovals();
-    expect(await f.changes.approvals.get(expiring.approval!.requestId)).toBeUndefined();
-    expect((await f.changes.record.page({ limit: 50 })).entries.some(entry =>
-      entry.requestId === expiring.approval!.requestId && entry.status === "expired")).toBe(true);
-    expect((await f.trust.inspect(f.path("native-outbox"))).effectiveDecision).toBe(false);
+    const before = (await f.changes.record.page({ limit: 50 })).entries;
+    const declined = await f.create("cancelled-create");
+    expect((await f.decide(declined, false)).status).toBe("declined");
+    await f.create("stopped-create");
+    await (await f.registry.acquire(f.home.sessionId)).abort("agent");
+    await f.settled();
+    expect(await readdir(f.workspace)).toEqual([]);
+    expect((await f.changes.record.page({ limit: 50 })).entries).toEqual(before);
   });
 
   it("native folder paths and cursors are exact and never trim into another project", async () => {
@@ -266,7 +280,7 @@ if (args.includes("worktree")) {
     const third = await f.service.invoke(phone, "projects.list", { limit: 1, after: second.nextCursor }) as unknown as NativePage;
     expect([first, second, third].flatMap(page => page.projects.map(project => project.name))).toEqual(["exact-native", "exact-native ", "z-native"]);
     expect(third.nextCursor).toBeNull();
-    await expect(f.service.invoke(phone, "projects.request", { commandId: `native-exact-${++command}`,
+    await expect(f.service.invoke(phone, "projects.change", { commandId: `native-exact-${++command}`,
       action: "untrust", name: "exact-native ", reason: "Never reinterpret an unsupported folder" })).rejects.toMatchObject({ code: "invalid_request" });
     expect((await f.trust.inspect(f.path("exact-native"))).effectiveDecision).toBe(true);
   });
@@ -315,33 +329,35 @@ if (args.includes("worktree")) {
     const f = await fixture();
     const controller = new AbortController();
     const client = { ...phone, signal: controller.signal };
-    const accepted = f.service.invoke(client, "projects.request", { commandId: `native-disconnect-${++command}`,
+    const accepted = f.service.invoke(client, "projects.change", { commandId: `native-disconnect-${++command}`,
       action: "create", name: "native-disconnect", reason: "Accepted commands retain receipt ownership" });
     controller.abort();
     const pending = await accepted as unknown as ChangeResult;
-    expect(pending.status).toBe("pending");
+    expect(pending.status).toBe("review");
     await expect(f.service.invoke(client, "projects.list", {})).rejects.toMatchObject({ name: "AbortError" });
     for (const extra of [{ actor: { kind: "ui", id: "forged" } }, { approved: true }]) {
-      await expect(f.service.invoke(phone, "projects.request", { commandId: `native-spoof-${++command}`,
+      await expect(f.service.invoke(phone, "projects.change", { commandId: `native-spoof-${++command}`,
         action: "trust", name: "native-disconnect", reason: "Not caller authority", ...extra })).rejects.toMatchObject({ code: "invalid_request" });
     }
-    expect((await f.trust.inspect(f.path("native-disconnect"))).effectiveDecision).toBe(false);
-    await f.decide(pending, false);
-    expect((await f.trust.inspect(f.path("native-disconnect"))).effectiveDecision).toBe(false);
+    expect(await readdir(f.workspace)).toEqual([]);
+    expect((await f.changes.record.page({ limit: 50 })).entries.filter(entry => entry.key === "project.lifecycle")).toEqual([]);
   });
 
   it("Home creates an untrusted main repository, approval grants trust and the real delegate owner immediately admits work", async () => {
     const f = await fixture();
-    const pending = await f.create("slim-key");
+    await f.decide(await f.create("slim-key"));
+    await f.decide((await f.request({ action: "untrust", name: "slim-key" })).details);
     expect(await f.git("slim-key", ["symbolic-ref", "--short", "HEAD"])).toBe("main");
     expect((await f.trust.inspect(f.path("slim-key"))).effectiveDecision).toBe(false);
     await expect(homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "untrusted-task", target: f.path("slim-key"), intent: "Report a finite result" }).then(handle => handle.completion)).rejects.toThrow(/trust/i);
-    const projection = await f.service.invoke(phone, "settings.approvals", {}) as unknown as { requests: Array<{ action?: { subject: string } }> };
-    expect(projection.requests.some(request => request.action?.subject === "project.lifecycle")).toBe(true);
-    await expect(f.changes.decide(pending.approval!.requestId, { digest: pending.approval!.digest, approved: true, decidedBy: { kind: "home", id: f.home.sessionId } })).rejects.toThrow(/maintainer/i);
-    expect((await f.decide(pending)).status).toBe("approved");
+    const pending = (await f.request({ action: "trust", name: "slim-key" })).details;
+    const directReview = await f.service.invoke(phone, "projects.change", { commandId: `direct-trust-${++command}`,
+      action: "trust", name: "slim-key", reason: "Cannot spoof the native actor" }) as unknown as ChangeResult;
+    await expect(projectsOwnerOf(f.registry)!.request({ action: "trust", name: "slim-key", reason: "Cannot spoof the native actor" },
+      { kind: "home", id: f.home.sessionId }, `forged-trust-${++command}`,
+      { confirmation: { digest: directReview.review!.digest, intent: directReview.intent } })).rejects.toThrow(/paired native UI/i);
+    expect((await f.decide(pending)).status).toBe("applied");
     expect((await f.trust.inspect(f.path("slim-key"))).effectiveDecision).toBe(true);
-    await waitFor(() => f.outcomes().some(entry => JSON.stringify(entry).includes(pending.approval!.requestId)) || undefined, "Home hears trust outcome");
     const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "trusted-task", target: f.path("slim-key"), intent: "Report ready" });
     expect(task.taskId).toBeTruthy();
     const completed = await task.completion;
@@ -350,28 +366,15 @@ if (args.includes("worktree")) {
     expect(completed.reportRef?.resultId, JSON.stringify(completed)).toBe("project-ready");
   });
 
-  it("decline and 24h expiry never grant authority and the requester hears both", async () => {
-    const f = await fixture();
-    const declined = await f.create("declined");
-    expect((await f.decide(declined, false)).status).toBe("declined");
-    const expired = await f.create("expired");
-    f.advance(APPROVAL_TTL_MS + 1);
-    await f.changes.pendingApprovals();
-    await expect(f.decide(expired)).rejects.toThrow(/no longer|expired/i);
-    for (const name of ["declined", "expired"]) expect((await f.trust.inspect(f.path(name))).effectiveDecision).toBe(false);
-    await waitFor(() => [declined, expired].every(result => f.outcomes().some(entry => JSON.stringify(entry).includes(result.approval!.requestId))) || undefined, "Home hears both outcomes");
-  });
-
   it("refuses traversal, existing files/directories, project symlinks and archive symlink escape", async () => {
     const f = await fixture();
     for (const name of ["../escape", "/tmp/escape", ".archive", "a/b", "a b"]) expect((await f.request({ action: "create", name })).isError).toBe(true);
-    const pending = await f.create("existing");
+    await f.decide(await f.create("existing"));
     expect((await f.request({ action: "create", name: "existing" })).isError).toBe(true);
     await writeFile(f.path("existing-file"), "preserve");
     expect((await f.request({ action: "create", name: "existing-file" })).isError).toBe(true);
     await symlink(f.path("existing"), f.path("linked"));
     expect((await f.request({ action: "trust", name: "linked" })).isError).toBe(true);
-    await f.decide(pending);
     await symlink(f.root, f.path(".archive"));
     expect((await f.request({ action: "archive", name: "existing" })).isError).toBe(true);
     expect(await readFile(f.path("existing-file"), "utf8")).toBe("preserve");
@@ -428,13 +431,15 @@ if (args.includes("worktree")) {
 
   it("pins new exact roots under an enclosing repository and default-always trust; partial relocation stays untrusted", async () => {
     const f = await fixture();
-    await f.changes.change({ kind: "global" }, [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }], { actor: { kind: "ui", id: "fixture" } });
+    await maintainerChange(f.service, phone, "settings.change", { commandId: `default-trust-${++command}`, target: { kind: "global" },
+      changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] });
     await exec("git", ["-C", f.workspace, "init", "--initial-branch=main"]);
     const ancestor = await f.trust.inspect(f.workspace);
     const pending = await f.create("nested");
-    expect((await f.trust.inspect(f.path("nested"))).effectiveDecision).toBe(false);
-    expect((await f.trust.inspect(f.workspace)).savedDecision).toBe(ancestor.savedDecision);
+    expect(await readdir(f.workspace)).not.toContain("nested");
     await f.decide(pending);
+    expect((await f.trust.inspect(f.path("nested"))).projectDir).toBe(f.path("nested"));
+    expect((await f.trust.inspect(f.workspace)).savedDecision).toBe(ancestor.savedDecision);
     const destination = f.path("retained");
     await mkdir(destination);
     let release!: () => void;
@@ -463,7 +468,8 @@ if (args.includes("worktree")) {
 
   it("identity replacement supersedes approval, workspace symlinks refuse and retained claim branches block effects", async () => {
     const f = await fixture();
-    const pending = await f.create("replaced");
+    await f.decide(await f.create("replaced"));
+    const pending = (await f.request({ action: "trust", name: "replaced" })).details;
     await rename(f.path("replaced"), join(f.root, "retained-source"));
     await mkdir(join(f.root, "outside"));
     await symlink(join(f.root, "outside"), f.path("replaced"));
@@ -481,7 +487,8 @@ if (args.includes("worktree")) {
 
   it("inspection of untrusted claim refs never runs repository-configured signature programs", async () => {
     const f = await fixture();
-    await f.create("signature-config");
+    await f.decide(await f.create("signature-config"));
+    await f.decide((await f.request({ action: "untrust", name: "signature-config" })).details);
     const marker = join(f.root, "signature-program-ran");
     const executable = join(f.root, "gpg-fixture");
     await writeFile(executable, `#!/bin/sh\nprintf ran > ${JSON.stringify(marker)}\nexit 1\n`, { mode: 0o700 });
@@ -497,6 +504,31 @@ if (args.includes("worktree")) {
     expect(refused.text).toMatch(/retains a work claim branch/i);
     await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect((await f.trust.inspect(f.path("signature-config"))).effectiveDecision).toBe(false);
+  });
+
+  it("retains the native response fence when partial GitHub effects are followed by a real failed-audit I/O failure", async () => {
+    const f = await fixture(true), audit = f.changes.record.path, retained = audit + "-retained";
+    const counter = join(f.root, "github-calls"), executable = join(f.root, "gh-fixture");
+    await writeFile(executable, `${await readFile(executable, "utf8")}
+printf attempt >> ${JSON.stringify(counter)}
+mv ${JSON.stringify(audit)} ${JSON.stringify(retained)}
+printf blocked > ${JSON.stringify(audit)}
+exit 7
+`);
+    const reviewed = await f.create("uncertain-remote", true);
+    await expect(f.decide(reviewed)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+    expect(await f.git("uncertain-remote", ["remote", "get-url", "origin"])).toBe("https://github.invalid/fixture/uncertain-remote.git");
+    expect((await f.trust.inspect(f.path("uncertain-remote"))).effectiveDecision).toBe(false);
+    await rm(audit); await rename(retained, audit);
+    const directory = join(f.tronHome, "gateway", "command-receipts");
+    const receipts = await Promise.all((await readdir(directory)).filter(name => name.endsWith(".json")).map(async name =>
+      JSON.parse(await readFile(join(directory, name), "utf8"))));
+    const pending = receipts.filter(receipt => receipt.method === "extension.respond" && receipt.status === "pending");
+    expect(pending).toHaveLength(1);
+    await expect(f.service.invoke(phone, "extension.respond", { commandId: pending[0].commandId })).rejects.toMatchObject({
+      code: "conflict", details: { outcomeUnknown: true } });
+    expect(await readFile(counter, "utf8")).toBe("attempt");
+    evidence.push({ failedAuditReceipt: pending[0], partialRemoteRetained: true });
   });
 
   it("partial GitHub failure retains an untrusted project and refuses to silently recreate an existing remote", async () => {
@@ -560,7 +592,7 @@ if (args.includes("worktree")) {
   it("a real idle admission before the relocation fence restores trusted project resources after move refusal", async () => {
     const f = await fixture();
     await f.decide(await f.create("resource-source"));
-    await f.create("resource-gate");
+    await f.decide(await f.create("resource-gate"));
     const source = f.path("resource-source");
     await mkdir(join(source, ".pi", "extensions"), { recursive: true });
     await writeFile(join(source, ".pi", "extensions", "restoration-probe.ts"), `export default function(pi) {

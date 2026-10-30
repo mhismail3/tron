@@ -99,7 +99,7 @@ struct HostedAskUserFixtureView: View {
                 interaction: $interaction,
                 onInteractionClosed: { value in
                     interaction = nil
-                    if receipt.count > 0 {
+                    if receipt.count > 0 && value.method != .change {
                         completed = AskUserToolPresentation(
                             form: value.form ?? fixture.form,
                             answer: receipt.lastCancelled ? nil : fixture.answer,
@@ -147,7 +147,9 @@ private final class HostedAskUserFixtureReceipt: ObservableObject {
         count += 1
         lastCancelled = cancelled
         let scope = "scope=\(interactionID)/\(hostEpoch)/\(presentationRevision)"
-        if cancelled {
+        if let digest = value?.objectValue?["digest"]?.stringValue, let approved = value?.objectValue?["approved"]?.boolValue {
+            summary = "native change approved=\(approved) digest=\(digest) \(scope)"
+        } else if cancelled {
             summary = "extension.respond cancelled=true \(scope)"
         } else {
             let answer = value?.objectValue?["answers"]?.arrayValue?.first?.objectValue
@@ -216,13 +218,28 @@ private struct HostedAskUserFixture {
             allowCancel: allowCancel
         )
         self.form = form
+        let nativeChange = ProcessInfo.processInfo.arguments.contains("-tron-native-change-fixture")
+        let review: ChangeReview? = nativeChange ? try! JSONValue.object([
+            "digest": .string(String(repeating: "a", count: 64)),
+            "title": .string("Allow shell command"),
+            "requiresTap": .bool(true),
+            "reason": .string("Run the exact reviewed command."),
+            "items": .array([.object([
+                "label": .string("Shell authority"),
+                "before": .string("Disabled"),
+                "after": .string("printf 'native witness'"),
+                "detail": .string("This simulator fixture does not execute a command."),
+                "exact": .string("{\"shell\":\"printf 'native witness'\"}"),
+            ])]),
+        ]).decode(ChangeReview.self) : nil
         let interaction = ExtensionInteraction(
             id: "ask-user-interaction",
             hostEpoch: "hosted-ask-user-epoch",
             presentationRevision: 1,
-            method: .form,
-            title: form.title,
-            form: form,
+            method: nativeChange ? .change : .form,
+            title: review?.title ?? form.title,
+            form: nativeChange ? nil : form,
+            review: review,
             owner: ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource),
             invocationId: "hosted-ask-user-invocation",
             operationId: "hosted-ask-user-operation"

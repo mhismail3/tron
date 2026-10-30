@@ -58,24 +58,6 @@ final class TronHomePushNavigationUITests: XCTestCase {
         keep("1684-home-push-tap-opened-other-chat")
     }
 
-    /// #2050: tapping an approval push opens the requesting chat with its waiting
-    /// request in the shared approval sheet. The tap decides nothing; Approve does.
-    @MainActor
-    func testApprovalPushTapOpensTheRequestInItsChat() {
-        continueAfterFailure = false
-        let app = launchThenTapPushOnForeground(presenting: .dashboard, ["-home-settings-approvals", "-home-push-approval"])
-        defer { app.terminate() }
-        assertSettledWithoutOpenFailure(app)
-        let approve = app.buttons["settings-approval-approve-settings-request-approve"]
-        XCTAssertTrue(approve.waitForExistence(timeout: 15), "The approval push did not open its request: \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Not set → Trusted")).firstMatch.exists, app.debugDescription)
-        XCTAssertFalse(app.buttons["settings-approval-approve-settings-request-chat"].exists, "Another chat's request does not open from this push")
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.settings-decisions"], "label == 'settings-decisions:none'"), "The tap alone decided")
-        keep("2050-approval-push-opened-sheet")
-        approve.tap()
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.settings-decisions"], "label CONTAINS 'approved:settings-request-approve'"), app.debugDescription)
-    }
-
     @MainActor
     private func launchThenTapPushOnForeground(presenting presented: Presented, _ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()

@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 /// Native presentation for Pi's semantic interaction APIs. This intentionally
-/// models select/confirm/input/editor only; arbitrary remote components and
+/// models semantic questions and the separate built-in native change card; arbitrary remote components and
 /// overlays use a separate, currently deferred capability.
 struct ExtensionInteractionSheet: View {
     @Environment(AppModel.self) private var model
@@ -34,7 +34,7 @@ struct ExtensionInteractionSheet: View {
         case .select: selectedOption != nil
         case .confirm: confirmValue != nil
         case .input, .editor: true
-        case .form: false
+        case .form, .change: false
         }
     }
 
@@ -42,9 +42,15 @@ struct ExtensionInteractionSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 16) {
-                    promptCard
-                    expirationView
-                    control
+                    if interaction.method == .change, let review = interaction.review {
+                        ChangeReviewCard(review: review, submitting: submitting,
+                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)])) },
+                            cancel: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(false)])) })
+                    } else {
+                        promptCard
+                        expirationView
+                        control
+                    }
                     if let submissionError {
                         Label(submissionError, systemImage: "exclamationmark.triangle.fill")
                             .font(TronTypography.bodySM)
@@ -69,15 +75,16 @@ struct ExtensionInteractionSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .tronToolbarAction(role: .neutral)
                     }
-                    .accessibilityLabel("Close question and keep answer")
+                    .accessibilityLabel(interaction.method == .change ? "Close review without deciding" : "Close question and keep answer")
                     .disabled(submitting)
                 }
                 ToolbarItem(placement: .principal) {
-                    Text("Question")
+                    Text(interaction.method == .change ? "Review change" : "Question")
                         .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                         .foregroundStyle(Color.tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    if interaction.method != .change {
                     Button(action: submit) {
                         TronToolbarTextLabel(
                             "Submit",
@@ -88,6 +95,7 @@ struct ExtensionInteractionSheet: View {
                     }
                     .accessibilityLabel("Submit answer")
                     .disabled(!canSubmit || submitting || isExpired)
+                    }
                 }
             }
         }
@@ -192,7 +200,7 @@ struct ExtensionInteractionSheet: View {
                     .focused($textFocused)
                     .accessibilityLabel(interaction.placeholder ?? "Response")
             }
-        case .form:
+        case .form, .change:
             EmptyView()
         }
     }
@@ -248,7 +256,7 @@ struct ExtensionInteractionSheet: View {
         case .select: value = selectedOption.map(JSONValue.string)
         case .confirm: value = confirmValue.map(JSONValue.bool)
         case .input, .editor: value = .string(text)
-        case .form: return
+        case .form, .change: return
         }
         respond(value: value)
     }
@@ -296,7 +304,7 @@ struct ExtensionInteractionSheet: View {
             } catch is CancellationError {
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 submitting = false
-            } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "conflict" {
+            } catch let failure as GatewayFailure where interaction.method != .change && (failure.code == "not_found" || failure.code == "conflict") {
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 onLocallyClosed()

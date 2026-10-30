@@ -177,21 +177,16 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Setup cards.** New Session cards are one `TronSetupCardLabel` with
   `TronTypography.settingsRowSubtext`.
 
-## Approval presentation
+## Exact review presentation
 
-Every agent request kind shows as `SettingsApprovalChip` (`UI/Chat/SettingsApprovalChips.swift`)
-in its chat and in Changes' Waiting for you, and opens `SettingsApprovalSheet`
-(`UI/Settings/SettingsApprovalsSection.swift`) over the receipt-backed `SettingsTrustCoordinator`
-and its open-request projection. `SettingsApprovalReview` reads canonical structured facts,
-never prose, and lays them out in standard `TronSettingsRow`s inside `TronGlassCard`/
-`TronSettingsGroup` with `tronPrimary` chrome. The transcript route owner retains approval
-sheets above lazy rows and presents a waiting tool's request once; Manage Home/Session do not
-duplicate them. Pending uses the Approve title and top-right red X/green check, no Done/bottom
-bar; native dismissal never submits. Current Gateway values/action
-previews and digest bind a deliberate tap. Terminal receipts/outcomes are read-only, with full
-wrapping uncertainty text; missing or incomplete proof stays unavailable, not applied/failed.
-Global Changes remains the audit/Undo surface; owner actions have no generic Undo. Positive
-compact status extends the shared pill palette's semantic success role, not per-chip colors.
+`ChangeReviewCard` (`UI/Components/ChangeReviewCard.swift`) is the one plaintext before/after
+card; `ChangeReviewSheet` presents it. An agent, Home or worker change arrives as the native
+`change` interaction (`ExtensionInteractionSheet`); renderer rows whose dry run requires a tap
+and project lifecycle actions (`projects.change`) present the same sheet. Approve answers the
+typed owner once with the review's digest through the receipt executor; Cancel and native
+dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
+only and keeps exact values behind its disclosure. Global Changes remains the audit/Undo
+surface; owner actions have no generic Undo.
 
 ## Shared lists and readers
 

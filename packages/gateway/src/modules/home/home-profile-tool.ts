@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 import { Type, type TSchema } from "../../kernel/pi/ai.js";
 import type { ExtensionToolContext, ToolDefinition } from "../../kernel/pi/coding-agent.js";
-import { approvalFormPresenter } from "../../kernel/host/approval-form.js";
-import { approvalWaitParameter, type ChangeResult } from "../../kernel/settings/tool-contract.js";
-import type { ApprovalStatus } from "../../kernel/settings/settings-approvals.js";
 import { GatewayError } from "../../errors.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { profilePath } from "../../knowledge/knowledge-profile-placement.js";
@@ -28,14 +25,12 @@ const PROFILE_PARAMETERS = Type.Object({
   assignments: Type.Optional(Type.Array(Type.Object({ id: Type.String({ minLength: 1, maxLength: 200 }), expectedRevision: Type.String({ minLength: 16, maxLength: 80 }), path: Type.String({ minLength: 1, maxLength: 131 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 500, description: "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and history stay unchanged." })),
   commandId: Type.Optional(Type.String({ minLength: 1, maxLength: 160, description: "retry: the ORIGINAL operation command returned with retry_required; never a new operation identity." })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: PROFILE_REASON_MAX, description: "Why the change is made. Required for retire; recorded in the ledger." })),
-  wait: approvalWaitParameter(false),
 }, { additionalProperties: false });
 
 /** Tool-result details: the saved revision, or the typed reason a change was refused. */
 export type HomeProfileToolDetails =
   | HomeProfileSaved
   | { status: "deferred"; version: string }
-  | { status: ApprovalStatus; action: ProfileToolAction; approval: ChangeResult["approval"]; summary?: string; failure?: string }
   | { status: "refused"; action: ProfileToolAction; reason: string }
   | { status: "unavailable"; action: ProfileToolAction }
   | { status: "organized"; action: "migrate" | "reorganize" | "retry"; commandId: string; changeIds: string[] }
@@ -58,20 +53,19 @@ type ProfileRequest = {
   text?: string;
   id?: string;
   reason?: string;
-  wait?: boolean;
 };
 
 /** Which fields each action takes. Anything else is refused, never silently ignored. */
 const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRequest>; allowed: Array<keyof ProfileRequest> }> = {
   read: { required: [], allowed: ["path", "offset", "cursor", "includeInactive"] },
   defer: { required: ["version"], allowed: ["version"] },
-  migrate: { required: ["assignments", "reason"], allowed: ["assignments", "reason", "wait"] },
-  reorganize: { required: ["assignments", "reason"], allowed: ["assignments", "reason", "wait"] },
+  migrate: { required: ["assignments", "reason"], allowed: ["assignments", "reason"] },
+  reorganize: { required: ["assignments", "reason"], allowed: ["assignments", "reason"] },
   retry: { required: ["commandId"], allowed: ["commandId"] },
   learn: { required: ["kind", "text"], allowed: ["kind", "text", "path", "corrects", "sensitive"] },
-  refine: { required: ["id"], allowed: ["id", "text", "kind", "reason", "wait"] },
-  supersede: { required: ["id", "kind", "text"], allowed: ["id", "kind", "text", "reason", "wait"] },
-  retire: { required: ["id", "reason"], allowed: ["id", "reason", "wait"] },
+  refine: { required: ["id"], allowed: ["id", "text", "kind", "reason"] },
+  supersede: { required: ["id", "kind", "text"], allowed: ["id", "kind", "text", "reason"] },
+  retire: { required: ["id", "reason"], allowed: ["id", "reason"] },
 };
 
 /**
@@ -79,7 +73,7 @@ const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRe
  * control decision with that owner's ordinary command receipt, not a note edit.
  * The tool owns no parallel note, decision or receipt store.
  */
-export function homeProfileTool(access: () => HomeProfileChangeAccess | undefined, webMark: () => boolean, knowledge: () => KnowledgeService | undefined): ToolDefinition<TSchema, HomeProfileToolDetails> {
+export function homeProfileTool(access: () => HomeProfileChangeAccess | undefined, knowledge: () => KnowledgeService | undefined): ToolDefinition<TSchema, HomeProfileToolDetails> {
   return {
     name: "profile",
     // docs/settings-model.md 5.4: declares it reads no open-world content.
@@ -125,8 +119,6 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       }
       const changes = access();
       if (!changes) return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
-      // One approval request either way (#2050): wait in this chat, or return pending.
-      const settle = (result: ChangeResult) => request.wait ? changes.wait(result.approval!.requestId, approvalFormPresenter(context), signal) : Promise.resolve(result);
       const citation = triggeringMessage(context);
       if (!citation) return refused(request.action, "no maintainer message in this chat to cite as evidence");
       if (request.action === "defer") {
@@ -143,13 +135,13 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         const original = request.action === "retry" ? request.commandId! : commandId(citation.sessionId, toolCallId);
         const op: HomeProfileRequest = request.action === "retry" ? { action: "retry", commandId: original } : { action: request.action, assignments: request.assignments! };
         try {
-          const result = await changes.change([op], { toolCallId, web: webMark(), author: { kind: "home", ...citation }, commandId: original, ...(request.reason ? { reason: request.reason.trim() } : {}) });
-          if (result.status === "pending") return approval(await settle(result), request.action);
+          const result = await changes.change([op], { toolCallId, author: { kind: "home", ...citation }, commandId: original, ...(request.reason ? { reason: request.reason.trim() } : {}) });
           return answer({ status: "organized", action: request.action, commandId: original, changeIds: result.changes.map(change => change.changeId) },
             `Profile ${request.action} acknowledged through Changes. Original command ${original}; ${result.changes.length} label-only changes. No content or authority was inferred.`);
         } catch (error) {
           // Publication may have failed AFTER the domain committed. Never call it
           // saved, mint another identity, or invite an unqualified second apply.
+          if (error instanceof GatewayError && error.code === "invalid_request") return refused(request.action, error.message);
           const reason = error instanceof Error ? error.message : String(error);
           return answer({ status: "retry_required", action: request.action, commandId: original, reason },
             `Profile ${request.action} is not acknowledged: ${reason}. Use retry with original command ${original}; it proves committed identities before repairing the audit, or resumes only the backed-up precommit intent. No success is assumed.`);
@@ -162,10 +154,9 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       let saved: HomeProfileSaved;
       try {
         const result = await changes.change([op], {
-          toolCallId, web: webMark(), author: { kind: "home", ...citation }, commandId: commandId(citation.sessionId, toolCallId),
+          toolCallId, author: { kind: "home", ...citation }, commandId: commandId(citation.sessionId, toolCallId),
           ...(request.reason ? { reason: request.reason.trim() } : {}),
         });
-        if (result.status === "pending") return approval(await settle(result), request.action);
         [saved] = result.saved as [HomeProfileSaved];
       } catch (error) {
         if (error instanceof GatewayError && error.code === "unsupported") return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
@@ -185,15 +176,6 @@ function savedText(saved: HomeProfileSaved, request: ProfileRequest): string {
     case "supersede": return `Superseded profile item note ${saved.supersededId} with note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text}.`;
     default: return `Retired profile item note ${saved.id}: ${saved.previousText}. It no longer applies. Reason: ${request.reason?.trim()}`;
   }
-}
-
-function approval(result: ChangeResult, action: ProfileToolAction) {
-  const details = { status: result.status as ApprovalStatus, action, approval: result.approval,
-    ...(result.summary ? { summary: result.summary } : {}), ...(result.failure ? { failure: result.failure } : {}) };
-  const text = result.status === "pending" ? "Waiting for the maintainer's approval in this chat on the exact before/after. Original notes remain unchanged; the outcome arrives later."
-    : result.status === "approved" ? `The maintainer approved; ${result.summary ?? "the exact profile changes were applied"}.`
-      : `Profile approval ${result.status}${result.failure ? ` (${result.failure})` : ""}; ${result.status === "failed" ? "inspect the profile before retrying" : "the original notes remain unchanged"}.`;
-  return answer(details, text);
 }
 
 function answer(details: HomeProfileToolDetails, text: string) {
