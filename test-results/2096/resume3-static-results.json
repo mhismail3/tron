@@ -1,0 +1,74 @@
+[
+  {
+    "name": "ownership",
+    "receipt": "candidate-resume3-static-ownership.json",
+    "rc": 0,
+    "seconds": 0.289
+  },
+  {
+    "name": "budgets",
+    "receipt": "candidate-resume3-static-budgets.json",
+    "rc": 0,
+    "seconds": 0.76
+  },
+  {
+    "name": "documentation policy",
+    "receipt": "candidate-resume3-static-documentation-policy.json",
+    "rc": 0,
+    "seconds": 0.864
+  },
+  {
+    "name": "generated docs",
+    "receipt": "candidate-resume3-static-generated-docs.json",
+    "rc": 0,
+    "seconds": 0.753
+  },
+  {
+    "name": "agent policy",
+    "receipt": "candidate-resume3-static-agent-policy.json",
+    "rc": 0,
+    "seconds": 0.381
+  },
+  {
+    "name": "privacy guard",
+    "receipt": "candidate-resume3-static-privacy-guard.json",
+    "rc": 0,
+    "seconds": 0.162
+  },
+  {
+    "name": "git diff --check",
+    "receipt": "candidate-resume3-static-git-diff---check.json",
+    "rc": 0,
+    "seconds": 0.03
+  },
+  {
+    "name": "moved-lines (advisory)",
+    "receipt": "candidate-resume3-static-moved-lines-advisory.json",
+    "rc": 0,
+    "seconds": 2.046
+  },
+  {
+    "name": "gateway typecheck",
+    "receipt": "candidate-resume3-static-gateway-typecheck.json",
+    "rc": 0,
+    "seconds": 1.171
+  },
+  {
+    "name": "gateway lint",
+    "receipt": "candidate-resume3-static-gateway-lint.json",
+    "rc": 0,
+    "seconds": 0.479
+  },
+  {
+    "name": "layers gateway",
+    "receipt": "candidate-resume3-static-layers-gateway.json",
+    "rc": 0,
+    "seconds": 1.766
+  },
+  {
+    "name": "layers ios",
+    "receipt": "candidate-resume3-static-layers-ios.json",
+    "rc": 0,
+    "seconds": 1.92
+  }
+]

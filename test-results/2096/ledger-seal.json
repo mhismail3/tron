@@ -1,0 +1,165 @@
+{
+  "outcome": "not-landed",
+  "sourceCheckpoint": "970d71971501c4732a501bb8d7151841b221171b",
+  "qualifiedMain": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+  "unqualifiedUpstream": "7f9917ea516d584e3795e8762de4d1b02a0f7597",
+  "upstreamCommitsUnqualified": 20,
+  "sealedUTC": "2026-10-30T01:32:14.208826+00:00",
+  "parentIssue": 2132,
+  "nativeInventoryLatestMixedRevision": {
+    "totalMethods": 595,
+    "candidate": {
+      "passed": 531,
+      "failed": 64
+    },
+    "failedAlsoMainFailed": 64,
+    "failedExactMainSignatures": 61,
+    "failedMainRedTracked": 64,
+    "failedMainUnrun": 0,
+    "failedMainPassed": 0,
+    "candidateRerunMethods": 4,
+    "candidateEverFailedMethods": 66,
+    "candidateOriginalFailureNowPassing": 2,
+    "distinctCandidateCompletedMethods": 595
+  },
+  "nativeRemainderCurrentRevision": {
+    "methods": 195,
+    "latestCandidatePass": 164,
+    "latestCandidateFail": 31,
+    "mainControls": 195,
+    "originalCandidateHistoryFailureRetained": true
+  },
+  "ownerJourneys": {
+    "total": 43,
+    "latestCandidate": {
+      "passed": 29,
+      "failed": 11,
+      "capTerminatedNoResult": 3
+    },
+    "main": {
+      "passed": 27,
+      "failed": 13,
+      "capTerminatedNoResult": 3
+    },
+    "differentAssertionMethods": 3,
+    "candidateForegroundOriginalPartialAssertionsRetained": [
+      1080,
+      1088
+    ]
+  },
+  "MacTerminal": {
+    "tag": "pending retirement, owned by terminal work",
+    "ownerClassActualMethods": 7,
+    "passedEachRevision": 7,
+    "separateLoadingClassUnrun": true
+  },
+  "gatewayEachRevision": {
+    "defaultPass": 35,
+    "nestedPass": 1
+  },
+  "nodeGatewayEachRevision": {
+    "files": 2,
+    "passed": 12
+  },
+  "completedMethodObservations": 945,
+  "owningHarnessObservationsIncludingConfirmation": 87,
+  "commandReceipts": 473,
+  "normalization": "Machine-private absolute path root prefixes replaced in committed copies; TSV fields fully quoted (including empty cells) for whitespace-clean lossless serialization. Full raw originals and hashes retained in owned evidence archive. No result, timestamp, code, error or assertion elided.",
+  "files": {
+    "ledger.json": {
+      "rawSHA256": "6dc45101cef7b450fb90fd3eb14babc0b26d8fb3dae822e834b9d9665b736db3",
+      "sealedSHA256": "6dc45101cef7b450fb90fd3eb14babc0b26d8fb3dae822e834b9d9665b736db3",
+      "bytes": 610191
+    },
+    "ledger.tsv": {
+      "rawSHA256": "9ca9153ac6e9aa576fa146b57f67cd28a8ac4700d18d90059de7b1900dc5b0eb",
+      "sealedSHA256": "a4ed1c61860d19dcbe3f5239b43f4384a9da53a0291414e0956ad7b6b5fc3d36",
+      "bytes": 110962
+    },
+    "attempt-ledger.json": {
+      "rawSHA256": "2491a646efdc9c1b9ed0de0b8bb4111795b6cf6810e8f46a3d384583a4c7e888",
+      "sealedSHA256": "e946dea6e9df51c527bfcb46f6e4b37690ba28d4a9b4f1d01e43b462df809c50",
+      "bytes": 445434
+    },
+    "attempt-ledger.tsv": {
+      "rawSHA256": "22e99f9eed2bd68269abe25aa783453aebd928ab1607fe76d4e5350f72c12021",
+      "sealedSHA256": "fffb616634316c061837a1b7017791780d149136b6d5082176a11a75d744e37d",
+      "bytes": 275443
+    },
+    "resume3-owning-harness-plan.json": {
+      "rawSHA256": "a0cdccbca4bff03753ac8b8f31513d6d5ac0403317f0a278d3f0d2cebaea5311",
+      "sealedSHA256": "ecc369543b9a8b32c362bd108aeb2374efdfe6584f5cf226f48f7a8935ea48f5",
+      "bytes": 62536
+    },
+    "resume3-owning-harness-ledger.json": {
+      "rawSHA256": "924712db3ea348994a774f95792bc514441efe65a6002849e49c0b8b9b5b8276",
+      "sealedSHA256": "498dc47e57ea4ec71d75c4002e8a03941f21a5dc8538f4e0ad5b7dd3f6d7b9ff",
+      "bytes": 50726
+    },
+    "resume3-owning-harness-ledger.tsv": {
+      "rawSHA256": "53fdf305b00a7c195de3ab44dccec93af904404beaa38d462c118fe3fb2645b2",
+      "sealedSHA256": "34dee5fabcd01c08ab5456542c0d54f61a4ec31575eab2492c441e7c9afea260",
+      "bytes": 35503
+    },
+    "resume3-paired-native-plan.json": {
+      "rawSHA256": "732563defaa980a756798c226c92639edf426e2c300f156606df02fa15865682",
+      "sealedSHA256": "732563defaa980a756798c226c92639edf426e2c300f156606df02fa15865682",
+      "bytes": 88575
+    },
+    "resume3-remaining-195.json": {
+      "rawSHA256": "fbe9dca192b6bca093c5551065c4704ead6110ba5e1b1a6af95d3d9efef94ec9",
+      "sealedSHA256": "fbe9dca192b6bca093c5551065c4704ead6110ba5e1b1a6af95d3d9efef94ec9",
+      "bytes": 17152
+    },
+    "resume3-mac-terminal-results.json": {
+      "rawSHA256": "eb53ebd56f361ed9534f3d01c5fc7f6972b0f6461fdbecf0987383e14d8aac02",
+      "sealedSHA256": "eb53ebd56f361ed9534f3d01c5fc7f6972b0f6461fdbecf0987383e14d8aac02",
+      "bytes": 3750
+    },
+    "resume3-unmatched-evidence.json": {
+      "rawSHA256": "69d7da32bb26a02c9ae0d2002e65eaca3ab8f83cc07faf70bfdb1091d9420db6",
+      "sealedSHA256": "669d43860bb9471cda7c02048440ad3a44d85c5d210551ad99eb488546f93182",
+      "bytes": 15786
+    },
+    "sealed-command-receipts.json": {
+      "rawSHA256": "32d3fb549fcb7949b64ef2bbe5f3823408ae76575b5532afdc9dd64e2d9bd317",
+      "sealedSHA256": "f6b5201e5610d7c317cb6e2ac2ee8ab47c9b491adeb7699a0c0a48ac36ce0061",
+      "bytes": 374043
+    },
+    "resume3-static-results.json": {
+      "rawSHA256": "f6f1969f95b7b033f33abe0da0a998ba1b6c8d95b3d1505b60b2863263ad25b0",
+      "sealedSHA256": "f6f1969f95b7b033f33abe0da0a998ba1b6c8d95b3d1505b60b2863263ad25b0",
+      "bytes": 1626
+    },
+    "resume3-schema-proof.json": {
+      "rawSHA256": "ef7a524fcadf2446973046d9c9c3d4ed40650f2939a4e823d16593f030078e4a",
+      "sealedSHA256": "ef7a524fcadf2446973046d9c9c3d4ed40650f2939a4e823d16593f030078e4a",
+      "bytes": 3310
+    },
+    "resume3-runtime-trace-comparison.json": {
+      "rawSHA256": "8536eeb3cc009fa39bc13c0c7961fbbd4ed14fcb84fb99b1fdd23ae06e5cb203",
+      "sealedSHA256": "8536eeb3cc009fa39bc13c0c7961fbbd4ed14fcb84fb99b1fdd23ae06e5cb203",
+      "bytes": 28821
+    },
+    "resume3-rebase-proposal.json": {
+      "rawSHA256": "eee1b5b73bfbfcbe657b3b5cd7df63523ba3ff12deffbcef889797b8b626d1ca",
+      "sealedSHA256": "eee1b5b73bfbfcbe657b3b5cd7df63523ba3ff12deffbcef889797b8b626d1ca",
+      "bytes": 5140
+    },
+    "resume3-application-verification.json": {
+      "rawSHA256": "3293c224643bb793354e196787c7654859103d0eae111dfc3d665520066fb774",
+      "sealedSHA256": "3293c224643bb793354e196787c7654859103d0eae111dfc3d665520066fb774",
+      "bytes": 1623
+    },
+    "resume3-2121-classification.json": {
+      "rawSHA256": "560472ae7d6b01b78f7c281fd28b99788e93521054527e42b8213389e89e266f",
+      "sealedSHA256": "3f24176d5e0355d3dcdfb5c94bb4e99284892c44b0c55b529d9ae35dea6ec9eb",
+      "bytes": 5759
+    },
+    "APPROVALS.json": {
+      "rawSHA256": "ca7e5f3d5400422c7c7a1b5d9ff10639b2ebba20d9d08ecdbb3a0de8138675e6",
+      "sealedSHA256": "ca7e5f3d5400422c7c7a1b5d9ff10639b2ebba20d9d08ecdbb3a0de8138675e6",
+      "bytes": 5179
+    }
+  }
+}

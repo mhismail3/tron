@@ -1,0 +1,1190 @@
+{
+  "traces": [
+    {
+      "lock": "automation-owned-run",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "blob-store-paths",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "catalog-metadata-index-paths",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "command-receipt-concurrency",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "command-receipt-paths",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "command-receipt-races",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "home-activation-wake",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "home-task-store-paths",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "project-root-resources",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "project-root-trust",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "protocol-wire",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-abort",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-compaction",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-eviction-choice",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-markers-paths",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-queue-control",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "run-steer",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "session-archive-paths",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "store-automations",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "store-command-receipts",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "store-home-designation",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "store-home-profile",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "store-home-tasks",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "store-run-markers",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "store-session-archive-attention",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "actualEqualAfterApprovedProjection": true,
+      "expectedEqualAfterApprovedProjection": true
+    }
+  ],
+  "canonicalNames": [
+    "ask_user",
+    "bash",
+    "checkin",
+    "computer",
+    "date",
+    "delegate",
+    "display",
+    "edit",
+    "jev",
+    "knowledge",
+    "memory_search",
+    "notify",
+    "profile",
+    "projects",
+    "read",
+    "read_file",
+    "report",
+    "session_read",
+    "session_search",
+    "settings",
+    "swift_app",
+    "task",
+    "web_search",
+    "write",
+    "zoom"
+  ],
+  "actualAliasesCompared": 197,
+  "distinctSchemaMismatches": [],
+  "aliases": [
+    {
+      "lock": "automation-owned-run",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "automation-owned-run",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "notify",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "delegation-subagent",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "zoom",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "date",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "memory_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "delegate",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "task",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "profile",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "session_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "session_read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "knowledge",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "read_file",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "home-contention-restart",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "project-root-trust",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-abort",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-cold-load-eviction",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-compaction",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-blockers",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-drain-snapshot",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-extension-ui",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-lifecycle-rpcs",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-prompt-stream",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-queue-control",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "run-steer",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "read",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "bash",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "edit",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "write",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "jev",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "web_search",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "settings",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "projects",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "ask_user",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "display",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "swift_app",
+      "matchesCurrentCanonicalActual": true
+    },
+    {
+      "lock": "transport-reconnect-snapshot",
+      "tool": "computer",
+      "matchesCurrentCanonicalActual": true
+    }
+  ]
+}

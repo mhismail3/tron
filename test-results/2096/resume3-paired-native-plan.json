@@ -1,0 +1,2488 @@
+{
+  "candidate": "970d71971501c4732a501bb8d7151841b221171b",
+  "main": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+  "mainControls": "Every remaining method receives a main control, including passing methods, as latest Home instruction requires.",
+  "jobs": [
+    {
+      "id": 1,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testEveryPendingComposerChipOpensItsOwnPreview"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testEveryPendingComposerChipOpensItsOwnPreview": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testEveryPendingComposerChipOpensItsOwnPreview": "passed"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testEveryPhotoChipOpensItsOwnPreview",
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testFileHeldThroughForegroundReadyRequiresFreshAttempt"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testEveryPhotoChipOpensItsOwnPreview": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testFileHeldThroughForegroundReadyRequiresFreshAttempt": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testEveryPhotoChipOpensItsOwnPreview": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testFileHeldThroughForegroundReadyRequiresFreshAttempt": "passed"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testFittedPhotoClearsSheetTitleRow",
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testHighDepthDisplayImageOpensAndReopensInBothAppearances"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testFittedPhotoClearsSheetTitleRow": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testHighDepthDisplayImageOpensAndReopensInBothAppearances": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testFittedPhotoClearsSheetTitleRow": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testHighDepthDisplayImageOpensAndReopensInBothAppearances": "passed"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testImageHeldThroughForegroundReadyRequiresFreshAttempt",
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testInvalidDisplayImageShowsHonestFallbackInBothAppearances"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testImageHeldThroughForegroundReadyRequiresFreshAttempt": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testInvalidDisplayImageShowsHonestFallbackInBothAppearances": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testImageHeldThroughForegroundReadyRequiresFreshAttempt": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testInvalidDisplayImageShowsHonestFallbackInBothAppearances": "passed"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testLocalPendingAndDecodedPhotoPreviewZoomAndClose"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testLocalPendingAndDecodedPhotoPreviewZoomAndClose": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testLocalPendingAndDecodedPhotoPreviewZoomAndClose": "failed"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testPhotoChromeForVisualReview"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testPhotoChromeForVisualReview": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testPhotoChromeForVisualReview": "passed"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementFencesHeldPreparation",
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementRevokesDownloadedFileReader"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementFencesHeldPreparation": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementRevokesDownloadedFileReader": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementFencesHeldPreparation": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementRevokesDownloadedFileReader": "passed"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementRevokesDownloadedReadonlySelection",
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testRetiredImagePreparationCannotPublishOnRetainedSheet"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementRevokesDownloadedReadonlySelection": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testRetiredImagePreparationCannotPublishOnRetainedSheet": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testProfileReplacementRevokesDownloadedReadonlySelection": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testRetiredImagePreparationCannotPublishOnRetainedSheet": "passed"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "selectors": [
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testSessionReplacementRevokesDownloadedReadonlySelection",
+        "TronMobileUITests/TronReadonlyAttachmentUITests/testVideoDisplaySheetOpensAtMediumPlaysAndExpandsToLarge"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testSessionReplacementRevokesDownloadedReadonlySelection": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testVideoDisplaySheetOpensAtMediumPlaysAndExpandsToLarge": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testSessionReplacementRevokesDownloadedReadonlySelection": "passed",
+          "TronMobileUITests/TronReadonlyAttachmentUITests/testVideoDisplaySheetOpensAtMediumPlaysAndExpandsToLarge": "passed"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "selectors": [
+        "TronMobileUITests/TronSessionRowClockUITests/testDashboardMetadataUsesSharedCodeTypography",
+        "TronMobileUITests/TronSessionRowClockUITests/testRelativeTimeReadsNowAndKeepsOneWidthAsItTicks"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSessionRowClockUITests/testDashboardMetadataUsesSharedCodeTypography": "passed",
+          "TronMobileUITests/TronSessionRowClockUITests/testRelativeTimeReadsNowAndKeepsOneWidthAsItTicks": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSessionRowClockUITests/testDashboardMetadataUsesSharedCodeTypography": "passed",
+          "TronMobileUITests/TronSessionRowClockUITests/testRelativeTimeReadsNowAndKeepsOneWidthAsItTicks": "passed"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "selectors": [
+        "TronMobileUITests/TronSessionTerminalUITests/testClosedTerminalShowsGatewayReason"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSessionTerminalUITests/testClosedTerminalShowsGatewayReason": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSessionTerminalUITests/testClosedTerminalShowsGatewayReason": "passed"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "selectors": [
+        "TronMobileUITests/TronSettingsApprovalFormUITests/testAskUserToolRowReopensAndSubmits"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsApprovalFormUITests/testAskUserToolRowReopensAndSubmits": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsApprovalFormUITests/testAskUserToolRowReopensAndSubmits": "passed"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "selectors": [
+        "TronMobileUITests/TronSettingsApprovalFormUITests/testCaptureApprovalRequestSurfacesInLightAndDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsApprovalFormUITests/testCaptureApprovalRequestSurfacesInLightAndDark": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsApprovalFormUITests/testCaptureApprovalRequestSurfacesInLightAndDark": "passed"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "selectors": [
+        "TronMobileUITests/TronSettingsApprovalFormUITests/testDismissedRequestWaitsBehindItsChipAndChangesDecisionSettlesIt"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsApprovalFormUITests/testDismissedRequestWaitsBehindItsChipAndChangesDecisionSettlesIt": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsApprovalFormUITests/testDismissedRequestWaitsBehindItsChipAndChangesDecisionSettlesIt": "passed"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "selectors": [
+        "TronMobileUITests/TronSettingsChangesReviewUITests/testChangesFiltersInteractionMeasurement",
+        "TronMobileUITests/TronSettingsChangesReviewUITests/testChangesRowsAndFiltersPreviewLightDarkLargeText"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsChangesReviewUITests/testChangesFiltersInteractionMeasurement": "passed",
+          "TronMobileUITests/TronSettingsChangesReviewUITests/testChangesRowsAndFiltersPreviewLightDarkLargeText": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsChangesReviewUITests/testChangesFiltersInteractionMeasurement": "passed",
+          "TronMobileUITests/TronSettingsChangesReviewUITests/testChangesRowsAndFiltersPreviewLightDarkLargeText": "passed"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "selectors": [
+        "TronMobileUITests/TronSettingsListRefreshUITests/testAdmittedCanonicalRefreshPreservesOpenDraftAndReopenUsesLatestSeed",
+        "TronMobileUITests/TronSettingsListRefreshUITests/testAdmittedCanonicalRefreshPreservesOpenDraftAndReopenUsesLatestSeedDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsListRefreshUITests/testAdmittedCanonicalRefreshPreservesOpenDraftAndReopenUsesLatestSeed": "passed",
+          "TronMobileUITests/TronSettingsListRefreshUITests/testAdmittedCanonicalRefreshPreservesOpenDraftAndReopenUsesLatestSeedDark": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsListRefreshUITests/testAdmittedCanonicalRefreshPreservesOpenDraftAndReopenUsesLatestSeed": "passed",
+          "TronMobileUITests/TronSettingsListRefreshUITests/testAdmittedCanonicalRefreshPreservesOpenDraftAndReopenUsesLatestSeedDark": "passed"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "selectors": [
+        "TronMobileUITests/TronSettingsScopeRowsUITests/testHomeModelsDark",
+        "TronMobileUITests/TronSettingsScopeRowsUITests/testHomeModelsLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testHomeModelsDark": "passed",
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testHomeModelsLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testHomeModelsDark": "passed",
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testHomeModelsLight": "passed"
+        }
+      }
+    },
+    {
+      "id": "018a",
+      "selectors": [
+        "TronMobileUITests/TronSettingsScopeRowsUITests/testSessionAndProjectDark"
+      ],
+      "splitReason": "Earlier same-class pair took220s; isolate to keep under300 without budget edits",
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testSessionAndProjectDark": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testSessionAndProjectDark": "passed"
+        }
+      }
+    },
+    {
+      "id": "018b",
+      "selectors": [
+        "TronMobileUITests/TronSettingsScopeRowsUITests/testSessionAndProjectLight"
+      ],
+      "splitReason": "Earlier same-class pair took220s; isolate to keep under300 without budget edits",
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testSessionAndProjectLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsScopeRowsUITests/testSessionAndProjectLight": "passed"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "selectors": [
+        "TronMobileUITests/TronSettingsThreeLayerPreviewTests/testCaptureThreeLayerDesignInLightAndDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSettingsThreeLayerPreviewTests/testCaptureThreeLayerDesignInLightAndDark": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSettingsThreeLayerPreviewTests/testCaptureThreeLayerDesignInLightAndDark": "passed"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "selectors": [
+        "TronMobileUITests/TronSharedPrimaryAccentsUITests/testBurgundyDark",
+        "TronMobileUITests/TronSharedPrimaryAccentsUITests/testBurgundyLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testBurgundyDark": "passed",
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testBurgundyLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testBurgundyDark": "passed",
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testBurgundyLight": "passed"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "selectors": [
+        "TronMobileUITests/TronSharedPrimaryAccentsUITests/testEmeraldDark",
+        "TronMobileUITests/TronSharedPrimaryAccentsUITests/testEmeraldLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testEmeraldDark": "passed",
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testEmeraldLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testEmeraldDark": "passed",
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testEmeraldLight": "passed"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "selectors": [
+        "TronMobileUITests/TronSharedPrimaryAccentsUITests/testOliveGoldDark",
+        "TronMobileUITests/TronSharedPrimaryAccentsUITests/testOliveGoldLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testOliveGoldDark": "passed",
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testOliveGoldLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testOliveGoldDark": "passed",
+          "TronMobileUITests/TronSharedPrimaryAccentsUITests/testOliveGoldLight": "passed"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "selectors": [
+        "TronMobileUITests/TronSheetBackgroundUITests/testSheetBackgroundContinuousInDark",
+        "TronMobileUITests/TronSheetBackgroundUITests/testSheetBackgroundContinuousInLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetBackgroundUITests/testSheetBackgroundContinuousInDark": "passed",
+          "TronMobileUITests/TronSheetBackgroundUITests/testSheetBackgroundContinuousInLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetBackgroundUITests/testSheetBackgroundContinuousInDark": "passed",
+          "TronMobileUITests/TronSheetBackgroundUITests/testSheetBackgroundContinuousInLight": "passed"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "selectors": [
+        "TronMobileUITests/TronSheetBackgroundUITests/testTopBlurVisualCheckpoint"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetBackgroundUITests/testTopBlurVisualCheckpoint": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetBackgroundUITests/testTopBlurVisualCheckpoint": "passed"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureHistoryDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHistoryDark": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHistoryDark": "passed"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureHistoryLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHistoryLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHistoryLight": "passed"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeDarkNormal"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeDarkNormal": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeDarkNormal": "passed"
+        }
+      }
+    },
+    {
+      "id": 28,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeDarkXXXL"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeDarkXXXL": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeDarkXXXL": "passed"
+        }
+      }
+    },
+    {
+      "id": 29,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeLightNormal"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeLightNormal": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeLightNormal": "passed"
+        }
+      }
+    },
+    {
+      "id": 30,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeLightXXXL"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeLightXXXL": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureHomeLightXXXL": "passed"
+        }
+      }
+    },
+    {
+      "id": 31,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureSessionDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureSessionDark": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureSessionDark": "passed"
+        }
+      }
+    },
+    {
+      "id": 32,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureSessionLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureSessionLight": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureSessionLight": "passed"
+        }
+      }
+    },
+    {
+      "id": 33,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLHome"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLHome": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLHome": "passed"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLManageSession"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLManageSession": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLManageSession": "passed"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLSessionMoreSettings"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLSessionMoreSettings": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLSessionMoreSettings": "passed"
+        }
+      }
+    },
+    {
+      "id": 36,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLSessionSettings"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLSessionSettings": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testCaptureXXXLSessionSettings": "passed"
+        }
+      }
+    },
+    {
+      "id": 37,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium",
+        "TronMobileUITests/TronSheetLayoutUITests/testHomeSettingsAreOnMainSheet"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium": "failed",
+          "TronMobileUITests/TronSheetLayoutUITests/testHomeSettingsAreOnMainSheet": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium": "passed",
+          "TronMobileUITests/TronSheetLayoutUITests/testHomeSettingsAreOnMainSheet": "passed"
+        }
+      },
+      "confirmation": {
+        "receipt": "candidate-resume3-confirm-history-hittability.json",
+        "result": "passed",
+        "classification": "candidate-only intermittent failure, unwaived; original failed outcome preserved; main control and one candidate confirmation pass",
+        "issue": 2122
+      }
+    },
+    {
+      "id": 38,
+      "selectors": [
+        "TronMobileUITests/TronSheetLayoutUITests/testSessionCaptionFollowsUntitledSettingsCard",
+        "TronMobileUITests/TronSheetLayoutUITests/testSharedRowTitleKeepsFullWidthAtXXXL"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetLayoutUITests/testSessionCaptionFollowsUntitledSettingsCard": "passed",
+          "TronMobileUITests/TronSheetLayoutUITests/testSharedRowTitleKeepsFullWidthAtXXXL": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetLayoutUITests/testSessionCaptionFollowsUntitledSettingsCard": "passed",
+          "TronMobileUITests/TronSheetLayoutUITests/testSharedRowTitleKeepsFullWidthAtXXXL": "passed"
+        }
+      }
+    },
+    {
+      "id": 39,
+      "selectors": [
+        "TronMobileUITests/TronSheetThemePreviewUITests/testMaintenanceContainersFollowSheetThemeAndForgetStaysDestructive",
+        "TronMobileUITests/TronSheetThemePreviewUITests/testMovedSettingsRemainReachableWithEditorsAndSources"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetThemePreviewUITests/testMaintenanceContainersFollowSheetThemeAndForgetStaysDestructive": "passed",
+          "TronMobileUITests/TronSheetThemePreviewUITests/testMovedSettingsRemainReachableWithEditorsAndSources": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetThemePreviewUITests/testMaintenanceContainersFollowSheetThemeAndForgetStaysDestructive": "passed",
+          "TronMobileUITests/TronSheetThemePreviewUITests/testMovedSettingsRemainReachableWithEditorsAndSources": "passed"
+        }
+      }
+    },
+    {
+      "id": 40,
+      "selectors": [
+        "TronMobileUITests/TronSheetThemePreviewUITests/testSettingsSectionColorReviewLightDark",
+        "TronMobileUITests/TronSheetThemePreviewUITests/testSettingsSheetPreviewLightDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetThemePreviewUITests/testSettingsSectionColorReviewLightDark": "passed",
+          "TronMobileUITests/TronSheetThemePreviewUITests/testSettingsSheetPreviewLightDark": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetThemePreviewUITests/testSettingsSectionColorReviewLightDark": "passed",
+          "TronMobileUITests/TronSheetThemePreviewUITests/testSettingsSheetPreviewLightDark": "failed"
+        }
+      }
+    },
+    {
+      "id": 41,
+      "selectors": [
+        "TronMobileUITests/TronSheetThemePreviewUITests/testWorkspaceControlsFollowTwoPresentingThemes"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetThemePreviewUITests/testWorkspaceControlsFollowTwoPresentingThemes": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetThemePreviewUITests/testWorkspaceControlsFollowTwoPresentingThemes": "failed"
+        }
+      }
+    },
+    {
+      "id": 42,
+      "selectors": [
+        "TronMobileUITests/TronSheetTintUITests/testDashboardSheetToolbarsTakeTheirTitleTint",
+        "TronMobileUITests/TronSheetTintUITests/testManageHomeToolbarsTakeTheirTitleTint"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetTintUITests/testDashboardSheetToolbarsTakeTheirTitleTint": "passed",
+          "TronMobileUITests/TronSheetTintUITests/testManageHomeToolbarsTakeTheirTitleTint": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetTintUITests/testDashboardSheetToolbarsTakeTheirTitleTint": "passed",
+          "TronMobileUITests/TronSheetTintUITests/testManageHomeToolbarsTakeTheirTitleTint": "passed"
+        }
+      }
+    },
+    {
+      "id": 43,
+      "selectors": [
+        "TronMobileUITests/TronSheetTintUITests/testNestedHistoryMenuOpensEveryDestinationInLightAndDark",
+        "TronMobileUITests/TronSheetTintUITests/testNestedSessionsRetentionOpensAndPersistsInLightAndDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetTintUITests/testNestedHistoryMenuOpensEveryDestinationInLightAndDark": "passed",
+          "TronMobileUITests/TronSheetTintUITests/testNestedSessionsRetentionOpensAndPersistsInLightAndDark": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetTintUITests/testNestedHistoryMenuOpensEveryDestinationInLightAndDark": "passed",
+          "TronMobileUITests/TronSheetTintUITests/testNestedSessionsRetentionOpensAndPersistsInLightAndDark": "passed"
+        }
+      }
+    },
+    {
+      "id": 44,
+      "selectors": [
+        "TronMobileUITests/TronSheetTintUITests/testSettingsSheetToolbarsTakeTheirTitleTint"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSheetTintUITests/testSettingsSheetToolbarsTakeTheirTitleTint": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSheetTintUITests/testSettingsSheetToolbarsTakeTheirTitleTint": "passed"
+        }
+      }
+    },
+    {
+      "id": 45,
+      "selectors": [
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testCheckin",
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testCheckinBlocked"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testCheckin": "passed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testCheckinBlocked": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testCheckin": "passed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testCheckinBlocked": "passed"
+        }
+      }
+    },
+    {
+      "id": 46,
+      "selectors": [
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testHome",
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testModels"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testHome": "failed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testModels": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testHome": "failed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testModels": "passed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 47,
+      "selectors": [
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testSession",
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testToast"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testSession": "passed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testToast": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testSession": "passed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testToast": "passed"
+        }
+      }
+    },
+    {
+      "id": 48,
+      "selectors": [
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspace",
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspaceAccessibility"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspace": "passed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspaceAccessibility": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspace": "passed",
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspaceAccessibility": "passed"
+        }
+      }
+    },
+    {
+      "id": 49,
+      "selectors": [
+        "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspaceNarrow"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspaceNarrow": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSixSmallUIPreviewTests/testWorkspaceNarrow": "passed"
+        }
+      }
+    },
+    {
+      "id": 50,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches": "passed"
+        }
+      }
+    },
+    {
+      "id": 51,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth": "passed"
+        }
+      }
+    },
+    {
+      "id": 52,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload": "passed"
+        }
+      }
+    },
+    {
+      "id": 53,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence": "passed"
+        }
+      }
+    },
+    {
+      "id": 54,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeTaskListAndRedelivery"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTaskListAndRedelivery": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTaskListAndRedelivery": "passed"
+        }
+      }
+    },
+    {
+      "id": 55,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm": "passed"
+        }
+      }
+    },
+    {
+      "id": 56,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeTitleAndManageTerminalUseCanonicalRoute"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTitleAndManageTerminalUseCanonicalRoute": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeTitleAndManageTerminalUseCanonicalRoute": "passed"
+        }
+      }
+    },
+    {
+      "id": 57,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testHomeToolsCatalogDraftAndRetainedConfiguration"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testHomeToolsCatalogDraftAndRetainedConfiguration": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testHomeToolsCatalogDraftAndRetainedConfiguration": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 58,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings": "passed"
+        }
+      }
+    },
+    {
+      "id": 59,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch": "passed"
+        }
+      }
+    },
+    {
+      "id": 60,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor": "passed"
+        }
+      }
+    },
+    {
+      "id": 61,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground": "passed"
+        }
+      }
+    },
+    {
+      "id": 62,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion": "passed"
+        }
+      }
+    },
+    {
+      "id": 63,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeContextWindowOpenDismissDoesNotWrite"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeContextWindowOpenDismissDoesNotWrite": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeContextWindowOpenDismissDoesNotWrite": "passed"
+        }
+      }
+    },
+    {
+      "id": 64,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeMainSheetStructure"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeMainSheetStructure": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeMainSheetStructure": "passed"
+        }
+      }
+    },
+    {
+      "id": 65,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings": "passed"
+        }
+      }
+    },
+    {
+      "id": 66,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomePauseResumeDisableKeepsChat"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomePauseResumeDisableKeepsChat": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomePauseResumeDisableKeepsChat": "passed"
+        }
+      }
+    },
+    {
+      "id": 67,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction": "passed"
+        }
+      }
+    },
+    {
+      "id": 68,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeSettingsApprovalsApproveAndDecline"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeSettingsApprovalsApproveAndDecline": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeSettingsApprovalsApproveAndDecline": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 69,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeStatesAndStopOwner"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeStatesAndStopOwner": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeStatesAndStopOwner": "passed"
+        }
+      }
+    },
+    {
+      "id": 70,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeSubSheetsOpenAtMedium"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeSubSheetsOpenAtMedium": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeSubSheetsOpenAtMedium": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 71,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeTerminalRespectsUnavailableCapability"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeTerminalRespectsUnavailableCapability": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeTerminalRespectsUnavailableCapability": "passed"
+        }
+      }
+    },
+    {
+      "id": 72,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageHomeUnresolvedDisableRetainsCompletionControl"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeUnresolvedDisableRetainsCompletionControl": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageHomeUnresolvedDisableRetainsCompletionControl": "passed"
+        }
+      }
+    },
+    {
+      "id": 73,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageSessionSectionsAtAccessibilityTypeInLightAndDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageSessionSectionsAtAccessibilityTypeInLightAndDark": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageSessionSectionsAtAccessibilityTypeInLightAndDark": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 74,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testManageSessionSettingsApprovalDecline"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testManageSessionSettingsApprovalDecline": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testManageSessionSettingsApprovalDecline": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 75,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testModelAcknowledgementResolvesWithoutDismissingPicker"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testModelAcknowledgementResolvesWithoutDismissingPicker": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testModelAcknowledgementResolvesWithoutDismissingPicker": "failed"
+        }
+      }
+    },
+    {
+      "id": 76,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testModelFailureRecoversAndDismissedPendingSelectionReconciles"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testModelFailureRecoversAndDismissedPendingSelectionReconciles": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testModelFailureRecoversAndDismissedPendingSelectionReconciles": "failed"
+        }
+      }
+    },
+    {
+      "id": 77,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testNestedHomeTasksErrorRetriesWithoutMovingChrome"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testNestedHomeTasksErrorRetriesWithoutMovingChrome": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testNestedHomeTasksErrorRetriesWithoutMovingChrome": "passed"
+        }
+      }
+    },
+    {
+      "id": 78,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testOnboardingPairingPassesAccessibilityAuditInLightMode"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testOnboardingPairingPassesAccessibilityAuditInLightMode": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testOnboardingPairingPassesAccessibilityAuditInLightMode": "passed"
+        }
+      }
+    },
+    {
+      "id": 79,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testOnboardingSheetSupportsNativeExpansionGesture"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testOnboardingSheetSupportsNativeExpansionGesture": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testOnboardingSheetSupportsNativeExpansionGesture": "passed"
+        }
+      }
+    },
+    {
+      "id": 80,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testPairingFieldsScaleAtAccessibilityXXXL"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testPairingFieldsScaleAtAccessibilityXXXL": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testPairingFieldsScaleAtAccessibilityXXXL": "passed"
+        }
+      }
+    },
+    {
+      "id": 81,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testPairingValidationIsAccessibleAndDoesNotLeaveOnboarding"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testPairingValidationIsAccessibleAndDoesNotLeaveOnboarding": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testPairingValidationIsAccessibleAndDoesNotLeaveOnboarding": "passed"
+        }
+      }
+    },
+    {
+      "id": 82,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testPostStopConfigurationWaitsForSettlementThenEnablesWithoutReopening"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testPostStopConfigurationWaitsForSettlementThenEnablesWithoutReopening": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testPostStopConfigurationWaitsForSettlementThenEnablesWithoutReopening": "failed"
+        }
+      }
+    },
+    {
+      "id": 83,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testProviderModelRoutesAndRefreshAreIndependent"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testProviderModelRoutesAndRefreshAreIndependent": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testProviderModelRoutesAndRefreshAreIndependent": "passed"
+        }
+      }
+    },
+    {
+      "id": 84,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testProviderUsageWrapsWithoutStackingDetails"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testProviderUsageWrapsWithoutStackingDetails": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testProviderUsageWrapsWithoutStackingDetails": "passed"
+        }
+      }
+    },
+    {
+      "id": 85,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles": "passed"
+        }
+      }
+    },
+    {
+      "id": 86,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testRendererConfirmationSurvivesCoverageAndCancelDoesNotWrite"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testRendererConfirmationSurvivesCoverageAndCancelDoesNotWrite": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testRendererConfirmationSurvivesCoverageAndCancelDoesNotWrite": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 87,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testRunningConfigurationLockHoldsAcrossRebaselines"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testRunningConfigurationLockHoldsAcrossRebaselines": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testRunningConfigurationLockHoldsAcrossRebaselines": "failed"
+        }
+      }
+    },
+    {
+      "id": 88,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSessionArchiveConfirmationAndArchivedContainerJourney"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSessionArchiveConfirmationAndArchivedContainerJourney": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSessionArchiveConfirmationAndArchivedContainerJourney": "passed"
+        }
+      }
+    },
+    {
+      "id": 89,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSessionArchiveExpansionRevealsRowsInView"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSessionArchiveExpansionRevealsRowsInView": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSessionArchiveExpansionRevealsRowsInView": "passed"
+        }
+      }
+    },
+    {
+      "id": 90,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSessionArchivePagingRetiresInFlightPassAndRestartsRefusedCursor"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSessionArchivePagingRetiresInFlightPassAndRestartsRefusedCursor": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSessionArchivePagingRetiresInFlightPassAndRestartsRefusedCursor": "passed"
+        }
+      }
+    },
+    {
+      "id": 91,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo": "passed"
+        }
+      }
+    },
+    {
+      "id": 92,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt": "passed"
+        }
+      }
+    },
+    {
+      "id": 93,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsChangesLastLookUsesPreviousVisit"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesLastLookUsesPreviousVisit": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesLastLookUsesPreviousVisit": "passed"
+        }
+      }
+    },
+    {
+      "id": 94,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsChangesOpensOwningHomeTask"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesOpensOwningHomeTask": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesOpensOwningHomeTask": "failed"
+        }
+      }
+    },
+    {
+      "id": 95,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsChangesOpensRequestingChatOnItsOwningMac"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesOpensRequestingChatOnItsOwningMac": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesOpensRequestingChatOnItsOwningMac": "passed"
+        }
+      }
+    },
+    {
+      "id": 96,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsChangesRedactedEntryIsNotUndoable"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesRedactedEntryIsNotUndoable": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesRedactedEntryIsNotUndoable": "passed"
+        }
+      }
+    },
+    {
+      "id": 97,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsChangesScopeFiltersAndApprovalReceipts"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesScopeFiltersAndApprovalReceipts": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesScopeFiltersAndApprovalReceipts": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 98,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsChangesUndoRefusalRetainsCurrentDiff"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesUndoRefusalRetainsCurrentDiff": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsChangesUndoRefusalRetainsCurrentDiff": "passed"
+        }
+      }
+    },
+    {
+      "id": 99,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsPaintedEdgesSpacingAndHitTargets"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsPaintedEdgesSpacingAndHitTargets": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsPaintedEdgesSpacingAndHitTargets": "passed"
+        }
+      }
+    },
+    {
+      "id": 100,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRendererCatalogPagesWithoutWriting"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererCatalogPagesWithoutWriting": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererCatalogPagesWithoutWriting": "passed"
+        }
+      }
+    },
+    {
+      "id": 101,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRendererDarkLargeType"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererDarkLargeType": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererDarkLargeType": "passed"
+        }
+      }
+    },
+    {
+      "id": 102,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRendererOrderedChoiceUsesSharedSlider"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererOrderedChoiceUsesSharedSlider": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererOrderedChoiceUsesSharedSlider": "passed"
+        }
+      }
+    },
+    {
+      "id": 103,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRendererRendersAFixtureSchema"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererRendersAFixtureSchema": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererRendersAFixtureSchema": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 104,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 105,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRendererRevertUsesTheReceiptPath"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererRevertUsesTheReceiptPath": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererRevertUsesTheReceiptPath": "passed"
+        }
+      }
+    },
+    {
+      "id": 106,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRendererSecretAndListEditors"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererSecretAndListEditors": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRendererSecretAndListEditors": "passed"
+        }
+      }
+    },
+    {
+      "id": 107,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsRowEditorAndRevertStayIndependent"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRowEditorAndRevertStayIndependent": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsRowEditorAndRevertStayIndependent": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 108,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsScopeVisualReviewInLightAndDark"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsScopeVisualReviewInLightAndDark": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsScopeVisualReviewInLightAndDark": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 109,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSettingsToolsEditorUsesAvailableToolsListAndDetails"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsToolsEditorUsesAvailableToolsListAndDetails": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSettingsToolsEditorUsesAvailableToolsListAndDetails": "passed"
+        }
+      }
+    },
+    {
+      "id": 110,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSharedRenameValidatesClearsAndCommitsTheEnteredName"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSharedRenameValidatesClearsAndCommitsTheEnteredName": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSharedRenameValidatesClearsAndCommitsTheEnteredName": "passed"
+        }
+      }
+    },
+    {
+      "id": 111,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSharedSettingsGlyphStaysInsideColumn"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSharedSettingsGlyphStaysInsideColumn": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSharedSettingsGlyphStaysInsideColumn": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 112,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSheetIntroTextMatchesRowSubtitleSize"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSheetIntroTextMatchesRowSubtitleSize": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSheetIntroTextMatchesRowSubtitleSize": "failed"
+        }
+      }
+    },
+    {
+      "id": 113,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testSupersededThinkingReceiptReleasesMountedConfiguration"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testSupersededThinkingReceiptReleasesMountedConfiguration": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testSupersededThinkingReceiptReleasesMountedConfiguration": "failed"
+        }
+      }
+    },
+    {
+      "id": 114,
+      "selectors": [
+        "TronMobileUITests/TronSmokeUITests/testUIFixesVisualReviewCaptures"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSmokeUITests/testUIFixesVisualReviewCaptures": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSmokeUITests/testUIFixesVisualReviewCaptures": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 115,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testActivityRowsCaptures"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testActivityRowsCaptures": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testActivityRowsCaptures": "passed"
+        }
+      }
+    },
+    {
+      "id": 116,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testAdjacentNotificationsKeepCompactIndependentTargets",
+        "TronMobileUITests/TronSubagentParityUITests/testHistoricalSessionPills"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testAdjacentNotificationsKeepCompactIndependentTargets": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testHistoricalSessionPills": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testAdjacentNotificationsKeepCompactIndependentTargets": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testHistoricalSessionPills": "passed"
+        }
+      }
+    },
+    {
+      "id": 117,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testHistoryGroupingVisualCaptures"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testHistoryGroupingVisualCaptures": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testHistoryGroupingVisualCaptures": "passed"
+        }
+      }
+    },
+    {
+      "id": 118,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testHistoryQueuedPausedResumedAndTerminalExecutions"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testHistoryQueuedPausedResumedAndTerminalExecutions": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testHistoryQueuedPausedResumedAndTerminalExecutions": "passed"
+        }
+      }
+    },
+    {
+      "id": 119,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testHomeChipLabelCaptures"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testHomeChipLabelCaptures": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testHomeChipLabelCaptures": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 120,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testHomeResultReadableMessageAndNestedInfo",
+        "TronMobileUITests/TronSubagentParityUITests/testInterleavedNotificationsPreserveConversationAndToolBoundaries"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testHomeResultReadableMessageAndNestedInfo": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testInterleavedNotificationsPreserveConversationAndToolBoundaries": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testHomeResultReadableMessageAndNestedInfo": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testInterleavedNotificationsPreserveConversationAndToolBoundaries": "passed"
+        }
+      }
+    },
+    {
+      "id": 121,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testNativeOrganizationAndPills",
+        "TronMobileUITests/TronSubagentParityUITests/testNotificationBodyFillsSheetWidth"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testNativeOrganizationAndPills": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testNotificationBodyFillsSheetWidth": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testNativeOrganizationAndPills": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testNotificationBodyFillsSheetWidth": "passed"
+        }
+      }
+    },
+    {
+      "id": 122,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testPendingWakePreflightJourney",
+        "TronMobileUITests/TronSubagentParityUITests/testQueuedMaintainerRemainsVisible"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testPendingWakePreflightJourney": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testQueuedMaintainerRemainsVisible": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testPendingWakePreflightJourney": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testQueuedMaintainerRemainsVisible": "passed"
+        }
+      }
+    },
+    {
+      "id": 123,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testQueuedWakeSteerJourney",
+        "TronMobileUITests/TronSubagentParityUITests/testSettingsResourcesAndDefinitionDiagnostic"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testQueuedWakeSteerJourney": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testSettingsResourcesAndDefinitionDiagnostic": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testQueuedWakeSteerJourney": "passed",
+          "TronMobileUITests/TronSubagentParityUITests/testSettingsResourcesAndDefinitionDiagnostic": "passed"
+        }
+      }
+    },
+    {
+      "id": 124,
+      "selectors": [
+        "TronMobileUITests/TronSubagentParityUITests/testWorkerResultChipTitleWidthLightDarkAndLargeText"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubagentParityUITests/testWorkerResultChipTitleWidthLightDarkAndLargeText": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubagentParityUITests/testWorkerResultChipTitleWidthLightDarkAndLargeText": "passed"
+        }
+      }
+    },
+    {
+      "id": 125,
+      "selectors": [
+        "TronMobileUITests/TronSubsheetReliabilityUITests/testCanonicalTranscriptStartsAtMedium",
+        "TronMobileUITests/TronSubsheetReliabilityUITests/testDeferredPresentationPlaysWhenItAppears"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testCanonicalTranscriptStartsAtMedium": "passed",
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testDeferredPresentationPlaysWhenItAppears": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testCanonicalTranscriptStartsAtMedium": "passed",
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testDeferredPresentationPlaysWhenItAppears": "passed"
+        }
+      }
+    },
+    {
+      "id": 126,
+      "selectors": [
+        "TronMobileUITests/TronSubsheetReliabilityUITests/testFirstTapInFreshManageHomeSubSheets",
+        "TronMobileUITests/TronSubsheetReliabilityUITests/testProfileRowsReopenAfterEveryDismissal"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testFirstTapInFreshManageHomeSubSheets": "failed",
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testProfileRowsReopenAfterEveryDismissal": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testFirstTapInFreshManageHomeSubSheets": "failed",
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testProfileRowsReopenAfterEveryDismissal": "passed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 127,
+      "selectors": [
+        "TronMobileUITests/TronSubsheetReliabilityUITests/testRequestDuringDismissalAlwaysPresentsOnce",
+        "TronMobileUITests/TronSubsheetReliabilityUITests/testRequestThatNeverAppearsIsSilentAndReported"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testRequestDuringDismissalAlwaysPresentsOnce": "passed",
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testRequestThatNeverAppearsIsSilentAndReported": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testRequestDuringDismissalAlwaysPresentsOnce": "passed",
+          "TronMobileUITests/TronSubsheetReliabilityUITests/testRequestThatNeverAppearsIsSilentAndReported": "passed"
+        }
+      }
+    },
+    {
+      "id": 128,
+      "selectors": [
+        "TronMobileUITests/TronTaskToolSheetUITests/testCaptureTaskSheetReview"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testCaptureTaskSheetReview": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testCaptureTaskSheetReview": "passed"
+        }
+      }
+    },
+    {
+      "id": 129,
+      "selectors": [
+        "TronMobileUITests/TronTaskToolSheetUITests/testCatalogShowsTaskContentAndKeepsJSONInTechnicalDetails",
+        "TronMobileUITests/TronTaskToolSheetUITests/testMessageBodyUsesStandardTextInk"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testCatalogShowsTaskContentAndKeepsJSONInTechnicalDetails": "passed",
+          "TronMobileUITests/TronTaskToolSheetUITests/testMessageBodyUsesStandardTextInk": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testCatalogShowsTaskContentAndKeepsJSONInTechnicalDetails": "passed",
+          "TronMobileUITests/TronTaskToolSheetUITests/testMessageBodyUsesStandardTextInk": "passed"
+        }
+      }
+    },
+    {
+      "id": 130,
+      "selectors": [
+        "TronMobileUITests/TronTaskToolSheetUITests/testRenameStopFallbackAndErrorUseTheirRecordedOutcomes",
+        "TronMobileUITests/TronTaskToolSheetUITests/testReportAndControlMessagesOpenOriginalTextInSharedReader"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testRenameStopFallbackAndErrorUseTheirRecordedOutcomes": "passed",
+          "TronMobileUITests/TronTaskToolSheetUITests/testReportAndControlMessagesOpenOriginalTextInSharedReader": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testRenameStopFallbackAndErrorUseTheirRecordedOutcomes": "passed",
+          "TronMobileUITests/TronTaskToolSheetUITests/testReportAndControlMessagesOpenOriginalTextInSharedReader": "passed"
+        }
+      }
+    },
+    {
+      "id": 131,
+      "selectors": [
+        "TronMobileUITests/TronTaskToolSheetUITests/testStatusShowsRecordedWorkerCheckinAndSpend"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testStatusShowsRecordedWorkerCheckinAndSpend": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronTaskToolSheetUITests/testStatusShowsRecordedWorkerCheckinAndSpend": "passed"
+        }
+      }
+    },
+    {
+      "id": 132,
+      "selectors": [
+        "TronMobileUITests/TronThemeColorPreviewUITests/testBurgundyAppearanceAndNewSession",
+        "TronMobileUITests/TronThemeColorPreviewUITests/testBurgundyHome"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testBurgundyAppearanceAndNewSession": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testBurgundyHome": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testBurgundyAppearanceAndNewSession": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testBurgundyHome": "passed"
+        }
+      }
+    },
+    {
+      "id": 133,
+      "selectors": [
+        "TronMobileUITests/TronThemeColorPreviewUITests/testEmeraldAppearanceAndNewSession",
+        "TronMobileUITests/TronThemeColorPreviewUITests/testEmeraldHome"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testEmeraldAppearanceAndNewSession": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testEmeraldHome": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testEmeraldAppearanceAndNewSession": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testEmeraldHome": "passed"
+        }
+      }
+    },
+    {
+      "id": 134,
+      "selectors": [
+        "TronMobileUITests/TronThemeColorPreviewUITests/testOliveGoldAppearanceAndNewSession",
+        "TronMobileUITests/TronThemeColorPreviewUITests/testOliveGoldHome"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testOliveGoldAppearanceAndNewSession": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testOliveGoldHome": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testOliveGoldAppearanceAndNewSession": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testOliveGoldHome": "passed"
+        }
+      }
+    },
+    {
+      "id": 135,
+      "selectors": [
+        "TronMobileUITests/TronThemeColorPreviewUITests/testQueuedSteerThemes",
+        "TronMobileUITests/TronThemeColorPreviewUITests/testTranscriptAndFirstOpenEditors"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testQueuedSteerThemes": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testTranscriptAndFirstOpenEditors": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeColorPreviewUITests/testQueuedSteerThemes": "passed",
+          "TronMobileUITests/TronThemeColorPreviewUITests/testTranscriptAndFirstOpenEditors": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 136,
+      "selectors": [
+        "TronMobileUITests/TronThemeIconPreviewUITests/testBuiltInThemeIconPreviews"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeIconPreviewUITests/testBuiltInThemeIconPreviews": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeIconPreviewUITests/testBuiltInThemeIconPreviews": "passed"
+        }
+      }
+    },
+    {
+      "id": 137,
+      "selectors": [
+        "TronMobileUITests/TronThemeIconUITests/testThemeSelectionAppliesBundledIconsAndRestoresSilently"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeIconUITests/testThemeSelectionAppliesBundledIconsAndRestoresSilently": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeIconUITests/testThemeSelectionAppliesBundledIconsAndRestoresSilently": "passed"
+        }
+      }
+    },
+    {
+      "id": 138,
+      "selectors": [
+        "TronMobileUITests/TronThemeNestingPreviewUITests/testBurgundyDark",
+        "TronMobileUITests/TronThemeNestingPreviewUITests/testBurgundyLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testBurgundyDark": "failed",
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testBurgundyLight": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testBurgundyDark": "failed",
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testBurgundyLight": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 139,
+      "selectors": [
+        "TronMobileUITests/TronThemeNestingPreviewUITests/testEmeraldDark",
+        "TronMobileUITests/TronThemeNestingPreviewUITests/testEmeraldLight"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testEmeraldDark": "failed",
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testEmeraldLight": "failed"
+        },
+        "main": {
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testEmeraldDark": "failed",
+          "TronMobileUITests/TronThemeNestingPreviewUITests/testEmeraldLight": "failed"
+        }
+      },
+      "trackingWrite": {
+        "exitCode": 0,
+        "output": "commented on issue #2122\n"
+      }
+    },
+    {
+      "id": 140,
+      "selectors": [
+        "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureComposerPickerSubtextForReview"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureComposerPickerSubtextForReview": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureComposerPickerSubtextForReview": "passed"
+        }
+      }
+    },
+    {
+      "id": 141,
+      "selectors": [
+        "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureHomeSecondaryRowsForReview"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureHomeSecondaryRowsForReview": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureHomeSecondaryRowsForReview": "passed"
+        }
+      }
+    },
+    {
+      "id": 142,
+      "selectors": [
+        "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureLightAndDarkReviewSurfaces"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureLightAndDarkReviewSurfaces": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testCaptureLightAndDarkReviewSurfaces": "passed"
+        }
+      }
+    },
+    {
+      "id": 143,
+      "selectors": [
+        "TronMobileUITests/TronToolSheetsPolishUITests/testComposerPickerSecondaryTextMatchesManageHomeRow",
+        "TronMobileUITests/TronToolSheetsPolishUITests/testOnlyOverflowingPromptOpensFullMarkdownReader"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testComposerPickerSecondaryTextMatchesManageHomeRow": "passed",
+          "TronMobileUITests/TronToolSheetsPolishUITests/testOnlyOverflowingPromptOpensFullMarkdownReader": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testComposerPickerSecondaryTextMatchesManageHomeRow": "passed",
+          "TronMobileUITests/TronToolSheetsPolishUITests/testOnlyOverflowingPromptOpensFullMarkdownReader": "passed"
+        }
+      }
+    },
+    {
+      "id": 144,
+      "selectors": [
+        "TronMobileUITests/TronToolSheetsPolishUITests/testSearchAndDelegateSeparateReadableContentFromTechnicalPayloads",
+        "TronMobileUITests/TronToolSheetsPolishUITests/testTaskMessageHeaderAndFullReaderForReview"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testSearchAndDelegateSeparateReadableContentFromTechnicalPayloads": "passed",
+          "TronMobileUITests/TronToolSheetsPolishUITests/testTaskMessageHeaderAndFullReaderForReview": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testSearchAndDelegateSeparateReadableContentFromTechnicalPayloads": "passed",
+          "TronMobileUITests/TronToolSheetsPolishUITests/testTaskMessageHeaderAndFullReaderForReview": "passed"
+        }
+      }
+    },
+    {
+      "id": 145,
+      "selectors": [
+        "TronMobileUITests/TronToolSheetsPolishUITests/testTaskResumeStopAndNoMessageKeepIdentityAndReaderOwnership"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testTaskResumeStopAndNoMessageKeepIdentityAndReaderOwnership": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSheetsPolishUITests/testTaskResumeStopAndNoMessageKeepIdentityAndReaderOwnership": "passed"
+        }
+      }
+    },
+    {
+      "id": 146,
+      "selectors": [
+        "TronMobileUITests/TronToolSummaryTintUITests/testActiveTintAndProgressArePreserved"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSummaryTintUITests/testActiveTintAndProgressArePreserved": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSummaryTintUITests/testActiveTintAndProgressArePreserved": "passed"
+        }
+      }
+    },
+    {
+      "id": 147,
+      "selectors": [
+        "TronMobileUITests/TronToolSummaryTintUITests/testCaptureForVisualApproval"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSummaryTintUITests/testCaptureForVisualApproval": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSummaryTintUITests/testCaptureForVisualApproval": "passed"
+        }
+      }
+    },
+    {
+      "id": 148,
+      "selectors": [
+        "TronMobileUITests/TronToolSummaryTintUITests/testRestingTintFollowsCanonicalLatestInvocation"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronToolSummaryTintUITests/testRestingTintFollowsCanonicalLatestInvocation": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronToolSummaryTintUITests/testRestingTintFollowsCanonicalLatestInvocation": "passed"
+        }
+      }
+    },
+    {
+      "id": 149,
+      "selectors": [
+        "TronMobileUITests/TronWorkerToolPreviewTests/testCheckin",
+        "TronMobileUITests/TronWorkerToolPreviewTests/testChips"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronWorkerToolPreviewTests/testCheckin": "passed",
+          "TronMobileUITests/TronWorkerToolPreviewTests/testChips": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronWorkerToolPreviewTests/testCheckin": "passed",
+          "TronMobileUITests/TronWorkerToolPreviewTests/testChips": "passed"
+        }
+      }
+    },
+    {
+      "id": 150,
+      "selectors": [
+        "TronMobileUITests/TronWorkerToolPreviewTests/testReport",
+        "TronMobileUITests/TronWorkerToolPreviewTests/testTools"
+      ],
+      "status": "complete",
+      "results": {
+        "candidate": {
+          "TronMobileUITests/TronWorkerToolPreviewTests/testReport": "passed",
+          "TronMobileUITests/TronWorkerToolPreviewTests/testTools": "passed"
+        },
+        "main": {
+          "TronMobileUITests/TronWorkerToolPreviewTests/testReport": "passed",
+          "TronMobileUITests/TronWorkerToolPreviewTests/testTools": "passed"
+        }
+      }
+    }
+  ]
+}

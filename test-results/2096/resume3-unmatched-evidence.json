@@ -1,0 +1,367 @@
+{
+  "outcome": "not-landed",
+  "authority": "Explicit Home gate decision; no waiver; no rebase or requalification beyond970d71971/d616f1dcc.",
+  "timestampMeaning": "All observation timestamps below are exact enclosing-command start/finish UTC, not invented per-method wall times.",
+  "noCompletedBaseline": [
+    {
+      "method": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight",
+      "observations": {
+        "candidate": {
+          "receipt": "candidate-resume3-own-ui-003.json",
+          "revision": "970d71971501c4732a501bb8d7151841b221171b",
+          "commandStartedUTC": "2026-10-29T21:16:04.232057+00:00",
+          "commandFinishedUTC": "2026-10-29T21:21:09.542321+00:00",
+          "commandRc": 143,
+          "commandSeconds": 305.31,
+          "capSeconds": 300,
+          "capTerminated": true
+        },
+        "main": {
+          "receipt": "base-resume3-own-ui-003.json",
+          "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+          "commandStartedUTC": "2026-10-29T21:22:26.715612+00:00",
+          "commandFinishedUTC": "2026-10-29T21:27:31.200861+00:00",
+          "commandRc": 143,
+          "commandSeconds": 304.485,
+          "capSeconds": 300,
+          "capTerminated": true
+        }
+      },
+      "classification": "Both cap-terminated, no completed test result or completed baseline; not passes, not waived."
+    },
+    {
+      "method": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark",
+      "observations": {
+        "candidate": {
+          "receipt": "candidate-resume3-own-ui-004.json",
+          "revision": "970d71971501c4732a501bb8d7151841b221171b",
+          "commandStartedUTC": "2026-10-29T21:27:31.236981+00:00",
+          "commandFinishedUTC": "2026-10-29T21:32:35.516150+00:00",
+          "commandRc": 143,
+          "commandSeconds": 304.279,
+          "capSeconds": 300,
+          "capTerminated": true
+        },
+        "main": {
+          "receipt": "base-resume3-own-ui-004.json",
+          "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+          "commandStartedUTC": "2026-10-29T21:32:35.581312+00:00",
+          "commandFinishedUTC": "2026-10-29T21:37:39.835107+00:00",
+          "commandRc": 143,
+          "commandSeconds": 304.254,
+          "capSeconds": 300,
+          "capTerminated": true
+        }
+      },
+      "classification": "Both cap-terminated, no completed test result or completed baseline; not passes, not waived."
+    },
+    {
+      "method": "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+      "observations": {
+        "candidate": {
+          "receipt": "candidate-resume3-own-ui-020.json",
+          "revision": "970d71971501c4732a501bb8d7151841b221171b",
+          "commandStartedUTC": "2026-10-29T22:53:48.940886+00:00",
+          "commandFinishedUTC": "2026-10-29T22:58:53.189560+00:00",
+          "commandRc": 143,
+          "commandSeconds": 304.249,
+          "capSeconds": 300,
+          "capTerminated": true
+        },
+        "main": {
+          "receipt": "base-resume3-own-ui-020.json",
+          "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+          "commandStartedUTC": "2026-10-29T22:58:53.221239+00:00",
+          "commandFinishedUTC": "2026-10-29T23:03:57.512913+00:00",
+          "commandRc": 143,
+          "commandSeconds": 304.292,
+          "capSeconds": 300,
+          "capTerminated": true
+        }
+      },
+      "classification": "Both cap-terminated, no completed test result or completed baseline; not passes, not waived."
+    }
+  ],
+  "differentAssertionFailures": [
+    {
+      "method": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL",
+      "locations": {
+        "candidate": [
+          "RealGatewayBuildsAppsUITests.swift:100"
+        ],
+        "main": [
+          "RealGatewayBuildsAppsUITests.swift:156"
+        ]
+      },
+      "observations": {
+        "candidate": {
+          "receipt": "candidate-resume3-own-ui-010.json",
+          "revision": "970d71971501c4732a501bb8d7151841b221171b",
+          "commandStartedUTC": "2026-10-29T22:05:58.216870+00:00",
+          "commandFinishedUTC": "2026-10-29T22:08:15.023524+00:00",
+          "commandRc": 65,
+          "commandSeconds": 136.807,
+          "capSeconds": 300,
+          "capTerminated": false
+        },
+        "main": {
+          "receipt": "base-resume3-own-ui-010.json",
+          "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+          "commandStartedUTC": "2026-10-29T22:08:15.065867+00:00",
+          "commandFinishedUTC": "2026-10-29T22:11:44.896646+00:00",
+          "commandRc": 65,
+          "commandSeconds": 209.831,
+          "capSeconds": 300,
+          "capTerminated": false
+        }
+      },
+      "classification": "Same method red on main, different reached assertion; no exact baseline reproduction or waiver."
+    },
+    {
+      "method": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDarkXXXL",
+      "locations": {
+        "candidate": [
+          "RealGatewayBuildsAppsUITests.swift:173"
+        ],
+        "main": [
+          "RealGatewayBuildsAppsUITests.swift:156"
+        ]
+      },
+      "observations": {
+        "candidate": {
+          "receipt": "candidate-resume3-own-ui-011.json",
+          "revision": "970d71971501c4732a501bb8d7151841b221171b",
+          "commandStartedUTC": "2026-10-29T22:11:46.842133+00:00",
+          "commandFinishedUTC": "2026-10-29T22:16:25.653021+00:00",
+          "commandRc": 65,
+          "commandSeconds": 278.811,
+          "capSeconds": 300,
+          "capTerminated": false
+        },
+        "main": {
+          "receipt": "base-resume3-own-ui-011.json",
+          "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+          "commandStartedUTC": "2026-10-29T22:16:25.731270+00:00",
+          "commandFinishedUTC": "2026-10-29T22:20:06.039016+00:00",
+          "commandRc": 65,
+          "commandSeconds": 220.308,
+          "capSeconds": 300,
+          "capTerminated": false
+        }
+      },
+      "classification": "Same method red on main, different reached assertion; no exact baseline reproduction or waiver."
+    },
+    {
+      "method": "TronMobileUITests/RealGatewayPairAndChatUITests/testCompletedAskUserColdReplayRetainsSelectedAnswers",
+      "locations": {
+        "candidate": [
+          "RealGatewayPairAndChatUITests.swift:578"
+        ],
+        "main": [
+          "RealGatewayPairAndChatUITests.swift:603"
+        ]
+      },
+      "observations": {
+        "candidate": {
+          "receipt": "candidate-resume3-own-ui-022.json",
+          "revision": "970d71971501c4732a501bb8d7151841b221171b",
+          "commandStartedUTC": "2026-10-29T23:09:43.816911+00:00",
+          "commandFinishedUTC": "2026-10-29T23:13:00.911124+00:00",
+          "commandRc": 65,
+          "commandSeconds": 197.094,
+          "capSeconds": 300,
+          "capTerminated": false
+        },
+        "main": {
+          "receipt": "base-resume3-own-ui-022.json",
+          "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+          "commandStartedUTC": "2026-10-29T23:13:00.947941+00:00",
+          "commandFinishedUTC": "2026-10-29T23:16:20.284941+00:00",
+          "commandRc": 65,
+          "commandSeconds": 199.337,
+          "capSeconds": 300,
+          "capTerminated": false
+        }
+      },
+      "classification": "Same method red on main, different reached assertion; no exact baseline reproduction or waiver."
+    }
+  ],
+  "candidateOnlyIntermittentObservations": [
+    {
+      "method": "TronMobileUITests/TronListStandardUITests/testCaptureResourcesAndEmptySubagentHistory",
+      "observations": {
+        "candidate": [
+          {
+            "receipt": "candidate-full-native-batch.json",
+            "revision": "ae6d44955471fad7ec27bb2aa4d774e6b8994040",
+            "commandStartedUTC": "2026-10-29T10:43:09.756814+00:00",
+            "commandFinishedUTC": "2026-10-29T13:43:26.020267+00:00",
+            "commandRc": 75,
+            "commandSeconds": 10816.263,
+            "capSeconds": 10830,
+            "capTerminated": false,
+            "methodResult": "failed",
+            "methodSeconds": 30.736,
+            "failureLines": [
+              "<checkout>/packages/ios-app/UITests/TronListStandardUITests.swift:72: error: -[TronMobileUITests.TronListStandardUITests testCaptureResourcesAndEmptySubagentHistory] : Failed to determine hittability of \"Resources\" Button: Activation point invalid and no suggested hit points based on element frame"
+            ]
+          },
+          {
+            "receipt": "candidate-confirm-main-pass-001.json",
+            "revision": "ae6d44955471fad7ec27bb2aa4d774e6b8994040",
+            "commandStartedUTC": "2026-10-29T14:20:42.278140+00:00",
+            "commandFinishedUTC": "2026-10-29T14:22:24.088121+00:00",
+            "commandRc": 65,
+            "commandSeconds": 101.81,
+            "capSeconds": 300,
+            "capTerminated": false,
+            "methodResult": "passed",
+            "methodSeconds": 56.713,
+            "failureLines": []
+          },
+          {
+            "receipt": "candidate-resume3-sequence.json",
+            "revision": "ae6d44955471fad7ec27bb2aa4d774e6b8994040",
+            "commandStartedUTC": "2026-10-29T15:05:52.046966+00:00",
+            "commandFinishedUTC": "2026-10-29T15:07:41.155657+00:00",
+            "commandRc": 65,
+            "commandSeconds": 109.109,
+            "capSeconds": 300,
+            "capTerminated": false,
+            "methodResult": "passed",
+            "methodSeconds": 57.022,
+            "failureLines": []
+          }
+        ],
+        "main": [
+          {
+            "receipt": "base-new-batch-controls-007.json",
+            "revision": "6768b17998482d7b55656387fd07213340ab57f2",
+            "commandStartedUTC": "2026-10-29T14:17:56.705649+00:00",
+            "commandFinishedUTC": "2026-10-29T14:20:04.951570+00:00",
+            "commandRc": 65,
+            "commandSeconds": 128.246,
+            "capSeconds": 300,
+            "capTerminated": false,
+            "methodResult": "passed",
+            "methodSeconds": 56.215,
+            "failureLines": []
+          },
+          {
+            "receipt": "base-resume3-sequence.json",
+            "revision": "6768b17998482d7b55656387fd07213340ab57f2",
+            "commandStartedUTC": "2026-10-29T15:04:02.201148+00:00",
+            "commandFinishedUTC": "2026-10-29T15:05:51.695778+00:00",
+            "commandRc": 65,
+            "commandSeconds": 109.495,
+            "capSeconds": 300,
+            "capTerminated": false,
+            "methodResult": "passed",
+            "methodSeconds": 54.646,
+            "failureLines": []
+          }
+        ]
+      },
+      "classification": "Initial candidate failure not reproduced on main; confirmation passed; original unwaived and unexplained."
+    },
+    {
+      "method": "TronMobileUITests/TronSheetLayoutUITests/testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium",
+      "observations": {
+        "candidate": [
+          {
+            "receipt": "candidate-resume3-remaining-037.json",
+            "revision": "970d71971501c4732a501bb8d7151841b221171b",
+            "commandStartedUTC": "2026-10-29T16:54:19.180200+00:00",
+            "commandFinishedUTC": "2026-10-29T16:54:58.124060+00:00",
+            "commandRc": 65,
+            "commandSeconds": 38.944,
+            "capSeconds": 300,
+            "capTerminated": false,
+            "methodResult": "failed",
+            "methodSeconds": 6.397,
+            "failureLines": [
+              "<checkout>/packages/ios-app/UITests/TronSheetLayoutUITests.swift:173: error: -[TronMobileUITests.TronSheetLayoutUITests testHistoryEntryUsesOneScrollAndClearsToolbarAtMedium] : Failed to determine hittability of \"Session History\" Button: Activation point invalid and no suggested hit points based on element frame"
+            ]
+          },
+          {
+            "receipt": "candidate-resume3-confirm-history-hittability.json",
+            "revision": "970d71971501c4732a501bb8d7151841b221171b",
+            "commandStartedUTC": "2026-10-29T16:56:39.055167+00:00",
+            "commandFinishedUTC": "2026-10-29T16:57:10.549400+00:00",
+            "commandRc": 0,
+            "commandSeconds": 31.494,
+            "capSeconds": 300,
+            "capTerminated": false,
+            "methodResult": "passed",
+            "methodSeconds": 22.152,
+            "failureLines": []
+          }
+        ],
+        "main": [
+          {
+            "receipt": "base-resume3-remaining-037.json",
+            "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+            "commandStartedUTC": "2026-10-29T16:54:58.347969+00:00",
+            "commandFinishedUTC": "2026-10-29T16:55:52.217687+00:00",
+            "commandRc": 0,
+            "commandSeconds": 53.87,
+            "capSeconds": 300,
+            "capTerminated": false,
+            "methodResult": "passed",
+            "methodSeconds": 22.121,
+            "failureLines": []
+          }
+        ]
+      },
+      "classification": "Initial candidate failure not reproduced on main; confirmation passed; original unwaived and unexplained."
+    },
+    {
+      "method": "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent",
+      "initialAssertionLines": [
+        1080,
+        1088
+      ],
+      "observations": {
+        "candidate": {
+          "receipt": "candidate-resume3-own-ui-028.json",
+          "revision": "970d71971501c4732a501bb8d7151841b221171b",
+          "commandStartedUTC": "2026-10-29T23:36:21.850251+00:00",
+          "commandFinishedUTC": "2026-10-29T23:41:26.255755+00:00",
+          "commandRc": 143,
+          "commandSeconds": 304.405,
+          "capSeconds": 300,
+          "capTerminated": true,
+          "methodResult": "cap-terminated, no result",
+          "failureLines": [
+            "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1080: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testForegroundAndReconnectKeepSheetsAndTheirContent] : XCTAssertTrue failed - Attributes: Application, 0x108b09400, pid: 70389, label: 'Tron'",
+            "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1088: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testForegroundAndReconnectKeepSheetsAndTheirContent] : XCTAssertTrue failed - Attributes: Application, 0x118100500, pid: 70389, label: 'Tron'"
+          ]
+        },
+        "main": {
+          "receipt": "base-resume3-own-ui-028.json",
+          "revision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+          "commandStartedUTC": "2026-10-29T23:41:26.314966+00:00",
+          "commandFinishedUTC": "2026-10-29T23:45:51.119615+00:00",
+          "commandRc": 0,
+          "commandSeconds": 264.805,
+          "capSeconds": 300,
+          "capTerminated": false,
+          "methodResult": "passed",
+          "failureLines": []
+        }
+      },
+      "confirmation": {
+        "receipt": "candidate-resume3-own-ui-028-confirmation.json",
+        "revision": "970d71971501c4732a501bb8d7151841b221171b",
+        "commandStartedUTC": "2026-10-29T23:52:14.988317+00:00",
+        "commandFinishedUTC": "2026-10-29T23:56:38.964839+00:00",
+        "commandRc": 0,
+        "commandSeconds": 263.977,
+        "capSeconds": 300,
+        "capTerminated": false,
+        "methodResult": "passed"
+      },
+      "classification": "Original candidate partial assertion failures at1080/1088 before cap are not reproduced on main. One candidate confirmation passed. Candidate-only intermittent observation, unwaived; no persistent divergence established."
+    }
+  ]
+}

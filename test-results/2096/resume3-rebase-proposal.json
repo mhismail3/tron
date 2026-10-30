@@ -1,0 +1,130 @@
+{
+  "upstream": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+  "frozenBase": "6768b17998482d7b55656387fd07213340ab57f2",
+  "originalApprovedCandidate": "ae6d44955471fad7ec27bb2aa4d774e6b8994040",
+  "goldenFiles": 16,
+  "counts": {
+    "typedPathsRemoved": 401,
+    "canonicalEqualAliases": 197,
+    "schemaFields": 394
+  },
+  "canonicalRetainedUnchanged": "packages/gateway/src/modules/home/locks/home-activation-wake.golden.json",
+  "sourceHelper": "unchanged original withoutSharedToolSchemas projection",
+  "preserved": "Every tool identity/order/sampling/role/lifecycle field and upstream wake-receipt change; only canonical-equal repeated description/parameters and existing matching typed paths removed.",
+  "proposedFiles": {
+    "packages/gateway/src/automations/locks/automation-owned-run.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 24,
+        "schemaFields": 48
+      },
+      "sha256": "ade7ac63afbbad18eb076e235cd96a7dac59c58063098a981b1dde7f629377b2"
+    },
+    "packages/gateway/src/kernel/delegation/locks/delegation-subagent.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 14,
+        "schemaFields": 28
+      },
+      "sha256": "5c3460578291f16f8e9dbf623389c06ac59003056799018107043cf4cefbe8f4"
+    },
+    "packages/gateway/src/modules/home/locks/home-contention-restart.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 15,
+        "schemaFields": 30
+      },
+      "sha256": "cdf32234e1777ba7adf06d252a43d640a931a56ddc5642c5a1fcc90dac7e2ff7"
+    },
+    "packages/gateway/src/protocol/locks/protocol-wire.golden.json": {
+      "removals": {
+        "typedPathsRemoved": 401
+      },
+      "sha256": "3f67c9399755c15b7ccfca972f3658fe2ac5868c15ad40bd6ed8b136b8e037a6"
+    },
+    "packages/gateway/src/sessions/locks/project-root-trust.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "3080d474ab58f42b985356f3e794faa2a6c1e7b94970f83f570b0c72cfb6c9d3"
+    },
+    "packages/gateway/src/sessions/locks/run-abort.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "3ae7f7af20c2ef91ccf34828e90266c23ef36c6125e3884af667d9b88ebc24bc"
+    },
+    "packages/gateway/src/sessions/locks/run-cold-load-eviction.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "136337e00120ac345fafc7b33fa38cf0cf9a691071358e8f7fb8bc7217883e4a"
+    },
+    "packages/gateway/src/sessions/locks/run-compaction.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "f175069fec7445a891af8132ce5af438c447f4d3be1b51833cbe597569cf7172"
+    },
+    "packages/gateway/src/sessions/locks/run-drain-blockers.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "a61c2eb5ef7bb7a6075e88fe37f8121bb14e2cb5f4e58baac789e2b05143973d"
+    },
+    "packages/gateway/src/sessions/locks/run-drain-snapshot.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "bc5105eca635c925dd3ed9797288524d45ea58cadf1d7bd8814e7873e07414e6"
+    },
+    "packages/gateway/src/sessions/locks/run-extension-ui.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "d67d4b4b03bb30f03297e25ac25e77515158bfbddbb5f9a41a4e3ed6c236cf41"
+    },
+    "packages/gateway/src/sessions/locks/run-lifecycle-rpcs.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "d2fc8007506fb5acce3978e300d47e7513eb3e7f9a3d3d5d3ea6ce2cbf8a6b9d"
+    },
+    "packages/gateway/src/sessions/locks/run-prompt-stream.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "6e94469bbbacc8b32211eb19e35f61d91930ffbd1133a52cbb787d9f4d4786ee"
+    },
+    "packages/gateway/src/sessions/locks/run-queue-control.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "3b298f1a6b2d4888283990644e39cd5e7a47870a460ca4b0ef4ce4f520f4a912"
+    },
+    "packages/gateway/src/sessions/locks/run-steer.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "1b845fc499c334d47e10ca027959d838e551cd1d77174f0369a466f886a7c37a"
+    },
+    "packages/gateway/src/transport/locks/transport-reconnect-snapshot.golden.json": {
+      "removals": {
+        "canonicalEqualAliases": 12,
+        "schemaFields": 24
+      },
+      "sha256": "c3db36b286910482a17fd72ae3e02bf90a05cbf2530a79f24fe2fa2be507ba12"
+    }
+  },
+  "patchSha256": "af6e23d80cf46efb3a77551e9044518cf3fc39380616764493fb59bf14997213",
+  "goldensWrittenToWorktree": false,
+  "reason": "Rebase hit15 golden conflicts after upstream2103/2119 approved metadata and1620 receipt changes; exact-diff approval required before resolution."
+}

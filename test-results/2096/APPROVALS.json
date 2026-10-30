@@ -1,0 +1,59 @@
+{
+  "approvedBy": "Home coordinator, under Mohsin's delegated non-subjective test authority",
+  "date": "2026-10-29",
+  "reason": "ROI gate: focused owner+survivors, one full batch, base-matched failures tracked",
+  "landingGate": {
+    "required": "Focused qualification of the changed UILock owner plus every named survivor method",
+    "allNative595MethodGate": "No longer required for landing",
+    "failurePolicy": "Failures must reproduce on unchanged main, remain visible and be tracked by issue number; do not grind known base-red methods",
+    "remainingNative": "Before final report, attempt the remaining native methods once as one explicit batch; no reruns of known base-red methods. A batch failure that does not reproduce on main stops landing.",
+    "reporting": "Report actual pass, fail, base-matched and incomplete counts; do not claim an unrun suite"
+  },
+  "nonSubjectiveChanges": "Home approves redundant-test/review-capture/stale-golden retirements or merges and stale assertion repairs only after unique behavioral, route and accessibility coverage is mapped and kept. Never mask a real regression. Record approved by Home coordinator in cleanup commits.",
+  "reservedToMohsin": [
+    "Visual judgments",
+    "Product judgments"
+  ],
+  "prohibitedActions": [
+    "Installs",
+    "OTA publication",
+    "Restarts"
+  ],
+  "landing": "Plain Git; no force push to main",
+  "latestCoordinatorCorrection": {
+    "date": "2026-10-29",
+    "priorBatch": "The 180-minute aggregate command violated the brief's 300-second command bound. Its execution budget was not separately approved and must not be represented as approval.",
+    "requiredExecution": "Each new native/main-control command is one method or a small method group under the existing 300-second cap. No edits to tests, goldens, assertions, timeouts or caps without exact-diff approval.",
+    "newFailures": "Classify all 22 newly failed methods on unchanged main. If a failure does not reproduce, rerun that method once on the candidate; if it still fails there and passes on main, stop and report without landing.",
+    "remainingMethods": "Run all 194 unstarted methods and the one unfinished method with bounded candidate shards; use main controls only for failures.",
+    "ledger": "Keep method, candidate/main result and return codes, issue number and signature caveats in the branch worktree's test-results/2096/ledger.tsv, mirrored in the durable evidence archive.",
+    "knownBaseRed": "Do not rerun already classified base-red candidate methods. File an issue for every untracked base-red failure.",
+    "scope": "One simulator lane; avoid #2108 and E8 files; no installs, OTA or restarts. Land only with every candidate failure reproduced on main and tracked, then continue #2097\u2013#2100 in order."
+  },
+  "evidence": "Current task's coordinator messages on 2026-10-29; this artifact records authority and does not itself change repository settings or test behavior",
+  "resume3Decision": {
+    "authority": "Home coordinator, explicit user instruction",
+    "recorded": "2026-10-29T14:50:11.973594+00:00",
+    "exactRequest": "Run GroupedRowAnatomy alone 3x on each frozen revision, alternating; replay preceding-selection sequence once each. Native commands remain under300s. Classify with observed base failure/selection sensitivity, base-flaky, unwaived, linked to2114. Stop if main always passes and candidate fails in isolation. If classified finish pending controls, rebase,195 native methods,10 iOS harness files,2 node-Gateway files. Land only with failures on main and tracked; no oracle/budget edits."
+  },
+  "schemaRebaseExactApproval": {
+    "authority": "Explicit maintainer approval relayed by Home in current user instruction",
+    "patch": "resume3-schema-rebase-proposal.patch",
+    "sha256": "af6e23d80cf46efb3a77551e9044518cf3fc39380616764493fb59bf14997213",
+    "resultHead": "67cb8ea81fe3f697d687af1a26c6bc3bc95fbea0",
+    "outsidePatchChanges": false
+  },
+  "homeDecisions20261029OwningHarness": {
+    "authority": "Explicit Home user message, 2026-10-29",
+    "mainBuild": "Up to3 incremental build-only commands first, unchanged300s cap each; record rc/time. Then main test under300s. If no stamped build, main control unbuildable under cap; candidate-only evidence, no baseline, no waiver.",
+    "capTermination": "304.682s killed run is cap-terminated, no test result.",
+    "MacTerminal": "Whole8-method class once candidate/main under300s; no method selector edits. If not fit mark unrun with reason. Pending retirement, owned by terminal work; no extra effort.",
+    "landing": "All failures must occur on main and be tracked. List no-baseline journeys. Plain Git only. Then2097-2100 in order.",
+    "limits": "No installs/OTA/restarts; leave2108/E8 alone; no compatibility code."
+  },
+  "finalHomeGate": {
+    "decision": "NOT LANDED; no waivers",
+    "sourceCheckpoint": "970d71971501c4732a501bb8d7151841b221171b",
+    "instructions": "Seal full ledgers in ledger-only commits; push branch only; update2096/2122 exact unmatched items and UTC timestamps; do not rebase/requalify; later7f9917ea5 integration and2097-2100; parent2132 already verified."
+  }
+}

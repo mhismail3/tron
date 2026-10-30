@@ -1,0 +1,126 @@
+{
+  "tag": "pending retirement, owned by terminal work",
+  "methods": [
+    "testEnrollTypeControlResizeAndKeepWorkingWithoutTheGateway",
+    "testShellAndOutputSurviveDismissAndBackground",
+    "testTwoShellsAreIndependentAndExitEndsOnlyOne",
+    "testMacWithoutShellHostStillOpensAPlainShell",
+    "testRemoveRevokesTheKeyOnTheMac",
+    "testRemoteLoginOffSaysHowToTurnItOnThenEnrolls",
+    "testHostKeyMismatchNeverConnects",
+    "testLoadingSheetIsOneUniformBackground"
+  ],
+  "attempts": {
+    "candidate": {
+      "tag": "pending retirement, owned by terminal work",
+      "receipt": "candidate-resume3-mac-terminal-whole-class.json",
+      "commandRc": 0,
+      "commandSeconds": 253.755,
+      "results": [
+        [
+          "TronMacTerminalUITests",
+          "testEnrollTypeControlResizeAndKeepWorkingWithoutTheGateway",
+          "passed",
+          "33.908"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testHostKeyMismatchNeverConnects",
+          "passed",
+          "10.839"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testMacWithoutShellHostStillOpensAPlainShell",
+          "passed",
+          "12.428"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testRemoteLoginOffSaysHowToTurnItOnThenEnrolls",
+          "passed",
+          "10.716"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testRemoveRevokesTheKeyOnTheMac",
+          "passed",
+          "13.847"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testShellAndOutputSurviveDismissAndBackground",
+          "passed",
+          "36.149"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testTwoShellsAreIndependentAndExitEndsOnlyOne",
+          "passed",
+          "66.634"
+        ]
+      ],
+      "errors": [],
+      "classification": "Whole owning class executed:7 passed, command rc0. Separate loading-class method unrun; not8 passes."
+    },
+    "base": {
+      "tag": "pending retirement, owned by terminal work",
+      "receipt": "base-resume3-mac-terminal-whole-class.json",
+      "commandRc": 0,
+      "commandSeconds": 217.395,
+      "results": [
+        [
+          "TronMacTerminalUITests",
+          "testEnrollTypeControlResizeAndKeepWorkingWithoutTheGateway",
+          "passed",
+          "35.484"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testHostKeyMismatchNeverConnects",
+          "passed",
+          "10.116"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testMacWithoutShellHostStillOpensAPlainShell",
+          "passed",
+          "12.426"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testRemoteLoginOffSaysHowToTurnItOnThenEnrolls",
+          "passed",
+          "10.755"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testRemoveRevokesTheKeyOnTheMac",
+          "passed",
+          "14.296"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testShellAndOutputSurviveDismissAndBackground",
+          "passed",
+          "36.584"
+        ],
+        [
+          "TronMacTerminalUITests",
+          "testTwoShellsAreIndependentAndExitEndsOnlyOne",
+          "passed",
+          "51.269"
+        ]
+      ],
+      "errors": [],
+      "classification": "Whole owning class executed:7 passed, command rc0. Separate loading-class method unrun; not8 passes."
+    }
+  },
+  "ownerClass": "TronMacTerminalUITests",
+  "ownerMethodCount": 7,
+  "otherClassUnrun": {
+    "class": "TronMacTerminalLoadingUITests",
+    "method": "testLoadingSheetIsOneUniformBackground",
+    "reason": "Separate class in same file; owner harness always selects TronMacTerminalUITests. No extra effort or selection changes per Home instruction."
+  }
+}

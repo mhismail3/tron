@@ -1,0 +1,1113 @@
+[
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 185.534,
+    "commandRc": 65,
+    "commandSeconds": 234.834,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-001.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift:48: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute] : Failed to tap \"settings-section-model-open\" Button: No matches found for Elements matching predicate '\"settings-section-model-open\" IN identifiers' from input {("
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 185.795,
+    "commandRc": 65,
+    "commandSeconds": 221.143,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-001.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift:48: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute] : Failed to tap \"settings-section-model-open\" Button: No matches found for Elements matching predicate '\"settings-section-model-open\" IN identifiers' from input {("
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRouteDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 189.327,
+    "commandRc": 65,
+    "commandSeconds": 217.964,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-002.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift:48: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testHomeQueueEditorUsesHomeScopeAndKeepsModelsRouteDark] : Failed to tap \"settings-section-model-open\" Button: No matches found for Elements matching predicate '\"settings-section-model-open\" IN identifiers' from input {("
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeQueueEditorUsesHomeScopeAndKeepsModelsRouteDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 187.015,
+    "commandRc": 65,
+    "commandSeconds": 217.874,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-002.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift:48: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testHomeQueueEditorUsesHomeScopeAndKeepsModelsRouteDark] : Failed to tap \"settings-section-model-open\" Button: No matches found for Elements matching predicate '\"settings-section-model-open\" IN identifiers' from input {("
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "candidate",
+    "result": "cap-terminated, no result",
+    "methodSeconds": null,
+    "commandRc": 143,
+    "commandSeconds": 305.31,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-003.json",
+    "errors": [],
+    "observedMethodResult": "unrun",
+    "classification": "Not a pass or failure; preserve partial log. No retry or cap change."
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "main",
+    "result": "cap-terminated, no result",
+    "methodSeconds": null,
+    "commandRc": 143,
+    "commandSeconds": 304.485,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-003.json",
+    "errors": [],
+    "observedMethodResult": "unrun",
+    "classification": "Not a pass or failure; preserve partial log. No retry or cap change."
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "candidate",
+    "result": "cap-terminated, no result",
+    "methodSeconds": null,
+    "commandRc": 143,
+    "commandSeconds": 304.279,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-004.json",
+    "errors": [],
+    "observedMethodResult": "unrun",
+    "classification": "Not a pass or failure; preserve partial log. No retry or cap change."
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayAgentSettingsUITests.swift",
+    "side": "main",
+    "result": "cap-terminated, no result",
+    "methodSeconds": null,
+    "commandRc": 143,
+    "commandSeconds": 304.254,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-004.json",
+    "errors": [],
+    "observedMethodResult": "unrun",
+    "classification": "Not a pass or failure; preserve partial log. No retry or cap change."
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentApprovalRequestsAppearInTheirChatAndSettleEverywhere",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayApprovalRequestsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 99.475,
+    "commandRc": 0,
+    "commandSeconds": 128.605,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-005.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentApprovalRequestsAppearInTheirChatAndSettleEverywhere",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayApprovalRequestsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 99.579,
+    "commandRc": 0,
+    "commandSeconds": 129.125,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-005.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 95.174,
+    "commandRc": 0,
+    "commandSeconds": 124.34,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-006.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 96.314,
+    "commandRc": 0,
+    "commandSeconds": 125.334,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-006.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 95.846,
+    "commandRc": 0,
+    "commandSeconds": 125.174,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-007.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 105.264,
+    "commandRc": 0,
+    "commandSeconds": 135.872,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-007.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 177.716,
+    "commandRc": 65,
+    "commandSeconds": 226.079,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-008.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:276: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallLight] : XCTAssertTrue failed - Attributes: Application, 0x118a5ad00, pid: 58797, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 176.746,
+    "commandRc": 65,
+    "commandSeconds": 211.179,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-008.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:276: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallLight] : XCTAssertTrue failed - Attributes: Application, 0x1066fe080, pid: 64164, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 179.306,
+    "commandRc": 65,
+    "commandSeconds": 211.156,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-009.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:276: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallDark] : XCTAssertTrue failed - Attributes: Application, 0x118879400, pid: 69660, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 180.391,
+    "commandRc": 65,
+    "commandSeconds": 209.49,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-009.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:276: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallDark] : XCTAssertTrue failed - Attributes: Application, 0x11706ebc0, pid: 70728, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 96.95,
+    "commandRc": 65,
+    "commandSeconds": 136.807,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-010.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:100: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallLightXXXL] : XCTAssertTrue failed - Attributes: Application, 0x10aa6ee40, pid: 81988, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 173.158,
+    "commandRc": 65,
+    "commandSeconds": 209.831,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-010.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:156: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallLightXXXL] : XCTAssertTrue failed - Attributes: Application, 0x11a5c4000, pid: 86145, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDarkXXXL",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 216.036,
+    "commandRc": 65,
+    "commandSeconds": 278.811,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-011.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:173: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallDarkXXXL] : XCTAssertTrue failed - Attributes: Application, 0x1159c0000, pid: 8667, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallDarkXXXL",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 160.677,
+    "commandRc": 65,
+    "commandSeconds": 220.308,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-011.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift:156: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testBuildsInstallDarkXXXL] : XCTAssertTrue failed - Attributes: Application, 0x1181dc140, pid: 28453, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayHomeAutomationUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 77.582,
+    "commandRc": 0,
+    "commandSeconds": 133.181,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-012.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayHomeAutomationUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 78.783,
+    "commandRc": 0,
+    "commandSeconds": 110.21,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-012.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayHomeAutomationUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 203.886,
+    "commandRc": 0,
+    "commandSeconds": 233.801,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-013.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeAutomationEditorAndAttributedMessageDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayHomeAutomationUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 79.734,
+    "commandRc": 0,
+    "commandSeconds": 116.424,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-013.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 76.493,
+    "commandRc": 0,
+    "commandSeconds": 116.279,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-014.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 76.015,
+    "commandRc": 0,
+    "commandSeconds": 110.252,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-014.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 105.413,
+    "commandRc": 0,
+    "commandSeconds": 137.293,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-015.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 105.011,
+    "commandRc": 0,
+    "commandSeconds": 134.191,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-015.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 139.828,
+    "commandRc": 0,
+    "commandSeconds": 173.499,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-016.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 139.064,
+    "commandRc": 0,
+    "commandSeconds": 174.397,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-016.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 86.491,
+    "commandRc": 0,
+    "commandSeconds": 122.504,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-017.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageLight",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 86.533,
+    "commandRc": 0,
+    "commandSeconds": 115.933,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-017.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 86.563,
+    "commandRc": 0,
+    "commandSeconds": 116.111,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-018.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCaptureAppsAndManageDark",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayInstalledAppsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 85.944,
+    "commandRc": 0,
+    "commandSeconds": 125.927,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-018.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 39.573,
+    "commandRc": 0,
+    "commandSeconds": 215.307,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-real-ui-home-status.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 41.831,
+    "commandRc": 0,
+    "commandSeconds": 87.501,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-real-ui-home-status-control.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "cap-terminated, no result",
+    "methodSeconds": null,
+    "commandRc": 143,
+    "commandSeconds": 304.249,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-020.json",
+    "errors": [],
+    "observedMethodResult": "unrun",
+    "classification": "Not a pass or failure; preserve partial log. No retry or cap change."
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "cap-terminated, no result",
+    "methodSeconds": null,
+    "commandRc": 143,
+    "commandSeconds": 304.292,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-020.json",
+    "errors": [],
+    "observedMethodResult": "unrun",
+    "classification": "Not a pass or failure; preserve partial log. No retry or cap change."
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 85.455,
+    "commandRc": 0,
+    "commandSeconds": 121.993,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-021.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 164.383,
+    "commandRc": 65,
+    "commandSeconds": 198.679,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-021.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:514: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted] : XCTAssertTrue failed - Attributes: Application, 0x115daf480, pid: 42990, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCompletedAskUserColdReplayRetainsSelectedAnswers",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 133.255,
+    "commandRc": 65,
+    "commandSeconds": 197.094,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-022.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:578: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testCompletedAskUserColdReplayRetainsSelectedAnswers] : XCTAssertTrue failed - Attributes: Application, 0x1191f3700, pid: 44848, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCompletedAskUserColdReplayRetainsSelectedAnswers",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 158.935,
+    "commandRc": 65,
+    "commandSeconds": 199.337,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-022.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:603: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testCompletedAskUserColdReplayRetainsSelectedAnswers] : XCTAssertTrue failed - Attributes: Application, 0x1175bad00, pid: 46449, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 80.794,
+    "commandRc": 0,
+    "commandSeconds": 128.811,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-023.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 67.317,
+    "commandRc": 0,
+    "commandSeconds": 115.924,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-023.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 90.153,
+    "commandRc": 0,
+    "commandSeconds": 127.674,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-024.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 171.234,
+    "commandRc": 65,
+    "commandSeconds": 226.327,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-024.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:844: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testImageOnlySteerLeavesTheQueueOnceDelivered] : XCTAssertTrue failed - Attributes: Application, 0x116af5680, pid: 61503, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 8.987,
+    "commandRc": 0,
+    "commandSeconds": 52.639,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-025.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 9.156,
+    "commandRc": 0,
+    "commandSeconds": 53.315,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-025.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 71.358,
+    "commandRc": 0,
+    "commandSeconds": 108.519,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-026.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 71.229,
+    "commandRc": 0,
+    "commandSeconds": 111.653,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-026.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 74.019,
+    "commandRc": 0,
+    "commandSeconds": 112.408,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-027.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 72.591,
+    "commandRc": 0,
+    "commandSeconds": 108.357,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-027.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "cap-terminated, no result",
+    "methodSeconds": null,
+    "commandRc": 143,
+    "commandSeconds": 304.405,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-028.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1080: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testForegroundAndReconnectKeepSheetsAndTheirContent] : XCTAssertTrue failed - Attributes: Application, 0x108b09400, pid: 70389, label: 'Tron'",
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1088: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testForegroundAndReconnectKeepSheetsAndTheirContent] : XCTAssertTrue failed - Attributes: Application, 0x118100500, pid: 70389, label: 'Tron'"
+    ],
+    "observedMethodResult": "unrun",
+    "classification": "Not a pass or failure; preserve partial log. No retry or cap change."
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 220.053,
+    "commandRc": 0,
+    "commandSeconds": 264.805,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-028.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate-confirmation",
+    "result": "passed",
+    "methodSeconds": 219.962,
+    "commandRc": 0,
+    "commandSeconds": 263.977,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-028-confirmation.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 118.353,
+    "commandRc": 65,
+    "commandSeconds": 163.445,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-029.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1243: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsSheetsOpenStably] : failed - no settings-section-advanced-open: Attributes: Application, 0x1051e70c0, pid: 73549, label: 'Tron'",
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:2050: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsSheetsOpenStably] : failed - no hittable Done control to dismiss the presented sheet: Attributes: Application, 0x119189040, pid: 73549, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 126.937,
+    "commandRc": 65,
+    "commandSeconds": 174.357,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-029.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1243: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsSheetsOpenStably] : failed - no settings-section-advanced-open: Attributes: Application, 0x1072730c0, pid: 76379, label: 'Tron'",
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:2050: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsSheetsOpenStably] : failed - no hittable Done control to dismiss the presented sheet: Attributes: Application, 0x11ad11400, pid: 76379, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 193.799,
+    "commandRc": 65,
+    "commandSeconds": 238.897,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-030.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1360: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsSourcesTextDoneAndRoutes] : failed - Extensions has no sources.extensions row: Attributes: Application, 0x10add2300, pid: 82612, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 150.615,
+    "commandRc": 65,
+    "commandSeconds": 203.689,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-030.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1360: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsSourcesTextDoneAndRoutes] : failed - Extensions has no sources.extensions row: Attributes: Application, 0x1069ba300, pid: 89979, label: 'Tron'"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 66.067,
+    "commandRc": 0,
+    "commandSeconds": 111.424,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-031.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testRoutineEditorsDisappearAndExplicitGlobalValueResets",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 66.592,
+    "commandRc": 0,
+    "commandSeconds": 108.964,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-031.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSessionSettingsOmitsInheritedRoutineEditors",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 63.452,
+    "commandRc": 0,
+    "commandSeconds": 106.023,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-032.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSessionSettingsOmitsInheritedRoutineEditors",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 63.274,
+    "commandRc": 0,
+    "commandSeconds": 99.803,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-032.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 66.77,
+    "commandRc": 0,
+    "commandSeconds": 102.713,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-033.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 67.098,
+    "commandRc": 0,
+    "commandSeconds": 103.948,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-033.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 52.634,
+    "commandRc": 65,
+    "commandSeconds": 85.672,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-034.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1552: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope] : XCTAssertEqual failed: (\"0\") is not equal to (\"1\") - one More Settings row (#1627)"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 57.763,
+    "commandRc": 65,
+    "commandSeconds": 107.966,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-034.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1552: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testGlobalSettingsServeExposedEditorsAndEditAtGlobalScope] : XCTAssertEqual failed: (\"0\") is not equal to (\"1\") - one More Settings row (#1627)"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsOutsideChangesAndBuiltinExtensionPersist",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "failed",
+    "methodSeconds": 116.748,
+    "commandRc": 65,
+    "commandSeconds": 191.245,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-035.json",
+    "errors": [
+      "<candidate>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1627: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsOutsideChangesAndBuiltinExtensionPersist] : XCTAssertNotNil failed - the outside change must open its value and actions"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsOutsideChangesAndBuiltinExtensionPersist",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "failed",
+    "methodSeconds": 117.348,
+    "commandRc": 65,
+    "commandSeconds": 195.819,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-035.json",
+    "errors": [
+      "<main>/packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift:1627: error: -[TronMobileUITests.RealGatewayPairAndChatUITests testSettingsOutsideChangesAndBuiltinExtensionPersist] : XCTAssertNotNil failed - the outside change must open its value and actions"
+    ]
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testExtensionsFlagsAPackageThatNeedsAnotherNode",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 62.783,
+    "commandRc": 0,
+    "commandSeconds": 117.714,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-036.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testExtensionsFlagsAPackageThatNeedsAnotherNode",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 62.1,
+    "commandRc": 0,
+    "commandSeconds": 105.196,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-036.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveMovesAndArchives",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 117.345,
+    "commandRc": 0,
+    "commandSeconds": 156.792,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-037.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveMovesAndArchives",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 118.818,
+    "commandRc": 0,
+    "commandSeconds": 159.088,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-037.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleListOmitsArchivedAndDepartedProjects",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 161.519,
+    "commandRc": 0,
+    "commandSeconds": 205.252,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-038.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleListOmitsArchivedAndDepartedProjects",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 162.187,
+    "commandRc": 0,
+    "commandSeconds": 199.126,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-038.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleDenialRetainsUntrustedRepository",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 144.77,
+    "commandRc": 0,
+    "commandSeconds": 177.206,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-039.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleDenialRetainsUntrustedRepository",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 101.037,
+    "commandRc": 0,
+    "commandSeconds": 143.936,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-039.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyArchiveUsesCanonicalReason",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 90.639,
+    "commandRc": 0,
+    "commandSeconds": 149.042,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-040.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyArchiveUsesCanonicalReason",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProjectLifecycleUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 67.611,
+    "commandRc": 0,
+    "commandSeconds": 123.501,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-040.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProviderLoginSurvivesSafariAndReconnect",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProviderLoginUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 120.957,
+    "commandRc": 0,
+    "commandSeconds": 163.662,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-041.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProviderLoginSurvivesSafariAndReconnect",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayProviderLoginUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 120.08,
+    "commandRc": 0,
+    "commandSeconds": 161.965,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-041.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayTrustedProjectsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 108.603,
+    "commandRc": 0,
+    "commandSeconds": 148.948,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-042.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayTrustedProjectsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 107.688,
+    "commandRc": 0,
+    "commandSeconds": 148.353,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-042.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayTrustedProjectsUITests.swift",
+    "side": "candidate",
+    "result": "passed",
+    "methodSeconds": 50.073,
+    "commandRc": 0,
+    "commandSeconds": 80.83,
+    "sourceRevision": "970d71971501c4732a501bb8d7151841b221171b",
+    "receipt": "candidate-resume3-own-ui-043.json",
+    "errors": []
+  },
+  {
+    "selector": "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject",
+    "file": "packages/ios-app/UITests/RealGateway/RealGatewayTrustedProjectsUITests.swift",
+    "side": "main",
+    "result": "passed",
+    "methodSeconds": 49.952,
+    "commandRc": 0,
+    "commandSeconds": 84.598,
+    "sourceRevision": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+    "receipt": "base-resume3-own-ui-043.json",
+    "errors": []
+  }
+]

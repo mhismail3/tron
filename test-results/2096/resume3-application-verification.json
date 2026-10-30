@@ -1,0 +1,25 @@
+{
+  "patchSha256Verified": "af6e23d80cf46efb3a77551e9044518cf3fc39380616764493fb59bf14997213",
+  "baseline": "d616f1dcceac4df0068ddf68e21c24a34d719aec",
+  "resolvedFiles": [
+    "packages/gateway/src/automations/locks/automation-owned-run.golden.json",
+    "packages/gateway/src/kernel/delegation/locks/delegation-subagent.golden.json",
+    "packages/gateway/src/modules/home/locks/home-contention-restart.golden.json",
+    "packages/gateway/src/protocol/locks/protocol-wire.golden.json",
+    "packages/gateway/src/sessions/locks/project-root-trust.golden.json",
+    "packages/gateway/src/sessions/locks/run-abort.golden.json",
+    "packages/gateway/src/sessions/locks/run-cold-load-eviction.golden.json",
+    "packages/gateway/src/sessions/locks/run-compaction.golden.json",
+    "packages/gateway/src/sessions/locks/run-drain-blockers.golden.json",
+    "packages/gateway/src/sessions/locks/run-drain-snapshot.golden.json",
+    "packages/gateway/src/sessions/locks/run-extension-ui.golden.json",
+    "packages/gateway/src/sessions/locks/run-lifecycle-rpcs.golden.json",
+    "packages/gateway/src/sessions/locks/run-prompt-stream.golden.json",
+    "packages/gateway/src/sessions/locks/run-queue-control.golden.json",
+    "packages/gateway/src/sessions/locks/run-steer.golden.json",
+    "packages/gateway/src/transport/locks/transport-reconnect-snapshot.golden.json"
+  ],
+  "all16ResultHashesMatchApprovedManifest": true,
+  "outsidePatchWorktreeContentsUnchanged": true,
+  "mechanism": "Restore only the16 patch paths to approved upstream basis, git apply --check, then git apply exact approved patch; no hand resolution."
+}
