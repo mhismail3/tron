@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import claim as claims
-import land
 import start
 from gh import Gh, GhError
 
@@ -55,6 +54,33 @@ def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
     if check and completed.returncode != 0:
         raise CleanupError(f"git {' '.join(args[:2])} failed: {completed.stderr.strip()}")
     return completed
+
+
+def operation_in_progress(root: Path) -> Optional[str]:
+    for marker, name in (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
+                         ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect")):
+        if Path(_git(root, "rev-parse", "--path-format=absolute", "--git-path", marker).stdout.strip()).exists():
+            return name
+    return None
+
+
+def _remote_head(root: Path, remote: str, branch: str) -> Optional[str]:
+    output = _git(root, "ls-remote", "--heads", remote, f"refs/heads/{branch}").stdout.split()
+    return output[0] if output else None
+
+
+def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
+    if _remote_head(root, remote, branch) is None:
+        return "already deleted"
+    # Keep a branch that moved off the proven exact head, even just before push.
+    deleted = _git(root, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{head}", remote,
+                   f":refs/heads/{branch}", check=False)
+    if deleted.returncode != 0:
+        if _remote_head(root, remote, branch) is None:
+            return "already deleted"
+        detail = (deleted.stderr.strip().splitlines() or ["no detail"])[-1]
+        return f"kept: the delete with a lease on {head[:12]} was refused ({detail})"
+    return "deleted"
 
 
 def list_worktrees(repo: Path) -> List[Worktree]:
@@ -120,7 +146,7 @@ def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Opti
     beyond = counted.stdout.strip() or "0"
     if beyond != "1":
         return None, f"{beyond} commits lie beyond {base_ref}, not only its claim commit"
-    # The same trailers `start` writes and the dashboard reads.
+    # The same creation trailers the claim owner writes.
     if claims.claim_commit(tree.path, tree.head, number) is None:
         return None, f"its one commit beyond {base_ref} carries no claim marker for #{number}"
     # `start` commits the base tree itself. Work amended or squashed into that
@@ -138,7 +164,10 @@ def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Opti
 
 def _merged_head(gh: Gh, branch: str, head: str, base: str) -> Tuple[Optional[str], Optional[str]]:
     """(the pull request that merged exactly `head`, None) or (None, why none did)."""
-    pulls = land.merged_pulls(gh, branch)
+    pulls = json.loads(gh.run("pr", "list", "--head", branch, "--state", "merged", "--limit", "100", "--json",
+                              "number,headRefOid,baseRefName,isCrossRepository"))
+    # A fork's same-named branch is not proof that this local head landed.
+    pulls = sorted((p for p in pulls if not p["isCrossRepository"]), key=lambda p: p["number"])
     own = [p for p in pulls if p["baseRefName"] == base]
     for pull in own:
         if pull["headRefOid"] == head:
@@ -191,7 +220,7 @@ def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
     current = _git(path, "rev-parse", "HEAD").stdout.strip()
     if current != tree.head:
         reasons.append(f"HEAD moved to {current[:12]} from {tree.head[:12]}")
-    operation = land.operation_in_progress(path)
+    operation = operation_in_progress(path)
     if operation:
         reasons.append(f"a {operation} is in progress")
     dirty = _git(path, "status", "--porcelain", "--untracked-files=all").stdout.splitlines()
@@ -409,8 +438,8 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[boo
     else:
         local = f"kept ({deleted.stderr.strip()})"
     try:
-        remote = land.delete_branch(settings.primary, settings.remote, tree.branch, tree.head)
-    except land.LandError as error:
+        remote = delete_branch(settings.primary, settings.remote, tree.branch, tree.head)
+    except CleanupError as error:
         return False, (f"worktree removed, local branch {local}; {settings.remote}/{tree.branch} was left: {error}. "
                        f"Delete it only if it is still at {tree.head[:12]}")
     return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}"
@@ -453,7 +482,7 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
     os.chdir(primary)
     # Under --all, one worktree's error (a failed gh call, a git failure) keeps that worktree
     # and the rest are still decided; for the current worktree alone it fails the command.
-    errors = (CleanupError, GhError, claims.ClaimError, land.LandError, json.JSONDecodeError,
+    errors = (CleanupError, GhError, claims.ClaimError, json.JSONDecodeError,
               OSError) if all_worktrees else ()
     blocked = failed = removed = 0
     for tree in candidates:

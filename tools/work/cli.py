@@ -14,8 +14,6 @@ import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import cleanup  # noqa: E402
 import comments  # noqa: E402
-import dashboard  # noqa: E402
-import land  # noqa: E402
 import release  # noqa: E402
 import handoff  # noqa: E402
 import start  # noqa: E402
@@ -59,12 +57,6 @@ def main(argv: list) -> int:
     giveup.add_argument("--stale", action="store_true",
                         help=f"release every claim idle over {release.STALE_HOURS}h whose owner is absent")
     giveup.add_argument("--dry-run", action="store_true", help="with --stale: list what would be released")
-    board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
-    board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
-    board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
-    status = commands.add_parser("status", help="Fresh advisory claim overlaps; no admission or queue")
-    status.add_argument("--area", action="append", default=[], help="proposed repo-relative path prefix; repeat for each")
-    status.add_argument("--json", action="store_true")
     comment = commands.add_parser("comment", help="post a privacy-checked public issue comment")
     comment.add_argument("issue", type=int, help="positive issue number")
     comment.add_argument("--body-file", required=True, type=Path, help="Markdown file to post; payloads are not logged")
@@ -115,11 +107,6 @@ def main(argv: list) -> int:
     project_set.add_argument("issue", type=int)
     project_set.add_argument("--status", choices=("Ready", "Blocked"))
     project_set.add_argument("--priority", choices=("P0", "P1", "P2", "P3"))
-    review = commands.add_parser("review-export", help="export exact committed review evidence for another checkout")
-    review.add_argument("--output", type=Path, required=True, help="new local artifact path; never overwritten")
-    review.add_argument("--base", help="ref whose merge base defines the review (default: configured remote/base branch)")
-    landing = commands.add_parser("land", help="fetch, merge origin/main, push HEAD to main; no checks or queue")
-    landing.add_argument("--dry-run", action="store_true", help="fetch and print the git operations without merging or pushing")
     access = commands.add_parser("auth", help="the agents' GitHub token: one-time setup or its status")
     access.add_argument("auth_command", choices=("setup", "status"))
     tidy = commands.add_parser("cleanup", help="remove this completed task worktree and branches after preservation checks")
@@ -150,11 +137,6 @@ def main(argv: list) -> int:
             if args.issue is None or not args.reason or args.dry_run:
                 parser.error("release needs <issue> and --reason (or --stale [--dry-run])")
             return release.run(Gh(root), Path.cwd(), config, args.issue, args.reason)
-        if args.command == "dashboard":
-            return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
-        if args.command == "status":
-            import work_status
-            return work_status.run(root, config, args.area, args.json)
         if args.command == "comment":
             return comments.post(Gh(root), root, config, args.issue, args.body_file)
         if args.command == "issue":
@@ -192,17 +174,13 @@ def main(argv: list) -> int:
             if args.project_command == "set":
                 tracking.set_project_fields(gh, root, config, args.issue, args.status, args.priority)
                 return 0
-        if args.command == "review-export":
-            return land.export_review(root, config, args.output, args.base)
-        if args.command == "land":
-            return land.land(root, config, args.dry_run)
         if args.command == "auth":
             import auth
             return auth.setup() if args.auth_command == "setup" else auth.status()
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, dashboard.DashboardError,
-            land.LandError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError,
+            cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
             json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1

@@ -134,9 +134,6 @@
     "claimedStatuses": [
       "In progress"
     ],
-    "activeStatuses": [
-      "In progress"
-    ],
     "statusField": "Status",
     "excludeLabels": [
       "epic"
@@ -159,9 +156,6 @@
   },
   "verify": {
     "scrubCommand": "scripts/personal-info-guard.sh --stdin"
-  },
-  "land": {
-    "doneStatus": "Done"
   },
   "cleanup": {
     "regenerableIgnored": [
@@ -196,14 +190,11 @@
       }
     ]
   },
-  "dashboard": {
-    "blockedStatus": "Blocked",
+  "issues": {
+    "doneStatus": "Done",
     "epicLabel": "epic",
     "priorityField": "Priority",
     "kindPrefix": "kind:",
-    "areaPrefix": "area:",
-    "ideaLabel": "kind:idea",
-    "recentDays": 14,
-    "pausedEpicDays": 14
+    "areaPrefix": "area:"
   }
 }

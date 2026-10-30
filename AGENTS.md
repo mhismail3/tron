@@ -106,15 +106,14 @@ no queue, gate or auto-revert.
 2. `git push origin HEAD:main`; on non-fast-forward repeat step 1, rerunning tests only if
    integration changed their dependencies. Never force-push main.
 3. Close the issue with the change, actual commands and results, and residual risk;
-   link long logs (`test-results/`, internal workspace). `scripts/tron work land` is
-   optional fetch/merge/push. Incidents also name the one-step diagnosing signal, added
+   link long logs (`test-results/`, internal workspace). Use plain Git to integrate/push. Incidents also name the one-step diagnosing signal, added
    with a test and a row in its module README Signals (`packages/gateway/docs/observability.md`).
 
 ## Work tracking
 
-- Issues and the Project coordinate, never approve ([tools/work](tools/work/README.md)).
-  One writer per issue; claims (`scripts/tron work start`) and overlap advice are not
-  locks. Never edit another worker's tree, delete its branch or take over unknown or live
+- Issues and the Project coordinate, never approve ([Git/gh skill](.agents/skills/tron-work/SKILL.md)).
+  One writer per issue; use ordinary Git/gh to inspect branches/worktrees/issues.
+  Existing claims are preservation metadata, not locks. Never edit another worker's tree, delete its branch or take over unknown or live
   work; preserve unpublished or parked checkpoints. `release`/`handoff` keep local work;
   `cleanup`/`recover` keep exact-head safeguards. After each issue lands on origin/main, sync primary main
   with `git merge --ff-only origin/main` only if tracked-clean and strictly behind; keep untracked files, never reset/rebase.

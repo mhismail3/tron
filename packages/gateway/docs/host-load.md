@@ -12,10 +12,10 @@ simulator jobs run at once across all worktrees: a fourth waits for a free slot
 still prevent simultaneous use of the same resource, and each command cleans
 up its own processes and simulator. Do not kill another worker or Stable.
 
-`scripts/tron work status --area PATH` reports fresh predicted overlaps,
-not queues, admission or a historical gate digest. A parked claim is not proof
-of live work; Home coordinates overlapping writes using actual task state.
-See [independent landing](../../../tools/work/README.md).
+Use ordinary Git/gh to inspect current branches, worktrees and issues. A parked
+claim is not proof of live work; Home coordinates overlapping writes using actual
+task state, not a duplicate status projection or admission queue.
+See the [Git/gh skill](../../../.agents/skills/tron-work/SKILL.md).
 
 ## Host-pressure signal
 

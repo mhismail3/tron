@@ -141,7 +141,7 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, 
         raise TrackingError("issue body exceeds the 64 KiB bound")
 
     declared = {label["name"] for label in config["labels"]}
-    board = config["dashboard"]
+    board = config["issues"]
     labels: List[str] = []
     if issue_type == "task":
         # Every task is classified at filing: exactly one kind and at least one area.
@@ -216,7 +216,7 @@ def edit_issue(gh: Gh, repo: Path, config: dict, number: int, title: Optional[st
 
 def _check_options(config: dict, status: Optional[str], priority: Optional[str]) -> None:
     declared_fields = {field["name"]: field for field in config["project"]["fields"]}
-    for name, value in ((config["claim"]["statusField"], status), (config["dashboard"]["priorityField"], priority)):
+    for name, value in ((config["claim"]["statusField"], status), (config["issues"]["priorityField"], priority)):
         if value is None:
             continue
         field = declared_fields.get(name)
@@ -233,7 +233,7 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
     declared = {label["name"] for label in config["labels"]}
     if set(additions) - declared:
         raise TrackingError("only labels declared in .github/work.json may be added")
-    if config["dashboard"]["epicLabel"] in (set(additions) | set(removals)):
+    if config["issues"]["epicLabel"] in (set(additions) | set(removals)):
         raise TrackingError("the epic label is fixed at creation")
     if number <= 0:
         raise TrackingError("issue numbers must be positive")
@@ -387,7 +387,7 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
         }
     # Phase and area epics retain their links; module issues remain maintenance.
     if child_number == epic_number or not (
-        config["dashboard"]["epicLabel"] in epic_labels or module_parent
+        config["issues"]["epicLabel"] in epic_labels or module_parent
     ):
         raise TrackingError("parent links require an epic parent or an open maintenance module other than the child")
     if any(node["id"] == child["node_id"] for node in _relation(gh, epic["node_id"])["subIssues"]["nodes"]):
@@ -475,7 +475,7 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     repository = f"{owner}/{name}"
     issue = _issue(gh, repository, number)
     labels = {label["name"] for label in issue.get("labels", [])}
-    if config["dashboard"]["epicLabel"] in labels:
+    if config["issues"]["epicLabel"] in labels:
         # Read every page before any write; a finished first page is not a finished epic.
         unfinished = open_sub_issues(gh, repository, number)
         if unfinished:
@@ -484,7 +484,7 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     posted = any(marker in (comment.get("body") or "")
                  for comment in gh.rest_pages(f"repos/{repository}/issues/{number}/comments"))
     is_open = issue.get("state") == "open"
-    done_status = config["land"]["doneStatus"]
+    done_status = config["issues"]["doneStatus"]
     _, project = _project(gh, repo, config)
     items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]
     status_item = None
