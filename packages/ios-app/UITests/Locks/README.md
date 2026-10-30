@@ -59,8 +59,8 @@ matrix. `TronUILockTests` retains the following explicit witnesses:
 |---|---|---|---|
 | Home Settings | light + dark | light + dark | Shared chrome and #1607 source/control metadata |
 | Memory-search tool detail | light + dark | light + dark | Shared chrome and #1607 source/control metadata |
-| Empty chat | light + dark | none | Pixel subtitle tint has no focused successor (#2093) |
-| Settled chat | light + dark | none | Pixel subtitle tint has no focused successor (#2093) |
+| Empty chat | light + dark | none | Shared composer placeholder uses primary ink dimmed (#2093) |
+| Settled chat | light + dark | none | Shared composer placeholder uses primary ink dimmed (#2093) |
 | Onboarding welcome | dark | none | No focused equivalent for dark appearance |
 | Session Settings | none | none | `TronSixSmallUIRegressionTests.testSessionSettingsOrder`; `TronConsolidatedUIRegressionTests.testSessionSettingsKeepsWorkerOverridesAndTrustReachable`; retained Home chrome |
 | Onboarding light | none | none | `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`: actual controls, hit geometry, historical feature-print |
@@ -68,9 +68,11 @@ matrix. `TronUILockTests` retains the following explicit witnesses:
 Chat content/tool controls retain `TronWorkerToolRegressionTests.testTranscriptChipsUseFriendlyNames`,
 `TronConsolidatedUIRegressionTests.testMemoryToolRowsAndCanonicalNavigation` and
 the retained tool-detail interaction journey. Empty chat navigation/title are
-required by `TronUILockTests.testChatEmpty`. These checks do not replace the
-unresolved subtitle-tint oracle. The four Home/tool-detail AX witnesses remain;
-an independent permission-row test is not equivalent to their source metadata.
+required by `TronUILockTests.testChatEmpty`. The four chat pixel witnesses pin
+`ComposerPlaceholder`'s shared `.inputPlaceholder` color, which is primary ink
+at 60% opacity; the muted green tint is intentional in light and dark modes.
+The four Home/tool-detail AX witnesses remain; an independent permission-row
+test is not equivalent to their source metadata.
 
 ## Comparison and settling
 
