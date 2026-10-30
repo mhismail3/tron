@@ -1,10 +1,8 @@
 # K-0: Gateway kernel design
 
-Phase 2 step 1 of [the restructure plan](plan.md#phase-2-gateway-kernel-m2-highest-risk-review-per-84)
-(issue #1524). It fixes the kernel ports, the module host contract, the Pi seam and the
-extraction order. **Approved by the maintainer on 2026-10-20 with decisions D1–D7 (§10).**
+The kernel contract (#1524) defines ports, module hosting and the Pi seam. **Approved by the maintainer on 2026-10-20 with decisions D1–D7 (§10).**
 References are `file:line` at base `096b35f8a`, relative to the Gateway's `src/`. Invariants
-B1–B6 (plan §4.1) bind every step: each port sits at a call site that exists today, with the
+in [the charter](../../AGENTS.md#architecture-invariants) bind every step: each port sits at a call site that exists today, with the
 same ordering, sync/async shape and failure handling.
 
 ## 1. Starting point
@@ -21,7 +19,7 @@ same ordering, sync/async shape and failure handling.
 
 ## 2. Kernel primitives and ports
 
-`kernel/{session,run,host,resources,delegation,settings,projection,pi}` (plan §5.2) expose
+`kernel/{session,run,host,resources,delegation,settings,projection,pi}` expose
 **operations** (called by transport and modules) and **hooks** (implemented by modules). The
 kernel imports no module. Slot↔registry callbacks (`broadcast`, `summaryChanged`, `changed`,
 `settled`, `rekey`, `closed`: `runtime-slot.ts:455-460`, `:477-484`) become calls inside the kernel.
@@ -160,7 +158,7 @@ reporting exactly the `TRON_MODULES` rows (`tron-modules.ts:306-313`).
 
 **Rule.** Outside `kernel/pi/`, production code neither imports nor resolves
 `@earendil-works/*` (D2: type-only imports included). Tests and `test-support` stay exempt: the
-faux provider is Pi's. `kernel/pi` is the plan's one sanctioned re-export seam (§4.2.5); its
+faux provider is Pi's. `kernel/pi` is the single Pi adaptation seam; its
 export list is the patch-removal checklist.
 
 | Package | Runtime names at base (production) |
@@ -191,7 +189,7 @@ theme set at module load (`sessions/semantic-ui-broker.ts:61`), which becomes an
 ## 5. Home: generic delegation versus Home policy
 
 Automations already use the worker-session boundary (`automations/automation-executor.ts` via
-`kernel/delegation/delegation-operations.ts`), so it is generic. Plan §5.2 puts the "generic parts" of
+`kernel/delegation/delegation-operations.ts`), so it is generic. The kernel owns the generic parts of
 `home-task-*` in K5; the line below is what is generic.
 
 | `kernel/delegation` (generic) | `modules/home` (policy) |
@@ -254,11 +252,11 @@ lands, a slice runs the named locks and the full Gateway suite directly. Locks s
 
 Order: wiring first (E1-E3), then read-only projection (E4), the behavior core (E5),
 delegation, which depends on run ownership (E6), and the registry, which depends on all
-(E7). E7 closed (maintainer, 2026-10-23) once the registry no longer constructed or called Home; its remaining items moved to E8. Net lines and deleted concepts are metrics, not slice or phase/E8 exit gates. Temporary forwarding, mirror and compatibility plumbing is not a way to close a slice: move actual consumers and delete superseded routes in the same change, including multi-file migrations. Acceptance requires one canonical owner, narrow explicit dependencies and preserved behavior. A retained seam must have a genuine blocker, actual consumer, removal issue and concrete exit condition in #1348’s simplification ledger; filing a follow-up alone is not a blocker. The exit review states deleted/remaining mechanisms and net lines, distinguishes enduring ownership contracts from temporary debt, and removes unnecessary dead code. Home leaves the registry through `sessionLineage` (§2.1; decision A, maintainer 2026-10-23): the kernel asks Home only for lineage facts, never through a HomeOwner mirror, and the registry's Home procedures (reserved-successor materialization, publication retirement, task recovery and dispatch) move to Home over K1 operations. The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
+(E7). E7 closed (maintainer, 2026-10-23) once the registry no longer constructed or called Home; its remaining items moved to E8. Net lines and deleted concepts are metrics, not slice or phase/E8 exit gates. Temporary forwarding, mirror and compatibility plumbing is not a way to close a slice: move actual consumers and delete superseded routes in the same change, including multi-file migrations. Acceptance requires one canonical owner, narrow explicit dependencies and preserved behavior. Home leaves the registry through `sessionLineage` (§2.1; decision A, maintainer 2026-10-23): the kernel asks Home only for lineage facts, never through a HomeOwner mirror, and the registry's Home procedures (reserved-successor materialization, publication retirement, task recovery and dispatch) move to Home over K1 operations. The rest of §5's left column follows E7 (maintainer, 2026-10-22): while `gateway/run` owns the slot
 and registry, which import delegation, a delegation→run import is a hard two-way pair (#1348 layers probe). E2 before E3-E7 keeps moved files from being re-touched for imports (D1). K4 and K6 are
 file moves on disjoint files that may run beside E3-E7 (`admin-settings-change`,
-`settings-approvals`, `admin.store`, `run-prompt-stream`). Each step is several slices of one
-owner and one change type (`move` before `simplify`), ≤ ~800 non-moved lines.
+`settings-approvals`, `admin.store`, `run-prompt-stream`). Changes preserve one owner and the named behavior boundaries; no move-only
+sequence, phase ledger or non-moved-line quota governs landing.
 
 ## 8. Invariants carried through
 
@@ -282,7 +280,7 @@ owner and one change type (`move` before `simplify`), ≤ ~800 non-moved lines.
 | Top-level side effects move (`semantic-ui-broker.ts:61` theme) | explicit `pi.initTheme()` in composition; `run-extension-ui` |
 | Profile fields miss a `liveProfile()` branch | §2.2 maps all 14; E0a; review greps `liveProfile` to zero |
 | Lock gaps (Home, pushes, automations, drain, `projectDir`) | E0 lands first; no slice touches unlocked behavior |
-| Pi upgrade (#1025) mid-extraction | land before or right after E2 (plan §11) |
+| Pi upgrade (#1025) | exact pins, atomic updater and Pi seam qualification under the charter |
 | Hot-owner churn (`runtime-slot.ts` 140 commits/30 days at baseline) | small slices, announcements in #1395/#1398, fast landing |
 
 ## 10. Decisions (maintainer, 2026-10-20)

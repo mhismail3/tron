@@ -19,6 +19,9 @@ scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections
 scripts/tron verify ... --plan                  # print the selection and steps only
 ```
 
+The [oracle policy](test-oracles.md) defines what tests must preserve.
+[Health reporting design](health-design.md) is a proposal, not executable policy.
+
 ## Worktree dependencies
 
 Worktree creation does not install dependencies. Before running a selection that

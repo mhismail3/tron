@@ -35,7 +35,7 @@ checker and `M2.fileSize` cannot drift. It reads Git objects only: commit first.
 
 The root `README.md` (250) and `AGENTS.md` (150) keep their hard budgets in
 `scripts/check-documentation-policy.py`, which the charter names.
-`docs/restructure/plan.md` is exempt until M6 (plan §0). Manifests carry no
+`docs/restructure/plan.md` has an explicit exemption in the checker. Manifests carry no
 size exceptions.
 
 ## Verify

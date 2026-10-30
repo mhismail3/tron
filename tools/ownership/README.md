@@ -79,9 +79,8 @@ default owner is one manifest per directory with `"owns": ["**"]`. Mixed
 directories are split by explicit lists, and cross-directory owners sit at the
 common parent (for example `work.module.json` at the root owns
 `tools/work/**`, its `scripts/test-work-*.py` tests and `.github/work.json`).
-Only `layer` and `owns` are filled in for now. Edges, capabilities and risk
-classes arrive with the tools that can check them (plan §7, 0.5–0.11).
-`--modules` prints the current map.
+Edges, capabilities, risk classes and verification declarations are optional
+fields checked by their owning tools. `--modules` prints the current map.
 
 ## Verify
 

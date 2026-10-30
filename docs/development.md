@@ -216,14 +216,13 @@ owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
 beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
 and `scripts/tron version check` reports drift read-only when requested.
 
-## Restructure metrics
+## Metrics
 
-`scripts/tron metrics [<rev>]` measures a commit's Git objects for the
-[restructure targets](restructure/plan.md#3-metrics-definitions-and-targets) and
-writes `test-results/metrics/<sha>.json`; `--compare <base>` prints the delta
-table restructure slices paste into their closing evidence. It reports and never
-gates. The [metric definitions](../tools/metrics/README.md) own the
-classification rules and the metrics that stay unavailable until their slice lands.
+`scripts/tron metrics [<rev>]` measures Git objects and writes
+`test-results/metrics/<sha>.json`; `--compare <base>` prints a delta table.
+Counts are trailing evidence, not targets or closing-paperwork obligations.
+The [metric definitions](../tools/metrics/README.md) own classification and
+explicitly unavailable measurements.
 
 ## Module ownership
 
@@ -247,13 +246,13 @@ always allowed.
 budget. It fails only a change that creates a production file over 800 lines, or
 a doc above twice its budget. [Budget rules](../tools/budgets/README.md).
 
-`scripts/tron verify --changed` is a restructure slice's one command: the static
-checkers above (ownership, budgets, layers, documentation policy, privacy guard,
-diff check, Gateway typecheck and lint), then the tests the changed modules own.
-A kernel, toolchain or unowned change runs every lock. It prints live progress,
-stops at the first failure, writes `test-results/verify/<sha>.json`, and fails a
-run that executes no test. A failure that also reproduces on the base commit does
-not block landing; the closing comment cites the base run. [Verify](../tools/verify/README.md).
+`scripts/tron verify --plan` explains affected selection; `scripts/tron verify`
+runs it, stopping at the first failure and retaining per-step wall times in
+`test-results/verify/<sha>.json`. Markdown-only changes need static/docs evidence,
+not executable tests. Higher-risk changes require affected checks now and broad
+coverage in the existing explicit batch. Exact known failures remain visible,
+owned and expiring. [Verify](../tools/verify/README.md) owns the executable rules;
+the [oracle policy](../tools/verify/test-oracles.md) owns what a surviving test proves.
 
 At most 3 simulator-heavy jobs run at once on this Mac, across all worktrees and workers. The
 iOS test runner (`scripts/tron-ios-test` build/run, so `verify` too), the profiler, the Gateway

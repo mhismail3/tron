@@ -87,8 +87,8 @@ delivery subsystem were retired. Do not reintroduce their terminology or
 architecture through compatibility wrappers. The current Cloudflare push relay
 is only a closed installation registry, idempotency boundary, and APNs
 transport; it owns no agent execution, session state, inbox, badge, or reminder
-policy. The [restructure plan](docs/restructure/plan.md) (§5.1 layers, §6.1
-module manifests) owns dependency direction and module ownership;
+policy. [Layers](tools/layers/README.md) and [module ownership](tools/ownership/README.md)
+own dependency direction and file ownership;
 [repository development](docs/development.md) owns repo-wide toolchain, Debug
 Gateway lifecycle and release runbooks.
 

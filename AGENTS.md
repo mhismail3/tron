@@ -81,8 +81,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   need the actual kernel/Gateway/Pi, process, socket, built or UI boundary, not logic alone.
 - Bugs start with a red reproduction. Replace duplicates; prove a deleted check's successor.
   Keep few rendered witnesses for clipping, targets and chrome, not whole AX trees.
-- Qualify golden reds; never auto-bless. Human approval is only for new design/taste or
-  intended visible change; batch it. Keep `test-results/` artifacts; label base-red/unqualified.
+- Follow the [oracle policy](tools/verify/test-oracles.md) for retirement, golden edits
+  and expiring quarantine. Keep `test-results/` artifacts; label base-red/unqualified.
 
 ## Resources and cleanup
 

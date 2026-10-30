@@ -1,7 +1,7 @@
-# Restructure metrics
+# Repository metrics
 
-`scripts/tron metrics` measures one commit for the restructure targets in
-[the plan](../../docs/restructure/plan.md#3-metrics-definitions-and-targets).
+`scripts/tron metrics` measures one commit. Counts are trailing evidence, not
+phase targets or required closing paperwork.
 It reports and never gates: the exit status is non-zero only for a usage or Git
 error (an unknown revision exits 2 and writes nothing).
 
