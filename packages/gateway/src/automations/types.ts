@@ -4,7 +4,7 @@ export const AUTOMATION_HOME_COOLDOWN_MS = 60_000;
 export const AUTOMATIONS_CAPABILITY = "automations.v2";
 export const AUTOMATIONS_TIMELINE_CAPABILITY = "automations.timeline.v1";
 
-export type AutomationActivation = "draft" | "enabled" | "paused" | "completed" | "blocked";
+export type AutomationActivation = "draft" | "enabled" | "paused" | "completed" | "blocked" | "expired";
 export type AutomationMisfirePolicy = "latest" | "skip";
 type AutomationOverlapPolicy = "skip" | "queueLatest";
 
@@ -22,10 +22,14 @@ export type AutomationAction =
   | { kind: "sessionPrompt"; text: string; resourceInvocation?: ResourceInvocation }
   | { kind: "notification"; message: string };
 
-export type AutomationProvenance =
+export type AutomationProvenance = { expiresAt?: string } & (
   | { kind: "mobile" | "local" }
   | { kind: "assistant"; sessionId: string; sourceId: string }
-  | { kind: "home"; homeId: string; expiresAt: string };
+  | { kind: "home"; homeId: string });
+
+export function automationExpired(record: { provenance: AutomationProvenance }, now = Date.now()): boolean {
+  return record.provenance.expiresAt !== undefined && Date.parse(record.provenance.expiresAt) <= now;
+}
 
 export type AutomationRunState =
   | "queued"
@@ -113,6 +117,7 @@ export type AutomationRunSummary = Pick<AutomationRun,
 >;
 
 export interface AutomationSummary {
+  expiresAt?: string;
   id: string;
   revision: number;
   stateRevision: number;

@@ -6,12 +6,12 @@ import { inputMessageOrigin } from "../kernel/host/input-admission.js";
 import { visitCanonicalSessionEntries } from "../kernel/session/canonical-reader.js";
 import { estimateTokens } from "../kernel/pi/coding-agent.js";
 import { AutomationStore } from "./automation-store.js";
-import { AUTOMATION_HOME_COOLDOWN_MS, type AutomationRecord, type AutomationRun } from "./types.js";
+import { automationExpired, AUTOMATION_HOME_COOLDOWN_MS, type AutomationRecord, type AutomationRun } from "./types.js";
 
 const runs = (record: AutomationRecord) => [...(record.currentRun ? [record.currentRun] : []), ...record.pendingHomeRuns ?? []];
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 const eligible = (record: AutomationRecord, run: AutomationRun) => record.activation !== "blocked"
-  && (record.provenance.kind !== "home" || record.activation === "enabled" && Date.parse(record.provenance.expiresAt) > Date.now())
+  && !automationExpired(record)
   && (run.manual || record.activation === "enabled");
 const stale = (run: AutomationRun, route: InputTriggerRoute | undefined) => run.homeDelivery && route && run.targetSnapshot.kind === "home"
   && (run.targetSnapshot.homeId !== route.homeId || run.targetSnapshot.routeGeneration !== route.routeGeneration || run.executionSessionId !== route.sessionId);
@@ -221,7 +221,7 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
       if (remaining[0]) next.currentRun = remaining[0]; else delete next.currentRun;
       if (remaining.length > 0 && wake) next.homeWakeAfter = new Date(Date.parse(next.homeWakeAt!) + AUTOMATION_HOME_COOLDOWN_MS).toISOString();
       else delete next.homeWakeAfter;
-      if (!next.currentRun && next.activation !== "blocked" && next.trigger.kind === "once" && !run.manual) next.activation = "completed";
+      if (!next.currentRun && next.activation === "enabled" && next.trigger.kind === "once" && !run.manual) next.activation = "completed";
       return next;
     });
   }

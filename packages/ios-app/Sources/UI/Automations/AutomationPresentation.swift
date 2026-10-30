@@ -256,7 +256,7 @@ struct AutomationDetailMetadata: Identifiable {
             row("Created by", creator), row("Revision", "\(record.revision)"),
         ]))
         if let expiresAt = record.provenance.expiresAt {
-            sections.append(Self(title: "Monitor", rows: [row("Expires", AutomationDateFormatting.date(expiresAt))]))
+            sections.append(Self(title: "Expiry", rows: [row("Expires", AutomationDateFormatting.date(expiresAt))]))
         }
         return sections
     }

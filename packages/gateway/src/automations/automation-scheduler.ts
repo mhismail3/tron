@@ -3,7 +3,7 @@ import { GatewayError, isUncertainOutcome, uncertainOutcome } from "../errors.js
 import { automationOperationId } from "../modules/automations/identity.js";
 import { AutomationStore, settleAutomationRun } from "./automation-store.js";
 import { automationOccurrenceId, classifyDueOccurrence } from "./schedule.js";
-import { AUTOMATION_HOME_COOLDOWN_MS, type AutomationRecord, type AutomationRun, type AutomationRunState } from "./types.js";
+import { automationExpired, AUTOMATION_HOME_COOLDOWN_MS, type AutomationRecord, type AutomationRun, type AutomationRunState } from "./types.js";
 
 const MAXIMUM_CONCURRENT_AUTOMATIONS = 4;
 const MAXIMUM_DISPATCHES_PER_SCAN = 64;
@@ -264,6 +264,7 @@ export class AutomationScheduler {
         throw new GatewayError("conflict", "Automation changed. Review it before running it.", true);
       }
       if (current.currentRun && current.target.kind !== "home") throw new GatewayError("busy", "Automation already has an active run", true);
+      if (automationExpired(current, this.now())) throw new GatewayError("conflict", "Expired automations cannot run");
       if (current.activation === "blocked") throw new GatewayError("conflict", "Resolve the blocked automation before running it");
       const scheduledFor = new Date(this.now()).toISOString();
       created = this.makeRun(
@@ -362,7 +363,7 @@ export class AutomationScheduler {
       this.options.onHomePending?.();
     }
     const candidates = this.store.snapshot()
-      .filter((record) => record.target.kind !== "home" && record.currentRun
+      .filter((record) => record.target.kind !== "home" && !automationExpired(record, this.now()) && record.currentRun
         && (record.activation === "enabled" || record.currentRun.manual === true)
         && (record.currentRun.state === "queued" || record.currentRun.state === "waiting")
         && (record.currentRun.retryAt === undefined || Date.parse(record.currentRun.retryAt) <= this.now()))
@@ -405,8 +406,8 @@ export class AutomationScheduler {
   private async materializeDueRuns(): Promise<void> {
     const now = this.now();
     for (const record of this.store.snapshot()) {
-      if (record.provenance.kind === "home" && record.activation !== "completed" && Date.parse(record.provenance.expiresAt) <= now) {
-        await this.store.mutateState(record.id, current => current); // Store retires expired, unclaimed Home messages.
+      if (record.activation !== "expired" && automationExpired(record, now)) {
+        await this.store.mutateState(record.id, current => current);
         continue;
       }
       if (record.activation !== "enabled" || !record.nextOccurrenceAt || Date.parse(record.nextOccurrenceAt) > now) continue;
@@ -480,7 +481,7 @@ export class AutomationScheduler {
     const claimId = randomUUID();
     const claimedAt = new Date(this.now()).toISOString();
     const claimed = await this.store.mutateState(candidate.id, (current) => {
-      if (current.currentRun?.runId !== run.runId
+      if (automationExpired(current, this.now()) || current.currentRun?.runId !== run.runId
         || current.activation !== "enabled" && current.currentRun.manual !== true
         || (current.currentRun.state !== "queued" && current.currentRun.state !== "waiting")) return current;
       const next = clone(current);
@@ -646,7 +647,7 @@ export class AutomationScheduler {
         const next = settleAutomationRun(current, terminal, now);
         if (manual && next.activation !== "blocked") next.activation = previousActivation;
         if (terminal.state === "outcomeUnknown") {
-          next.activation = "blocked";
+          next.activation = previousActivation === "paused" ? "paused" : "blocked";
           next.blockedReason = "outcome-unknown";
           delete next.nextOccurrenceAt;
           delete next.queuedLatestOccurrence;
@@ -656,7 +657,7 @@ export class AutomationScheduler {
           const scheduledFor = next.queuedLatestOccurrence;
           delete next.queuedLatestOccurrence;
           next.currentRun = this.makeRun(next, scheduledFor, automationOccurrenceId(next.id, next.revision, scheduledFor));
-        } else if (!manual && next.trigger.kind === "once" && !next.currentRun) {
+        } else if (!manual && next.trigger.kind === "once" && !next.currentRun && next.activation === "enabled") {
           next.activation = "completed";
         }
         return next;
@@ -798,7 +799,7 @@ export class AutomationScheduler {
     const records = this.store.snapshot();
     let nearest: number | undefined;
     for (const record of records) {
-      if (record.provenance.kind === "home" && record.activation !== "completed") {
+      if (record.provenance.expiresAt !== undefined && record.activation !== "expired") {
         const expires = Date.parse(record.provenance.expiresAt);
         if (nearest === undefined || expires < nearest) nearest = expires;
       }

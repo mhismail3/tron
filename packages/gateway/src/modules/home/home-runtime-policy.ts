@@ -4,7 +4,7 @@ import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
  * runtime. Shared by runtime admission and settings declarations: ordinary Mac
  * tool defaults cannot grant or remove Home's curated capabilities. */
 export const HOME_TOOL_NAMES: readonly string[] = [
-  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "monitor", "profile",
+  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "schedule", "profile",
   "web_search", "session_search", "session_read", "knowledge", "read_file", "settings", "projects",
 ];
 

@@ -203,16 +203,6 @@ export class AutomationService {
     return resolved;
   }
 
-  async pauseHomeMonitors(sessionId: string): Promise<void> {
-    const route = this.homeTarget?.();
-    if (route?.sessionId !== sessionId) return;
-    for (const record of this.store.snapshot()) {
-      if (record.provenance.kind === "home" && record.provenance.homeId === route.homeId && record.activation === "enabled") {
-        await this.pause(record.id, record.revision);
-      }
-    }
-  }
-
   async blockSessionTarget(sessionId: string): Promise<void> {
     await this.store.blockTarget(sessionId);
     this.scheduler.wake();
@@ -230,6 +220,8 @@ export class AutomationService {
   private async canonicalizeTarget(target: AutomationTarget): Promise<AutomationTarget> {
     if (target.kind === "home") { await this.validateTarget(target); return target; }
     if (target.kind === "existingSession") {
+      const home = this.homeTarget?.();
+      if (home?.sessionId === target.sessionId) return { kind: "home", homeId: home.homeId, routeGeneration: home.routeGeneration };
       await this.targets.requirePersistedUserSession(target.sessionId);
       return target;
     }

@@ -260,7 +260,7 @@ const HOME_EXTENSIONS = [
 /** The curated Home profile's executable tool set: the allowlist, sorted the way
  * the assertions read it. */
 const HOME_TOOLS = [
-  "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "monitor", "notify",
+  "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "notify",
   "profile", "projects", "read_file", "session_read", "session_search", "settings", "task", "web_search", "zoom",
 ];
 

@@ -1,6 +1,7 @@
 import { StringEnum } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { Type } from "../kernel/pi/ai.js";
+import type { SessionContext } from "../kernel/host/module-host.js";
 import { currentInvocationContext } from "../kernel/host/extension-execution-context.js";
 import type { JsonValue } from "../protocol/types.js";
 
@@ -11,6 +12,7 @@ export interface ScheduleToolRequest {
   notificationMessage?: string;
   target?: "currentSession" | "newSessionInWorkspace" | "home";
   at?: string;
+  expiresAt?: string;
   everyMinutes?: number;
   timezone?: string;
   localTime?: string;
@@ -38,6 +40,7 @@ const parameters = Type.Object({
   notificationMessage: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   target: Type.Optional(StringEnum(["currentSession", "newSessionInWorkspace", "home"] as const)),
   at: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  expiresAt: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   everyMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 525_600 })),
   timezone: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   localTime: Type.Optional(Type.String({ minLength: 5, maxLength: 5 })),
@@ -50,7 +53,7 @@ const parameters = Type.Object({
 }, { additionalProperties: false });
 
 export function createTronScheduleExtension(input: {
-  sessionId: () => string;
+  session: Pick<SessionContext, "sessionId" | "profile" | "delegatedWorker">;
   operations: ScheduleToolOperations;
 }): ExtensionFactory {
   return (pi) => {
@@ -59,10 +62,10 @@ export function createTronScheduleExtension(input: {
       // docs/settings-model.md 5.4: declares it reads no open-world content.
       annotations: { openWorldHint: false },
       label: "Schedule",
-      description: "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds.",
+      description: "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds.",
       promptSnippet: "Create and manage durable schedules and reminders for the current Tron session",
       promptGuidelines: [
-        "Use schedule only when the user explicitly asks to create, change, run, cancel, or resolve a persistent automation.",
+        "Use schedule for authorized durable automations. Home may manage them directly; interactive sessions require user confirmation; delegated workers cannot mutate them.",
         "The schedule tool manages the current persisted Tron session, a new session in its current workspace per prompt run, or an attributed Home message; it cannot schedule shell commands, deployments, or Gateway lifecycle actions.",
         "Do not use schedule from inside a scheduled automation to create or mutate another automation.",
       ],
@@ -71,10 +74,13 @@ export function createTronScheduleExtension(input: {
       execute: async (toolCallId, request, _signal, _onUpdate, ctx) => {
         const context = currentInvocationContext();
         if (request.action !== "list" && request.action !== "show"
-          && context?.operationId?.startsWith("automation:")) {
+          && (context?.operationId?.startsWith("automation:") || context?.trigger)) {
           throw new Error("Scheduled automation turns cannot mutate automations");
         }
-        if (request.action !== "list" && request.action !== "show") {
+        if (request.action !== "list" && request.action !== "show" && input.session.delegatedWorker()) {
+          throw new Error("Delegated workers and their subagents cannot mutate automations");
+        }
+        if (request.action !== "list" && request.action !== "show" && input.session.profile().settingsActor !== "home") {
           if (!ctx.hasUI) throw new Error("Automation mutations require an interactive user confirmation");
           const confirmed = await ctx.ui.confirm(
             "Confirm automation change",
@@ -86,7 +92,7 @@ export function createTronScheduleExtension(input: {
             return { content: [{ type: "text", text: "Automation change cancelled by the user." }], details: { cancelled: true } };
           }
         }
-        const result = await input.operations.execute(input.sessionId(), toolCallId, request);
+        const result = await input.operations.execute(input.session.sessionId(), toolCallId, request);
         return {
           content: [{ type: "text", text: result.message }],
           details: result.details,

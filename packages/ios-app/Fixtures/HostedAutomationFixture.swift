@@ -92,6 +92,12 @@ struct HostedAutomationFixtureView: View {
             AutomationPresentationFixture.record(activation: "enabled", current: true),
         ].enumerated().map { index, record in
             var fields = try JSONValue.encode(record).objectValue!
+            if index == 0, ProcessInfo.processInfo.arguments.contains("-automation-expiry") {
+                fields["activation"] = .string("expired")
+                fields["provenance"] = .object(["kind": .string("assistant"), "sessionId": .string("home-fixture"), "sourceId": .string("fixture-call"), "expiresAt": .string("2026-09-20T12:00:00Z")])
+                fields["nextOccurrenceAt"] = .null
+                fields["lastRun"] = .null
+            }
             fields["id"] = .string("automation-\(index)")
             fields["name"] = .string(["Daily workspace review", "Daily reminder", "Project report"][index])
             return try JSONValue.object(fields).decode(GatewayAutomationRecord.self)

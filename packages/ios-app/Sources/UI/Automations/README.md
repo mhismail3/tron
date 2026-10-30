@@ -28,11 +28,9 @@ editors), `KnowledgeFormSheet`, `KnowledgeMutation`,
   `AutomationDashboardPreferencesOwner`. No search. Opening a session from an Automation, or a push
   route, dismisses the sheet first. No pull-to-refresh: `automation.changed` drives refresh while
   presented.
-- **Home-created monitors.** These are ordinary visible Automations with **Tron Home**
-  creator attribution and an expiry row in detail. The Gateway owns their five-minute
-  minimum interval, three-active limit and 24-hour maximum lease. Pause or expiry cancels
-  unclaimed monitor messages, and Home Stop pauses its monitors; maintainer definitions
-  retain their existing lifecycle. Editing or enabling never extends a monitor’s expiry.
+- **Expiry.** Every automation may have an expiry, displayed in detail. Expired
+  automations remain visible but cannot run or enable. Home uses the normal inventory
+  and editor; there are no monitor-specific restrictions or controls.
 - **Reads.** List pages omit action bodies, require one exact catalog revision, and cap each Gateway
   at 1,024 definitions; prompt or notification content comes only from authenticated,
   surface-scoped `automation.get`. iOS builds no schedule engine and infers no execution state; the
