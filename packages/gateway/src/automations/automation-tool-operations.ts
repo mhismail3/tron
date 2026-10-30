@@ -69,7 +69,11 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       || Object.keys(input).some(key => !fields.includes(key))
       || fields.some(key => input[key] === undefined)) throw new GatewayError("invalid_request", "Invalid monitor fields for this action");
     const owns = (record: AutomationRecord) => record.provenance.kind === "home" && record.provenance.homeId === route.homeId;
-    if (action === "list") return { monitors: this.service.store.snapshot().filter(owns) };
+    if (action === "list") {
+      const all = this.service.store.snapshot().filter(owns).reverse();
+      return { monitors: all.slice(0, 50).map(({ id, revision, name, activation, trigger, provenance }) =>
+        ({ id, revision, name, activation, trigger, expiresAt: provenance.kind === "home" ? provenance.expiresAt : undefined })), omittedCount: Math.max(0, all.length - 50) };
+    }
     return this.receipts.execute(
       `home:${route.homeId}`, `tool.monitor.${action}`, commandId(sessionId, toolCallId, `monitor.${action}`), async () => {
         if (action === "create") {

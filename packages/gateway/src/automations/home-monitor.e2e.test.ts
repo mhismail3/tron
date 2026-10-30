@@ -160,6 +160,8 @@ it("real Gateway/socket/Pi: interval, expiry, active-count and ownership refusal
   expect((await phone.request("automation.get", { automationId: foreign.result.id })).result).toEqual(foreign.result);
   const ownList = (await prompt("List only Home-created definitions.", [{ action: "list" }]))[0].details as any;
   expect(ownList.monitors).toHaveLength(4);
+  expect(ownList.omittedCount).toBe(0);
+  expect(ownList.monitors.every((record: any) => record.expiresAt && record.history === undefined && record.action === undefined)).toBe(true);
   expect(ownList.monitors.some((record: any) => record.id === foreign.result.id)).toBe(false);
   expect((await phone.request("settings.approvals", {})).result.requests).toHaveLength(0);
   expect(gateway.record().providerRequests.every(request => request.tools.includes("monitor"))).toBe(true);

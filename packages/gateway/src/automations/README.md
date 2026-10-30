@@ -64,7 +64,7 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   Intervals are whole minutes from 5–1440; expiry is required, future, and at most
   24 hours from creation. At most three Home monitors may be enabled installation-wide;
   create and enable check the bound under the store mutex. First firing is one
-  interval after creation. `list` returns definitions/revisions; `pause|resume|delete`
+  interval after creation. `list` returns at most 50 newest summaries/revisions and an omitted count, never message bodies or run history; `pause|resume|delete`
   require `automationId, expectedRevision`. Expiry cannot be extended by editing or
   resuming. The existing scheduler completes expired monitors; pause/expiry cancels
   unclaimed messages, while claimed inputs retain their proof owner. Unlike ordinary
