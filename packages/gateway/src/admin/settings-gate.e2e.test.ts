@@ -10,7 +10,7 @@ import { settingsDependencies, setHomeMemoryModels } from "../../test-support/se
 import { HOME_TOOL_NAMES, homeToolCatalog } from "../modules/home/home-runtime-policy.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
-import { reviewedMutation } from "../../test-support/native-change.js";
+import { maintainerChange } from "../../test-support/native-change.js";
 import type { ChangeEntry } from "../kernel/settings/settings-record.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -307,7 +307,7 @@ describe("typed settings at real runtime boundaries", () => {
     const f = await fixture({ reasoning: true });
     const home = await f.designateHome();
     const tools = ["ask_user", "date", "settings"];
-    const save = (changes: Array<Record<string, unknown>>) => reviewedMutation(f.service, phone(), "settings.change", {
+    const save = (changes: Array<Record<string, unknown>>) => maintainerChange(f.service, phone(), "settings.change", {
       commandId: commandId(), target: { kind: "home" },
       changes: changes.map(change => ({ layer: "session", op: "set", ...change })),
     });
@@ -362,7 +362,7 @@ describe("typed settings at real runtime boundaries", () => {
     const first = await f.designateHome();
     for (const [key, value] of [["model.thinking[role=chat]", "high"], ["run.retry.maxRetries", 7], ["context.images.block", true]] as const) {
       const snapshot = first.snapshot();
-      await reviewedMutation(f.service, phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: first.id },
+      await maintainerChange(f.service, phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: first.id },
         fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
         changes: [{ key, layer: "session", op: "set", value }] });
     }
@@ -503,7 +503,7 @@ describe("typed settings at real runtime boundaries", () => {
     expect(lowered).toMatchObject({ status: "declined" });
     expect((await observe()).images).toBe(0);
     expect(slot.settingsSessionLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true }) });
-    await reviewedMutation(f.service, phone(), "settings.change", {
+    await maintainerChange(f.service, phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
       changes: [{ key: "context.images.block", layer: "session", op: "unset" }],
@@ -514,7 +514,7 @@ describe("typed settings at real runtime boundaries", () => {
   it.each([false, true])("an approved Global image-block widening (session target: %s) releases only inheriting open chats", async (viaSession) => {
     const f = await fixture();
     const target = { kind: "global" } as const;
-    const setDefault = (value: boolean, sessionId?: string) => reviewedMutation(f.service, phone(), "settings.change", {
+    const setDefault = (value: boolean, sessionId?: string) => maintainerChange(f.service, phone(), "settings.change", {
       commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target,
       changes: [{ key: "context.images.block", layer: "global", op: "set", value }],
     });

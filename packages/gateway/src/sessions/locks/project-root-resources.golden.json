@@ -39,29 +39,6 @@
     },
     {
       "client": "phone",
-      "method": "settings.change",
-      "params": {
-        "changes": [
-          {
-            "key": "permissions.projectTrust",
-            "layer": "global",
-            "op": "set",
-            "qualifiers": {
-              "project": "<tmp>/project/packages/app"
-            },
-            "value": true
-          }
-        ],
-        "commandId": "lock-command-0002",
-        "confirmationDigest": "<base64:64>",
-        "reason": "Trust the lock project",
-        "target": {
-          "kind": "global"
-        }
-      }
-    },
-    {
-      "client": "phone",
       "method": "packages.list",
       "params": {
         "cwd": "<tmp>/project/packages/app"

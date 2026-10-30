@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { reviewedMutation } from "../../test-support/native-change.js";
+import { maintainerChange } from "../../test-support/native-change.js";
 import { SettingsStoreAdapter } from "../admin/settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
@@ -191,7 +191,7 @@ describe("Mac Terminal", () => {
       const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
 
       expect(await service.invoke(client(phone), "macTerminal.status", {})).toMatchObject({ serviceState: "unconfigured", hostKeys: [], enrolled: false });
-      const enabled = await reviewedMutation(service, client(phone), "settings.change", {
+      const enabled = await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalServer", layer: "global", op: "set", value: true }],
       }) as unknown as { changes: Array<{ changeId: string }> };
@@ -208,7 +208,7 @@ describe("Mac Terminal", () => {
 
       // Enrollment is the maintainer's tap through settings.change: applied at
       // its approve tier and recorded.
-      const enrolled = await reviewedMutation(service, client(phone), "settings.change", {
+      const enrolled = await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       }) as unknown as { status: string; changes: Array<{ status: string }> };
@@ -278,7 +278,7 @@ describe("Mac Terminal", () => {
       // denial after TCP/auth, not merely by the last-key service shutdown.
       const keeper = await pair("Keeper iPhone");
       const keeperKey = JSON.parse(await run(probe, ["keygen"])) as { publicKey: string };
-      await reviewedMutation(service, client(keeper), "settings.change", {
+      await maintainerChange(service, client(keeper), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: keeper }, layer: "global", op: "set", value: keeperKey.publicKey }],
       });
@@ -286,7 +286,7 @@ describe("Mac Terminal", () => {
       // The native replacement/undo oracle covers the hardware-owned rows
       // that cannot be mutated by the generic hosted/Linux settings journey.
       const replacement = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
-      const replaced = await reviewedMutation(service, client(phone), "settings.change", {
+      const replaced = await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: replacement.publicKey }],
       }) as unknown as { changes: Array<{ changeId: string }> };
@@ -296,14 +296,14 @@ describe("Mac Terminal", () => {
       await native.recover();
       expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
       expect(await connect(endpoint, replacement.privateKeyPEM)).toMatchObject({ outcome: "ok" });
-      await reviewedMutation(service, client(phone), "settings.undo", { commandId: commandId(), changeId: replaced.changes[0]!.changeId });
+      await maintainerChange(service, client(phone), "settings.undo", { commandId: commandId(), changeId: replaced.changes[0]!.changeId });
       expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "ok" });
       expect(await connect(endpoint, replacement.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
       transcript.push({ case: "native-key-replacement-undo", detail: { restored: true } });
       await native.recover();
       // Revocation from the iPhone: the key unset through the same path.
       ({ service } = await gateway(tronHome, port));
-      const revoked = await reviewedMutation(service, client(phone), "settings.change", {
+      const revoked = await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "unset" }],
       }) as unknown as { status: string; changes: Array<{ status: string }> };
@@ -315,14 +315,14 @@ describe("Mac Terminal", () => {
 
       // Revoking the paired device removes its key as a logged change.
       ({ service, devices } = await gateway(tronHome, port));
-      await reviewedMutation(service, client(phone), "settings.change", {
+      await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       });
       expect((await connect(endpoint, key.privateKeyPEM)).outcome).toBe("ok");
       const otherPhone = await pair("Second iPhone");
       // An iPhone enrolls only its own key, so a device revoke always finds it.
-      await expect(reviewedMutation(service, client(otherPhone), "settings.change", {
+      await expect(maintainerChange(service, client(otherPhone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       })).rejects.toMatchObject({ code: "invalid_request" });
@@ -343,11 +343,11 @@ describe("Mac Terminal", () => {
       const deviceHistory = await service.invoke(client(otherPhone), "settings.history", { limit: 1 }) as unknown as { entries: Array<Record<string, unknown>> };
       expect(deviceHistory.entries[0]).toMatchObject({ key: "permissions.macTerminalKey", status: "applied", reason: "The paired device was revoked" });
       transcript.push({ case: "revoked-with-device", detail: deviceHistory.entries[0] });
-      await reviewedMutation(service, client(otherPhone), "settings.undo", { commandId: commandId(), changeId: enabled.changes[0]!.changeId });
+      await maintainerChange(service, client(otherPhone), "settings.undo", { commandId: commandId(), changeId: enabled.changes[0]!.changeId });
       expect(await native.enabled()).toBe(false);
       expect((await native.status()).serviceState).toBe("stopped");
       expect(await native.read()).toEqual({ [keeper]: keeperKey.publicKey });
-      await reviewedMutation(service, client(otherPhone), "settings.change", {
+      await maintainerChange(service, client(otherPhone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalServer", layer: "global", op: "set", value: true }],
       });

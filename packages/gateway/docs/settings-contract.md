@@ -176,8 +176,9 @@ canonical `extension.respond` mutation receipt. Before acceptance, Stop/cancella
 means no effects. After acceptance, retirement cannot falsely decline accepted work
 or cause replay. An uncertain receipt requires inspection.
 
-Direct paired-native `settings.change`, `settings.undo` and `settings.applyAgain`
-resubmit `confirmationDigest` only after the native card's explicit action.
+The maintainer's own `settings.change`, `settings.undo` and `settings.applyAgain`
+apply directly: his tap is the authority. A renderer that shows a key's review card
+may bind that tap to it with `confirmationDigest`; a changed store refuses it as stale.
 Project lifecycle uses `projects.change`, binding its exact typed intent and review;
 its owner revalidates filesystem, Git, occupancy and trust before effects.
 Project action facts do not invent generic inverses. Local RPC cannot confirm reviews.

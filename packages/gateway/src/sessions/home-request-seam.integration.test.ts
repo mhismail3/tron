@@ -282,16 +282,11 @@ async function open(label: string, options: FixtureOptions = {}) {
 }
 
 /** Home's Session-scope image choice as the paired iPhone makes it through the
- * real change path: a widening returns its exact review and applies only with
- * that digest, as the Gateway's paired-native admission supplies it. */
+ * real change path: the maintainer's own tap applies directly, privacy widening too. */
 async function chooseHomeImages(item: Awaited<ReturnType<typeof homeFixture>>, blocked: boolean): Promise<void> {
   const changes = (item.registry as unknown as { settingsOwners: { changes: SettingsChangePath } }).settingsOwners.changes;
-  const request = [{ key: "context.images.block", layer: "session" as const, op: "set" as const, value: blocked }];
-  const context = { actor: { kind: "ui" as const, id: "device:home-seam" }, homeChapter: item.slot.homeSettingsChapter() };
-  const first = await changes.change({ kind: "home" }, request, { ...context, commandId: randomUUID() });
-  const applied = first.status === "review"
-    ? await changes.change({ kind: "home" }, request, { ...context, commandId: randomUUID(), confirmationDigest: first.review!.digest })
-    : first;
+  const applied = await changes.change({ kind: "home" }, [{ key: "context.images.block", layer: "session", op: "set", value: blocked }],
+    { actor: { kind: "ui", id: "device:home-seam" }, commandId: randomUUID(), homeChapter: item.slot.homeSettingsChapter() });
   expect(applied.status).toBe("applied");
 }
 

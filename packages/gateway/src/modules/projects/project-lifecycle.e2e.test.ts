@@ -20,7 +20,7 @@ import { UploadStore } from "../../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../../config.js";
 import type { ProjectChangeResult as ChangeResult } from "./project-lifecycle.js";
 import type { ExtensionInteraction } from "../../protocol/types.js";
-import { reviewedMutation } from "../../../test-support/native-change.js";
+import { maintainerChange } from "../../../test-support/native-change.js";
 
 const exec = promisify(execFile);
 const artifact = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/project-lifecycle/report.json");
@@ -431,7 +431,7 @@ if (args.includes("worktree")) {
 
   it("pins new exact roots under an enclosing repository and default-always trust; partial relocation stays untrusted", async () => {
     const f = await fixture();
-    await reviewedMutation(f.service, phone, "settings.change", { commandId: `default-trust-${++command}`, target: { kind: "global" },
+    await maintainerChange(f.service, phone, "settings.change", { commandId: `default-trust-${++command}`, target: { kind: "global" },
       changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] });
     await exec("git", ["-C", f.workspace, "init", "--initial-branch=main"]);
     const ancestor = await f.trust.inspect(f.workspace);

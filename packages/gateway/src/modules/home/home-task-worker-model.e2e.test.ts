@@ -540,14 +540,10 @@ describe("Home task budget", () => {
     { stopReason: "toolUse", usage: { input: 2, output, cacheRead: 0, cacheWrite: 0 } } as never);
   const install = (f: Awaited<ReturnType<typeof fixture>>) =>
     f.settings.settingsChanges;
-  /** The maintainer's paired iPhone answers a spend widening's exact review with
-   * its digest; any other actor receives only the review. */
-  const setBudget = async (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) => {
-    const request = [{ key: "permissions.budget.task", layer: "session" as const, op: value ? "set" as const : "unset" as const, ...(value ? { value } : {}) }];
-    const result = await changes.change({ kind: "home" }, request, context);
-    return result.status === "review" && context.actor.kind === "ui"
-      ? changes.change({ kind: "home" }, request, { ...context, confirmationDigest: result.review!.digest }) : result;
-  };
+  /** The maintainer's paired tap applies a spend widening directly; any other
+   * actor receives only the exact review. */
+  const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
+    changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "session", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
 
   it("stops a task at the turn boundary that reaches its budget: limited, budget, no further model request", async () => {
     const f = await fixture();

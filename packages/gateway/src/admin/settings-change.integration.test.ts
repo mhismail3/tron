@@ -18,7 +18,7 @@ import { SettingsStoreAdapter } from "./settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
-import { reviewedMutation } from "../../test-support/native-change.js";
+import { maintainerChange } from "../../test-support/native-change.js";
 import { OutsideChanges } from "./settings-outside.js";
 import { McpAdminService } from "./mcp-admin-service.js";
 import { ModelConfigService } from "./model-config-service.js";
@@ -452,7 +452,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
-    reviewedMutation(service, c, "settings.change", { commandId: commandId(), target, changes, ...extra });
+    maintainerChange(service, c, "settings.change", { commandId: commandId(), target, changes, ...extra });
   const agentChange = async (target: Parameters<SettingsChangePath["change"]>[0], changes: Parameters<SettingsChangePath["change"]>[1]) => {
     const result = await settingsChanges.change(target, changes, {
       actor: { kind: "agent", id: "repository-agent" }, reason: "Update repository configuration",
@@ -548,7 +548,7 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
 
     // Undo writes `before` back as an ordinary change that names what it undid.
-    const undone = await reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId }) as { changes: Array<{ changeId: string }> };
+    const undone = await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId }) as { changes: Array<{ changeId: string }> };
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     const undoEntry = (await f.history()).find(candidate => candidate.changeId === undone.changes[0]!.changeId);
     expect(undoEntry).toMatchObject({ undoOf: applied.changes[0]!.changeId, before: 6, after: 4 });
@@ -556,7 +556,7 @@ describe("settings.change", () => {
     // Undo after a later conflicting change is refused with the current value.
     const second = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 }]);
     await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 10 }]);
-    await expect(reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: second.changes[0]!.changeId }))
+    await expect(maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: second.changes[0]!.changeId }))
       .rejects.toMatchObject({ code: "conflict", details: { current: 10, after: 8,
         display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
@@ -571,7 +571,7 @@ describe("settings.change", () => {
     expect(proxyEntry).toMatchObject({ changed: true, redacted: true,
       presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });
     expect(JSON.stringify(await f.history())).not.toContain("proxy.invalid");
-    await expect(reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
+    await expect(maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
       .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
 
     // A layer the key does not allow, and a key with no writer, are refused.
@@ -674,7 +674,7 @@ describe("settings.change", () => {
     expect((await f.trust.inspect(project)).savedDecision).toBe(true);
     expect(f.broadcasts.some(event => event.topic === "trust.changed")).toBe(true);
     expect((await f.history({ key: "permissions.projectTrust" }))[0]).toMatchObject({ after: true, status: "applied" });
-    await reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: granted.changes[0]!.changeId });
+    await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: granted.changes[0]!.changeId });
     expect((await f.trust.inspect(project)).savedDecision).toBeNull();
 
     // Trust is keyed by the Project root: a Mac request naming a subdirectory
@@ -700,7 +700,7 @@ describe("settings.change", () => {
     expect(await trustRow()).toMatchObject({ value: true, layer: "global" });
     const blocked = await f.change({ kind: "project", cwd: child }, [{ key: "permissions.projectTrust", layer: "global", op: "set", value: false }]);
     expect(await trustRow()).toMatchObject({ value: false });
-    await reviewedMutation(f.service, client(), "settings.undo", { commandId: commandId(), changeId: blocked.changes[0]!.changeId });
+    await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: blocked.changes[0]!.changeId });
     expect((await f.trust.inspect(child)).savedDecision).toBe(true);
     expect(JSON.parse(await readFile(join(f.agentDir, "trust.json"), "utf8"))[await realpath(child)]).toBeUndefined();
   });
@@ -1226,7 +1226,7 @@ describe("every key at every allowed layer", () => {
           const actor = key.id === "permissions.macTerminalKey"
             ? { ...client([slot.id]), identity: ENROLLED_IPHONE } as ClientContext : client([slot.id]);
           expect(await f.change(targets[layer]!, request, { ...extra, dryRun: true }, actor))
-            .toMatchObject({ dryRun: true, status: "review", review: { requiresTap: true } });
+            .toMatchObject({ dryRun: true, status: "applied", review: { requiresTap: true } });
           report.push({ ...instance, result: "native mutation: real sshd Gateway round trips" });
           continue;
         }
@@ -1246,7 +1246,7 @@ describe("every key at every allowed layer", () => {
         expect(after!.layer, `${key.id}@${layer} source`).toBe(scope);
         if (!key.redacted) expect(after!.value, `${key.id}@${layer} value`).toEqual(expectedValue);
         expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
-        const undo = reviewedMutation(f.service, client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
+        const undo = maintainerChange(f.service, client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
         if (key.redacted) {
           // A redacted change has no recorded `before`: never undoable, so unset it directly.
           await expect(undo).rejects.toMatchObject({ code: "conflict" });

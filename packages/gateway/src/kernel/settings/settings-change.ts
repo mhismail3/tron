@@ -186,7 +186,7 @@ export class SettingsChangePath {
     if (context.confirmationDigest && context.confirmationDigest !== review.digest) throw new GatewayError("conflict", "The reviewed change is stale; nothing was applied");
     if (context.dryRun) {
       let next = 0;
-      return { dryRun: true, status: errors.size ? "failed" : requiresTap ? "review" : "applied", review,
+      return { dryRun: true, status: errors.size ? "failed" : requiresTap && context.actor.kind !== "ui" ? "review" : "applied", review,
         changes: requests.map((request, index) => {
           const error = errors.get(index);
           if (error) return { changeId: "", key: request.key, layer: request.layer, status: "failed", error: { code: error.code, message: error.message } };
@@ -195,7 +195,9 @@ export class SettingsChangePath {
             status: "applied", ...outcomeValues(plan.key.redacted, plan.before, plan.after) };
         }) };
     }
-    if (requiresTap && !context.confirmationDigest) return { status: "review", review, changes: [] };
+    // The paired maintainer's own tap is the authority (it may bind a reviewed
+    // digest); every other actor gets only the exact review for that tap.
+    if (requiresTap && context.actor.kind !== "ui") return { status: "review", review, changes: [] };
     const applied = await this.applyAll(target, stores, planned, context, entry => entry);
     const changes = this.outcomes(applied.filter(done => !done.plan.target), "applied");
     const adopted = this.outcomes(applied.filter(done => done.plan.target), "applied");

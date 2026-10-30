@@ -16,7 +16,7 @@ import { SettingsStoreAdapter } from "./settings-model.js";
 import { SettingsChangePath } from "../kernel/settings/settings-change.js";
 import { SettingsModel } from "../kernel/settings/settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "../kernel/settings/settings-record.js";
-import { reviewedMutation } from "../../test-support/native-change.js";
+import { maintainerChange as maintainerRpc } from "../../test-support/native-change.js";
 const { KEYS } = TEST_SETTINGS_SCHEMA;
 import type { Resolution, ResolvedKey, SettingsTarget } from "../kernel/settings/tool-contract.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
@@ -400,7 +400,7 @@ describe("settings renderer contract", () => {
     const initial = await resolve();
     expect(row(initial, queue)).toMatchObject({ value: [], display: "Same as Home", presentation: { control: "list" } });
     expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
-    const change = async (id: string, key: string, value: unknown) => await reviewedMutation(f.service, subscribed(), "settings.change", {
+    const change = async (id: string, key: string, value: unknown) => await maintainerRpc(f.service, subscribed(), "settings.change", {
       commandId: id, target, changes: [{ key, layer: "global", op: "set", value }],
     });
     await change("queue-two", queue, [first, second]);
@@ -443,7 +443,7 @@ describe("settings renderer contract", () => {
   };
   /** A maintainer's change through the RPC: the iPhone's own tap, as the Mac target. */
   const maintainerChange = (f: Fixture, changes: unknown[], dryRun = false) =>
-    reviewedMutation(f.service, subscribed(), "settings.change", { commandId: commandId(), target: macTarget, changes, ...(dryRun ? { dryRun: true } : {}) });
+    maintainerRpc(f.service, subscribed(), "settings.change", { commandId: commandId(), target: macTarget, changes, ...(dryRun ? { dryRun: true } : {}) });
   const options = (f: Fixture, request: Record<string, unknown>, target: Record<string, unknown> = macTarget) =>
     f.service.invoke(subscribed(), "settings.options", { target, ...request }) as Promise<Options>;
 
@@ -451,7 +451,7 @@ describe("settings renderer contract", () => {
     const f = await fixture();
     await f.trust.set(f.project, true);
     const changeAt = async (target: Record<string, unknown>, value: string[]) => {
-      if (target.kind !== "project") return reviewedMutation(f.service, subscribed(), "settings.change", {
+      if (target.kind !== "project") return maintainerRpc(f.service, subscribed(), "settings.change", {
         commandId: commandId(), target, changes: [{ key: "tools.active", layer: target.kind, op: "set", value }],
       });
       // Repository composition remains available to logged agent requests, not app editors.

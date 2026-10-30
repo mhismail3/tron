@@ -70,52 +70,6 @@
         "error": null,
         "ok": true,
         "result": {
-          "changes": [],
-          "review": {
-            "digest": "<base64:64>",
-            "items": [
-              {
-                "after": "Trusted",
-                "before": "Not set",
-                "detail": "Global stored value\nglobal\nTrusting a project runs its extensions and hooks.",
-                "exact": "{\"target\":{\"kind\":\"global\"},\"key\":\"permissions.projectTrust\",\"layer\":\"global\",\"qualifiers\":{\"project\":\"<tmp>/project\"},\"op\":\"set\",\"before\":null,\"after\":true}",
-                "label": "Trust for this project"
-              }
-            ],
-            "reason": "Trust the lock project",
-            "requiresTap": true,
-            "title": "Trust for this project"
-          },
-          "status": "review"
-        }
-      }
-    },
-    {
-      "client": "phone",
-      "method": "settings.change",
-      "params": {
-        "changes": [
-          {
-            "key": "permissions.projectTrust",
-            "layer": "global",
-            "op": "set",
-            "qualifiers": {
-              "project": "<tmp>/project/packages/app"
-            },
-            "value": true
-          }
-        ],
-        "commandId": "lock-command-0003",
-        "confirmationDigest": "<base64:64>",
-        "reason": "Trust the lock project",
-        "target": {
-          "kind": "global"
-        }
-      },
-      "response": {
-        "error": null,
-        "ok": true,
-        "result": {
           "changes": [
             {
               "after": true,
@@ -198,7 +152,7 @@
       "client": "phone",
       "method": "session.create",
       "params": {
-        "commandId": "lock-command-0004",
+        "commandId": "lock-command-0003",
         "cwd": "<tmp>/project/packages/app"
       },
       "response": {
@@ -662,7 +616,7 @@
       "client": "phone",
       "method": "session.prompt",
       "params": {
-        "commandId": "lock-command-0005",
+        "commandId": "lock-command-0004",
         "sessionId": "<id>",
         "text": "where does this chat run?"
       },
@@ -689,7 +643,7 @@
             "value": false
           }
         ],
-        "commandId": "lock-command-0006",
+        "commandId": "lock-command-0005",
         "reason": "Stop trusting the lock project",
         "target": {
           "kind": "global"
@@ -743,7 +697,7 @@
       "client": "phone",
       "method": "session.prompt",
       "params": {
-        "commandId": "lock-command-0007",
+        "commandId": "lock-command-0006",
         "sessionId": "<id>",
         "text": "and after revoking trust?"
       },

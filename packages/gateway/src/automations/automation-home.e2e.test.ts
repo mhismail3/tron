@@ -586,10 +586,10 @@ it("real Gateway: an automation wake cannot approve settings, trust, grants or s
   await mkdir(untrusted);
   // A known exact preview is not authority. Even its digest cannot be supplied
   // through an agent tool or turned into a native tap by trigger text.
-  const seed = await phone.request("settings.change", { commandId: gateway.commandId(), target: { kind: "global" },
+  const seed = await phone.request("settings.change", { commandId: gateway.commandId(), target: { kind: "global" }, dryRun: true,
     reason: "Exact native trust preview", changes: [{ key: trustKey, qualifiers: { project: untrusted }, layer: "global", op: "set", value: true }] });
   expect(seed.ok, JSON.stringify(seed)).toBe(true);
-  expect(seed.result).toMatchObject({ status: "review", review: { requiresTap: true } });
+  expect(seed.result).toMatchObject({ dryRun: true, status: "applied", review: { requiresTap: true } });
   const query = { target: { kind: "home" }, keys: ["run.retry.maxRetries", trustKey] };
   const baseline = await phone.request("settings.resolve", query);
   expect(baseline.ok, JSON.stringify(baseline)).toBe(true);

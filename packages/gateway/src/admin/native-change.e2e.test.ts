@@ -269,8 +269,9 @@ describe("typed changes and exact native acceptance", () => {
   it("replans the actual store after the human wait and refuses a stale exact review", async () => {
     const f = await nativeChange();
     try {
-      const first = await f.service.invoke(phone, "settings.change", { commandId: "other-shell-review", target: { kind: "global" }, changes: [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/bash" }] }) as unknown as { review: { digest: string } };
-      await f.service.invoke(phone, "settings.change", { commandId: "other-shell-accepted", confirmationDigest: first.review.digest, target: { kind: "global" }, changes: [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/bash" }] });
+      // The maintainer's own paired tap applies directly while the card waits.
+      await expect(f.service.invoke(phone, "settings.change", { commandId: "other-shell-accepted", target: { kind: "global" }, changes: [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/bash" }] }))
+        .resolves.toMatchObject({ status: "applied", review: { requiresTap: true } });
       await expect(f.answer(true)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("stale") });
       await f.prompting;
       expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBe("/bin/bash");
