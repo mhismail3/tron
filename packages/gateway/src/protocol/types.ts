@@ -41,9 +41,7 @@ export type AdministrativeDrainBlockerCategory =
   | "administrative-provider-package-operation"
   | "provider-login"
   | "automation-dispatch"
-  | "automation-terminal-persistence"
-  | "knowledge-observation"
-  | "knowledge-curation";
+  | "automation-terminal-persistence";
 
 export interface AdministrativeDrainBlockerSummary {
   /** Per-drain opaque identity. It is not a session, run, path, or token ID. */

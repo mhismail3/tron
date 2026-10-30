@@ -10,8 +10,8 @@ import {
   type AssistantMessage, type SimpleStreamOptions, type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
-import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
-import { KnowledgeStore } from "../src/knowledge/knowledge-store.js";
+
+import { ProfileStore } from "../src/modules/home/profile-store.js";
 import { workspaceModule } from "../src/workspace/workspace-module.js";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
@@ -251,7 +251,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const notificationService = await options.notifications?.(tronHome);
   const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
   let homeTriggers: AutomationHomeTrigger | undefined;
-  let knowledge: KnowledgeService | undefined;
+  let knowledge: ProfileStore | undefined;
   let profileSettings: { model: SettingsModel; changes: SettingsChangePath } | undefined;
   const registry = await createTestRegistry({
     triggerSources: () => homeTriggers ? [homeTriggers] : [],
@@ -276,7 +276,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await registry.initialize();
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } }).sessionCatalog.whenPublished();
 
-  if (options.knowledge) knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
+  if (options.knowledge) knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
   // Production settings wiring (gateway-main.ts): every read reconciles outside changes.
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") }) }));
   const settingsRecord = new SettingsChangeRecord(tronHome);
@@ -489,7 +489,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       await server?.close();
       await automations?.dispose();
       await registry.dispose().catch(() => {});
-      knowledge?.dispose();
+
       await receipts.dispose();
       await outside.dispose();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

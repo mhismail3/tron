@@ -43,7 +43,7 @@ import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES,
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 import { admitHomeTaskToolRequest, homeSystemPrompt } from "./tron-home-extension.js";
 import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
-import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
+import type { ProfileStore } from "./profile-store.js";
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
 const MAXIMUM_RECORD_BYTES = 16 * 1_024 * 1_024;
@@ -146,7 +146,7 @@ export interface HomeOwnerOptions {
   machineId?: string;
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
   /** Knowledge supplies the learned profile section of Home's system prompt. */
-  knowledge: () => KnowledgeService | undefined;
+  knowledge: () => ProfileStore | undefined;
   /** Each external source retains its durable outbox. */
   triggerSources?: () => readonly InputTriggerInbox[];
 }

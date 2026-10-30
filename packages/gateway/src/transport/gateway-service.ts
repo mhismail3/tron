@@ -75,69 +75,13 @@ import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
-import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
+import type { ProfileStore } from "../modules/home/profile-store.js";
 import type { ConnectionAccess, ConnectionAction } from "../modules/integrations/contract.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import type { HomeOwner } from "../modules/home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 import type { ModuleHost } from "../kernel/host/module-host.js";
-
-const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
-const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
-
-/** Object reads are an exact byte protocol, not a presentation projection.
- * safeJson intentionally clips ordinary strings; applying it here would make
- * base64 and its advertised byte offsets disagree. Keep this boundary typed and
- * bounded so the native/frame limits still govern the enclosing response. */
-/** Preview batches carry base64 like object reads, so they cross the same exact
- * byte boundary instead of safeJson's string clipping. */
-function projectKnowledgePreviewBatch(value: unknown): JsonValue {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("internal", "Knowledge preview batch response is invalid");
-  const items = (value as { items?: unknown }).items;
-  if (!Array.isArray(items) || items.length > KNOWLEDGE_PREVIEW_BATCH_ITEMS) throw new GatewayError("internal", "Knowledge preview batch response is invalid");
-  let total = 0;
-  return { items: items.map(entry => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
-    const item = entry as Record<string, unknown>;
-    if (typeof item.recordId !== "string" || item.recordId.length > 200 || typeof item.hash !== "string" || !/^[a-f0-9]{64}$/.test(item.hash)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
-    if (item.base64 === undefined) {
-      if (!["forbidden", "missing", "too-large"].includes(item.unavailable as string)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
-      return { recordId: item.recordId, hash: item.hash, unavailable: item.unavailable as string };
-    }
-    if (typeof item.base64 !== "string") throw new GatewayError("internal", "Knowledge preview batch item is invalid");
-    const bytes = Buffer.from(item.base64, "base64");
-    if (bytes.byteLength > KNOWLEDGE_PREVIEW_MAX_BYTES || total + bytes.byteLength > KNOWLEDGE_PREVIEW_BATCH_BYTES
-      || bytes.toString("base64") !== item.base64) throw new GatewayError("internal", "Knowledge preview batch item exceeds its bound");
-    total += bytes.byteLength;
-    return { recordId: item.recordId, hash: item.hash, base64: item.base64 };
-  }) };
-}
-
-function projectKnowledgeObjectChunk(value: unknown): JsonValue {
-  if (value === null) return null;
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("internal", "Knowledge object response is invalid");
-  const item = value as Record<string, unknown>;
-  if (typeof item.hash !== "string" || !/^[a-f0-9]{64}$/.test(item.hash)
-    || typeof item.mediaType !== "string" || item.mediaType.length < 1 || item.mediaType.length > 160
-    || !Number.isSafeInteger(item.bytes) || (item.bytes as number) < 0 || (item.bytes as number) > KNOWLEDGE_OBJECT_CHUNK_BYTES
-    || !Number.isSafeInteger(item.totalBytes) || (item.totalBytes as number) < 0 || (item.totalBytes as number) > KNOWLEDGE_OBJECT_TOTAL_BYTES
-    || !Number.isSafeInteger(item.offset) || (item.offset as number) < 0 || (item.offset as number) > (item.totalBytes as number)
-    || typeof item.base64 !== "string" || item.base64.length > 4 * Math.ceil(KNOWLEDGE_OBJECT_CHUNK_BYTES / 3) || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(item.base64)
-    || Buffer.from(item.base64, "base64").byteLength !== item.bytes
-    || Buffer.from(item.base64, "base64").toString("base64") !== item.base64) {
-    throw new GatewayError("internal", "Knowledge object response is invalid");
-  }
-  const totalBytes = item.totalBytes as number;
-  if ((item.offset as number) + (item.bytes as number) > totalBytes) throw new GatewayError("internal", "Knowledge object response exceeds its declared extent");
-  const bytes = item.bytes as number;
-  const offset = item.offset as number;
-  const end = offset + bytes;
-  if (end < totalBytes ? bytes === 0 || item.nextOffset !== end : item.nextOffset !== undefined) throw new GatewayError("internal", "Knowledge object continuation is invalid");
-  return { hash: item.hash, mediaType: item.mediaType, bytes, totalBytes, offset, base64: item.base64, ...(end < totalBytes ? { nextOffset: end } : {}) };
-}
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -296,7 +240,6 @@ const restartDrainMethods = new Set([
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read", "knowledge.x.credits",
   "connections.list",
 ]);
 
@@ -375,7 +318,7 @@ export interface GatewayServiceDependencies {
   notifications?: NotificationService;
   workRegistry?: GatewayWorkRegistry;
   automations?: AutomationService;
-  knowledge?: KnowledgeService;
+  knowledge?: ProfileStore;
   /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
   connections?: Pick<ConnectionAccess, "invoke">;
   /** Tron Home's designation owner; absent only in a Gateway without one. */
@@ -608,7 +551,6 @@ export class GatewayService {
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
-        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
         ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY] : []),
         ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY] : []),
@@ -760,29 +702,6 @@ export class GatewayService {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home context accepts no parameters");
         return safeJson(this.requireHome().contextStatus());
       }
-      case "knowledge.status":
-      case "knowledge.observation.coverage":
-      case "knowledge.list":
-      case "knowledge.read":
-      case "knowledge.object.read":
-      case "knowledge.previews.read":
-      case "knowledge.search":
-      case "knowledge.recall":
-      case "knowledge.curation.jobs":
-      case "knowledge.tags.retag-needed":
-      case "knowledge.tags.budget":
-      case "knowledge.tags.estimate":
-      case "knowledge.connector.status":
-      case "knowledge.connector.queue":
-      case "knowledge.raindrop.read":
-      case "knowledge.x.credits": {
-
-        const knowledge = this.requireKnowledge();
-        const result = await knowledge.invoke({ operation: method, request: params } as KnowledgeAction);
-        if (method === "knowledge.object.read") return projectKnowledgeObjectChunk(result);
-        if (method === "knowledge.previews.read") return projectKnowledgePreviewBatch(result);
-        return safeJson(result);
-      }
       case "connections.list": {
         if (!this.dependencies.connections) throw new GatewayError("unsupported", "Connection management is unavailable");
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "connections.list accepts no parameters");
@@ -845,40 +764,6 @@ export class GatewayService {
           this.mcpChanged(scope);
           return safeJson(stored);
         });
-      case "knowledge.config":
-      case "knowledge.tags.configure":
-      case "knowledge.tags.reconcile":
-      case "knowledge.observation.dismiss":
-      case "knowledge.source.capture":
-      case "knowledge.source.preview.refresh":
-      case "knowledge.source.assess":
-      case "knowledge.source.summarize":
-      case "knowledge.source.reextract":
-      case "knowledge.source.tag":
-      case "knowledge.tags.run":
-      case "knowledge.tags.budget.reconcile":
-      case "knowledge.connector.budget.reconcile":
-      case "knowledge.source.curate":
-      case "knowledge.source.take":
-      case "knowledge.source.admission":
-      case "knowledge.note.create":
-      case "knowledge.note.update":
-      case "knowledge.reflect":
-      case "knowledge.correction":
-      case "knowledge.forget":
-      case "knowledge.exclusion":
-      case "knowledge.connector.configure":
-      case "knowledge.connector.assessment.approve":
-      case "knowledge.x.oauth.begin":
-      case "knowledge.x.oauth.complete":
-      case "knowledge.connector.discover":
-      case "knowledge.connector.ack":
-      case "knowledge.raindrop.move":
-      case "knowledge.source.ingest":
-      case "knowledge.raindrop.intake": {
-        const knowledge = this.requireKnowledge();
-        return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as unknown as KnowledgeAction)));
-      }
       case "connections.setup.begin":
       case "connections.setup.complete":
       case "connections.setup.cancel":
@@ -911,7 +796,7 @@ export class GatewayService {
       case "command.status": {
         const method = string(params.method, "method", { max: 160 });
         const status = await this.dependencies.receipts.status(client.identity, method, string(params.commandId, "commandId", { min: 8, max: 160 }));
-        return safeJson(method.startsWith("knowledge.") ? await this.knowledgeReceiptResult(status as unknown as JsonValue) : status);
+        return safeJson(status);
       }
       case "gateway.drain.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Gateway drain status accepts no parameters");
@@ -2620,11 +2505,6 @@ export class GatewayService {
     return { provider, id };
   }
 
-  private requireKnowledge(): KnowledgeService {
-    if (!this.dependencies.knowledge) throw new GatewayError("unsupported", "Knowledge is unavailable in this Gateway build");
-    return this.dependencies.knowledge;
-  }
-
   private requireAutomations(): AutomationService {
     if (!this.dependencies.automations) throw new GatewayError("unsupported", "Automations are unavailable in this Gateway build");
     if (!this.dependencies.automations.status().ready) throw new GatewayError("busy", "Automations are still recovering", true);
@@ -2648,62 +2528,6 @@ export class GatewayService {
         this.mobileIdentityLanes.delete(deviceId);
       }
     }
-  }
-
-  private knowledgeReceiptSafe(result: JsonValue): JsonValue {
-    if (!result || typeof result !== "object" || Array.isArray(result)) return result;
-    const value = result as Record<string, JsonValue>;
-    if (value.record && typeof value.record === "object" && !Array.isArray(value.record)) {
-      const record = value.record as Record<string, JsonValue>;
-      if (typeof record.id === "string" && typeof record.revisionId === "string") return { ...value, record: { id: record.id, revisionId: record.revisionId } };
-    }
-    if (Array.isArray(value.records)) {
-      const records = value.records.filter(item => item && typeof item === "object" && !Array.isArray(item)).map(item => {
-        const record = item as Record<string, JsonValue>;
-        return { id: record.id, revisionId: record.revisionId };
-      }).filter(item => typeof item.id === "string" && typeof item.revisionId === "string");
-      if (records.length === value.records.length) return { ...value, records: records as unknown as JsonValue };
-    }
-    return result;
-  }
-
-  private async knowledgeReceiptResult(result: JsonValue): Promise<JsonValue> {
-    if (!result || typeof result !== "object" || Array.isArray(result)) return result;
-    const value = result as Record<string, JsonValue>;
-    const knowledge = this.requireKnowledge();
-    if (value.result && typeof value.result === "object" && !Array.isArray(value.result)) {
-      return { ...value, result: await this.knowledgeReceiptResult(value.result) };
-    }
-    if (value.record && typeof value.record === "object" && !Array.isArray(value.record)) {
-      const ref = value.record as Record<string, JsonValue>;
-      if (typeof ref.id === "string" && typeof ref.revisionId === "string") {
-        let record: unknown;
-        try {
-          record = await knowledge.invoke({ operation: "knowledge.read", request: { id: ref.id, revisionId: ref.revisionId } });
-        } catch (error) {
-          // A forgotten record's old revision is deliberately no longer a
-          // readable receipt dependency. Treat that stale reference like a
-          // missing record instead of allowing replay/status to resurrect or
-          // expose erased evidence.
-          if (!(error instanceof KnowledgeStoreError) || error.kind !== "invalid"
-            || error.message !== "Requested revision is not committed for this record") throw error;
-          record = null;
-        }
-        return record ? { ...value, record: safeJson(record) } : { ...value, record: null };
-      }
-    }
-    if (Array.isArray(value.records)) {
-      const records = [];
-      for (const item of value.records) {
-        const ref = item as Record<string, JsonValue>;
-        if (typeof ref?.id !== "string" || typeof ref?.revisionId !== "string") return result;
-        const record = await knowledge.invoke({ operation: "knowledge.read", request: { id: ref.id, revisionId: ref.revisionId } });
-        if (!record) return { ...value, records: [] };
-        records.push(safeJson(record));
-      }
-      return { ...value, records };
-    }
-    return result;
   }
 
   private async mutation(
@@ -2732,11 +2556,6 @@ export class GatewayService {
       : undefined;
     let completionOwnsWork = false;
     try {
-      const knowledgeMutation = method.startsWith("knowledge.");
-      const prior = knowledgeMutation
-        ? await this.dependencies.receipts.status(client.identity, method, commandId)
-        : undefined;
-      if (prior?.status === "completed" && prior.result !== undefined) return this.knowledgeReceiptResult(prior.result);
       // The operation is the part that waits away from the loop (a shell command,
       // a compaction, a model, a package install), so it runs off the request's
       // share of the loop: a background slice must not be paused for a request
@@ -2745,9 +2564,7 @@ export class GatewayService {
         client.identity,
         method,
         commandId,
-        knowledgeMutation
-          ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
-          : () => offLoop(() => operation(work?.token)),
+        () => offLoop(() => operation(work?.token)),
         (respondBeforeReceiptCompletion || resolveBinding) ? {
           ...(resolveBinding ? { resolveBinding,
             onRouteBound: category => this.requireHome().noteRouteBound(category),
@@ -2774,7 +2591,7 @@ export class GatewayService {
           } : {}),
         } : undefined,
       );
-      return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
+      return result;
     } finally {
       if (!completionOwnsWork) work?.settle();
     }

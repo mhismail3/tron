@@ -49,7 +49,7 @@ One actual native input supplies canonical file reads, mutation ordering, runtim
 projections and worker I/O; Home keeps no forwarding callbacks or duplicate worker input.
 The same registry-owned K5 service owns worker orchestration and cold artifact proof;
 Home computes its subagent projection from the selected native cut through K5's reader.
-Composition supplies the same late K6 settings, Knowledge and raw model owners.
+Composition supplies the same late K6 settings, Profile and raw model owners.
 
 - **Record.** `<tronHome>/gateway/home/home.json` (`0600`, atomic durable publish): `version`
   `2`, `homeId`, ordered `chapters` (`{ sessionId, ordinal, state: active | sealed | reserved
@@ -169,8 +169,8 @@ changes keep its store, cursors and spend.
 ### Tools and profile
 
 - **Research tools** (read-only): the shared `web_search` search/read/content contract
-  ([public-web owner](../../knowledge/README.md#shared-public-web-research)), `session_search`,
-  `session_read` (never Home chapters) and read-only `knowledge`.
+  (`workspace/web-research-module.ts`), `session_search`,
+  `session_read` (never Home chapters) and bounded explicit `profile` reads.
   Web schema, backend and quota owner are identical to ordinary workers and native
   research children. Results are capped untrusted data; delegation is not gated on them.
 - **Shared tools:** Pi owns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,
@@ -182,27 +182,30 @@ changes keep its store, cursors and spend.
 - **Settings tool:** Home changes settings through the one change path as `home`,
   using the shared exact native card when consent is needed. With `taskId` it reads
   or changes a worker's session. Fetched content is data, never authority.
-- **Learned profile:** personal Knowledge notes labelled `home-profile` plus one `kind-<kind>`
+- **Learned profile:** personal Profile-owned notes labelled `home-profile` plus one `kind-<kind>`
   (`preference`, `standing-decision`, `delegation-default`, `fact`, `correction`). The `profile` tool's
   inferred content writes and maintainer `home.profileChange` (confirmed, `expectedRevision`)
   share `HomeProfileItems`, which owns operation validation, rollback, undo fencing and
   typed result projection. Content changes use `SettingsChangePath.auditSubject`, retaining
   the Home stripe through effects, grouped audit, awaited observer and projection; partial
   failures restore before ungrouped failure audit and rethrow the original value.
-  Explicit placement-only migration/reorganization freezes the original audit in Knowledge's
+  Explicit placement-only migration/reorganization freezes the original audit in Profile's
   backup before effects, then uses the kernel's atomic subject publisher after proving
   committed identities. Retry repairs only a committed audit or explicitly resumes its
   precommit intent; existing Changes Undo restores exact labels without rewriting content.
   `## Learned profile` carries bounded seven-area/count/revision metadata and diagnostic
   references, never note text. Home explicitly reads v2 paths or Prior organization and
-  chooses relevance and worker-brief content; unavailable Knowledge says so. Placement
+  chooses relevance and worker-brief content; unavailable Profile says so. Placement
   never weaken confirmed standing authority. See [profile contract](profile.md).
-  Home chapters are never observed by Knowledge.
+  Storage is current-format-only under `workspace/state/profile`; immutable note
+  revisions, receipt replay and crash-safe placement backups remain Profile-owned.
+  Oversized references use `profile` exact revision reads and bounded `nextOffset`
+  continuations; they never silently truncate or resolve through a retired tool.
 
 ### RPCs and clients
 
 - Capabilities `home.v1`, `home-memory-view.v1`, `home-chapter-list.v1`, `home-profile-list.v1`,
-  `home-profile-edit.v1` (profile ones need Knowledge); shapes in `src/protocol/types.ts`.
+  `home-profile-edit.v1` (profile ones need the Profile owner); shapes in `src/protocol/types.ts`.
 - Reads: `home.status` (phase, readiness, recovery, chapter, `openSessionId`, `live`,
   `waitingForUser`, `taskRecovery`, memory counters; derived, never stored), `home.context`,
   `home.open`, `home.chapterList` (ledger, metrics and derived `contents`), `home.profileList`,
@@ -227,7 +230,7 @@ changes keep its store, cursors and spend.
 - Typed role queues and worker thinking are the machine-routing authority; learned
   delegation notes are never parsed as queue configuration. Explicit task choices
   remain overrides. `home-task-worker-model.e2e.test.ts` exercises a contradictory
-  active v2-placed Knowledge note while the actual worker follows the typed settings.
+  active v2-placed Profile note while the actual worker follows the typed settings.
 
 ## Entry points
 
@@ -277,5 +280,5 @@ arrives inline in order, and bounded immutable pages reconstruct the exact repor
 ## Not here
 
 Episodic memory internals ([gateway/episodic](../../episodic/README.md)), settings
-keys ([settings-model.md](../../../docs/settings-model.md)), Knowledge, RuntimeSlot and the
+keys ([settings-model.md](../../../docs/settings-model.md)), Profile, RuntimeSlot and the
 generic session lifecycle ([Gateway README](../../../README.md)).

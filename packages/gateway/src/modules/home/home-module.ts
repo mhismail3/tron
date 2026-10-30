@@ -8,7 +8,7 @@ import { HOME_SESSION_PROFILE_NAME, homeSessionProfile, type HomeSessionProfileS
 import type { GatewayHost, ModuleDescriptor, RunSettledPolicy, SessionContext } from "../../kernel/host/module-host.js";
 import { createTronHomeExtension } from "./tron-home-extension.js";
 import { homeResearchTools } from "./home-research-tools.js";
-import type { WebResearchTransport } from "../../knowledge/web-research.js";
+import type { WebResearchTransport } from "../../workspace/web-research.js";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
 import { HomeProfileItems, type HomeProfileChangeAccess } from "./home-profile.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
@@ -37,7 +37,7 @@ import type { SessionOperations } from "../../kernel/session/runtime-registry.js
 import type { ModelRuntime } from "../../kernel/pi/coding-agent.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
-import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
+import type { ProfileStore } from "./profile-store.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../../sessions/session-search-contract.js";
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 
@@ -55,7 +55,7 @@ export interface HomeModuleServices {
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange): Promise<HomeTaskHandle>;
   task(sessionId: string, request: unknown, confirm?: ConfirmChange): Promise<unknown>;
   profileChanges(session: SessionContext): HomeProfileChangeAccess | undefined;
-  knowledge: KnowledgeService | undefined;
+  knowledge: ProfileStore | undefined;
   search(): ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
   read: HomeSessionReader;
 }
@@ -65,7 +65,7 @@ export interface HomeComposition {
   triggerSources?: HomeOwnerOptions["triggerSources"];
   runtime: HomeSessionProfileServices["runtime"];
   settings(): Readonly<{ model: SettingsModel; changes: SettingsChangePath }> | undefined;
-  knowledge(): KnowledgeService | undefined;
+  knowledge(): ProfileStore | undefined;
   modelRuntime?: ModelRuntime | undefined;
   tronHome: string;
   agentDir: string;
@@ -256,7 +256,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
 }
 
 /** Home's profile tool resolves the current change path and actor on each call. */
-export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => KnowledgeService | undefined, maintainerTurn: () => boolean): HomeProfileChangeAccess | undefined {
+export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => ProfileStore | undefined, maintainerTurn: () => boolean): HomeProfileChangeAccess | undefined {
   if (!changes || !session.profile().profileChanges) return undefined;
   const requireMaintainerTurn = () => {
     if (!maintainerTurn()) throw new GatewayError("invalid_request", "This profile decision requires the current maintainer turn, not a background wake or old message");
@@ -266,7 +266,7 @@ export function homeProfileChanges(session: SessionContext, changes: SettingsCha
       requireMaintainerTurn();
       const owner = knowledge();
       if (!owner) throw new GatewayError("unsupported", "Knowledge is unavailable");
-      return owner.store.deferProfileSorting(commandId, version);
+      return owner.deferProfileSorting(commandId, version);
     },
     change: (ops, input) => {
       if (ops.some(op => op.action === "learn" && op.sensitive)) requireMaintainerTurn();
@@ -326,13 +326,13 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
 function createHomeResearchModule(services: () => HomeModuleServices): ModuleDescriptor {
   return {
     name: "tron-home-research",
-    purpose: "Adds Home's read-only session search, cited-entry reading and Knowledge lookup.",
-    tools: ["session_search", "session_read", "knowledge"], commands: [],
+    purpose: "Adds Home\'s read-only session search and cited-entry reading.",
+    tools: ["session_search", "session_read"], commands: [],
     start: () => ({ extension: () => {
       const owners = services();
       return pi => {
         const tools = homeResearchTools({
-          knowledge: () => owners.knowledge, sessionSearch: owners.search, sessionRead: owners.read,
+          sessionSearch: owners.search, sessionRead: owners.read,
         });
         for (const tool of tools) pi.registerTool(tool);
       };

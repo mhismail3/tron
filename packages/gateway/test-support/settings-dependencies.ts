@@ -11,7 +11,7 @@ import type { TrustService } from "../src/kernel/resources/trust-service.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
 import type { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { HomeProfileItems } from "../src/modules/home/home-profile.js";
-import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
+import type { ProfileStore } from "../src/modules/home/profile-store.js";
 import { homeOwnerOf, projectsOwnerOf } from "./gateway-registry.js";
 
 /** The real settings model and change path a fixture Gateway needs, wired the
@@ -24,7 +24,7 @@ export function settingsDependencies(input: {
   sessions?: { reloadProject(cwd: string, trusted: boolean, force: boolean): Promise<unknown>; commitProjectReload(cwd: string): Promise<unknown> | unknown; abortProjectReload(cwd: string): Promise<unknown> | unknown };
   home?: () => HomeOwner | undefined;
   /** The learned profile's Knowledge owner, for Home's `profile` tool (doc 6.4). */
-  knowledge?: () => KnowledgeService | undefined;
+  knowledge?: () => ProfileStore | undefined;
   /** Installs them for the `settings` tool, as gateway-main does. */
   registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath): void };
   /** The change path's clock; a fixture advances it to test expiry. */

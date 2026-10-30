@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { expect, it } from "vitest";
-import type { NoteContent } from "../../knowledge/knowledge-contract.js";
+import type { NoteContent } from "./profile-note-contract.js";
 import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
 import { fixture, homeActivation, profileReportFile, profileSection, readProfilePage, say } from "../../../test-support/home-profile-fixture.js";
 

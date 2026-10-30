@@ -7,21 +7,21 @@ import { setHomeMemoryModels } from "../../../test-support/settings-dependencies
 import { waitFor } from "../../../test-support/wait-for.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
-import { KnowledgeService } from "../../knowledge/knowledge-service.js";
-import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
+
+import { ProfileStore } from "./profile-store.js";
 import { readHomeProfileIndex } from "./home-profile.js";
-import type { KnowledgeRecord } from "../../knowledge/knowledge-contract.js";
+import type { ProfileNoteRecord } from "./profile-note-contract.js";
 import { answerChangeCard } from "../../../test-support/native-change.js";
 import { displayOwnerOf } from "../../../test-support/gateway-registry.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 
-type Note = Extract<KnowledgeRecord, { kind: "note" }>;
+type Note = Extract<ProfileNoteRecord, { kind: "note" }>;
 const maintainer = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
-let knowledge: KnowledgeService | undefined;
+let knowledge: ProfileStore | undefined;
 const evidence: unknown[] = [];
 afterEach(async () => {
-  knowledge?.dispose(); knowledge = undefined;
+   knowledge = undefined;
   await disposeFixtures();
   await mkdir("test-results/home-profile", { recursive: true });
   await writeFile("test-results/home-profile/triage.json", JSON.stringify(evidence, null, 2));
@@ -37,16 +37,16 @@ async function setup() {
   // installed before acquiring the successor runtime, as gateway-main does.
   let registry = await f.restartToReadiness();
   f.registry = registry;
-  knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
+  knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
   await homeOwnerOf(registry).recoverTasks();
   let service: GatewayService | undefined;
   return {
     f,
     async restart() {
-      knowledge!.dispose(); knowledge = undefined;
+       knowledge = undefined;
       registry = await f.restartToReadiness();
       f.registry = registry;
-      knowledge = new KnowledgeService(new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {}));
+      knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
       await homeOwnerOf(registry).recoverTasks();
     },
     /** One Home turn; `card` is the maintainer's answer to the exact card it waits on. */
@@ -75,7 +75,7 @@ async function setup() {
   };
 }
 async function seed(index: number): Promise<Note> {
-  return (await knowledge!.store.createNote({ commandId: `triage-seed-${index}`, record: {
+  return (await knowledge!.createNote({ commandId: `triage-seed-${index}`, record: {
     kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [] }, relations: [],
     content: { title: `Inferred example ${index}`, role: "fact", confirmed: false, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["inferred", "review"] } },
   } })).record as Note;
@@ -87,7 +87,7 @@ it("receipts Not now durably; cold restart, edits, moves and old-command replay 
   for (let index = 0; index < 8; index++) originals.push(await seed(index));
   const visibleVersion = (await readHomeProfileIndex(knowledge!)).sorting.version;
   const hidden = await seed(99);
-  await knowledge!.store.setExclusion("triage-hide-old", hidden.id, true, hidden.revisionId);
+  await knowledge!.setExclusion("triage-hide-old", hidden.id, true, hidden.revisionId);
   const index = await readHomeProfileIndex(knowledge!);
   expect(index.items).toHaveLength(8);
   expect(index.sorting.version).toBe(visibleVersion);
@@ -95,31 +95,31 @@ it("receipts Not now durably; cold restart, edits, moves and old-command replay 
   const result = await p.turn("Not now. Do not offer sorting until a new note arrives.", { action: "defer", version }, "defer-first");
   expect(result.result).toMatchObject({ status: "deferred", version });
   const commandId = `profile-${createHash("sha256").update(`${p.f.home.sessionId}\0defer-first`).digest("hex").slice(0, 48)}`;
-  const saved = await knowledge!.store.deferProfileSorting(commandId, version);
+  const saved = await knowledge!.deferProfileSorting(commandId, version);
   expect(saved).toEqual(result.result);
-  const stateBeforeReplay = (await knowledge!.store.status()).stateRevision;
-  expect(await knowledge!.store.deferProfileSorting(commandId, version)).toEqual(saved);
-  expect((await knowledge!.store.status()).stateRevision).toBe(stateBeforeReplay);
+  const stateBeforeReplay = (await knowledge!.list({ limit: 1 })).stateRevision;
+  expect(await knowledge!.deferProfileSorting(commandId, version)).toEqual(saved);
+  expect((await knowledge!.list({ limit: 1 })).stateRevision).toBe(stateBeforeReplay);
   await p.restart();
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(true);
-  await knowledge!.store.setExclusion("triage-unhide-old", hidden.id, false, hidden.revisionId);
+  await knowledge!.setExclusion("triage-unhide-old", hidden.id, false, hidden.revisionId);
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(true);
-  await knowledge!.store.setExclusion("triage-rehide-old", hidden.id, true, hidden.revisionId);
+  await knowledge!.setExclusion("triage-rehide-old", hidden.id, true, hidden.revisionId);
   const old = originals[0]!;
-  await knowledge!.store.updateNote({ commandId: "triage-edit-existing", recordId: old.id, expectedRevision: old.revisionId,
+  await knowledge!.updateNote({ commandId: "triage-edit-existing", recordId: old.id, expectedRevision: old.revisionId,
     record: { ...old, content: { ...old.content, title: "An edit is not a new note", profile: { version: 2, path: ["communication", "answers"] } } } });
   const suppressed = await p.turn("Continue with another question.");
   expect(suppressed.first.system).toContain("Sorting offer: deferred");
   expect((await readHomeProfileIndex(knowledge!)).sorting.version).toBe(version);
   const newNote = await seed(8);
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(false);
-  await expect(knowledge!.store.deferProfileSorting("triage-stale-deferral", version)).rejects.toThrow(/new profile notes|snapshot changed/i);
-  expect(await knowledge!.store.deferProfileSorting(commandId, version)).toEqual(saved);
+  await expect(knowledge!.deferProfileSorting("triage-stale-deferral", version)).rejects.toThrow(/new profile notes|snapshot changed/i);
+  expect(await knowledge!.deferProfileSorting(commandId, version)).toEqual(saved);
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(false);
   const resumed = await p.turn("Start another maintainer turn.");
   expect(resumed.first.system).toContain("Sorting offer: eligible");
-  expect((await knowledge!.store.read(newNote.id) as Note).content.confirmed).toBe(false);
-  await knowledge!.store.forget("triage-forget-new", newNote.id, "Explicit fixture forget", newNote.revisionId);
+  expect((await knowledge!.read(newNote.id) as Note).content.confirmed).toBe(false);
+  await knowledge!.forget("triage-forget-new", newNote.id, "Explicit fixture forget", newNote.revisionId);
   expect((await readHomeProfileIndex(knowledge!)).sorting.deferred).toBe(false);
   evidence.push({ durableNotNow: true, coldRestart: true, editsAndMovesDoNotReset: true, receiptReplayDoesNotMutate: true, newNoteResumes: true, staleDeferralRefused: true });
 }, 120_000);
@@ -135,36 +135,36 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   expect((await readHomeProfileIndex(knowledge!)).items).toHaveLength(0);
   const stated = await p.turn(text, { action: "learn", kind: "fact", text, sensitive: true }, "sensitive-stated");
   expect(stated.result.status).toBe("saved");
-  const note = await knowledge!.store.read(stated.result.id as string) as Note;
+  const note = await knowledge!.read(stated.result.id as string) as Note;
   expect(note.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
   expect(note.content.confirmed).toBe(false);
   expect(note.content.privacyScope).toBe("private");
   const move = await p.turn("Propose a place for that sensitive note.", { action: "reorganize", assignments: [{ id: note.id, expectedRevision: note.revisionId, path: "life/health" }], reason: "Exact review before moving private material" }, "sensitive-review", false);
   evidence.push({ sensitivePlacementReview: move.result });
   expect(move.result).toMatchObject({ status: "declined" });
-  expect((await knowledge!.store.read(note.id) as Note).revisionId).toBe(note.revisionId);
+  expect((await knowledge!.read(note.id) as Note).revisionId).toBe(note.revisionId);
   for (const action of ["refine", "supersede"] as const) {
     // Home never edits private material alone: its edit waits on the exact card.
     const edit = await p.turn("Infer a new private fact from this short reply.", { action, id: note.id,
       kind: "fact", text: "An invented sensitive fixture inference", reason: "Not an explicit sensitive statement" }, `sensitive-${action}`, false);
     expect(edit.result).toMatchObject({ status: "declined" });
-    expect(await knowledge!.store.read(note.id)).toEqual(note);
+    expect(await knowledge!.read(note.id)).toEqual(note);
   }
   const metadata = await p.turn("What is available to read?", { action: "read" }, "sensitive-index");
   expect(metadata.first.system).not.toContain(text);
   expect(metadata.result.status).toBe("read");
   expect(JSON.stringify(metadata.result)).not.toContain(text);
-  await knowledge!.store.setExclusion("sensitive-exclude", note.id, true, note.revisionId, "Explicit fixture exclusion");
+  await knowledge!.setExclusion("sensitive-exclude", note.id, true, note.revisionId, "Explicit fixture exclusion");
   const excluded = await p.turn("Read the holding area.", { action: "read", path: "inferred" }, "excluded-sensitive");
   evidence.push({ excludedRead: excluded.result });
   expect(excluded.result.items).toEqual([]);
-  await knowledge!.store.forget("sensitive-forget", note.id, "Explicit fixture forget", note.revisionId);
+  await knowledge!.forget("sensitive-forget", note.id, "Explicit fixture forget", note.revisionId);
   await p.restart();
   const forgotten = await p.turn("Read only current profile records.", { action: "read", path: "inferred", includeInactive: true }, "forgotten-sensitive");
   evidence.push({ forgottenRead: forgotten.result });
   expect(forgotten.result.items).toEqual([]);
   expect(forgotten.first.system).not.toContain(text);
-  expect(await knowledge!.store.read(note.id)).toBeNull();
+  expect(await knowledge!.read(note.id)).toBeNull();
   evidence.push({ declaredSensitiveInferenceRefused: true, explicitSensitiveUnsorted: true, metadataBodyFree: true, excludedAndForgottenAbsentFromHomeReads: true, coldRestart: true });
 }, 120_000);
 
@@ -173,15 +173,15 @@ it("lets Home retire its own unconfirmed standing proposal with a reason but req
   const learned = await p.turn("Propose this standing decision for my review.", { action: "learn", kind: "standing-decision", text: "Proposed synthetic standing decision" }, "own-standing");
   expect(learned.result.status).toBe("saved");
   const id = learned.result.id as string;
-  const original = await knowledge!.store.read(id) as Note;
+  const original = await knowledge!.read(id) as Note;
   expect(original.content.confirmed).toBe(false);
   const refine = await p.turn("Propose exact revised wording.", { action: "refine", id, text: "Revised synthetic standing decision", reason: "Exact wording review" }, "own-refine-review", false);
   evidence.push({ exactRefinementReview: refine.result });
   expect(refine.result.status).toBe("declined");
-  expect((await knowledge!.store.read(id) as Note).revisionId).toBe(original.revisionId);
+  expect((await knowledge!.read(id) as Note).revisionId).toBe(original.revisionId);
   const retired = await p.turn("Withdraw your unconfirmed proposal.", { action: "retire", id, reason: "Withdrawing my own unconfirmed proposal" }, "own-standing-retire");
   expect(retired.result).toMatchObject({ status: "saved", action: "retire", id });
-  const current = await knowledge!.store.read(id) as Note;
+  const current = await knowledge!.read(id) as Note;
   expect(current.content.retired).toBe(true);
   expect(current.content.confirmed).toBe(false);
   expect(current.content.title).toBe(original.content.title);

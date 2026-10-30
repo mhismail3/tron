@@ -1,19 +1,19 @@
-import type { JsonValue } from "../protocol/types.js";
-import { isGatewayTimestamp } from "../util/timestamp.js";
-import { validateProfileMetadata } from "./knowledge-profile-placement.js";
+import type { JsonValue } from "../../protocol/types.js";
+import { isGatewayTimestamp } from "../../util/timestamp.js";
+import { validateProfileMetadata } from "./profile-placement.js";
 
-export const KNOWLEDGE_SCHEMA_VERSION = 1 as const;
+export const PROFILE_NOTE_SCHEMA_VERSION = 1 as const;
 
-export type KnowledgeScope = "personal" | "research";
-export type KnowledgeRecordKind = "note";
+export type ProfileNoteScope = "personal" | "research";
+export type ProfileNoteRecordKind = "note";
 
-export interface KnowledgeObjectRef {
+export interface ProfileNoteObjectRef {
   hash: string;
   mediaType: string;
   bytes: number;
 }
 
-export interface KnowledgeSessionEntryCitation {
+export interface ProfileNoteSessionEntryCitation {
   sessionId: string;
   branchId?: string;
   entryId: string;
@@ -22,16 +22,16 @@ export interface KnowledgeSessionEntryCitation {
   endOffset?: number;
 }
 
-export interface KnowledgeEvidenceRef {
+export interface ProfileNoteEvidenceRef {
   /** A record citation is exact when revisionId is supplied. */
   recordId?: string;
   revisionId?: string;
-  sessionEntry?: KnowledgeSessionEntryCitation;
+  sessionEntry?: ProfileNoteSessionEntryCitation;
   objectHash?: string;
   locator?: string;
 }
 
-export interface KnowledgeProvenance {
+export interface ProfileNoteProvenance {
   actor: "user" | "agent" | "connector" | "import" | "system";
   source?: string;
   sessionId?: string;
@@ -39,10 +39,10 @@ export interface KnowledgeProvenance {
   invocationId?: string;
   /** Why this revision was written, when its writer records one (Home's profile changes do). Bounded text; ledger metadata, never evidence. */
   reason?: string;
-  evidence: KnowledgeEvidenceRef[];
+  evidence: ProfileNoteEvidenceRef[];
 }
 
-export interface KnowledgeTemporalQualification {
+export interface ProfileNoteTemporalQualification {
   eventAt?: string;
   validFrom?: string;
   validTo?: string;
@@ -50,7 +50,7 @@ export interface KnowledgeTemporalQualification {
   timezone?: string;
 }
 
-export type KnowledgeRelationType =
+export type ProfileNoteRelationType =
   | "supports"
   | "contradicts"
   | "corrects"
@@ -58,8 +58,8 @@ export type KnowledgeRelationType =
   | "derivedFrom"
   | "related";
 
-export interface KnowledgeRelation {
-  type: KnowledgeRelationType;
+export interface ProfileNoteRelation {
+  type: ProfileNoteRelationType;
   recordId: string;
   revisionId?: string;
   field?: string;
@@ -69,7 +69,7 @@ export interface NoteFieldQualification {
   field: string;
   value: JsonValue;
   subject?: string;
-  evidence: KnowledgeEvidenceRef[];
+  evidence: ProfileNoteEvidenceRef[];
   certainty: "confirmed" | "candidate" | "external" | "historical";
   validFrom?: string;
   validTo?: string;
@@ -77,14 +77,14 @@ export interface NoteFieldQualification {
 
 export interface NoteContent {
   /** Sole current placement; absent only in pre-hierarchy revisions/Undo. */
-  profile?: import("./knowledge-profile-placement.js").ProfileMetadata;
+  profile?: import("./profile-placement.js").ProfileMetadata;
   title: string;
   body?: string;
   fields?: NoteFieldQualification[];
   role: "fact" | "preference" | "concept" | "decision" | "workflow" | "synthesis";
   confirmed: boolean;
   /** Explicitly retained evidence against a candidate or claim. */
-  contraryEvidence?: KnowledgeEvidenceRef[];
+  contraryEvidence?: ProfileNoteEvidenceRef[];
   /** Review/freshness metadata is descriptive and never an automatic deletion date. */
   freshness?: "current" | "aging" | "stale" | "unknown";
   privacyScope?: "private" | "shared";
@@ -99,45 +99,45 @@ export interface NoteContent {
   retired?: boolean;
 }
 
-export interface KnowledgeRecordBase {
-  schemaVersion: typeof KNOWLEDGE_SCHEMA_VERSION;
+export interface ProfileNoteRecordBase {
+  schemaVersion: typeof PROFILE_NOTE_SCHEMA_VERSION;
   id: string;
   revisionId: string;
-  kind: KnowledgeRecordKind;
-  scope: KnowledgeScope;
+  kind: ProfileNoteRecordKind;
+  scope: ProfileNoteScope;
   createdAt: string;
   updatedAt: string;
-  provenance: KnowledgeProvenance;
-  temporal?: KnowledgeTemporalQualification;
-  relations: KnowledgeRelation[];
+  provenance: ProfileNoteProvenance;
+  temporal?: ProfileNoteTemporalQualification;
+  relations: ProfileNoteRelation[];
 }
 
-export type KnowledgeRecord = KnowledgeRecordBase & { kind: "note"; content: NoteContent };
-export type KnowledgeRecordDraft = Omit<KnowledgeRecordBase, "schemaVersion" | "id" | "revisionId" | "createdAt" | "updatedAt"> & {
+export type ProfileNoteRecord = ProfileNoteRecordBase & { kind: "note"; content: NoteContent };
+export type ProfileNoteRecordDraft = Omit<ProfileNoteRecordBase, "schemaVersion" | "id" | "revisionId" | "createdAt" | "updatedAt"> & {
   id?: string; createdAt?: string; updatedAt?: string; kind: "note"; content: NoteContent;
 };
 
-export interface KnowledgeConfig {
-  schemaVersion: typeof KNOWLEDGE_SCHEMA_VERSION;
+export interface ProfileNoteConfig {
+  schemaVersion: typeof PROFILE_NOTE_SCHEMA_VERSION;
   revision: number;
   eligibility: { excludedSessionIds: string[]; excludedProjectIds: string[] };
   maximumSearchResults: number;
 }
-export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = { schemaVersion: 1, revision: 0, eligibility: { excludedSessionIds: [], excludedProjectIds: [] }, maximumSearchResults: 50 };
-export interface KnowledgeListRequest {
-  kind?: "note"; scope?: KnowledgeScope; limit?: number; cursor?: string; includeSuppressed?: boolean;
+export const DEFAULT_PROFILE_NOTE_CONFIG: ProfileNoteConfig = { schemaVersion: 1, revision: 0, eligibility: { excludedSessionIds: [], excludedProjectIds: [] }, maximumSearchResults: 50 };
+export interface ProfileNoteListRequest {
+  kind?: "note"; scope?: ProfileNoteScope; limit?: number; cursor?: string; includeSuppressed?: boolean;
 }
-export interface KnowledgeListResponse {
-  records: KnowledgeRecord[]; stateRevision: number; nextCursor?: string; incomplete?: boolean;
+export interface ProfileNoteListResponse {
+  records: ProfileNoteRecord[]; stateRevision: number; nextCursor?: string; incomplete?: boolean;
 }
-export interface KnowledgeNoteMutationRequest {
-  commandId: string; record: KnowledgeRecordDraft; confirmedByUser?: boolean;
+export interface ProfileNoteNoteMutationRequest {
+  commandId: string; record: ProfileNoteRecordDraft; confirmedByUser?: boolean;
 }
-export type KnowledgeAction =
-  | { operation: "knowledge.list"; request: KnowledgeListRequest }
-  | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean } }
-  | { operation: "knowledge.note.create"; request: KnowledgeNoteMutationRequest }
-  | { operation: "knowledge.note.update"; request: KnowledgeNoteMutationRequest & { recordId: string; expectedRevision: string } };
+export type ProfileNoteAction =
+  | { operation: "profile-note.list"; request: ProfileNoteListRequest }
+  | { operation: "profile-note.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean } }
+  | { operation: "profile-note.note.create"; request: ProfileNoteNoteMutationRequest }
+  | { operation: "profile-note.note.update"; request: ProfileNoteNoteMutationRequest & { recordId: string; expectedRevision: string } };
 
 const ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const REVISION = /^[0-9a-f-]{16,80}$/;
@@ -145,12 +145,12 @@ const HASH = /^[a-f0-9]{64}$/;
 const NOTE_TAG_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
 const NOTE_TAGS_MAX = 8;
 
-export function assertKnowledgeId(value: unknown, label = "knowledge id"): asserts value is string {
+export function assertProfileNoteId(value: unknown, label = "profile-note id"): asserts value is string {
   if (typeof value !== "string" || !ID.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
 }
 
 /** Project identity is a bounded workspace reference, not a record ID. */
-export function assertKnowledgeProjectId(value: unknown, label = "project id"): asserts value is string {
+export function assertProfileNoteProjectId(value: unknown, label = "project id"): asserts value is string {
   if (typeof value !== "string" || value.length < 1 || value.length > 4_096 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`Invalid ${label}`);
   if (value.startsWith("/")) {
     if (value.includes("\\") || value.split("/").some(component => component === "..")) throw new Error(`Invalid ${label}`);
@@ -174,18 +174,18 @@ function isJsonValue(value: unknown, depth = 0): value is JsonValue {
   return Object.keys(value).length <= 100 && Object.values(value).every(item => isJsonValue(item, depth + 1));
 }
 
-function assertEvidence(value: unknown): asserts value is KnowledgeEvidenceRef {
+function assertEvidence(value: unknown): asserts value is ProfileNoteEvidenceRef {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid evidence reference");
   const item = value as Record<string, unknown>;
   if (item.recordId === undefined && item.sessionEntry === undefined) throw new Error("Evidence must cite a record or session entry");
-  if (item.recordId !== undefined) assertKnowledgeId(item.recordId, "evidence record id");
+  if (item.recordId !== undefined) assertProfileNoteId(item.recordId, "evidence record id");
   if (item.revisionId !== undefined && item.recordId === undefined) throw new Error("Evidence revision requires a record citation");
   if (item.revisionId !== undefined && (typeof item.revisionId !== "string" || !REVISION.test(item.revisionId))) throw new Error("Invalid evidence revision");
   if (item.sessionEntry !== undefined) {
     const entry = item.sessionEntry as Record<string, unknown>;
-    assertKnowledgeId(entry.sessionId, "evidence session id");
-    assertKnowledgeId(entry.entryId, "evidence entry id");
-    if (entry.branchId !== undefined) assertKnowledgeId(entry.branchId, "evidence branch id");
+    assertProfileNoteId(entry.sessionId, "evidence session id");
+    assertProfileNoteId(entry.entryId, "evidence entry id");
+    if (entry.branchId !== undefined) assertProfileNoteId(entry.branchId, "evidence branch id");
     if (entry.digest !== undefined && (typeof entry.digest !== "string" || !HASH.test(entry.digest))) throw new Error("Invalid evidence entry digest");
     for (const key of ["startOffset", "endOffset"]) if (entry[key] !== undefined && (!Number.isSafeInteger(entry[key]) || (entry[key] as number) < 0)) throw new Error("Invalid evidence entry span");
   }
@@ -193,14 +193,14 @@ function assertEvidence(value: unknown): asserts value is KnowledgeEvidenceRef {
   if (item.locator !== undefined && (typeof item.locator !== "string" || item.locator.length > 512)) throw new Error("Invalid evidence locator");
 }
 
-export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid knowledge record");
+export function validateProfileNoteRecord(value: unknown): ProfileNoteRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid profile-note record");
   const item = value as Record<string, unknown>;
-  if (item.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION) throw new Error("Unsupported knowledge record schema");
-  assertKnowledgeId(item.id);
-  if (typeof item.revisionId !== "string" || !REVISION.test(item.revisionId)) throw new Error("Invalid knowledge revision");
-  if (item.kind !== "note") throw new Error("Invalid knowledge kind");
-  if (item.scope !== "personal" && item.scope !== "research") throw new Error("Invalid knowledge scope");
+  if (item.schemaVersion !== PROFILE_NOTE_SCHEMA_VERSION) throw new Error("Unsupported profile-note record schema");
+  assertProfileNoteId(item.id);
+  if (typeof item.revisionId !== "string" || !REVISION.test(item.revisionId)) throw new Error("Invalid profile-note revision");
+  if (item.kind !== "note") throw new Error("Invalid profile-note kind");
+  if (item.scope !== "personal" && item.scope !== "research") throw new Error("Invalid profile-note scope");
   assertTimestamp(item.createdAt, "createdAt");
   assertTimestamp(item.updatedAt, "updatedAt");
   const provenance = item.provenance as Record<string, unknown>;
@@ -212,7 +212,7 @@ export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
   if (!Array.isArray(item.relations)) throw new Error("Invalid relations");
   for (const relation of item.relations) {
     if (!relation || typeof relation !== "object" || !["supports", "contradicts", "corrects", "supersedes", "derivedFrom", "related"].includes((relation as Record<string, unknown>).type as string)) throw new Error("Invalid relation");
-    assertKnowledgeId((relation as Record<string, unknown>).recordId, "relation record id");
+    assertProfileNoteId((relation as Record<string, unknown>).recordId, "relation record id");
   }
   const temporal = item.temporal;
   if (temporal !== undefined) {
@@ -225,11 +225,11 @@ export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
     if (note.profile && item.scope !== "personal") throw new Error("Profile metadata belongs only to personal notes");
     if (note.profile && note.tags?.includes("kind-correction") && !item.relations.some(relation => relation.type === "corrects" && typeof relation.revisionId === "string")) throw new Error("A correction requires an exact wrong-claim relation");
   }
-  return value as KnowledgeRecord;
+  return value as ProfileNoteRecord;
 }
 
 function validateNoteContent(value: unknown): void {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid knowledge content");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid profile-note content");
   const content = value as Record<string, unknown>;
     if (typeof content.title !== "string" || content.title.length > 512 || !["fact", "preference", "concept", "decision", "workflow", "synthesis"].includes(content.role as string) || typeof content.confirmed !== "boolean") throw new Error("Invalid note content");
     if (content.body !== undefined && (typeof content.body !== "string" || content.body.length > 100_000)) throw new Error("Invalid note body");
@@ -262,11 +262,11 @@ function validateNoteContent(value: unknown): void {
       }
     }
 }
-export function validateKnowledgeConfig(value: unknown): KnowledgeConfig {
+export function validateProfileNoteConfig(value: unknown): ProfileNoteConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Profile note configuration");
   const config = value as Record<string, unknown>;
   const eligibility = config.eligibility as Record<string, unknown>;
   const maximumSearchResults = config.maximumSearchResults;
-  if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || Object.keys(eligibility).some(key => !["excludedSessionIds", "excludedProjectIds"].includes(key)) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || !eligibility.excludedSessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.excludedProjectIds.every(item => { try { assertKnowledgeProjectId(item, "excluded project id"); return true; } catch { return false; } }) || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid Profile note configuration");
+  if (config.schemaVersion !== PROFILE_NOTE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || Object.keys(eligibility).some(key => !["excludedSessionIds", "excludedProjectIds"].includes(key)) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || !eligibility.excludedSessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.excludedProjectIds.every(item => { try { assertProfileNoteProjectId(item, "excluded project id"); return true; } catch { return false; } }) || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid Profile note configuration");
   return { schemaVersion: 1, revision: config.revision, eligibility: { excludedSessionIds: eligibility.excludedSessionIds as string[], excludedProjectIds: eligibility.excludedProjectIds as string[] }, maximumSearchResults };
 }

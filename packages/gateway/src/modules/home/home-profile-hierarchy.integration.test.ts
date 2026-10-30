@@ -101,7 +101,7 @@ it("the real Home profile tool retries one original label group and native Chang
   const settled = await first;
   const advertised = settled.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details as { status: string; commandId: string };
   expect(advertised).toMatchObject({ status: "retry_required" });
-  const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
+  const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "profile", "profile-backups");
   const backups = await Promise.all((await readdir(directory)).map(async name => JSON.parse(await readFile(join(directory, name), "utf8")) as { operation: { commandId: string; envelope?: { context?: { actor?: { toolCallId?: string } } } } }));
   const originalOperations = backups.filter(backup => backup.operation.envelope?.context?.actor?.toolCallId === "organize-tool-first");
   expect(originalOperations).toHaveLength(1);

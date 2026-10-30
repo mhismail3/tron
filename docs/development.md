@@ -220,8 +220,8 @@ and `scripts/tron version check` reports drift read-only when requested.
 
 `scripts/retire-knowledge.py` is a one-shot offline tool, never Gateway startup
 code. It exports every committed source revision as Markdown plus exact original
-JSON and attachments; active Profile notes and controls stay in their existing
-store. It grants no trust or file access. Choose the export location for the
+JSON and attachments; personal notes, immutable histories, accepted receipts and
+Profile controls move to the current `workspace/state/profile` owner. It grants no trust or file access. Choose the export location for the
 existing normal-file tools; Home's file reader still requires a trusted project.
 
 First rehearse on a copy. Supply absolute, canonical, disjoint paths and freshly
@@ -236,12 +236,15 @@ python3 scripts/retire-knowledge.py "${args[@]}"
 python3 scripts/retire-knowledge.py "${args[@]}" --verify
 ```
 
-The archive is independently hashed before export. All export hashes and exact
-current immutable bytes are checked before the **first catalog deletion commit**,
-the point of no return. Cleanup removes only retired owned bytes, preserving
-retained/shared/orphan objects. Read-only verification requires the exact expected
-remaining file set and unchanged Profile revisions/controls. Suppression or scope
-exclusions refuse plaintext export pending an explicit privacy disposition.
+The complete original namespace and workspace marker are independently archived
+and hashed before export. Verify ordinary files and the new Profile destination
+before the **Knowledge namespace rename**, the cutover boundary. Resumable cleanup
+removes only that retired namespace; the archive retains original and orphan bytes.
+Verification checks exact exported files, note bytes, Profile controls, receipts and
+backup paths. Sealed reruns refuse deleted exports rather than restoring them.
+Suppression or scope exclusions refuse plaintext export pending explicit disposition.
+The new runtime reads only current Profile format and refuses either old namespace;
+it never converts at startup or falls back to the recovery archive.
 
 A live cutover is maintainer-only, after the verified lockstep build is ready.
 Record the prior compatible build, complete immutable archive and export manifests,

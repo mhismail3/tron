@@ -8,8 +8,8 @@ import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../sessions
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { homeOwnerOf, queueOwnerOf } from "../../../test-support/gateway-registry.js";
-import { KnowledgeService } from "../../knowledge/knowledge-service.js";
-import { KnowledgeStore } from "../../knowledge/knowledge-store.js";
+
+import { ProfileStore } from "./profile-store.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 
 afterEach(async () => {
@@ -113,7 +113,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     briefEvidence.push({ scenario: "ordinary-queue-home-isolation", mac, home });
   });
   it("routes from typed queues even when an active learned delegation note names a different default", async () => {
-    let knowledge: KnowledgeService | undefined;
+    let knowledge: ProfileStore | undefined;
     const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
     installSettings(f);
     await setModelQueue(queueOwners(f), "background", [f.model]);
@@ -122,15 +122,15 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await initialHome.prompt("Hello");
     await waitFor(() => initialHome.snapshot().configurationBlocker === null, "Home persisted before cold open");
     f.registry = await f.restart();
-    knowledge = new KnowledgeService(new KnowledgeStore(f.registry.moduleHost.contract(workspaceModule), () => {}));
+    knowledge = new ProfileStore(f.registry.moduleHost.contract(workspaceModule));
     const mirrored = `Default workers must use ${f.model.provider}/${f.model.id} with off thinking.`;
-    await knowledge.invoke({ operation: "knowledge.note.create", request: {
+    await knowledge.createNote({
       commandId: "conflicting-delegation-note", record: { kind: "note", scope: "personal",
         provenance: { actor: "agent", evidence: [] }, relations: [], content: {
           title: mirrored, role: "workflow", confirmed: false, tags: ["home-profile", "kind-delegation-default"],
           profile: { version: 2, path: ["inferred", "review"] },
         } },
-    } });
+    });
     await setModelQueue(queueOwners(f), "worker", [`${f.model.provider}/${TASK_REASONING_MODEL_ID}`]);
     await f.settings.settingsChanges.change({ kind: "home" }, [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }],
       { actor: { kind: "ui", id: "fixture" } });

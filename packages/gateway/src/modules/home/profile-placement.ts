@@ -1,4 +1,4 @@
-import type { KnowledgeRecord } from "./knowledge-contract.js";
+import type { ProfileNoteRecord } from "./profile-note-contract.js";
 
 /** Placement is organization only. These are the seven personal roots; inferred
  * is deliberately separate, and prior organization is never a writable root. */
@@ -18,7 +18,7 @@ export interface ProfileNoteRow {
   profile?: ProfileMetadata; supersedes: string[];
 }
 export interface ProfileRecordRow extends ProfileNoteRow { id: string; revisionId: string; createdAt: string; updatedAt: string }
-export function profileNoteRow(record: KnowledgeRecord): ProfileNoteRow | null {
+export function profileNoteRow(record: ProfileNoteRecord): ProfileNoteRow | null {
   if (record.kind !== "note" || record.scope !== "personal" || !record.content.tags?.includes("home-profile")) return null;
   return { title: record.content.title, confirmed: record.content.confirmed, tags: record.content.tags, retired: record.content.retired === true,
     ...(record.content.profile ? { profile: record.content.profile } : {}), supersedes: record.relations.filter(relation => relation.type === "supersedes").map(relation => relation.recordId) };
@@ -42,7 +42,7 @@ export function validateProfileMetadata(raw: unknown): asserts raw is ProfileMet
   }
 }
 
-type Note = Pick<Extract<KnowledgeRecord, { kind: "note" }>, "id" | "relations"> & { content: Pick<Extract<KnowledgeRecord, { kind: "note" }>["content"], "profile" | "retired"> };
+type Note = Pick<Extract<ProfileNoteRecord, { kind: "note" }>, "id" | "relations"> & { content: Pick<Extract<ProfileNoteRecord, { kind: "note" }>["content"], "profile" | "retired"> };
 /** Supersession includes retired successors, matching the canonical profile reader. */
 function occupancy(notes: readonly Note[]): Map<string, number> {
   const superseded = new Set(notes.flatMap(note => note.relations.filter(relation => relation.type === "supersedes").map(relation => relation.recordId)));
@@ -63,7 +63,7 @@ function occupancy(notes: readonly Note[]): Map<string, number> {
   counts.set("sub-areas", prefixes.size);
   return counts;
 }
-/** Called inside the admitted Knowledge transaction, including direct note
+/** Called inside the admitted ProfileNote transaction, including direct note
  * writers. Restored over-cap data remains readable; only net growth is refused. */
 export function assertProfileCapacity(before: readonly Note[], after: readonly Note[]): void {
   const prior = occupancy(before), next = occupancy(after);

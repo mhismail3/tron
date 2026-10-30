@@ -38,9 +38,9 @@ import { afterAll, afterEach, vi } from "vitest";
 import { waitFor } from "./wait-for.js";
 import { TrustService } from "../src/kernel/resources/trust-service.js";
 import { HomeTaskStore, type HomeTaskRecord } from "../src/modules/home/home-task-store.js";
-import type { KnowledgeRecord } from "../src/knowledge/knowledge-contract.js";
-import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
-import { KnowledgeStore } from "../src/knowledge/knowledge-store.js";
+import type { ProfileNoteRecord } from "../src/modules/home/profile-note-contract.js";
+
+import { ProfileStore } from "../src/modules/home/profile-store.js";
 import { RuntimeRegistry } from "../src/kernel/session/runtime-registry.js";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
@@ -179,8 +179,8 @@ export type Step = (context: Context) => ReturnType<typeof fauxAssistantMessage>
 
 export interface Fixture {
   registry: RuntimeRegistry;
-  knowledge: KnowledgeService;
-  store: KnowledgeStore;
+  knowledge: ProfileStore;
+  store: ProfileStore;
   project: string;
   sessionId: string;
   slot: HomeSlot;
@@ -210,7 +210,7 @@ export async function fixture(label: string): Promise<Fixture> {
   runtime.registerNativeProvider(memoryFaux.provider);
   const trust = new TrustService(agentDir);
   await trust.set(project, true);
-  let knowledge: KnowledgeService | undefined;
+  let knowledge: ProfileStore | undefined;
   let settings: { model: SettingsModel; changes: SettingsChangePath } | undefined;
   const registry = await createTestRegistry({ knowledge: () => knowledge, settings: () => settings, agentDir,
     tronHome,
@@ -228,8 +228,8 @@ export async function fixture(label: string): Promise<Fixture> {
   await waitFor(() => (registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "catalog cut", { boundMs: 30_000 });
   await registry.catalog("all");
 
-  const store = new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {});
-  knowledge = new KnowledgeService(store);
+  const store = new ProfileStore(registry.moduleHost.contract(workspaceModule));
+  knowledge = store;
   // The one settings change path, wired as gateway-main wires it: Home's profile tool
   // and the maintainer's home.profileChange share its profile applier and record.
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime: runtime }));
@@ -309,7 +309,7 @@ export const say = (text: string): Step => () => fauxAssistantMessage(text);
 export interface ProfilePage {
   status: "read";
   path: string;
-  items: Array<ListedItem & { path: string; provenance: KnowledgeRecord["provenance"]; content: Extract<KnowledgeRecord, { kind: "note" }>["content"] }>;
+  items: Array<ListedItem & { path: string; provenance: ProfileNoteRecord["provenance"]; content: Extract<ProfileNoteRecord, { kind: "note" }>["content"] }>;
   nextCursor?: string;
 }
 export function profileReadResult(messages: Array<Record<string, unknown>>, callId: string): ProfilePage {
@@ -337,13 +337,13 @@ export function latestMaintainerEntryId(f: Fixture): string {
   return user.id;
 }
 
-export async function profileNotes(f: Fixture): Promise<Array<KnowledgeRecord & { kind: "note" }>> {
+export async function profileNotes(f: Fixture): Promise<Array<ProfileNoteRecord & { kind: "note" }>> {
   const records = (await f.store.list({ kind: "note", scope: "personal", includeSuppressed: true })).records;
-  return records.filter((record): record is KnowledgeRecord & { kind: "note" } => record.kind === "note" && record.content.tags?.includes("home-profile") === true);
+  return records.filter((record): record is ProfileNoteRecord & { kind: "note" } => record.kind === "note" && record.content.tags?.includes("home-profile") === true);
 }
 
-export async function noteAt(f: Fixture, id: string, revisionId?: string): Promise<KnowledgeRecord & { kind: "note" }> {
-  const record = await f.knowledge.invoke({ operation: "knowledge.read", request: { id, ...(revisionId ? { revisionId } : {}), includeSuppressed: true } }) as KnowledgeRecord | null;
+export async function noteAt(f: Fixture, id: string, revisionId?: string): Promise<ProfileNoteRecord & { kind: "note" }> {
+  const record = await f.knowledge.read(id, revisionId, true) as ProfileNoteRecord | null;
   if (!record || record.kind !== "note") throw new Error(`no note ${id}`);
   return record;
 }

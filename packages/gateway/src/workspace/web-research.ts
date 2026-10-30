@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { fetchPublicUrl, validatePublicSourceUrl } from "./public-web-fetch.js";
+import { fetchPublicUrl, validatePublicSourceUrl } from "../foundation/public-web-fetch.js";
 import { utf8, webToolResult, type WebFailure, type WebOutcome, type WebResearchRequest, type WebSource, type WebToolResult } from "./web-research-contract.js";
 
 export interface WebResearchTransport {

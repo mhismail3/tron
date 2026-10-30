@@ -2,7 +2,7 @@ import { workspaceModule } from "../workspace/workspace-module.js";
 import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
- * `session_search`, `session_read`, `knowledge` and shared `read` registered by the
+ * `session_search`, `session_read`, `profile` and shared `read` registered by the
  * real Home and Pi modules, called by a faux model inside real
  * activations on a designated Home, with the request seam live and counted.
  *
@@ -42,9 +42,9 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
 import type { HomeResearchToolDetails } from "../modules/home/home-research-tools.js";
-import type { WebResearchTransport } from "../knowledge/web-research.js";
-import { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { KnowledgeStore } from "../knowledge/knowledge-store.js";
+import type { WebResearchTransport } from "../workspace/web-research.js";
+
+import { ProfileStore } from "../modules/home/profile-store.js";
 import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { SessionSearchIndex } from "./session-search-index.js";
 import { SessionSearchService } from "./session-search-service.js";
@@ -143,8 +143,8 @@ interface Fixture {
   requestRecords: HomeRequestRecord[];
   requests: CapturedRequest[];
   fetchedUrls: string[];
-  knowledge: KnowledgeService;
-  store: KnowledgeStore;
+  knowledge: ProfileStore;
+  store: ProfileStore;
   search: SessionSearchService;
   sessionId: string;
   slot: HomeSlot;
@@ -174,7 +174,7 @@ async function fixture(
   const requestRecords: HomeRequestRecord[] = [];
   const web = webTransport();
   let search: SessionSearchService | undefined;
-  let knowledge: KnowledgeService | undefined;
+  let knowledge: ProfileStore | undefined;
   const registry = await createTestRegistry({ knowledge: () => knowledge, agentDir, sessionSearch: () => search,
     tronHome,
     idleRuntimeMs: 60_000,
@@ -194,8 +194,8 @@ async function fixture(
   await registry.catalog("all");
 
   // Real owners, installed the way gateway-main installs them.
-  const store = new KnowledgeStore(registry.moduleHost.contract(workspaceModule), () => {});
-  knowledge = new KnowledgeService(store);
+  const store = new ProfileStore(registry.moduleHost.contract(workspaceModule));
+  knowledge = store;
   const indexPath = join(tronHome, "gateway", "session-search.sqlite");
   await seedIndex?.(registry, indexPath);
   const index = await SessionSearchIndex.open(indexPath);
@@ -431,13 +431,13 @@ describe("Tron Home research tools", () => {
     }
   }, 120_000);
 
-  it("runs web, search, Knowledge and trusted-file tools inside Home activations with zero seam refusals", async () => {
+  it("runs web, search, Profile and trusted-file tools inside Home activations with zero seam refusals", async () => {
     const f = await fixture("all-tools");
 
     // Profile remains active note storage. Source capture is no longer a tool.
-    await f.store.createNote({ commandId: "seed-note-0001", record: {
+    const { record: profileNote } = await f.store.createNote({ commandId: "seed-note-0001", record: {
       id: "profile-fixture", kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [],
-      content: { title: "Profile fixture note", body: "the profile fixture body", role: "fact", confirmed: true },
+      content: { title: "Profile fixture note", body: "the profile fixture body", role: "fact", confirmed: true, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["inferred", "review"] } },
     } });
 
     // Seed another chat for session search, then release its runtime.
@@ -484,9 +484,9 @@ describe("Tron Home research tools", () => {
     expect(sessions!.text).toContain("RESEARCH-NEEDLE-ALPHA");
     expect(sessions!.text).toContain("untrusted content");
 
-    const [knowledge] = await toolAnswers(f, "what do we know", [{ name: "knowledge", args: { action: "read", id: "profile-fixture" } }]);
-    expect(knowledge!.details).toEqual({ status: "ok" });
-    expect(knowledge!.text).toContain("Profile fixture note");
+    const [profile] = await toolAnswers(f, "read the exact Profile reference", [{ name: "profile", args: { action: "read", id: profileNote.id, revisionId: profileNote.revisionId } }]);
+    expect(profile!.details).toMatchObject({ status: "read-record", id: profileNote.id, revisionId: profileNote.revisionId });
+    expect(profile!.text).toContain("Profile fixture note");
 
     const [file] = await toolAnswers(f, "read the notes", [{ name: "read", args: { path: filePath, offset: 2, limit: 3 } }]);
     expect(file!.isError).toBe(false);
@@ -506,7 +506,7 @@ describe("Tron Home research tools", () => {
     recordCase("all-tools", {
       refusals: refusals(f).length,
       activations: activations.length,
-      tools: [search, fetch, sessions, knowledge, file].map(answer => answer!.toolName),
+      tools: [search, fetch, sessions, profile, file].map(answer => answer!.toolName),
     });
   }, 120_000);
 
@@ -555,8 +555,9 @@ describe("Tron Home research tools", () => {
     expect(relative!.text).toContain("home workspace content");
     expect(missing!.isError).toBe(true);
 
-    // F4: a Knowledge write action is structurally outside the Home schema, so
-    // the SDK refuses the arguments before the service is ever reached.
+    // F4: the retired tool is absent, so no Knowledge operation can reach an owner.
+    const context = await f.slot.context() as unknown as { availableTools: Array<{ name: string }> };
+    expect(context.availableTools.map(tool => tool.name)).not.toContain("knowledge");
     const [write] = await toolAnswers(f, "try a knowledge write", [{ name: "knowledge", args: { action: "createNote", commandId: "evil-note-0001", title: "evil", scope: "personal" } }]);
     expect(write!.isError).toBe(true);
     expect((await f.store.list({ kind: "note" })).records.some(record => record.content.title === "evil")).toBe(false);
@@ -790,7 +791,9 @@ describe("Tron Home research tools", () => {
     ].join("\n"), fixtureScript, exported]);
     const manifest = JSON.parse(await readFile(join(exported, "MANIFEST.json"), "utf8"));
     expect(manifest.counts.sourceRevisions).toBe(2);
-    for (const revision of ["source-rev-0", "source-rev-1"]) {
+    const revisions = manifest.sources.map((source: { revision: string }) => source.revision);
+    expect(new Set(revisions).size).toBe(2);
+    for (const revision of revisions) {
       const path = join(exported, "sources", "source", revision, "source.md");
       const original = await readFile(path, "utf8");
       const [answer] = await toolAnswers(f, "read the saved source with its original citation", [
@@ -970,12 +973,12 @@ describe("Tron Home research tools", () => {
     };
     const tools = context.availableTools.map((tool) => tool.name);
     // F6: web is shared, while Home-only research registrations stay in Home.
-    // Ordinary sessions retain tron-core's full Knowledge tool.
+    // Retired Knowledge is absent in both Home and ordinary sessions.
     expect(tools).toContain("web_search");
     for (const name of ["web_fetch", "session_search", "session_read", "read_file"]) {
       expect(tools, `ordinary sessions must not register ${name}`).not.toContain(name);
     }
-    expect(tools).toContain("knowledge");
+    expect(tools).not.toContain("knowledge");
     expect(tools).toContain("bash");
     const extensions = context.extensions.map((extension) => extension.name.replace(/^<inline:/, "").replace(/>$/, ""));
     expect(extensions).not.toContain("tron-home-research");

@@ -4,8 +4,8 @@ import { join, extname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
-import { webResearchTool, type WebResearchRequest } from "../knowledge/web-research-contract.js";
-import { WebResearch, type WebResearchTransport } from "../knowledge/web-research.js";
+import { webResearchTool, type WebResearchRequest } from "./web-research-contract.js";
+import { WebResearch, type WebResearchTransport } from "./web-research.js";
 
 /** Start once per Gateway, resolve the same service at every call and reload.
  * Child grants carry only a local scoped capability, never provider credentials. */
@@ -51,7 +51,7 @@ export function createWebResearchModule(transport: () => WebResearchTransport | 
           // Retained child launches carry an exact extension path. Reopening a
           // parent must recreate that path with the new runtime's socket grant.
           const path = join(childDirectory, `${createHash("sha256").update(scope).digest("hex")}.ts`);
-          const child = fileURLToPath(new URL(`../knowledge/web-research-child${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+          const child = fileURLToPath(new URL(`./web-research-child${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
           await writeFile(path, `import { webResearchChild } from ${JSON.stringify(pathToFileURL(child).href)};\nexport default webResearchChild(${JSON.stringify(join(directory!, "service.sock"))}, ${JSON.stringify(token)});\n`, { mode: 0o600 });
           entry = { token, path }; grants.set(scope, entry); tokens.set(token, scope);
         }

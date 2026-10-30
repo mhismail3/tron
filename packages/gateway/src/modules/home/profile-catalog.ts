@@ -1,5 +1,5 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { validateProfileMetadata, type ProfileNoteRow } from "./knowledge-profile-placement.js";
+import { validateProfileMetadata, type ProfileNoteRow } from "./profile-placement.js";
 
 export type CatalogCollection = "records" | "suppressions" | "scopeExclusions" | "receipts" | "cleanup" | "recordCleanup";
 
@@ -10,7 +10,7 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
     if (decoded !== true) throw new Error("Invalid Profile cleanup row");
     return decoded as T;
   }
-  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error(`Invalid Knowledge ${collection} row`);
+  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error(`Invalid Profile ${collection} row`);
   const value = decoded as Record<string, unknown>;
   const strings = (item: unknown): item is string[] => Array.isArray(item) && item.every(part => typeof part === "string");
   switch (collection) {
@@ -20,26 +20,26 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
         || typeof value.sortAt !== "number" || !Number.isFinite(value.sortAt) || !strings(value.recordRefs) || !strings(value.objectHashes)
         || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string"
         || (value.sessionId !== undefined && typeof value.sessionId !== "string")
-        || (value.branchId !== undefined && typeof value.branchId !== "string")
-        || !Array.isArray(value.searchFields) || !value.searchFields.every(field => strings(field) && field.length === 2)) throw new Error("Invalid Knowledge record head");
-      if (value.profileRow !== undefined && value.profileRow !== null) {
+        || (value.branchId !== undefined && typeof value.branchId !== "string")) throw new Error("Invalid Profile record head");
+      if (value.profileRow === undefined) throw new Error("Profile metadata projection is required");
+      if (value.profileRow !== null) {
         const row = value.profileRow as ProfileNoteRow;
         if (typeof row.title !== "string" || row.title.length > 512 || typeof row.confirmed !== "boolean" || typeof row.retired !== "boolean" || !strings(row.tags) || row.tags.length > 8 || !strings(row.supersedes)) throw new Error("Invalid profile row projection");
         if (row.profile !== undefined) validateProfileMetadata(row.profile);
       }
       break;
     case "suppressions":
-      if (typeof value.excluded !== "boolean" || typeof value.forgotten !== "boolean") throw new Error("Invalid Knowledge suppression");
+      if (typeof value.excluded !== "boolean" || typeof value.forgotten !== "boolean") throw new Error("Invalid Profile suppression");
       break;
     case "scopeExclusions":
-      if (typeof value.excluded !== "boolean") throw new Error("Invalid Knowledge scope exclusion");
+      if (typeof value.excluded !== "boolean") throw new Error("Invalid Profile scope exclusion");
       break;
     case "receipts":
       if (typeof value.operation !== "string" || typeof value.requestHash !== "string" || !strings(value.recordIds)
-        || !value.result || typeof value.result !== "object" || (value.invalidated !== undefined && typeof value.invalidated !== "boolean")) throw new Error("Invalid Knowledge receipt");
+        || !value.result || typeof value.result !== "object" || (value.invalidated !== undefined && typeof value.invalidated !== "boolean")) throw new Error("Invalid Profile receipt");
       break;
     case "recordCleanup":
-      if (typeof value.recordId !== "string" || typeof value.revisionId !== "string") throw new Error("Invalid Knowledge record cleanup row");
+      if (typeof value.recordId !== "string" || typeof value.revisionId !== "string") throw new Error("Invalid Profile record cleanup row");
       break;
   }
   return value as T;
@@ -71,13 +71,13 @@ class CatalogTable<T> {
   }
 }
 
-export type KnowledgeTable<T> = Pick<CatalogTable<T>, keyof CatalogTable<T>>;
+export type ProfileTable<T> = Pick<CatalogTable<T>, keyof CatalogTable<T>>;
 
 /** Canonical catalog, not a mirror/cache. Immutable bodies remain in records/.
  * The store's workspace mutex owns every connection/transaction through close,
  * including async record I/O; no reader can see an uncommitted catalog head.
  */
-export class KnowledgeCatalog {
+export class ProfileCatalog {
   private readonly database: DatabaseSync;
   private transaction = false;
 
@@ -105,15 +105,15 @@ export class KnowledgeCatalog {
         `);
       } else {
         const version = this.database.prepare("PRAGMA user_version").get()?.user_version;
-        if (version !== 1) throw new Error("Unsupported Knowledge catalog version");
+        if (version !== 1) throw new Error("Unsupported Profile catalog version");
       }
     } catch (error) { this.database.close(); throw error; }
   }
 
-  table<T>(collection: CatalogCollection): KnowledgeTable<T> { return new CatalogTable<T>(this.database, collection); }
+  table<T>(collection: CatalogCollection): ProfileTable<T> { return new CatalogTable<T>(this.database, collection); }
   control<T>(): T {
     const row = this.database.prepare("SELECT value FROM control WHERE id = 1").get();
-    if (!row) throw new Error("Knowledge catalog control is missing");
+    if (!row) throw new Error("Profile catalog control is missing");
     return JSON.parse(String(row.value)) as T;
   }
   setControl(value: unknown): void {

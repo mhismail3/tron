@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { lstat, readdir } from "node:fs/promises";
-import { GatewayError } from "../errors.js";
-import { assertProfileCapacity, profilePath, type ProfileMetadata } from "./knowledge-profile-placement.js";
-import { durableAtomicWriteJson, durableRemove } from "../foundation/durable-json.js";
-import { readSecureJson } from "../foundation/secure-json.js";
-import { assertKnowledgeId, validateKnowledgeRecord, type KnowledgeRecord, type NoteContent } from "./knowledge-contract.js";
+import { GatewayError } from "../../errors.js";
+import { assertProfileCapacity, profilePath, type ProfileMetadata } from "./profile-placement.js";
+import { durableAtomicWriteJson, durableRemove } from "../../foundation/durable-json.js";
+import { readSecureJson } from "../../foundation/secure-json.js";
+import { assertProfileNoteId, validateProfileNoteRecord, type ProfileNoteRecord, type NoteContent } from "./profile-note-contract.js";
 
 export type ProfileFile = "core" | "home" | `scopes/${string}`;
 export const PROFILE_FILE_TAG = "home-file-";
@@ -25,7 +25,7 @@ export function profileFileTags(tags: readonly string[], file?: ProfileFile): st
 }
 
 /** A native typed edit does not model owner labels/retirement; omission preserves them. */
-export function carryNoteMarks(current: KnowledgeRecord, content: NoteContent): NoteContent {
+export function carryNoteMarks(current: ProfileNoteRecord, content: NoteContent): NoteContent {
   if (current.kind !== "note") return storedNoteContent(content);
   const tags = content.tags ?? current.content.tags;
   const retired = content.retired ?? current.content.retired;
@@ -39,7 +39,7 @@ export function storedNoteContent(content: NoteContent): NoteContent {
   return rest;
 }
 
-type Note = Extract<KnowledgeRecord, { kind: "note" }>;
+type Note = Extract<ProfileNoteRecord, { kind: "note" }>;
 /** Complete migration touches active legacy Core/Home only, never inactive or
  * named-scope originals. Reads and recovery do not infer a new destination. */
 export function profileMigrationMembers(notes: readonly Note[]): Note[] {
@@ -67,7 +67,7 @@ interface PartitionBackup {
   version: 1;
   digest: string;
   assignments: ProfileAssignment[];
-  originals: Array<{ record: Note; history: KnowledgeRecord[] }>;
+  originals: Array<{ record: Note; history: ProfileNoteRecord[] }>;
   prepared: Note[];
   operation?: { commandId: string; mode: ProfilePartitionRequest["mode"]; envelope: unknown };
 }
@@ -103,14 +103,14 @@ export async function readProfileOperation(directory: string, commandId: string)
 interface PartitionAccess {
   backupDirectory(): Promise<string>;
   recordBytes: number;
-  notes(): AsyncIterable<KnowledgeRecord>;
+  notes(): AsyncIterable<ProfileNoteRecord>;
   excluded(note: Note): boolean;
-  history(id: string): AsyncIterable<KnowledgeRecord>;
+  history(id: string): AsyncIterable<ProfileNoteRecord>;
   write(record: Note, expectedRevision: string): Promise<void>;
 }
 const BACKUP_BYTES = 64 * 1_048_576;
 
-/** Existing Knowledge tombstones govern these copies too. A forget invalidates
+/** Existing ProfileNote tombstones govern these copies too. A forget invalidates
  * its whole atomic plan; unrelated snapshots stay recoverable, while uncommitted
  * prepared files retire through the existing recordCleanup transaction. */
 async function* profileBackups(root: string): AsyncGenerator<{ path: string; plan: PartitionBackup }> {
@@ -120,7 +120,7 @@ async function* profileBackups(root: string): AsyncGenerator<{ path: string; pla
   if (!status.isDirectory() || status.isSymbolicLink()) refuse("Unsafe profile backup directory");
   for (const name of await readdir(directory)) {
     const path = join(directory, name);
-    // The sole writer holds the Knowledge mutex. Unpublished temp files cannot
+    // The sole writer holds the ProfileNote mutex. Unpublished temp files cannot
     // own staged revisions: bodies only start after the canonical backup rename.
     if (/^[a-f0-9]{64}\.json\.\d+\.[a-f0-9]{12}\.tmp$/.test(name)) { await durableRemove(path); continue; }
     if (!/^[a-f0-9]{64}\.json$/.test(name)) refuse("Unknown profile backup file");
@@ -129,20 +129,20 @@ async function* profileBackups(root: string): AsyncGenerator<{ path: string; pla
     // An added opaque Home envelope must bring its owned privacy contract here;
     // never silently carry unknown copies through forget.
     if (plan.version !== 1 || Object.keys(plan).some(key => !["version", "digest", "assignments", "originals", "prepared", "operation"].includes(key))) refuse("Unsupported profile backup cleanup shape");
-    for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateKnowledgeRecord(record);
+    for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateProfileNoteRecord(record);
     if (plan.prepared.some(record => record.kind !== "note") || plan.originals.some(item => item.record.kind !== "note" || item.history.some(record => record.id !== item.record.id))) refuse("Invalid profile backup history ownership");
     yield { path, plan };
   }
 }
-function affectedBackupMembers(plan: PartitionBackup, affected: (record: KnowledgeRecord) => boolean): Set<string> {
+function affectedBackupMembers(plan: PartitionBackup, affected: (record: ProfileNoteRecord) => boolean): Set<string> {
   return new Set([...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])].filter(affected).map(record => record.id));
 }
-export async function* profileBackupRetirements(root: string, forgottenId: string, affected: (record: KnowledgeRecord) => boolean, committed: (id: string, revision: string) => boolean) {
+export async function* profileBackupRetirements(root: string, forgottenId: string, affected: (record: ProfileNoteRecord) => boolean, committed: (id: string, revision: string) => boolean) {
   for await (const { plan } of profileBackups(root)) if (affectedBackupMembers(plan, affected).size) {
     for (const record of plan.prepared) if (record.id === forgottenId || !committed(record.id, record.revisionId)) yield { recordId: record.id, revisionId: record.revisionId };
   }
 }
-export async function redactProfileBackups(root: string, affected: (record: KnowledgeRecord) => boolean): Promise<void> {
+export async function redactProfileBackups(root: string, affected: (record: ProfileNoteRecord) => boolean): Promise<void> {
   for await (const { path, plan } of profileBackups(root)) {
     const removed = affectedBackupMembers(plan, affected);
     if (!removed.size) continue;
@@ -157,7 +157,7 @@ export async function redactProfileBackups(root: string, affected: (record: Know
 }
 const refuse = (message: string): never => { throw new GatewayError("conflict", message); };
 
-/** Runs INSIDE KnowledgeStore's admitted SQL transaction. The backup is a bounded
+/** Runs INSIDE ProfileNoteStore's admitted SQL transaction. The backup is a bounded
  * immutable recovery manifest, not another catalog: canonical heads stay in SQL.
  * Prepared revision identities are durable before any body write, so a retry adopts
  * every staged body instead of silently leaking precommit immutable revisions.
@@ -169,7 +169,7 @@ export async function partitionProfileNotes(request: ProfilePartitionRequest, ac
   const assignments = request.assignments.map(item => ({ id: item.id, expectedRevision: item.expectedRevision, ...(item.path !== undefined ? { path: item.path } : {}), ...(item.profile !== undefined ? { profile: item.profile } : {}), ...(item.file !== undefined ? { file: item.file } : {}), ...(item.labels !== undefined ? { labels: item.labels } : {}) })).sort((a, b) => a.id.localeCompare(b.id));
   if (new Set(assignments.map(item => item.id)).size !== assignments.length) refuse("Duplicate profile assignment");
   for (const item of assignments) {
-    assertKnowledgeId(item.id, "profile note"); assertKnowledgeId(item.expectedRevision, "profile revision");
+    assertProfileNoteId(item.id, "profile note"); assertProfileNoteId(item.expectedRevision, "profile revision");
     if (item.file !== undefined && !validProfileFile(item.file)) refuse("Invalid explicit profile partition");
     if (item.labels !== undefined && (item.file !== undefined || request.mode !== "reorganize" || !Array.isArray(item.labels) || item.labels.some((label, index) => typeof label.tag !== "string" || !label.tag.startsWith(PROFILE_FILE_TAG) || !Number.isInteger(label.index) || label.index < 0 || (index > 0 && label.index <= item.labels![index - 1]!.index)))) refuse("Invalid profile label restoration");
     if (item.path !== undefined) { try { profilePath(item.path); } catch (error) { refuse(String(error)); } }
@@ -197,7 +197,7 @@ export async function partitionProfileNotes(request: ProfilePartitionRequest, ac
   if (saved.present) {
     plan = saved.value;
     if (plan.version !== 1 || plan.digest !== planDigest(request.mode, assignments, plan.operation) || (audit && plan.operation?.commandId !== request.commandId) || JSON.stringify(plan.assignments) !== JSON.stringify(assignments)) refuse("Profile backup does not match this migration");
-    for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateKnowledgeRecord(record);
+    for (const record of [...plan.prepared, ...plan.originals.flatMap(item => [item.record, ...item.history])]) validateProfileNoteRecord(record);
     if (plan.prepared.length !== assignments.length || plan.originals.length !== assignments.length || plan.prepared.some((note, index) => note.id !== assignments[index]!.id || plan.originals[index]!.record.id !== note.id)) refuse("Incomplete profile backup");
   } else {
     if (assignments.every(item => current.has(item.id) && JSON.stringify(current.get(item.id)!.content) === JSON.stringify(assignmentContent(current.get(item.id)!, item)))) {
@@ -216,7 +216,7 @@ export async function partitionProfileNotes(request: ProfilePartitionRequest, ac
       if (!note || note.revisionId !== item.expectedRevision) refuse("Profile assignment revision is stale or unavailable");
       const content = assignmentContent(note!, item);
       const next = JSON.stringify(note!.content) === JSON.stringify(content) ? note! : { ...note!, revisionId: randomUUID(), content };
-      validateKnowledgeRecord(next);
+      validateProfileNoteRecord(next);
       if (Buffer.byteLength(JSON.stringify(next, null, 2) + "\n") > access.recordBytes) refuse("Partitioned note exceeds its record byte bound");
       admit({ record: note, prepared: next });
       if (request.mode === "migrate" && note!.content.profile) refuse("An already migrated note needs explicit reorganization");

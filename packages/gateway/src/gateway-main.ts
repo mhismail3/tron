@@ -67,14 +67,12 @@ import type { ScheduleToolOperations } from "./automations/tron-schedule-extensi
 import { DisplayArtifactStore } from "./display/display-artifact-store.js";
 import { DisplayOwner } from "./display/display-modules.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
-import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+
 import { HomeProfileItems } from "./modules/home/home-profile.js";
-import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
-import { KnowledgeService } from "./knowledge/knowledge-service.js";
+import { ProfileStore } from "./modules/home/profile-store.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "./providers/model-queue-extension.js";
 import { ModelQueueOwner, modelQueueProjectionPath } from "./providers/model-queue.js";
 import { ProviderUsageOwner } from "./providers/provider-usage.js";
-import { JevDecisionClient } from "./knowledge/jev-client.js";
 import { SessionSearchIndex } from "./sessions/session-search-index.js";
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
@@ -491,15 +489,9 @@ try {
   logger.log("warning", "Optional session search index is unavailable; chat remains available", { event: "session-search.index-unavailable", source: "search", error });
 }
 startupCheckpoint("session-search-index");
-const knowledgeChanges = new KnowledgeChangeCoalescer(change => transport?.broadcast("knowledge.changed", {
-  stateRevision: change.stateRevision,
-  ...(change.recordIds ? { recordIds: change.recordIds } : {}),
-}));
-const knowledgeStore = new KnowledgeStore(
-  modules.contract(workspaceModule),
-  change => knowledgeChanges.record(change),
-);
-const knowledge = new KnowledgeService(knowledgeStore);
+const knowledgeStore = new ProfileStore(
+  modules.contract(workspaceModule));
+const knowledge = knowledgeStore;
 const packages = new PackageService(
   config.agentDir,
   trust,
