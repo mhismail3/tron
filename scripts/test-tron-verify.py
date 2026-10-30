@@ -457,6 +457,14 @@ class QuarantineTests(VerifyCase):
             text = path.read_text()
             for forbidden in ('PRIVATE_SENTINEL', 'failureMessages', 'fullName', 'arguments', 'prompt', 'credentials', str(r.path), 'packages/gateway/src/'):
                 self.assertNotIn(forbidden, text)
+        r.write('test-results/malformed.json', json.dumps({'schema': 'tron.verify.v1', 'commit': first['commit'],
+            'steps': [{'quarantined': [{'testId': 42}]}], 'prompt': 'PRIVATE_SENTINEL'}))
+        malformed = subprocess.run([str(r.path / 'scripts/tron'), 'health', '--sha', 'HEAD',
+                                   '--verify-report', 'test-results/malformed.json'], cwd=r.path,
+                                  env=r.env, capture_output=True, text=True)
+        self.assertEqual(malformed.returncode, 1)
+        self.assertEqual(json.loads(malformed.stdout)['status'], 'unavailable')
+        self.assertNotIn('PRIVATE_SENTINEL', malformed.stdout + malformed.stderr)
         HEALTH_ARTIFACTS.mkdir(parents=True, exist_ok=True)
         (HEALTH_ARTIFACTS / 'health-sample.json').write_text(json.dumps(card, indent=2))
 

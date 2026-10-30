@@ -316,7 +316,7 @@ def main(argv: list[str]) -> int:
     except KeyboardInterrupt:
         record['status'] = 'interrupted'
         record['reason'] = 'partial collection retained; not a pass'
-    except (OSError, ValueError, TypeError, KeyError, subprocess.CalledProcessError):
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.CalledProcessError):
         record['status'] = 'unavailable'
         record['reason'] = 'source unavailable, malformed, or not pinned main; no private diagnostic copied'
     try:
