@@ -204,7 +204,7 @@ def landed_changes(main: str, reports: list[dict]) -> list[dict]:
         durations = [step['seconds'] for report in attempts.values() for step in report.get('steps', [])
                      if step.get('name', '').startswith('tests:') and step.get('status') in ('ok', 'failed', 'quarantined')
                      and type(step.get('seconds')) in (int, float) and math.isfinite(step['seconds']) and step['seconds'] >= 0]
-        rows.append({'commit': sha, 'firstCommit': first, 'introducedCommits': len(commits),
+        rows.append({'commit': sha, 'firstCommit': first, 'introducedCommits': len(commits) if first else None,
                      'publicationObservedAt': datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp else None,
                      'commitToPublication': field('partial' if seconds is not None else 'unavailable',
                          reasons=['Git author time to local successful-push reflog observation, not request-to-server-land time']
