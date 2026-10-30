@@ -26,8 +26,10 @@ module.
   manifest; archive verification fails if either is absent.
 - `Icons/AppIcon.icon` and `Icons/AppIconBeta.icon` are the shipping and development/test app
   icons. Each separates the original raster deer silhouette (including antialiased edges) from
-  its cream/green or amber/white background and color. Icon Composer supplies glass, specular
+  its cream or amber/white background and color. Icon Composer supplies glass, specular
   lighting, shadow and translucency, with dark backgrounds and system tinted/clear renditions.
+  The shipping icon has no dark background fill, so dark mode uses the system's default dark
+  background like other apps; the beta icon keeps its own dark amber.
   The shipping icon's light and dark material specializations disable specular lighting and
   reduce translucency to 0.2 while retaining glass; light also reduces shadow to 0.2. The
   highlight follows the light angle (device tilt), so with it on the dense antler branches read

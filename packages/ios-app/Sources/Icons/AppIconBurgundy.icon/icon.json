@@ -4,12 +4,6 @@
       "value" : {
         "automatic-gradient" : "srgb:0.95294,0.92941,0.89020,1.00000"
       }
-    },
-    {
-      "appearance" : "dark",
-      "value" : {
-        "automatic-gradient" : "srgb:0.07059,0.12549,0.10588,1.00000"
-      }
     }
   ],
   "groups" : [
