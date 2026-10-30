@@ -3493,8 +3493,126 @@ class LifecycleHarness(LaneHarness):
         return resolved.stdout.strip()
 
     def readiness_node_environment(self, environment: dict[str, str]) -> dict[str, str]:
-        """Reuse the single synthetic pinned Node/npm fixture for lifecycle tools."""
-        return GatewayE2EFixture.readiness_node_environment(self, environment)
+        """Use test-owned readiness processes instead of requiring built Gateway dist.
+
+        These actual-runner regressions stop before XCTest. Their only fixture
+        contract is the enrollment/health and proxy-ready signals consumed while
+        setting up a fresh case, so a clean checkout need not build production
+        Gateway artifacts merely to test runner failure propagation. The one bin
+        directory also carries `npm`, which the harness requires beside `node`
+        before it installs the fixture Gateway.
+
+        The wrapper is that complete pinned toolchain (`TRON_NODE_BIN` with a
+        sibling `npm`) and carries its real Node, its sources, its records and its
+        knobs itself: a fixture process starts under the harness's minimal
+        environment (#445) and never sees this process's variables.
+        """
+        real_node = self.pinned_host_node(environment)
+        binary = self.root / "fixture-node"
+        binary.mkdir(exist_ok=True)
+        gateway_source = binary / "fixture-gateway.cjs"
+        gateway_source.write_text(f'''const fs = require("node:fs");
+const http = require("node:http");
+const logs = `${{process.env.TRON_DATA_DIR}}/logs`;
+fs.mkdirSync(logs, {{ recursive: true }});
+fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "gateway.started" }}) + "\\n");
+// The Gateway's own record of the device connections a journey left behind, in the
+// order the real Gateway writes them: each connection opens and closes under its
+// own id, so a backgrounded journey's retire-then-reconnect is visible as a close
+// before a different connection's open. The counts come from the case's knob file
+// because a fixture process inherits no case environment (#445).
+const knob = "{self.fixture_knob("connection-counts")}";
+const connections = (fs.existsSync(knob) ? fs.readFileSync(knob, "utf8") : "2 1").trim().split(/\\s+/).map(Number);
+for (let index = 0; index < Math.max(connections[0], connections[1]); index++) {{
+  const connectionId = `fixture-connection-${{index + 1}}`;
+  if (index < connections[0]) {{
+    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.opened", connectionId }}) + "\\n");
+  }}
+  if (index < connections[1]) {{
+    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.closed", connectionId }}) + "\\n");
+  }}
+}}
+const enrollment = `${{process.env.TRON_DATA_DIR}}/gateway/enrollment.json`;
+fs.writeFileSync(enrollment, JSON.stringify({{ code: "fixture-pairing-code" }}), {{ mode: 0o600 }});
+const server = http.createServer((request, response) => {{
+  response.writeHead(request.url === "/health" ? 200 : 404);
+  response.end();
+}});
+server.listen(Number(process.env.TRON_GATEWAY_PORT), "127.0.0.1");
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''')
+        proxy_source = binary / "fixture-proxy.cjs"
+        proxy_source.write_text(f'''const fs = require("node:fs");
+const http = require("node:http");
+const controlFailure = "{self.fixture_knob("proxy-control-failure")}";
+const startupFailure = "{self.fixture_knob("proxy-startup-failure")}";
+if (fs.existsSync(startupFailure) && fs.readFileSync(startupFailure, "utf8").trim() === "1") {{
+  console.error("fixture proxy startup failure evidence");
+  process.exit(42);
+}}
+const server = http.createServer((request, response) => {{
+  if (request.url === "/_fixture/control") {{
+    // The harness reads the owned proxy's link statistics as journey evidence.
+    if (fs.existsSync(controlFailure) && fs.readFileSync(controlFailure, "utf8").trim() === "1") {{
+      response.writeHead(500); response.end(); return;
+    }}
+    response.writeHead(200, {{ "content-type": "application/json" }});
+    response.end(JSON.stringify({{ schedule: "unshaped", clientHeartbeatTimeline: [{{ connection: 1, sequence: 1, enqueuedAt: "2026-10-09T00:00:00.000Z", gatewayPongMs: 4 }}] }}));
+    return;
+  }}
+  response.writeHead(404); response.end();
+}});
+server.listen(0, "127.0.0.1", () => {{
+  fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({{ port: server.address().port, pid: process.pid }}), {{ mode: 0o600 }});
+}});
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''')
+        record = binary / "record"
+        record.mkdir(exist_ok=True)
+        node = binary / "node"
+        node.write_text(f'''#!/usr/bin/env bash
+set -euo pipefail
+# The synthetic build owns the same version-query contract as its readiness
+# server; it deliberately does not need a production dist tree.
+if [[ "${{1:-}}" == --input-type=module && "${{@: -1}}" == */packages/gateway/dist/kernel/pi/version.js ]]; then
+  printf '0.0.0-fixture'
+  exit 0
+fi
+case "${{1:-}}" in
+  */packages/gateway/dist/index.js)
+    /usr/bin/env >"{record}/gateway.env"
+    echo "$$" >"{record}/gateway.pid"
+    # The command line the process runs as is the owned command the harness checks for
+    # (argv, not a title rewrite, so no path length can truncate it). A case may name
+    # another command line through its knob, to exercise a refused start.
+    argv0="node $1"
+    if [[ -f "{self.fixture_knob("gateway-argv0")}" ]]; then argv0="$(<"{self.fixture_knob("gateway-argv0")}")"; fi
+    exec -a "$argv0" "{real_node}" "{gateway_source}"
+    ;;
+  */ios-gateway-fault-proxy.mjs)
+    /usr/bin/env >"{record}/proxy.env"
+    exec -a "node $1" "{real_node}" "{proxy_source}"
+    ;;
+  */packages/gateway/*|*/ios-gateway-*.mjs|*.js|*.mjs|*.cjs)
+    echo "unexpected Node fixture command: $*" >&2
+    exit 70
+    ;;
+esac
+exec "{real_node}" "$@"
+''')
+        node.chmod(0o755)
+        # `npm` only has to satisfy the harness's same-bin-directory check and
+        # the fixture install it performs; no case builds production Gateway
+        # artifacts, and the checks under test stop before that build's output.
+        npm = binary / "npm"
+        npm.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n")
+        npm.chmod(0o755)
+        result = dict(environment)
+        result["PATH"] = f"{binary}:{environment['PATH']}"
+        result["TRON_NODE_BIN"] = str(node)
+        return result
 
     def add_device(self, udid: str, *, name: str, state: str = "Booted") -> None:
         """A device no Tron ownership marker claims."""
@@ -3817,128 +3935,6 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             [str(harness), *arguments], env=environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
         )
-
-    def readiness_node_environment(self, environment: dict[str, str]) -> dict[str, str]:
-        """Use test-owned readiness processes instead of requiring built Gateway dist.
-
-        These actual-runner regressions stop before XCTest. Their only fixture
-        contract is the enrollment/health and proxy-ready signals consumed while
-        setting up a fresh case, so a clean checkout need not build production
-        Gateway artifacts merely to test runner failure propagation. The one bin
-        directory also carries `npm`, which the harness requires beside `node`
-        before it installs the fixture Gateway.
-
-        The wrapper is that complete pinned toolchain (`TRON_NODE_BIN` with a
-        sibling `npm`) and carries its real Node, its sources, its records and its
-        knobs itself: a fixture process starts under the harness's minimal
-        environment (#445) and never sees this process's variables.
-        """
-        real_node = self.pinned_host_node(environment)
-        binary = self.root / "fixture-node"
-        binary.mkdir(exist_ok=True)
-        gateway_source = binary / "fixture-gateway.cjs"
-        gateway_source.write_text(f'''const fs = require("node:fs");
-const http = require("node:http");
-const logs = `${{process.env.TRON_DATA_DIR}}/logs`;
-fs.mkdirSync(logs, {{ recursive: true }});
-fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "gateway.started" }}) + "\\n");
-// The Gateway's own record of the device connections a journey left behind, in the
-// order the real Gateway writes them: each connection opens and closes under its
-// own id, so a backgrounded journey's retire-then-reconnect is visible as a close
-// before a different connection's open. The counts come from the case's knob file
-// because a fixture process inherits no case environment (#445).
-const knob = "{self.fixture_knob("connection-counts")}";
-const connections = (fs.existsSync(knob) ? fs.readFileSync(knob, "utf8") : "2 1").trim().split(/\\s+/).map(Number);
-for (let index = 0; index < Math.max(connections[0], connections[1]); index++) {{
-  const connectionId = `fixture-connection-${{index + 1}}`;
-  if (index < connections[0]) {{
-    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.opened", connectionId }}) + "\\n");
-  }}
-  if (index < connections[1]) {{
-    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.closed", connectionId }}) + "\\n");
-  }}
-}}
-const enrollment = `${{process.env.TRON_DATA_DIR}}/gateway/enrollment.json`;
-fs.writeFileSync(enrollment, JSON.stringify({{ code: "fixture-pairing-code" }}), {{ mode: 0o600 }});
-const server = http.createServer((request, response) => {{
-  response.writeHead(request.url === "/health" ? 200 : 404);
-  response.end();
-}});
-server.listen(Number(process.env.TRON_GATEWAY_PORT), "127.0.0.1");
-process.once("SIGTERM", () => server.close(() => process.exit(0)));
-process.once("SIGINT", () => server.close(() => process.exit(0)));
-''')
-        proxy_source = binary / "fixture-proxy.cjs"
-        proxy_source.write_text(f'''const fs = require("node:fs");
-const http = require("node:http");
-const controlFailure = "{self.fixture_knob("proxy-control-failure")}";
-const startupFailure = "{self.fixture_knob("proxy-startup-failure")}";
-if (fs.existsSync(startupFailure) && fs.readFileSync(startupFailure, "utf8").trim() === "1") {{
-  console.error("fixture proxy startup failure evidence");
-  process.exit(42);
-}}
-const server = http.createServer((request, response) => {{
-  if (request.url === "/_fixture/control") {{
-    // The harness reads the owned proxy's link statistics as journey evidence.
-    if (fs.existsSync(controlFailure) && fs.readFileSync(controlFailure, "utf8").trim() === "1") {{
-      response.writeHead(500); response.end(); return;
-    }}
-    response.writeHead(200, {{ "content-type": "application/json" }});
-    response.end(JSON.stringify({{ schedule: "unshaped", clientHeartbeatTimeline: [{{ connection: 1, sequence: 1, enqueuedAt: "2026-10-09T00:00:00.000Z", gatewayPongMs: 4 }}] }}));
-    return;
-  }}
-  response.writeHead(404); response.end();
-}});
-server.listen(0, "127.0.0.1", () => {{
-  fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({{ port: server.address().port, pid: process.pid }}), {{ mode: 0o600 }});
-}});
-process.once("SIGTERM", () => server.close(() => process.exit(0)));
-process.once("SIGINT", () => server.close(() => process.exit(0)));
-''')
-        record = binary / "record"
-        record.mkdir(exist_ok=True)
-        node = binary / "node"
-        node.write_text(f'''#!/usr/bin/env bash
-set -euo pipefail
-# The synthetic build owns the same version-query contract as its readiness
-# server; it deliberately does not need a production dist tree.
-if [[ "${{1:-}}" == --input-type=module && "${{@: -1}}" == */packages/gateway/dist/kernel/pi/version.js ]]; then
-  printf '0.0.0-fixture'
-  exit 0
-fi
-case "${{1:-}}" in
-  */packages/gateway/dist/index.js)
-    /usr/bin/env >"{record}/gateway.env"
-    echo "$$" >"{record}/gateway.pid"
-    # The command line the process runs as is the owned command the harness checks for
-    # (argv, not a title rewrite, so no path length can truncate it). A case may name
-    # another command line through its knob, to exercise a refused start.
-    argv0="node $1"
-    if [[ -f "{self.fixture_knob("gateway-argv0")}" ]]; then argv0="$(<"{self.fixture_knob("gateway-argv0")}")"; fi
-    exec -a "$argv0" "{real_node}" "{gateway_source}"
-    ;;
-  */ios-gateway-fault-proxy.mjs)
-    /usr/bin/env >"{record}/proxy.env"
-    exec -a "node $1" "{real_node}" "{proxy_source}"
-    ;;
-  */packages/gateway/*|*/ios-gateway-*.mjs|*.js|*.mjs|*.cjs)
-    echo "unexpected Node fixture command: $*" >&2
-    exit 70
-    ;;
-esac
-exec "{real_node}" "$@"
-''')
-        node.chmod(0o755)
-        # `npm` only has to satisfy the harness's same-bin-directory check and
-        # the fixture install it performs; no case builds production Gateway
-        # artifacts, and the checks under test stop before that build's output.
-        npm = binary / "npm"
-        npm.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n")
-        npm.chmod(0o755)
-        result = dict(environment)
-        result["PATH"] = f"{binary}:{environment['PATH']}"
-        result["TRON_NODE_BIN"] = str(node)
-        return result
 
     def fixture_environment_record(self, environment: dict[str, str], name: str) -> dict[str, str]:
         """The environment one fixture process was handed, as `readiness_node_environment` records it."""
