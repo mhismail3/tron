@@ -74,15 +74,9 @@ struct SessionShellView: View {
     @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
     @State private var dashboardHeader = DashboardHeaderState()
     @State private var showNewSession = false
-    @State private var knowledgeDraftText: String?
-    @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
-    /// A Knowledge "start a session" handoff waiting for the Knowledge sheet to
-    /// finish dismissing before New Session presents.
-    @State private var knowledgeDraftPending = false
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var showingAutomations = false
-    @State private var showingKnowledge = false
     @State private var showingApps = false
     @State private var projectSettings: ProjectSettingsRoute?
     @State private var presentedSession: AppModel.SessionNavigationRoute?
@@ -162,9 +156,7 @@ struct SessionShellView: View {
                 isPresented: $showNewSession,
                 identity: "dashboard.new-session"
             ) {
-                NewSessionSheet(initialDraftText: knowledgeDraftText, pinnedProfileID: knowledgeDraftIdentity?.profileID) { route in
-                    knowledgeDraftText = nil
-                    knowledgeDraftIdentity = nil
+                NewSessionSheet { route in
                     present(route)
                 }
                     .tronTopBlur(.sheet)
@@ -176,21 +168,6 @@ struct SessionShellView: View {
                 preferences: automationViewPreferencesBinding,
                 onOpenSession: openAutomationSession
             )
-            .tronManagedSheet(
-                isPresented: $showingKnowledge,
-                identity: "dashboard.knowledge",
-                onDismiss: {
-                    guard knowledgeDraftPending else { return }
-                    knowledgeDraftPending = false
-                    showNewSession = true
-                }
-            ) {
-                KnowledgeSheet(
-                    onOpenDraft: openKnowledgeDraft,
-                    onOpenSession: openKnowledgeEvidence,
-                    onDone: { showingKnowledge = false }
-                )
-            }
             .tronManagedSheet(isPresented: $showingApps, identity: "dashboard.apps") {
                 InstalledAppsSheet()
             }
@@ -243,7 +220,7 @@ struct SessionShellView: View {
             }
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
                 if previousProfileID != profileID {
-                    routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil
+                    routeReplacementOwner.invalidate()
                 }
                 var route = presentedSession
                 profileRouteOwner.reconcile(
@@ -315,35 +292,6 @@ struct SessionShellView: View {
         )
     }
 
-    private func openKnowledgeDraft(_ record: KnowledgeRecord) {
-        let identity = model.knowledgePresentationIdentity
-        guard let text = KnowledgeDraftHandoffPolicy.text(for: record, identity: identity) else { return }
-        knowledgeDraftIdentity = identity
-        knowledgeDraftText = text
-        // New Session presents from the dashboard once the Knowledge sheet is gone.
-        knowledgeDraftPending = true
-        showingKnowledge = false
-        showingApps = false
-    }
-
-    private func openKnowledgeEvidence(sessionID: String, entryID: String) {
-        guard let profileID = model.knowledgePresentationIdentity.profileID, openingSessionID == nil else { return }
-        openingSessionID = "knowledge:\(profileID):\(sessionID):\(entryID)"
-        let navigationIntent = navigationOwner.begin()
-        Task { @MainActor in
-            defer { openingSessionID = nil }
-            guard openingSessionID == "knowledge:\(profileID):\(sessionID):\(entryID)",
-                  model.knowledgePresentationIdentity.profileID == profileID else { return }
-            do {
-                let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID, historyEntryID: entryID)
-                guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
-                showingKnowledge = false
-                showingApps = false
-                present(route)
-            } catch is CancellationError { return } catch { model.presentError(error) }
-        }
-    }
-
     private func openAutomationSession(profileID: String, sessionID: String) {
         guard openingSessionID == nil else { return }
         openingSessionID = "\(profileID):\(sessionID)"
@@ -369,7 +317,6 @@ struct SessionShellView: View {
         DashboardChrome(
             header: dashboardHeader,
             onOpenAutomations: { showingAutomations = true },
-            onOpenKnowledge: { showingKnowledge = true },
             onOpenApps: { showingApps = true },
             actions: dashboardMenuActions,
             home: showsHomeFloatingButton
@@ -485,7 +432,6 @@ struct SessionShellView: View {
         showNewSession = false
         showSettings = false
         showingAutomations = false
-        showingKnowledge = false
         showingApps = false
         projectSettings = nil
 

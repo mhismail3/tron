@@ -245,12 +245,6 @@ final class AppModel {
     let macTerminal = MacTerminalController()
     /// Owns idempotent Home designation receipts independently of dashboard reads.
     let homeMutations: HomeMutationCoordinator
-    /// Typed access to Gateway-owned Knowledge; no records are persisted here.
-    let knowledge: KnowledgeRPCClient
-    /// The Library's bounded first-page projection and its preview images. Both
-    /// are disposable and neither is a second authority for the corpus.
-    let knowledgeLibraryCache: KnowledgeLibraryPageCache
-    let knowledgePreviews: KnowledgePreviewStore
     /// Read-side projections and owner-routed connection-instance mutations.
     let integrations: IntegrationsRPCClient
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
@@ -317,15 +311,6 @@ final class AppModel {
     /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0
     private(set) var dashboardPresentationRevision = 0
-    /// Gateway-broadcast knowledge mutations invalidate dashboard reads without
-    /// introducing a dashboard-owned polling loop.
-    private(set) var knowledgeInvalidationRevision = 0
-    /// The typed change carried by the latest broadcast, when the Gateway sent
-    /// one. Absent means the client cannot reason about the revision and must
-    /// refresh rather than patch rows.
-    private(set) var latestKnowledgeChange: KnowledgeChanged?
-    private(set) var latestKnowledgeCurationJob: KnowledgeCurationJob?
-    private(set) var knowledgeCurationJobRevision = 0
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
@@ -689,19 +674,6 @@ final class AppModel {
         })
         let installedApps = InstalledSwiftApps.gateway(client: client, lifecycle: lifecycle, mutations: mutationExecutor)
         let workspaceInspection = WorkspaceInspectionService(client: client)
-        let knowledge = KnowledgeRPCClient(
-            request: { method, params in
-                try await client.requestValue(method, params)
-            },
-            mutationExecutor: mutationExecutor,
-            uuidSource: uuidSource
-        )
-        let knowledgeLibraryCache = KnowledgeLibraryPageCache()
-        let knowledgePreviews = KnowledgePreviewStore(
-            loadBatch: { requests, includeArchived in
-                try await knowledge.readPreviews(requests, includeArchived: includeArchived)
-            }
-        )
         let integrations = IntegrationsRPCClient(
             request: { method, params in
                 try await client.requestValue(method, params)
@@ -740,9 +712,6 @@ final class AppModel {
         self.noticeCenter = noticeCenter
         self.dashboardConnections = dashboardConnections
         self.automationCatalog = automationCatalog
-        self.knowledge = knowledge
-        self.knowledgeLibraryCache = knowledgeLibraryCache
-        self.knowledgePreviews = knowledgePreviews
         self.integrations = integrations
         self.homeMutations = homeMutations
         self.mutationExecutor = mutationExecutor
@@ -1789,7 +1758,6 @@ extension AppModel {
         homeMutations.forgetProfile(profileID)
         await composerDrafts.removeProfile(profileID).value
         await cache.remove(profileID: profileID)
-        await knowledgeLibraryCache.remove(profileID: profileID)
     }
 
     func forgetGateway(_ profile: GatewayProfile) async {
@@ -4843,13 +4811,6 @@ extension AppModel {
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
-        case "knowledge.changed":
-            knowledgeInvalidationRevision &+= 1
-            latestKnowledgeChange = { if case .knowledgeChanged(let change) = event.preparation { return change }; return nil }()
-        case "knowledge.curation.job":
-            guard case .knowledgeCurationJob(let job) = event.preparation else { break }
-            latestKnowledgeCurationJob = job
-            knowledgeCurationJobRevision &+= 1
         case "packages.progress", "packages.completed":
             let completed = event.topic == "packages.completed"
             let succeeded = event.payload.objectValue?["success"]?.boolValue == true

@@ -30,7 +30,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `PackageConfigurationCoordinator`, `CustomModelConfigurationCoordinator`, `ConfigurationAutosaveCoordinator` | Packages, custom models, autosaved configuration writes. |
 | `HomeStatusPresentationOwner`, `HomeSheetReadOwner`, `HomeMutationCoordinator` | Home status, Home sheet reads, Home commands. |
 | `AutomationCatalogCoordinator`, `AutomationRPCClient` | Automation summaries per Gateway. |
-| `KnowledgeRPCClient`, `KnowledgePresentationStores`, `KnowledgePreviewStore` | Knowledge reads and receipted mutations. |
+| `KnowledgePresentationIdentity`, `KnowledgeDestinationIdentity` | Shared transport/read and accepted-result identities used by settings, uploads, auth and Profile; no corpus projection. |
 | `IntegrationsRPCClient` | Connection-owner projections and mutations. |
 | `SessionHistoryStore`, `SessionProcessHistoryStore`, `ReadOnlySubagentSessionStore`, `FeedStore` | History pages, subagent history, read-only child transcripts, shared accumulating feed paging. |
 | `PresentationActivityCoordinator`, `PresentationRefreshPolicy`, `ManagedSheetPresentation`, `PresentationScopedState` | Foremost read demand, native sheet graphs, binding leases and presentation-lifetime state ([parity](../../docs/presentation-parity.md#presentation-activity)). |

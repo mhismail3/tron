@@ -1,22 +1,13 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { validateProfileMetadata, type ProfileNoteRow } from "./knowledge-profile-placement.js";
 
-export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "cleanup" | "recordCleanup" | "sourceIdentities";
-export interface RecallRank { score: number; family: number; freshness: number; sortAt: number; keyOrder: string; }
-export interface RecallCandidate<T> { key: string; value: T; rank: RecallRank; }
+export type CatalogCollection = "records" | "suppressions" | "scopeExclusions" | "receipts" | "cleanup" | "recordCleanup";
 
 // Validate rows at their read/write boundary, without materializing the corpus.
 function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
-  let decoded: unknown;
-  if (collection === "sourceIdentities" && typeof raw === "string") {
-    try { decoded = JSON.parse(raw); } catch { decoded = raw; }
-  } else decoded = typeof raw === "string" ? JSON.parse(raw) : raw;
+  const decoded: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (collection === "cleanup") {
-    if (decoded !== true) throw new Error("Invalid Knowledge object cleanup row");
-    return decoded as T;
-  }
-  if (collection === "sourceIdentities") {
-    if (typeof decoded !== "string") throw new Error("Invalid Knowledge source identity row");
+    if (decoded !== true) throw new Error("Invalid Profile cleanup row");
     return decoded as T;
   }
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error(`Invalid Knowledge ${collection} row`);
@@ -25,14 +16,11 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
   switch (collection) {
     case "records":
       if (typeof value.latestRevisionId !== "string" || !strings(value.revisionIds) || !value.revisionIds.includes(value.latestRevisionId)
-        || !["observation", "source", "note"].includes(value.kind as string) || !["personal", "research"].includes(value.scope as string)
+        || value.kind !== "note" || !["personal", "research"].includes(value.scope as string)
         || typeof value.sortAt !== "number" || !Number.isFinite(value.sortAt) || !strings(value.recordRefs) || !strings(value.objectHashes)
         || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string"
-        || (value.sourceIdentities !== undefined && !strings(value.sourceIdentities))
-        || (value.admission !== undefined && !["pending", "retained", "archived"].includes(value.admission as string))
         || (value.sessionId !== undefined && typeof value.sessionId !== "string")
         || (value.branchId !== undefined && typeof value.branchId !== "string")
-        || (value.kind === "source" ? !validSourceRow(value.sourceRow) : value.sourceRow !== undefined)
         || !Array.isArray(value.searchFields) || !value.searchFields.every(field => strings(field) && field.length === 2)) throw new Error("Invalid Knowledge record head");
       if (value.profileRow !== undefined && value.profileRow !== null) {
         const row = value.profileRow as ProfileNoteRow;
@@ -53,32 +41,8 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
     case "recordCleanup":
       if (typeof value.recordId !== "string" || typeof value.revisionId !== "string") throw new Error("Invalid Knowledge record cleanup row");
       break;
-    case "coverage":
-      if (typeof value.id !== "string" || !value.range || !["observed", "empty", "excluded", "pending", "failed", "unavailable"].includes(value.disposition as string)) throw new Error("Invalid Knowledge coverage row");
-      break;
   }
   return value as T;
-}
-
-/** A source head's row projection. Every field is bounded, and the text-free
- * shape is what keeps a Library page small. */
-function validSourceRow(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const row = value as Record<string, unknown>;
-  const optional = (key: string): boolean => row[key] === undefined || (typeof row[key] === "string" && (row[key] as string).length <= 4_096);
-  return typeof row.title === "string" && row.title.length <= 4_096
-    && ["complete", "partial", "metadata-only", "inaccessible", "failed", "reference-only"].includes(row.captureDisposition as string)
-    && ["uri", "originalUri", "mediaType", "sourceSavedAt", "sourcePublishedAt", "summary", "supersededBy"].every(optional)
-    && (row.tagIds === undefined || (Array.isArray(row.tagIds) && row.tagIds.length <= 24 && row.tagIds.every(item => typeof item === "string" && item.length <= 64)))
-    && (row.tagVocabularyRevision === undefined || (typeof row.tagVocabularyRevision === "number" && Number.isSafeInteger(row.tagVocabularyRevision) && row.tagVocabularyRevision >= 0))
-    && (row.tags === undefined || (Array.isArray(row.tags) && row.tags.length <= 24 && row.tags.every(item => !!item && typeof item === "object" && typeof item.id === "string" && typeof item.label === "string" && item.label.length <= 80)))
-    && (row.summary === undefined || (row.summary as string).length <= 280)
-    && (row.ageBasis === "sourceSavedAt" || row.ageBasis === "capturedAt")
-    && typeof row.ageSince === "string" && Number.isFinite(Date.parse(row.ageSince))
-    && ["ages", "does-not-age", "unknown"].includes(row.decayClass as string)
-    && (row.verdict === undefined || ["evergreen", "dated", "superseded", "archive"].includes(row.verdict as string))
-    && typeof row.hasTake === "boolean" && typeof row.tagsStale === "boolean"
-    && (row.preview === undefined || (typeof row.preview === "object" && row.preview !== null && !Array.isArray(row.preview)));
 }
 
 // Escape keys as JSON strings: receipt keys contain NUL separators, and the
@@ -136,9 +100,6 @@ export class KnowledgeCatalog {
           CREATE INDEX records_kind_date ON entries(collection, json_extract(value, '$.kind'), json_extract(value, '$.sortAt') DESC, key) WHERE collection = 'records';
           CREATE INDEX records_scope_date ON entries(collection, json_extract(value, '$.scope'), json_extract(value, '$.sortAt') DESC, key) WHERE collection = 'records';
           CREATE INDEX records_kind_scope_date ON entries(collection, json_extract(value, '$.kind'), json_extract(value, '$.scope'), json_extract(value, '$.sortAt') DESC, key) WHERE collection = 'records';
-          CREATE INDEX coverage_date ON entries(collection, json_extract(value, '$.recordedAt'), key) WHERE collection = 'coverage';
-          CREATE INDEX coverage_scope ON entries(collection, json_extract(value, '$.range.sessionId'), json_extract(value, '$.range.branchId'), json_extract(value, '$.range.projectId'), json_extract(value, '$.range.fromEntryId')) WHERE collection = 'coverage';
-          CREATE INDEX coverage_disposition ON entries(collection, json_extract(value, '$.disposition'), json_extract(value, '$.recordedAt')) WHERE collection = 'coverage';
           CREATE TABLE revision_owners (revision TEXT PRIMARY KEY, record TEXT NOT NULL);
           CREATE INDEX revision_record ON revision_owners(record);
         `);
@@ -181,33 +142,6 @@ export class KnowledgeCatalog {
       .map(row => ({ key: JSON.parse(String(row.key)) as string, value: catalogValue<T>(collection, String(row.value)) }));
   }
 
-  /** Bounded internal recall pages with an exact SQLite ordering tuple. The
-   * statement completes before callers await immutable record-body reads. */
-  recallRows<T>(input: {
-    where: string; parameters: SQLInputValue[]; scoreSQL: string; scoreParameters: SQLInputValue[];
-    familySQL: string; freshnessSQL: string; after?: RecallRank; limit: number;
-  }): Array<RecallCandidate<T>> {
-    const continuation = input.after ? `WHERE score < ? OR (score = ? AND (family > ? OR (family = ? AND (freshness < ? OR (freshness = ? AND (sortAt < ? OR (sortAt = ? AND keyOrder > ?)))))))` : "";
-    const cursorParameters: SQLInputValue[] = input.after ? [
-      input.after.score, input.after.score, input.after.family, input.after.family,
-      input.after.freshness, input.after.freshness, input.after.sortAt, input.after.sortAt, input.after.keyOrder,
-    ] : [];
-    const query = `WITH ranked AS (
-      SELECT key, key AS keyOrder, value, (${input.scoreSQL}) AS score, (${input.familySQL}) AS family,
-        (${input.freshnessSQL}) AS freshness, CAST(json_extract(value, '$.sortAt') AS REAL) AS sortAt
-      FROM entries WHERE collection = 'records' AND (${input.where})
-    ), page AS (
-      SELECT key, keyOrder, value, score, family, freshness, sortAt FROM ranked ${continuation}
-      ORDER BY score DESC, family ASC, freshness DESC, sortAt DESC, keyOrder ASC LIMIT ?
-    ) SELECT key, keyOrder, value, score, family, freshness, sortAt FROM page ORDER BY score DESC, family ASC, freshness DESC, sortAt DESC, keyOrder ASC`;
-    const rows = this.database.prepare(query).all(...input.scoreParameters, ...input.parameters, ...cursorParameters, input.limit);
-    return rows.map(row => ({
-      key: JSON.parse(String(row.key)) as string,
-      value: catalogValue<T>("records", String(row.value)),
-      rank: { score: Number(row.score), family: Number(row.family), freshness: Number(row.freshness), sortAt: Number(row.sortAt), keyOrder: String(row.keyOrder) },
-    }));
-  }
-
   *scan<T>(collection: CatalogCollection, where: string, parameters: SQLInputValue[], order: string): IterableIterator<{ key: string; value: T }> {
     const query = `SELECT key, value FROM entries WHERE collection = '${collection}' ${where ? `AND (${where})` : ""} ORDER BY ${order}`;
     for (const row of this.database.prepare(query).iterate(...parameters)) {
@@ -215,20 +149,5 @@ export class KnowledgeCatalog {
     }
   }
 
-  /** Raw rows for the explicit storage upgrade only. A pre-upgrade head does
-   * not satisfy the current head contract, and the caller's rebuild is exactly
-   * what makes it valid; ordinary reads go through the validated accessors. */
-  rawEntries(collection: CatalogCollection): Array<{ key: string; value: unknown }> {
-    return this.database.prepare("SELECT key, value FROM entries WHERE collection = ? ORDER BY key").all(collection)
-      .map(row => ({ key: JSON.parse(String(row.key)) as string, value: JSON.parse(String(row.value)) as unknown }));
-  }
 
-  count(collection: CatalogCollection, where: string): number {
-    return Number(this.database.prepare(`SELECT count(*) AS count FROM entries WHERE collection = '${collection}' AND (${where})`).get()!.count);
-  }
-
-  coverageCounts(): Record<string, number> {
-    return Object.fromEntries(this.database.prepare("SELECT json_extract(value, '$.disposition') AS disposition, count(*) AS count FROM entries WHERE collection = 'coverage' GROUP BY disposition")
-      .all().map(row => [String(row.disposition), Number(row.count)]));
-  }
 }

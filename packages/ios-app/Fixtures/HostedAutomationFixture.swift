@@ -129,7 +129,6 @@ struct HostedAutomationFixtureView: View {
                         // The real dashboard menu opens the real Automations sheet.
                         DashboardModeMenuButton(
                             onOpenAutomations: { automationsPresented = true },
-                            onOpenKnowledge: {},
                             onOpenApps: {},
                             actions: .init(settings: {}, creation: [])
                         )

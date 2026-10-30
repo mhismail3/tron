@@ -100,8 +100,6 @@ struct TronMobileApp: App {
                 HostedHomeSummaryTypographyFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-row-clock-fixture") {
                 HostedSessionRowClockFixture()
-            } else if ProcessInfo.processInfo.arguments.contains("-tron-knowledge-detail-fixture") {
-                HostedKnowledgeDetailFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-integrations-fixture") {
                 HostedIntegrationsFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-dashboard-menu-fixture") {
