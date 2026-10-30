@@ -63,6 +63,15 @@ it("real Gateway/socket/Pi: Home creates a visible bounded monitor without appro
   expect(gateway.record().providerRequests[0].tools).toContain("monitor");
 });
 
+it("real Gateway/socket/Pi: the existing scheduler timer expires a monitor without a nudge or provider wake", async () => {
+  const { gateway, phone, prompt, monitors } = await fixture();
+  expect((await prompt("Use a short real lease.", [{ action: "create", name: "Timer expiry", message: "Ref #2156. Disarm at expiry.", everyMinutes: 5, expiresAt: new Date(Date.now() + 6_000).toISOString() }]))[0].isError).not.toBe(true);
+  const monitor = (await monitors())[0];
+  const before = gateway.record().providerRequests.length;
+  await waitFor(async () => (await phone.request("automation.get", { automationId: monitor.id })).result.activation === "completed", "real scheduler timer disarms expired monitor");
+  expect(gateway.record().providerRequests).toHaveLength(before);
+});
+
 it.each(["monitor", "result"] as const)("real Gateway/socket/Pi: %s wake resumes the same progress worker exactly once", async mode => {
   let clock = Date.now();
   vi.spyOn(Date, "now").mockImplementation(() => clock);
