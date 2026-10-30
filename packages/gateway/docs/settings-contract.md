@@ -14,8 +14,8 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 - **F2 Truth.** Each layer's store is the truth; the change record is audit and undo, never
   consulted for a value. A store that differs from the last observed value is an
   [outside change](#outside-changes), offered **Apply again**; Tron never re-applies on its own.
-- **F3 Policy.** Routine reversible writes apply and log. Irreversible,
-  trust/executable authority, privacy expansion, spend and install effects require an exact paired-native
+- **F3 Policy.** Routine reversible writes apply and log. Widening trust/executable
+  authority, privacy or spend, and any install or irreversible effect, require an exact paired-native
   tap through the dedicated [native review](#native-review), never a generic form.
 - **F4 Scopes.** Top wins: **Project > Session/Home override > Global**, among the scopes
   the target has and the key's grants allow. One resolver takes the topmost applied scope with
@@ -67,7 +67,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `context.branchSummary.reserveTokens` | — | context | project, global | none | live | next-compaction | — |
 | `context.images.autoResize` | — | tools | project, session, global | as allowed | fixed | new-chat | — |
 | `context.images.block` | — | tools | project, session, global | as allowed | narrow live, widen fixed | next-request | privacy |
-| `tools.active` | — | tools | project, session, global, home | session, home | fixed | next-turn | trust |
+| `tools.active` | — | tools | project, session, global, home | session, home | fixed | next-turn | — |
 | `tools.codemode.mode` | — | tools | project, global | none | fixed | new-chat | — |
 | `tools.codemode.inlineBudget` | — | tools | project, global | none | fixed | new-chat | — |
 | `tools.shell.path` | — | tools | project, global | none | fixed | new-chat | trust |
@@ -126,8 +126,8 @@ when a change is not immediate; timing may differ by direction.
   and request onto the session's `SettingsManager` (Home too) and, for provider timeouts, at
   `ModelRuntime.streamSimple`. **Follow the default** unsets a Session value.
 - **Per direction** (`context.images.block`): narrowing applies next request; widening waits
-  for a new chat unless approved or tapped. `requestPins` in `tron.settings.v1` hold directional
-  values; an approved Mac/Project widening releases inherited pins, never explicit Session values.
+  for a new chat unless the maintainer's native tap applies it. `requestPins` in `tron.settings.v1` hold directional
+  values; a tapped Mac/Project widening releases inherited pins, never explicit Session values.
 - Fork, cold resume and Home rollover carry `tron.settings.v1`, never the record. Changing a
   model or thinking never persists a default.
 

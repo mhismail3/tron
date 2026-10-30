@@ -40,9 +40,10 @@ No Knowledge DTO or profile inverse is invented by the settings kernel.
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
-worker. Routine reversible changes apply, log and can be undone. Only irreversible,
-trust/executable authority, privacy expansion, spend and install effects require an exact native tap;
-privacy access and spend limits require it when widening. Writer grants and scope admission apply first.
+worker. Routine reversible changes, tool selection included, apply, log and can be undone.
+Widening trust/executable authority, privacy access or spend, and any install or
+irreversible effect, require an exact native tap; narrowing them is routine. Writer
+grants and scope admission apply first.
 There are no settings tiers, floor overrides, pending requests, expiry, outcome
 outbox, risk-model calls or settings decision RPCs.
 
