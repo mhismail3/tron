@@ -1447,8 +1447,11 @@ async function bandwidthStreamLeg(config, { mobile, chat, retry }) {
     } catch (error) {
       // A session that will not mount is not this case's finding: the leg
       // measures the streams it holds. The close event can still be in flight
-      // when the request fails, so wait for it before calling a close a bug.
-      if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) await sleep(50);
+      // when the request fails. Await its accounting rather than guessing how
+      // quickly the shaped connection will finish its close handshake.
+      if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
+        await waitForClosure(mobile, config.measuredDeadlineMs);
+      }
       if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) throw error;
       await streamChat.close().catch(() => {});
       if (mobile.closedUnexpectedly) break;
@@ -1533,9 +1536,11 @@ async function bandwidthLeg(config, { mobile, chat, retry }) {
           // (counted as an unexpected close), not a failure of the profile: the leg
           // ends with the operations it measured and the metric that says why. The
           // close event can still be in flight while the socket is only closing, so
-          // wait for it; a socket that is gone without a counted close is a
-          // measurement bug, and is reported as one.
-          if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) await sleep(50);
+          // await the same close/accounting boundary used by restart measurement.
+          // A socket that is gone without a counted close is a measurement bug.
+          if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
+            await waitForClosure(mobile, config.measuredDeadlineMs);
+          }
           if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
             throw new Error(`${mobile.name} socket died under the cap without being counted: ${messageOf(error)}`);
           }

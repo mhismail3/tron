@@ -83,6 +83,8 @@ normal, swap ≤ 4 GiB and the volume can hold the catalog.
   can reach pong misses and capacity closes; rejected without two streams, 0.9 link
   use and a backlog), `restart` (the profiler restarts the fixture on the same port;
   every client must reconnect; storm and downtime requests are classified by outcome).
+  Capped legs await the socket's close event within the measured-operation deadline
+  before reading close accounting; a closing socket alone is not an uncounted close.
 - **Targets:** blackhole `recovery_ready_ms` p95 ≤ 5 s (C-3); zero
   `pong_deadline_misses` (C-4); zero capacity closes (G-4); restart reconnect ≤ 10 s
   and no storm request over 1 s (G-13, reported as a warning). Per iteration:
