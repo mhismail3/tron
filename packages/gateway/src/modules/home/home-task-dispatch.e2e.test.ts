@@ -214,6 +214,71 @@ describe("Home task authorization RPC", () => {
     await expect(owner.taskTool(f.home.sessionId, { action: "approve", taskId: task.taskId } as any)).rejects.toThrow();
     evidence.push({ case: "card-one-use-grant", task, permissions: await list() });
   });
+  it.each(["approve", "deny", "expire"] as const)("Mac replacement resume after a consumed grant waits for a fresh exact card: %s", async decision => {
+    const approved = decision === "approve";
+    const { f, list, service } = await controls();
+    const owner = homeOwnerOf(f.registry), home = await f.registry.acquire(f.home.sessionId);
+    let entered = 0;
+    f.faux.setResponses([(_context, options) => {
+      entered++;
+      return new Promise<never>((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("stopped")), { once: true }));
+    }, fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const starting = owner.dispatchTask(f.home.sessionId, { taskId: "replace-granted", intent: "Exact finite work", target: f.cwd }, undefined,
+      (review, apply) => home.requestChange({ review, apply }));
+    await (await answerChangeCard(service, maintainerPhone, home, true, "initial-replacement-grant")).response;
+    const run = await starting;
+    await waitFor(() => entered === 1, "original granted worker entered");
+    const original = await owner.taskStatus(run.taskId);
+    expect((await list()).grants).toMatchObject([{ state: "consumed" }]);
+    await owner.stopTask({ taskId: run.taskId, operationId: original.operationId! });
+    await run.completion;
+    const operation = "21590000-0000-4000-8000-000000000001";
+    const directory = join(f.root, ".tron-maintenance", "replace");
+    await mkdir(join(directory, operation), { recursive: true });
+    await writeFile(join(directory, "current.json"), JSON.stringify({ id: operation }));
+    await writeFile(join(directory, operation, "journal.json"), JSON.stringify({ schema: 1, kind: "tron-mac-replace", steps: [], id: operation, state: "succeeded", workers: [{ taskId: run.taskId, sessionId: original.sessionId, title: "Exact finite work" }] }));
+    const slot = home;
+    // Observe the actual timer boundary; the broker's clock test separately
+    // advances the full day. Invoking its owned callback keeps real Gateway I/O
+    // and task admission live without advancing unrelated worker deadlines.
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    let outcome: { result?: any; error?: unknown } | undefined;
+    const resume = service.invoke(maintainerPhone, "mac.replace.resumeWorker", { commandId: "resume-replaced-worker", operationId: operation, taskId: run.taskId })
+      .then(result => outcome = { result }, error => outcome = { error });
+    const card = await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change") ?? (outcome ? { error: outcome.error } : undefined), "resume card or refusal");
+    expect(card).not.toHaveProperty("error");
+    expect(card).toMatchObject({ method: "change", review: { title: "Allow Home task replace-granted.resume-1 once" } });
+    expect(entered).toBe(1);
+    expect((await list()).grants).toHaveLength(1);
+    if (decision === "expire") {
+      const day = 24 * 60 * 60 * 1000;
+      const expiry = timers.mock.calls.find(([, delay]) => delay === day);
+      expect(expiry).toBeDefined();
+      expiry![0]();
+    } else {
+      const { response } = await answerChangeCard(service, maintainerPhone, slot, approved, "fresh-replacement-grant");
+      await response;
+    }
+    await resume;
+    timers.mockRestore();
+    if (approved) {
+      expect(outcome!.error).toBeUndefined();
+      await waitFor(async () => (await owner.taskStatus("replace-granted.resume-1")).lifecycle === "terminal", "freshly granted resume settles");
+      const permissions = await list();
+      expect(permissions.grants).toHaveLength(2);
+      expect(permissions.grants.every((grant: any) => grant.state === "consumed")).toBe(true);
+      expect(new Set(permissions.grants.map((grant: any) => grant.id)).size).toBe(2);
+      await refused(f, "cannot-reuse-resume-grant", (await owner.taskStatus("replace-granted.resume-1")).intent.text);
+      expect((await list()).grants).toEqual(permissions.grants);
+    } else {
+      expect(outcome!.error).toMatchObject({ message: expect.stringContaining(decision === "expire" ? "expired unanswered" : "declined this task grant") });
+      expect((await owner.taskStatus("replace-granted.resume-1")).sessionId).toBeNull();
+      expect((await list()).grants).toHaveLength(1);
+      expect(entered).toBe(1);
+    }
+    evidence.push({ case: "replacement-fresh-grant", decision, grants: (await list()).grants });
+  });
+
   it("a declined grant card runs nothing and records no grant; Home may only ask again on a new card", async () => {
     const { f, list, service } = await controls();
     const first = await delegateTurn(f, service, "deny-request", false);

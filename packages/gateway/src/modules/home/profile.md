@@ -69,16 +69,22 @@ Home can sort its own inferred nonbinding notes and retire its own unconfirmed
 proposals with a reason, including an unconfirmed standing/default/correction
 proposal. Sorting a confirmed/private note or a standing/default/correction kind,
 retiring another author's or confirmed note, and all content refinements require
-an exact maintainer decision through `home.profile.review`.
-Original notes remain unchanged while pending. `wait: true` keeps the call waiting in
-Home's chat for the decision; otherwise it returns pending. The review shows each note's
-own words and its areas (`Unsorted › Review → Communication › Questions`); the stored
-action binds exact before/after values and source revisions, shown behind the sheet's
-technical disclosure. Supersede previews show both the old
-note becoming superseded and the replacement's text, kind, confirmation, placement
-and source link. Stale approvals fail rather than overwrite a later native edit.
-Approval apply borrows the already-held Home subject stripe; it does not acquire
-the same non-reentrant mutex twice. Accepted changes retain Changes and Undo.
+an exact maintainer decision through the shared native `change` card
+(`SemanticUIBroker.requestChange` via `nativeChangeConfirmer`). Home's tool waits
+in the asking chat; original notes remain unchanged until the tap. Unanswered
+cards expire after 24 hours. The review shows each note's own words and its areas
+(`Unsorted › Review → Communication › Questions`); its digest binds exact before/after
+values and source revisions behind the sheet's technical disclosure. Supersede
+previews show both the old note becoming superseded and the replacement's text,
+kind, confirmation, placement and source link. Stale or expired cards are refused,
+not advertised as publication retries. Accepted changes retain Changes and Undo.
+
+Organization keeps the original operation command ID through the tap, backup and
+audit. If publication fails after placement commits, Home's returned `retry_required`
+command repairs that operation's audit without applying placement again. The
+maintainer's `home.profileChange` supports the same migrate/reorganize/retry path;
+its own tap is authority, so it does not open another card. Retry names the original
+operation inside a fresh RPC receipt. Both paths retain exact-revision fencing and Undo.
 
 Home's model-visible policy offers sorting at the start of a maintainer turn when
 eight notes are unsorted, at most eight per batch. “Not now” suppresses offers until

@@ -16,8 +16,8 @@ import type {
   ExtensionSemanticState,
   ExtensionWidget,
 } from "../../protocol/types.js";
-import { TRON_FORM_CAPABILITY, TRON_CHANGE_CAPABILITY } from "./extension-adapter-contract.js";
-import type { ChangeCapableUI, NativeChangeRequest, FormCapableUI, FormRequest } from "./extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "./extension-adapter-contract.js";
+import type { FormCapableUI, FormRequest } from "./extension-adapter-contract.js";
 import {
   canonicalExtensionFormAnswer,
   EXTENSION_FORM_MAX_ANSWER_BYTES,
@@ -537,7 +537,6 @@ export class SemanticUIBroker {
       },
     };
     (context as ExtensionUIContext & FormCapableUI)[TRON_FORM_CAPABILITY] = broker.requestForm.bind(broker) as FormRequest;
-    (context as ExtensionUIContext & ChangeCapableUI)[TRON_CHANGE_CAPABILITY] = broker.requestChange.bind(broker) as NativeChangeRequest;
     return context;
   }
 }

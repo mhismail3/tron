@@ -99,18 +99,20 @@ it("the real Home profile tool retries one original label group and native Chang
   const { response } = await answerChangeCard(f.service, maintainer, f.slot, true, command("approve-organize"));
   await expect(response).rejects.toThrow("Owned tool audit publication fault");
   const settled = await first;
-  expect(settled.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details).toMatchObject({ status: "retry_required" });
+  const advertised = settled.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details as { status: string; commandId: string };
+  expect(advertised).toMatchObject({ status: "retry_required" });
   const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "knowledge", "profile-backups");
   const backups = await Promise.all((await readdir(directory)).map(async name => JSON.parse(await readFile(join(directory, name), "utf8")) as { operation: { commandId: string; envelope?: { context?: { actor?: { toolCallId?: string } } } } }));
   const originalOperations = backups.filter(backup => backup.operation.envelope?.context?.actor?.toolCallId === "organize-tool-first");
   expect(originalOperations).toHaveLength(1);
   const pending = originalOperations[0]!.operation;
+  expect(advertised.commandId).toBe(pending.commandId);
   expect(await history(f)).toEqual([]);
   const committed = await f.store.read(original.id) as typeof original;
   expect(committed).toEqual({ ...original, revisionId: committed.revisionId, content: { ...original.content,
     tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["engineering", "release"] } } });
   fault.mockRestore();
-  const next = await homeActivation(f, "Retry only the original organization operation.", [profileCall({ action: "retry", commandId: pending.commandId }, "organize-tool-retry"), say("acknowledged")]);
+  const next = await homeActivation(f, "Retry only the original organization operation.", [profileCall({ action: "retry", commandId: advertised.commandId }, "organize-tool-retry"), say("acknowledged")]);
   const organized = next.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-retry")?.details as { status: string; commandId: string; changeIds: string[] };
   expect(organized).toMatchObject({ status: "organized", commandId: pending.commandId });
   expect(organized.changeIds).toHaveLength(1);
@@ -127,6 +129,55 @@ it("the real Home profile tool retries one original label group and native Chang
   const undoEntries = (await history(f)).filter(entry => entry.undoOf);
   expect(undoEntries.map(entry => entry.undoOf)).toEqual(organized.changeIds);
   recordCase("tool-original-envelope-retry-native-label-undo", { originalCommand: pending.commandId, originalToolCall: "organize-tool-first", changeIds: organized.changeIds, exactMalformedLabelsRestored: true });
+});
+
+it("a stale organization card is refused, not advertised as a recoverable audit failure", async () => {
+  const f = await fixture("stale-organization");
+  const original = (await f.store.createNote({ commandId: command("stale-seed"), record: { kind: "note", scope: "personal",
+    provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],
+    content: { title: "Original instruction.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"], profile: { version: 2, path: ["communication"] } } } })).record;
+  const turn = homeActivation(f, "Review this placement.", [profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }], reason: "Exact placement" }, "stale-organize"), say("refused")]);
+  await waitFor(() => f.slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "profile card");
+  await f.service.invoke(maintainer, "home.profileChange", { commandId: command("new-native-edit"), changes: [{ action: "refine", id: original.id, expectedRevision: original.revisionId, text: "New native instruction." }] });
+  const current = await f.store.read(original.id);
+  const { response } = await answerChangeCard(f.service, maintainer, f.slot, true, command("stale-tap"));
+  await expect(response).rejects.toThrow(/Profile changed since this exact/);
+  const result = (await turn).last.messages.find(message => message.role === "toolResult" && message.toolCallId === "stale-organize")?.details;
+  expect(result).toMatchObject({ status: "refused", action: "reorganize", reason: expect.stringMatching(/Profile changed since this exact/) });
+  expect(result).not.toHaveProperty("commandId");
+  expect(await f.store.read(original.id)).toEqual(current);
+});
+
+it.each(["migrate", "reorganize"] as const)("maintainer profileChange %s repairs its audit with original-command retry and supports Undo", async action => {
+  const f = await fixture(`native-${action}-retry`);
+  const original = await legacyProfileFixture(f.store, command("native-seed"), { kind: "note", scope: "personal",
+    provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],
+    content: { title: "Keep this exact instruction.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision", "home-file-core"] } });
+  await mkdir(f.record.path, { recursive: true });
+  const parent = await stat(f.record.path);
+  const sync = durability.syncDurably;
+  let failed = false;
+  const fault = vi.spyOn(durability, "syncDurably").mockImplementation(async handle => {
+    const actual = await handle.stat();
+    if (!failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned native profile audit fault"); }
+    await sync(handle);
+  });
+  const originalCommand = command(`native-${action}`);
+  await expect(f.service.invoke(maintainer, "home.profileChange", { commandId: originalCommand, reason: "Exact native placement",
+    changes: [{ action, assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }] }] })).rejects.toThrow("Owned native profile audit fault");
+  fault.mockRestore();
+  expect(await history(f)).toEqual([]);
+  const committed = await f.store.read(original.id) as typeof original;
+  expect(committed.content.profile).toEqual({ version: 2, path: ["engineering", "release"] });
+  const retry = () => f.service.invoke(maintainer, "home.profileChange", { commandId: command("native-repair"), changes: [{ action: "retry", commandId: originalCommand }] }) as Promise<{ status: string; changes: Array<{ changeId: string }> }>;
+  const repaired = await retry();
+  expect(repaired.status).toBe("applied");
+  expect(repaired.changes).toHaveLength(1);
+  expect((await retry()).changes).toEqual(repaired.changes);
+  expect(await f.store.read(original.id)).toEqual(committed);
+  expect(await history(f)).toEqual([expect.objectContaining({ commandId: originalCommand, actor: { kind: "ui", id: maintainer.identity } })]);
+  await undo(f, repaired.changes[0]!.changeId, "native-organization-undo");
+  expect({ ...await f.store.read(original.id), revisionId: original.revisionId }).toEqual(original);
 });
 
 it("new profile content is discoverable but never automatically inserted into Home", async () => {

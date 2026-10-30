@@ -143,7 +143,7 @@ Knowledge lock.
 
 | Store (under the Tron home) | Owner | Lock |
 |---|---|---|
-| `agent/settings.json`, `gateway/settings/` (change record, `floors.json`, `approvals.json`) | settings model and change path | `gateway/admin` store-settings |
+| `agent/settings.json`, `gateway/settings/` (typed values and permanent change record) | settings model and change path | `gateway/admin` store-settings |
 | `gateway/devices.json`, `local-auth.json`, `enrollment.json` | `DeviceStore` | `gateway/security` store-devices |
 | `gateway/command-receipts/` | `CommandReceiptStore` | `gateway/transport` store-command-receipts |
 | `gateway/session-archive.json`, `session-attention.json` | archive and attention stores | `gateway/session-catalog` |
@@ -170,7 +170,7 @@ and the exact files after it: session attention (`gateway/projection`), session
 archive, the blob store behind `gateway/blobs/` and `gateway/exports/`, and the
 cold-catalog metadata index `gateway/catalog-metadata-v2.json`
 (`gateway/session-catalog`), command receipts (`gateway/transport`), run
-markers (`gateway/run`), settings approvals (`gateway/admin`), Home tasks and their
+markers (`gateway/run`), Home tasks and their
 authority (`gateway/home`), and the workspace-state markers (`gateway/workspace`).
 Generated ids come from the same counted `randomUUID` as corpus recording. A value
 the host file system assigns (the index's device and inode identity) is named by a
@@ -245,8 +245,8 @@ an archive timestamp truncated on read, a store rewritten on open, an
 automation status read broken, and a field added to a response. Derived stores
 (#1484): a search derivation-version bump, a shorter projected usage skip, a
 projection skip read at its expiry, the release-date alias read skipping fetched
-dates, and a shorter settings approval lifetime (caught by re-recording).
-Write paths (#1493): an approved change left untold, a run-marker bound of 17,
+dates.
+Write paths (#1493): a run-marker bound of 17,
 a session lane dropped while a queued write holds it, Home task spend allowed to
 drop its cache split, and a feature marker admitted with extra keys. Home
 (#1536): swapped Home tools, one prompt word, a wake that delivers nothing, the

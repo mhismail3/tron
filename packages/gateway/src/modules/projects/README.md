@@ -3,7 +3,7 @@
 ## Purpose
 
 Gateway-owned project lifecycle for Home and ordinary chats, using the existing
-settings approval/action authority and the canonical Project trust store. Delegated
+native change-card authority and the canonical Project trust store. Delegated
 workers share the ordinary tool surface, but cannot approve their own requests.
 
 ## Owns
@@ -37,9 +37,10 @@ Home work once (one task-store pass for all rows), never once per folder or page
   Historical session paths/transcripts are not rewritten. Close project sessions before
   a move; start new sessions at the resulting path.
 
-The settings owner registers the action at startup before decisions. Its existing
-queue, exact preview/digest, 24-hour expiry, UI-only decision, execution claim and typed
-requester outcomes are authoritative; there is no second queue or outcome store.
+The shared semantic UI broker presents the exact preview/digest and expires an
+unanswered card after 24 hours. Only a paired maintainer response can accept it;
+the trusted effect callback runs inside the canonical `extension.respond` receipt.
+There is no settings approval queue or separate outcome store.
 Home can delegate immediately after successful trust. Decline/expiry grant nothing.
 An interrupted/failed action is never replayed; inspect retained paths and Changes.
 A crash after a local creation intent may leave an unresolved audit row; it does
@@ -48,8 +49,8 @@ fail, the native owner retires uncertain frames without a success publication an
 releases project admission. Canonical session data stays intact; repair failing
 resources before reopening the cold session. A refusal before filesystem effects
 preserves trust only for the original retained source directory.
-Repeating create refuses its existing path; repeating an approval refuses its settled
-request. To retry a failed creation's trust phase, explicitly request `trust`.
+Repeating create refuses its existing path; a settled native interaction cannot
+apply again. To retry a failed creation's trust phase, explicitly request `trust`.
 
 ## Invariants
 
@@ -73,8 +74,9 @@ request. To retry a failed creation's trust phase, explicitly request `trust`.
 - Git subprocesses are bounded, noninteractive and ignore inherited `GIT_*` selectors;
   hooks/templates and repository-configured log signature programs do not execute.
   GitHub stderr/credential-bearing config is not returned.
-- The shared iOS approval chip and sheet show action items; no custom UI is introduced. The
-  `projects` tool's `wait` waits in the asking chat for the decision; otherwise it returns pending.
+- The shared native change card and iOS `ChangeReviewSheet` show action items.
+  The `projects` tool waits in the asking chat for that card's decision; there is
+  no `wait` option or separate pending-request API.
 
 ## Native RPC
 
@@ -138,11 +140,11 @@ GitHub success is a spawned fixture executable, never a live repository. The
 installed `gh` also runs with empty auth configuration/token environment under
 macOS Seatbelt's network deny; this proves unauthenticated refusal/retained state,
 not real remote creation. The real-CLI case requires installed `gh` and `sandbox-exec`.
-Native cases invoke the real Gateway module route, receipts and Settings decisions:
+Native cases invoke the real Gateway module route, receipts and exact native decisions:
 create → trust → rename → untrust → archive, deny/replay, actual move eligibility,
 unsupported folders, authenticated actor provenance and disconnect ownership.
 
 ## Not here
 
-Approval/outcome storage and UI authority: kernel settings/admin. Trust records and
+Native card presentation and acceptance: kernel host semantic UI broker. Trust records and
 serialized relocation: kernel resources. Worker control/settlement: native delegation.

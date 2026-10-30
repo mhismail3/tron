@@ -78,10 +78,6 @@ export class SettingsStoreAdapter {
   }
 
 
-  get floorsPath(): string {
-    return join(this.dependencies.tronHome, "gateway", "settings", "floors.json");
-  }
-
   /** Gateway-owned keys no pi file holds (Binding `gateway`); only the change path writes it. */
   get gatewaySettingsPath(): string {
     return join(this.dependencies.tronHome, "gateway", "settings", "gateway.json");

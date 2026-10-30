@@ -85,8 +85,7 @@ would remove. Test-tooling signals are rows of [knowledge](../src/knowledge/READ
 | `Library/Caches/Logs/app.jsonl` | 10 MiB (the user's chosen cap) | **Not yet measured:** the build that writes this stream is not installed on the phone |
 | iOS incident store | 96 KiB, 7 days | Bounded incident history, independent of the app log's cap |
 | `device-exports/` | 10 bundles | The newest exports; older ones are deleted at write time |
-| `gateway/settings/approvals.json` (pending settings changes) | 100 open requests, plus at most 400 decided ones until their requester is told | Open requests expire after 24 hours; a decided request is dropped once told, and lives on in the change record |
-| `gateway/settings/changes/` (the settings change record) | None: kept forever (settings-model.md decision 12) | One entry per settings key changed, a few hundred bytes each, in segments of 500 entries named in `index.json`; `settings.history` reads one segment per page. Its size on disk is the growth signal. **Not yet measured** |
+| `gateway/settings/changes/` (the settings change record) | None: kept forever ([change path](settings-contract.md#change-path)) | One entry per settings key changed, a few hundred bytes each, in segments of 500 entries named in `index.json`; `settings.history` reads one segment per page. Its size on disk is the growth signal. **Not yet measured** |
 
 Change a cap only if it holds less than 14 days on the Mac or 7 days on the phone at
 measured volume; measurements are kept in issues, not here.

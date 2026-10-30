@@ -67,6 +67,34 @@ async function failPublication(path: string) {
   });
 }
 
+it("a tapped organization keeps its original recovery identity through audit failure, retry and Undo", async () => {
+  const { f, profile, originals, request } = await setup("v2");
+  const context = { commandId: "home-original-organization", actor: { kind: "home" as const, id: "home", toolCallId: "organize" },
+    author: { kind: "home" as const, sessionId: "home", entryId: "maintainer-message" }, reason: "Exact placement review" };
+  const fault = await failPublication(f.settings.settingsChanges.record.path);
+  let taps = 0;
+  await expect(profile.change(f.settings.settingsChanges, [{ action: "reorganize", assignments: request.assignments }], {
+    ...context, confirm: async (_review, apply) => { taps++; return apply({ deviceId: "maintainer", commandId: "distinct-native-tap-receipt" }); },
+  })).rejects.toThrow("Owned original group publication fault");
+  fault.mockRestore();
+  expect(taps).toBe(1);
+  const recovery = await knowledge!.store.profilePartitionRecovery(context.commandId);
+  expect(recovery.committed).toBe(true);
+  const heads = await Promise.all(originals.map(note => knowledge!.store.read(note.id)));
+  const retry = () => profile.change(f.settings.settingsChanges, [{ action: "retry", commandId: context.commandId }], context);
+  const result = await retry();
+  expect((await retry()).changes).toEqual(result.changes);
+  expect(await Promise.all(originals.map(note => knowledge!.store.read(note.id)))).toEqual(heads);
+  const audit = (await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries;
+  expect(audit).toHaveLength(originals.length);
+  expect(audit.every(entry => entry.commandId === context.commandId)).toBe(true);
+  await f.settings.settingsChanges.undo(result.changes[0]!.changeId, { actor: { kind: "ui", id: "maintainer" }, commandId: "undo-tapped-organization" });
+  for (const original of originals) {
+    const restored = await knowledge!.store.read(original.id);
+    expect({ ...restored, revisionId: original.revisionId }).toEqual(original);
+  }
+});
+
 it("backs up exact original audit, publishes the full migration group on cold retry, and undoes/reorganizes only labels through real Changes", async () => {
   const { f, profile, originals, context, request, cold } = await setup("v2");
   const fault = await failPublication(f.settings.settingsChanges.record.path);

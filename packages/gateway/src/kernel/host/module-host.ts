@@ -101,6 +101,8 @@ export interface SessionContext {
   joinTerminalReceiptWrites(): Promise<void>;
   /** The current session actor and target; installed settings stay late-bound. */
   settings(): SettingsToolAccess | undefined;
+  /** Internal module-only native change port; never installed on extension UI. */
+  requestChange: import("./native-change.js").NativeChangeRequest;
   contextPolicy(): ContextPolicy | undefined;
   compaction: {
     policy(): CompactionPolicyLifecycle | undefined;

@@ -16,14 +16,9 @@ HomeTaskDispatcher uses the actual registry-owned DelegationOperations shared wi
 automations for worker creation/resume and cross-session steer/stop/interrupt. K5
 owns acquisition/control orchestration; Home retains authorization, ledger and wake
 policy, not native tool-interruption wiring or a second delegation instance.
-Root's late composition supplies its actual settings model/change owner directly,
-including outcome wake subscription. Home acknowledges outcomes only after the
-canonical reader completes its durable file-and-directory proof; the approvals
-store remains the sole outbox through refused wakes and process recovery. Home selects
-outcomes for its chapter requester IDs through the same bounded, cancellable envelope
-for user turns and autonomous wakes; native before-agent-start selection is ordinary-only.
-A failed current canonical proof defers acknowledgement and chapter sealing, retaining
-the outbox without scanning sealed chapter files.
+Root's late composition supplies its actual settings model/change owner directly.
+Native change cards wait in the requesting turn and consume the paired tap through
+`extension.respond`'s canonical receipt; Home owns no approval outcome outbox.
 
 - **Designation and chapters:** `home-owner.ts` (record, ledger, profile changes, wake
   scheduler), `home-chapter-state.ts`, `home-chapter-contents.ts`, `home-session-*.ts`.
@@ -177,8 +172,9 @@ changes keep its store, cursors and spend.
   `session_read` (never Home chapters), read-only `knowledge`, `read_file` (explicitly trusted
   projects). Web schema, backend and quota owner are identical to ordinary workers and native
   research children. Results are capped untrusted data; delegation is not gated on them.
-- **Settings tool:** Home changes settings through the one change path as `home`; fetched
-  content raises the tier one step. With `taskId` it reads or changes a worker's session.
+- **Settings tool:** Home changes settings through the one change path as `home`,
+  using the shared exact native card when consent is needed. With `taskId` it reads
+  or changes a worker's session. Fetched content is data, never authority.
 - **Learned profile:** personal Knowledge notes labelled `home-profile` plus one `kind-<kind>`
   (`preference`, `standing-decision`, `delegation-default`, `fact`, `correction`). The `profile` tool's
   inferred content writes and maintainer `home.profileChange` (confirmed, `expectedRevision`)

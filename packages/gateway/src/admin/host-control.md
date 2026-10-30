@@ -81,7 +81,13 @@ only writer of `<tronHome>/../.tron-maintenance/replace/<operation>/`.
 `quick`, `full` or `none` with the reason; `mac.replace.start` (receipt-backed) runs
 only on the supervised Stable Gateway of this `~/.tron`; `mac.replace.complete`
 pushes one notification per attempt; `mac.replace.resumeWorker` resumes a stopped
-worker as a `.resume-N` successor once.
+worker as a `.resume-N` successor once. If its one-use grant was consumed and no
+standing scope covers the continuation, it waits for a fresh exact grant card in
+Home through `HomeTaskDispatcher.authorizeTask` and the shared native broker.
+No worker starts before that tap. Decline or the unanswered card's 24-hour expiry
+runs nothing; an accepted new grant is consumed once for the same project/full-work
+scope and the continuation's exact brief. The response receipt belongs to Home,
+not the worker session being resumed.
 
 ## iPhone install and device labels
 

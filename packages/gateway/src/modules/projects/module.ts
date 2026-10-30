@@ -47,7 +47,7 @@ export function projectsModule(owner: ProjectLifecycle): ModuleDescriptor<Projec
           }, { additionalProperties: false }),
         execute: async (toolCallId, raw, signal, _update, context) => {
           const id = session.sessionId();
-          const confirm = nativeChangeConfirmer(context, signal);
+          const confirm = nativeChangeConfirmer(context, session.requestChange, signal);
           const result = await owner.request(raw as ProjectRequest, { kind: session.profile().settingsActor === "home" ? "home" : session.delegatedWorker() ? "worker" : "agent", id, sessionId: id, toolCallId }, toolCallId, confirm ? { confirm } : {});
           return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
         },

@@ -1382,6 +1382,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         },
         joinTerminalReceiptWrites: () => this.runInvocations.joinTerminalReceiptWrites(),
         settings: () => this.settingsToolAccess(),
+        requestChange: input => this.requestChange(input),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
@@ -4319,6 +4320,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       })),
     };
   }
+
+  readonly requestChange: import("../host/native-change.js").NativeChangeRequest = input => {
+    this.assertNoTrustReload();
+    return this.ui.requestChange(input);
+  };
 
   respondToInteraction(id: string, hostEpoch: string, presentationRevision: number, value: unknown, cancelled: boolean, acceptance?: import("../../protocol/types.js").NativeChangeAcceptance): void | Promise<void> {
     this.assertNoTrustReload();

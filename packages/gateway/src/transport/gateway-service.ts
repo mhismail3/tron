@@ -418,7 +418,14 @@ export class GatewayService {
       ...(notifications ? { notify: async ({ sourceId, message }) => notifications.enqueue({ sessionId: "mac-replace", sourceId, kind: "explicit", title: "Tron Mac", message }) } : {}),
       ...(home ? {
         latestWorkerTask: (sessionId: string) => home.latestWorkerTask(sessionId),
-        resumeTask: async (input: { taskId: string; operationId: string; text: string }) => safeJson(await home.resumeTask(input)),
+        resumeTask: async (input: { taskId: string; operationId: string; text: string }) => {
+          const status = await home.status();
+          if (!status.sessionId) throw new GatewayError("conflict", "Home has no session for grant review");
+          // The card belongs to Home, not the stopped worker: its response receipt
+          // must not occupy the worker session that this continuation acquires.
+          const slot = await dependencies.sessions.acquire(status.sessionId);
+          return safeJson(await home.resumeTask(input, undefined, undefined, [], { confirm: (review, apply) => slot.requestChange({ review, apply }) }));
+        },
       } : {}),
     });
     this.iosDeviceInstallService = dependencies.iosDeviceInstallService ?? new IosDeviceInstallService({

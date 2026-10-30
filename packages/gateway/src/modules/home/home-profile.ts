@@ -372,17 +372,19 @@ export class HomeProfileItems {
         if (!confirm) throw new GatewayError("invalid_request", "This profile change needs the maintainer's tap on its exact card; original notes remain unchanged");
         const pinned = requests.map(op => "id" in op ? { ...op, expectedRevision: op.expectedRevision ?? read.items.find(item => item.id === op.id)?.revisionId } : op) as HomeProfileRequest[];
         const review = profileReview(read, pinned, context.reason);
-        const applied = await confirm(review, async acceptance => {
+        const applied = await confirm(review, async () => {
           // The card is current only if the profile still yields the exact same review.
           if (profileReview(await this.read(), pinned, context.reason!).digest !== review.digest) throw new GatewayError("conflict", "The profile changed since this exact card; nothing was applied");
-          return this.change(changes, pinned, { ...context, approved: true, commandId: acceptance.commandId });
+          // The tap authorizes this intent; its receipt must not replace the
+          // original operation identity used by the backup and Home's retry.
+          return this.change(changes, pinned, { ...context, approved: true });
         });
         return applied ?? { status: "declined", changes: [], saved: [], items: [] };
       }
     }
     const partition = requests.find(op => op.action === "migrate" || op.action === "reorganize" || op.action === "retry");
     if (partition && (partition.action === "migrate" || partition.action === "reorganize" || partition.action === "retry")) {
-      if (requests.length !== 1 || (context.author.kind !== "home" && !context.approved)) throw new GatewayError("invalid_request", "Organization is one explicit Home operation");
+      if (requests.length !== 1) throw new GatewayError("invalid_request", "Organization is one explicit operation");
       return partition.action === "retry" ? this.retryPartition(changes, partition.commandId, context.actor.kind)
         : this.partition(changes, { commandId: context.commandId, mode: partition.action, assignments: partition.assignments }, context);
     }

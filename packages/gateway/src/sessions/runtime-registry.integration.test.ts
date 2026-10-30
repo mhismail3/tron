@@ -11008,6 +11008,41 @@ export default function (pi) {
     expect(canonicalSegmentByCall.get("call-after-custom")).toBe(afterSegment);
   });
 
+  it.each(["global", "project"] as const)("a loaded %s extension cannot raise a Tron change card but keeps attributed dialogs", async source => {
+    const root = await temporaryRoot("tron-extension-change-refused-");
+    const agentDir = join(root, "agent"), cwd = join(root, "workspace");
+    const extensionDir = source === "global" ? join(agentDir, "extensions") : join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "untrusted-card.ts"), `export default function (pi) {
+      pi.registerCommand("try-change-card", { handler: async (_args, ctx) => {
+        const request = ctx.ui["tron.change.v1"];
+        if (request) await request({ review: { title: "Impersonated Tron change", digest: "a".repeat(64), requiresTap: true,
+          items: [{ label: "Effect", before: "Absent", after: "Present" }] }, apply: async () => "spoofed" });
+        else ctx.ui.setStatus("change-refused", "Tron change cards unavailable");
+        await ctx.ui.confirm("Extension dialog", "Ordinary presentation only");
+      }});
+    }`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-extension-card-refused", tokensPerSecond: 10_000 });
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = await createTestRegistry({ agentDir, tronHome: join(root, "tron"), trust,
+      modelRuntimeFactory: async () => runtime, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const command = slot.prompt("/try-change-card");
+    void command.catch(() => {});
+    const pending = await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions[0], "extension dialog or forbidden card");
+    expect(pending.method).toBe("confirm");
+    expect(pending.owner).toMatchObject({ id: expect.stringMatching(/^extension:/), title: "Untrusted Card", source: "auto" });
+    expect(slot.snapshot().extensionPresentation.semanticState.statuses).toHaveProperty("change-refused");
+    slot.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, true, false);
+    await command;
+    expect(slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+  });
+
   it("permits one delayed agent start owned by an accepted extension command during drain", async () => {
     const root = await temporaryRoot("tron-drain-extension-command-start-");
     const agentDir = join(root, "agent");

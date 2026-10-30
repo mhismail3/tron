@@ -26,8 +26,8 @@ notification inbox.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
   credentials. Settings shows only a fixed local stage label; the app accepts no relay URL or push
   credential from settings.
-- **Alerts.** No badge, background fetch or actions, except the `settings-approval` category's
-  foreground Approve/Decline. The bundled `tron-notification.caf` sound; ask pushes are Time
+- **Alerts.** No badge, background fetch or notification approval actions. Exact changes
+  are reviewed in the shared in-chat native card. The bundled `tron-notification.caf` sound; ask pushes are Time
   Sensitive (entitlement in every build configuration). A foreground synchronized chat's
   presentation lease suppresses its own agent-terminal alert at the Gateway. Push Notifications
   settings toggle Input needed, Finished and Waiting through `push.registration.upsert`, rolling

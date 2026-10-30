@@ -5,7 +5,7 @@
 Push notification admission and the user-facing notification inbox: endpoint-scoped
 push grants, durable intents, relay delivery and read state. Producers are
 RuntimeSlot's automatic terminal and input-required alerts, the model's `notify`
-tool and the settings approval push.
+tool and explicit lifecycle result notifications.
 
 ## Owns
 
@@ -75,8 +75,8 @@ deliveries retired as failed with one `schema_upgrade` signal).
   reactivated. Upsert, remove and `device.revoke` share one lane per device;
   revocation disables push before removing the bearer and keeps a tombstone.
 - **Relay.** The origin comes only from maintainer-owned `config/PushService.xcconfig`
-  (exact public HTTPS). One `/v3/notifications` route (and `GET /v3/capabilities`
-  before a `settings-approval` push), no redirects, 20 s deadline, 2 KiB request and
+  (exact public HTTPS). One `/v3/notifications` route, no category/action metadata,
+  no redirects, 20 s deadline, 2 KiB request and
   16 KiB response bounds, HMAC over method, path, timestamp, request ID and body hash.
   Transient outcomes retry with the same request ID; ambiguous ones are terminal.
   Relay `invalid_signature`/`installation_unavailable` invalidate the grant. The relay
@@ -132,4 +132,4 @@ so neither path relies on compression completing before receipt I/O.
 ## Not here
 
 - The relay service and App Attest: the relay package and iOS.
-- Settings approval pushes' decision flow: [settings contract](../../docs/settings-contract.md).
+- Exact in-chat change review: [settings contract](../../docs/settings-contract.md#native-review).

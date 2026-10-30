@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { Type, type TSchema } from "../../kernel/pi/ai.js";
 import type { ExtensionToolContext, ToolDefinition } from "../../kernel/pi/coding-agent.js";
-import { GatewayError } from "../../errors.js";
-import { nativeChangeConfirmer } from "../../kernel/host/native-change.js";
+import { GatewayError, isUncertainOutcome } from "../../errors.js";
+import { nativeChangeConfirmer, type NativeChangeRequest } from "../../kernel/host/native-change.js";
 import type { KnowledgeService } from "../../knowledge/knowledge-service.js";
 import { profilePath } from "../../knowledge/knowledge-profile-placement.js";
 import { profileIndex } from "./home-profile-hierarchy.js";
@@ -75,7 +75,7 @@ const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRe
  * control decision with that owner's ordinary command receipt, not a note edit.
  * The tool owns no parallel note, decision or receipt store.
  */
-export function homeProfileTool(access: () => HomeProfileChangeAccess | undefined, knowledge: () => KnowledgeService | undefined): ToolDefinition<TSchema, HomeProfileToolDetails> {
+export function homeProfileTool(access: () => HomeProfileChangeAccess | undefined, knowledge: () => KnowledgeService | undefined, requestChange: NativeChangeRequest): ToolDefinition<TSchema, HomeProfileToolDetails> {
   return {
     name: "profile",
     // docs/settings-model.md 5.4: declares it reads no open-world content.
@@ -124,7 +124,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       const citation = triggeringMessage(context);
       if (!citation) return refused(request.action, "no maintainer message in this chat to cite as evidence");
       // Edits Home may not make alone wait for the maintainer's tap on the exact card.
-      const confirm = nativeChangeConfirmer(context, signal);
+      const confirm = nativeChangeConfirmer(context, requestChange, signal);
       const declined = () => answer({ status: "declined", action: request.action }, "The maintainer declined the exact profile card; the original notes are unchanged.");
       if (request.action === "defer") {
         try {
@@ -147,7 +147,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         } catch (error) {
           // Publication may have failed AFTER the domain committed. Never call it
           // saved, mint another identity, or invite an unqualified second apply.
-          if (error instanceof GatewayError && error.code === "invalid_request") return refused(request.action, error.message);
+          if (error instanceof GatewayError && !isUncertainOutcome(error) && ["invalid_request", "conflict"].includes(error.code)) return refused(request.action, error.message);
           const reason = error instanceof Error ? error.message : String(error);
           return answer({ status: "retry_required", action: request.action, commandId: original, reason },
             `Profile ${request.action} is not acknowledged: ${reason}. Use retry with original command ${original}; it proves committed identities before repairing the audit, or resumes only the backed-up precommit intent. No success is assumed.`);

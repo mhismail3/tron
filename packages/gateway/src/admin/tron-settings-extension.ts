@@ -1,5 +1,5 @@
 import { type SettingsToolAccess, type ChangeRequest, type ChangeResult } from "../kernel/settings/tool-contract.js";
-import { nativeChangeConfirmer } from "../kernel/host/native-change.js";
+import { nativeChangeConfirmer, type NativeChangeRequest } from "../kernel/host/native-change.js";
 import { StringEnum, Type } from "../kernel/pi/ai.js";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 
@@ -50,7 +50,7 @@ function signalText(result: ChangeResult): string {
   return ` Stored now and used from the worker's next model request, but the signal to worker ${signal.taskId} was refused (${signal.error.code}: ${signal.error.message}).`;
 }
 
-export function createTronSettingsExtension(access: () => SettingsToolAccess | undefined): ExtensionFactory {
+export function createTronSettingsExtension(access: () => SettingsToolAccess | undefined, requestChange: NativeChangeRequest): ExtensionFactory {
   return pi => {
     pi.registerTool({
       name: "settings", label: "Settings",
@@ -73,7 +73,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
           }));
           return { content: [{ type: "text", text: JSON.stringify({ ...(resolution.worker ? { worker: resolution.worker } : {}), layers: resolution.layers, keys: summary }) }], details: resolution };
         }
-        const confirm = nativeChangeConfirmer(context, signal);
+        const confirm = nativeChangeConfirmer(context, requestChange, signal);
         const result = await owner.change(input.changes, {
           reason: input.reason, toolCallId, ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}),
           ...(confirm ? { confirm } : {}),

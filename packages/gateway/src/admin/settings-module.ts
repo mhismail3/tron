@@ -7,5 +7,5 @@ export const settingsModule: ModuleDescriptor = {
   purpose: "Lets the agent read and change settings through the one logged change path, and marks a run that read web content.",
   tools: ["settings"],
   commands: [],
-  start: () => ({ extension: (session) => createTronSettingsExtension(() => session.settings()) }),
+  start: () => ({ extension: (session) => createTronSettingsExtension(() => session.settings(), session.requestChange) }),
 };

@@ -163,12 +163,16 @@ A review binds target, operation identity (including Undo/Apply again), reason a
 every displayed item, alongside exact typed values. Controls, bidi and invisible
 format characters are disclosed; credential-bearing values remain redacted.
 A review is disposable presentation, not authority or a durable pending store.
-No settings tier, floor override, risk assessment, expiry, outcome outbox or decision
-RPC exists.
+No settings tier, floor override, risk assessment, outcome outbox or decision RPC exists.
+Unanswered native change cards expire after 24 hours with no effects; an expired
+card is refused, not treated as a declined or retryable applied change.
 
 The model tool has resolve/change only and accepts no confirmation digest.
-The built-in host presents `method: "change"` / `tron.change.v1` through its existing
-semantic interaction owner. Generic `tron.form.v1` and `ask_user` cannot grant effects.
+The built-in host presents `method: "change"` through its existing semantic
+interaction owner. The request port is passed only to Tron's built-in
+settings/profile/project/task-grant owners, never installed on extension UI.
+Global and project extensions retain owner-attributed dialogs and `tron.form.v1`;
+these and `ask_user` cannot grant effects.
 The trusted callback stays server-side. A non-local authenticated paired response
 must match the interaction, host epoch, revision, exact digest and answer shape.
 Acceptance consumes the interaction once; the callback is awaited inside the

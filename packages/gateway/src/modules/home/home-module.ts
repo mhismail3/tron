@@ -317,7 +317,7 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
         (request, signal, confirm) => owners.delegate(session.sessionId(), request, signal, confirm),
         (request, confirm) => owners.task(session.sessionId(), request, confirm),
-        () => owners.knowledge, () => owners.profileChanges(session));
+        () => owners.knowledge, () => owners.profileChanges(session), session.requestChange);
     } }; },
   };
 }

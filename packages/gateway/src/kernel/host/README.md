@@ -39,8 +39,12 @@ classification remain outside K3; `extensionAdmission` supplies that actual poli
 at the loader cut. The module also owns whether the interaction capability is required.
 `semantic-ui-broker.ts`, `semantic-form.ts` and `extension-adapter-contract.ts` own
 semantic interactions and the versioned form capability; a generic form never authorizes
-an effect. `native-change.ts` owns the dedicated `change` interaction, whose exact review only
-a paired native device answers. `presentation/` owns the
+an effect. `native-change.ts` owns the internal module-only port for the dedicated
+`change` interaction, whose exact review only a paired native device answers.
+Only Tron's settings, Home profile, project and task-grant factories receive that
+port through `SessionContext`; no change capability is attached to extension UI.
+Loaded global/project extensions retain ordinary dialogs and forms with their
+Gateway-attributed owner name. `presentation/` owns the
 remote Pi host, component generations, bounded terminal capture and the single
 presentation epoch. `extension-lifecycle-coordinator.ts` derives quiescence from
 that epoch; the runtime replaces its activity source when rotating the host.
