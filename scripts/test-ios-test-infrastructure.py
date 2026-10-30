@@ -3466,6 +3466,36 @@ class StatusFixture(LaneHarness, unittest.TestCase):
 class LifecycleHarness(LaneHarness):
     """Synthetic Mac for the tools that share one lane lifecycle (SIM-7)."""
 
+    def fixture_knob(self, name: str) -> Path:
+        """A fixture-owned setting read by the synthetic Node readiness tools."""
+        path = self.root / "fixture-node/knobs" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def pinned_host_node(self, environment: dict[str, str]) -> str:
+        """Resolve the pinned host Node without letting fixture cache overrides mask it."""
+        probe_environment = {
+            **environment,
+            "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm")),
+        }
+        # The resolver treats an explicit fixture XcodeGen cache as its only
+        # Node cache, so restore the host selection for this read-only probe.
+        host_tools = os.environ.get("TRON_CI_TOOLS_DIR")
+        if host_tools is None:
+            probe_environment.pop("TRON_CI_TOOLS_DIR", None)
+        else:
+            probe_environment["TRON_CI_TOOLS_DIR"] = host_tools
+        resolved = subprocess.run(
+            [str(ROOT / "scripts/tron-node"), "exec", "node", "-p", "process.execPath"],
+            env=probe_environment, check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        return resolved.stdout.strip()
+
+    def readiness_node_environment(self, environment: dict[str, str]) -> dict[str, str]:
+        """Reuse the single synthetic pinned Node/npm fixture for lifecycle tools."""
+        return GatewayE2EFixture.readiness_node_environment(self, environment)
+
     def add_device(self, udid: str, *, name: str, state: str = "Booted") -> None:
         """A device no Tron ownership marker claims."""
         document = self.inventory()
@@ -3910,17 +3940,6 @@ exec "{real_node}" "$@"
         result["TRON_NODE_BIN"] = str(node)
         return result
 
-    def fixture_knob(self, name: str) -> Path:
-        """A file a fake fixture process reads its own configuration from.
-
-        A fixture process starts under the harness's minimal environment (#445),
-        so a case that steers the synthetic Gateway or proxy writes this knob
-        before the harness starts it instead of exporting a variable.
-        """
-        path = self.root / "fixture-node/knobs" / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
-
     def fixture_environment_record(self, environment: dict[str, str], name: str) -> dict[str, str]:
         """The environment one fixture process was handed, as `readiness_node_environment` records it."""
         path = Path(environment["TRON_NODE_BIN"]).parent / "record" / name
@@ -3931,34 +3950,6 @@ exec "{real_node}" "$@"
             if variable:
                 assignments[variable] = value
         return assignments
-
-    def pinned_host_node(self, environment: dict[str, str]) -> str:
-        """The real Node the synthetic fixture toolchain forwards to.
-
-        A test process started from a Gateway-spawned shell has that Gateway's
-        bundled runtime first on `PATH`: the very runtime #445 keeps out of a
-        fixture, and one that cannot load unsigned development add-ons. So
-        use the repository's pinned resolver, retaining the host NVM location
-        while every writable fixture path stays inside the isolated environment.
-        """
-        probe_environment = {
-            **environment,
-            "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm")),
-        }
-        # XcodeGen fixtures name their synthetic cache in TRON_CI_TOOLS_DIR.
-        # The read-only Node probe must resolve the host's pinned Node instead,
-        # while keeping all fixture HOME and writable roots contained.
-        host_tools = os.environ.get("TRON_CI_TOOLS_DIR")
-        if host_tools is None:
-            probe_environment.pop("TRON_CI_TOOLS_DIR", None)
-        else:
-            probe_environment["TRON_CI_TOOLS_DIR"] = host_tools
-        resolved = subprocess.run(
-            [str(ROOT / "scripts/tron-node"), "exec", "node", "-p", "process.execPath"],
-            env=probe_environment,
-            check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        return resolved.stdout.strip()
 
     def nvm_pinned_environment(self, environment: dict[str, str]) -> dict[str, str]:
         """The fixture toolchain selected the way a machine without TRON_NODE_BIN
@@ -4950,6 +4941,9 @@ class InheritedLeaseFixture(LifecycleHarness, unittest.TestCase):
                 self.assertFalse(lane.exists(), sorted(path.name for path in lane.iterdir()) if lane.exists() else None)
                 self.assertFalse(self.present(udid))
 
+                # Both tools need the same fake Node/npm wrapper for a build;
+                # no build assertion should depend on a real host npm install.
+                environment = self.readiness_node_environment(environment)
                 again = self.tool(E2E, "build", "--lane", name, environment=environment)
                 self.assertEqual(again.returncode, 0, again.stderr)
                 marker = json.loads((lane / "simulator.json").read_text())
