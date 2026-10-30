@@ -29,7 +29,7 @@ checks pass. A merged PR at the local head is one completion proof; a closed
 issue with exact-main ancestry or only its unchanged claim commit are others.
 The tree must be clean, every ignored file regenerable, and no process working
 inside. It first runs the release commands configured in `.github/work.json`
-from inside the worktree. [`tools/work/README.md`](../../../tools/work/README.md#other-helpers) owns
+from inside the worktree. [`tools/work/README.md`](../../../tools/work/README.md#exact-head-cleanup) owns
 the contract. A worktree it keeps stays with its owner: resolve the reason it
 names, never delete around it.
 
