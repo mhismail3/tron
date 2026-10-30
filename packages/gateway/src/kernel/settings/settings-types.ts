@@ -1,3 +1,4 @@
+import { redactCredentials } from "../../util/credential-redaction.js";
 import { createHash } from "node:crypto";
 import type { ChangeReview } from "../../protocol/types.js";
 import { splitModelRef, type LayerId, type FixedSetting } from "./tool-contract.js";
@@ -86,13 +87,14 @@ export const LAYER_LABELS: Record<LayerId, string> = {
 
 /** Invisible controls are disclosed, not silently stripped from an exact review. */
 export function disclosed(text: string): string {
-  return text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
+  return redactCredentials(text).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
     character => character === "\n" ? character : character.split("").map(unit => "\\u" + unit.charCodeAt(0).toString(16).padStart(4, "0")).join(""));
 }
 
 /** One immutable before/after projection; the digest binds identity AND everything shown. */
 export function changeReview(identity: unknown, input: Omit<ChangeReview, "digest">): ChangeReview {
   const review = { title: disclosed(input.title), requiresTap: input.requiresTap,
+    ...(input.reason === undefined ? {} : { reason: disclosed(input.reason) }),
     items: input.items.map(item => Object.freeze({ label: disclosed(item.label), before: disclosed(item.before), after: disclosed(item.after),
       ...(item.detail === undefined ? {} : { detail: disclosed(item.detail) }), ...(item.exact === undefined ? {} : { exact: disclosed(item.exact) }) })) };
   const result = { ...review, digest: createHash("sha256").update(JSON.stringify({ identity, review })).digest("hex") };

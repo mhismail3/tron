@@ -4065,15 +4065,15 @@ extension AppModel {
         try await settingsTrust.settingsHistory(cursor: cursor, actor: actor, layer: layer, section: section, key: key, status: status)
     }
 
-    func applySettingsChangeAgain(_ changeID: String) async throws {
-        try await settingsTrust.applySettingsChangeAgain(changeID)
+    func applySettingsChangeAgain(_ changeID: String, confirmationDigest: String? = nil) async throws -> SettingsChangeResult {
+        try await settingsTrust.applySettingsChangeAgain(changeID, confirmationDigest: confirmationDigest)
     }
 
-    func undoSettingsChange(_ entry: SettingsChangeHistoryEntry) async throws {
+    func undoSettingsChange(_ entry: SettingsChangeHistoryEntry, confirmationDigest: String? = nil) async throws -> SettingsChangeResult {
         let target: JSONValue = .object(["kind": .string(entry.target.kind),
             "sessionId": entry.target.sessionId.map(JSONValue.string) ?? .null])
         let snapshot = entry.layer == "session" ? try rendererConfigurationSnapshot(target) : nil
-        try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+        return try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot), confirmationDigest: confirmationDigest) { [weak self] in
             guard let snapshot else { return true }
             return self?.admitsConfigurationSend(snapshot) == true
         }
@@ -4113,9 +4113,9 @@ extension AppModel {
         return try await settingsTrust.previewChange(target: target, change: change, fence: rendererConfigurationFence(snapshot))
     }
 
-    func changeSetting(target: JSONValue, change: JSONValue) async throws {
+    func changeSetting(target: JSONValue, change: JSONValue, confirmationDigest: String? = nil) async throws {
         let snapshot = try rendererConfigurationSnapshot(target)
-        try await settingsTrust.change(target: target, change: change, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+        try await settingsTrust.change(target: target, change: change, fence: rendererConfigurationFence(snapshot), confirmationDigest: confirmationDigest) { [weak self] in
             guard let snapshot else { return true }
             return self?.admitsConfigurationSend(snapshot) == true
         }

@@ -617,6 +617,7 @@ export interface ChangeReview {
   digest: string;
   title: string;
   requiresTap: boolean;
+  reason?: string;
   items: Array<{ label: string; before: string; after: string; detail?: string; exact?: string }>;
 }
 

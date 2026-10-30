@@ -225,7 +225,7 @@ final class ExtensionInteractionDraftStore {
             return stored.selectedOption == nil
                 && stored.confirmValue == nil
                 && ExtensionInteractionResponsePolicy.primitiveTextError(stored.text) == nil
-        case .form:
+        case .form, .change:
             return false
         }
     }

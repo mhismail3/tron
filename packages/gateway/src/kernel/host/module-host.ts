@@ -115,6 +115,7 @@ export interface SessionContext {
  * is refused while draining. `handle` validates its own parameters. */
 export interface RpcContext {
   readonly identity: string;
+  readonly isLocal: boolean;
   /** Disconnect only cancels disposable reads, never accepted commands. */
   readonly signal?: AbortSignal;
 }

@@ -1,3 +1,4 @@
+import { GatewayError } from "../../errors.js";
 import { StringEnum, Type } from "../../kernel/pi/ai.js";
 import type { ModuleDescriptor } from "../../kernel/host/module-host.js";
 import type { JsonValue } from "../../protocol/types.js";
@@ -13,7 +14,7 @@ function projectConfirmation(value: unknown): { digest: string; intent: unknown 
 }
 
 export function projectsModule(owner: ProjectLifecycle): ModuleDescriptor<ProjectLifecycle> {
-  return { name: "tron-projects", purpose: "Creates projects and requests maintainer-approved trust, rename, recoverable archive and untrust through the canonical approvals owner.", tools: ["projects"], commands: [],
+  return { name: "tron-projects", purpose: "Creates and manages projects through exact paired-native review and canonical mutation receipts.", tools: ["projects"], commands: [],
     start: () => ({ contract: owner, capabilities: ["projects.lifecycle.v1"], rpc: {
       "projects.list": { kind: "read", handle: async (params, context) => {
         rejectUnknownFields(params, ["limit", "after"], "projects.list");
@@ -26,6 +27,7 @@ export function projectsModule(owner: ProjectLifecycle): ModuleDescriptor<Projec
       } },
       "projects.change": { kind: "mutation", handle: async (params, context) => {
         rejectUnknownFields(params, ["commandId", "action", "name", "newName", "github", "reason", "confirmation"], "projects.change");
+        if (params.confirmation !== undefined && context.isLocal) throw new GatewayError("auth_required", "An exact project tap requires a paired native device");
         const input: ProjectRequest = {
           action: text(params.action, "action", 16) as ProjectRequest["action"],
           name: text(params.name, "name", 64),

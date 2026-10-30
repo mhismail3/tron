@@ -2,135 +2,104 @@
 
 ## Purpose
 
-Declared settings schema, resolution/request pins and the audited change engine,
-with durable audit/approval stores. Session contexts and store adapters share
-one contract and one persisted store format.
-
-Registered action requests always remain pending until a separate exact-digest
-maintainer decision, including requests originating in the native UI. Requesting
-an action is not approving it; ordinary UI settings-change application is unchanged.
+Declared settings, resolution/request pins, typed writes and permanent change/Undo
+history. Canonical settings stores remain value truth; the audit never computes a
+setting and is not an approval queue.
 
 ## Owns
 
-`settings-schema.ts` owns the concrete key table, binding/type declarations,
-code floors and schema indexes. Composition supplies Home tool names, the run
-compaction limit and security validation without upward imports.
-`settings-resolver.ts` owns layer precedence, qualification, composition, clamping
-and state badges; `settings-project-diagnostics.ts` owns bounded Project diagnostics.
-`settings-model.ts` owns target resolution and fixed-direction request pins.
-`settings-change.ts` owns planning, tiers, approvals, ordered application/reverse
-rollback, outside-write brackets, Home recipe companion effects and target stripes.
-Store reads/catalogs, provider admission and binding I/O enter through its owner ports.
-`SettingsReadOwner.admitModelChoice` supplies actual provider I/O keyed by the
-active SDK runtime, including borrowed views; it does not depend on optional
-module-policy availability or capture an eligibility snapshot.
-Home supplies learned-profile operations and typed result projection; `auditSubject`
-keeps their validation, restoration, grouped audit and awaited observer/projection
-under the same Home stripe, without moving Knowledge DTOs into the kernel.
-`settings-approval-review.ts` owns the one agent-tool approval wait (#2050) every
-approval-requesting tool (settings, profile, projects) uses when it is called with
-`wait` (`approvalWaitParameter`): the host shows the request through an `ApprovalPresenter`
-(the semantic approval form) and the wait ends when the request settles. The settings
-engine remains the decision/expiry authority and `settings.decide` its only decision path;
-the form is never answered. Stop/host retirement supersedes the pending request, never
-masquerading as a maintainer decline. The direct terminal result consumes its outbox slot,
-so it does not also schedule an outcome turn. Requests returned pending use the outbox.
-`approvalReference` names a request in every tool result, pending or settled.
+- `settings-schema.ts`: key bindings, value validation/formatting, writers, timing,
+  effect and native-tap classification. Composition supplies Home tool names,
+  compaction limits and security validation without upward imports.
+- `settings-resolver.ts`: layer precedence, qualifiers, composition, clamping and
+  state badges. `settings-project-diagnostics.ts` owns bounded Project diagnostics.
+- `settings-model.ts`: target resolution and fixed-direction request pins.
+- `settings-change.ts`: planning, expected-before fences, target stripes, ordered
+  store application/reverse rollback, outside-write brackets, Home companion effects,
+  audit and history-consumed Undo. Store I/O and provider admission enter through
+  owner ports. `SettingsReadOwner.admitModelChoice` uses the active SDK runtime,
+  including borrowed views; it captures no eligibility snapshot.
+- `settings-record.ts`: durable, byte/row-bounded segments, index recovery and
+  paged history. Indexed immutable segments must retain their indexed row count;
+  a grouped Undo requires exactly its unique, consistently sized members.
+- `tool-contract.ts`: layer, qualifier, model-reference/queue and typed tool/result
+  vocabulary. `settings-types.ts` owns value formatting/composition and immutable,
+  disclosed before/after reviews whose digest binds identity and every shown field.
+- `scope-resolution.ts`: declared binding admission, canonical targets and sorted
+  qualifier identities. `settings-admission.ts` owns operational model/thinking
+  selection and synchronous compaction validation.
+- `settings-sdk-manager.ts`: declared Project projection, validation and locked
+  raw-document merging through Pi's public storage seam. Ignored repository fields
+  stay with their canonical document and survive SDK writes.
 
-`tool-contract.ts`: layer/tier/qualifier and model-reference/queue role/key vocabulary,
-retired scope-name mapping
-shared by session readers and store migration, and tool request, resolution,
-result and worker-state interfaces. `settings-types.ts` owns value validation, formatting,
-ordered queue summaries, Pi-compatible tool-selection composition and neutral resolver inputs
-(store snapshots, outside marks, floor overrides, Git state and option/format sources). `settings-record.ts` owns append-only audit
-segments and bounded history pages; `settings-approvals.ts` owns pending exact-diff
-approvals (settings changes and registered approval actions), their admission bounds,
-settlement, expiry and untold outcomes; composition calls `settings-change.ts`'s `start()`
-to arm one timer for the earliest pending deadline and `onOutcome` nudges Home when an
-outcome settles. Known later deadlines are armed before expiry I/O, so a transient failure
-cannot disarm them and a persistently bad store is not retried immediately.
-Constructing an inspection-only owner starts no background work.
-Expiry shares each target's decision stripe. `dispose()` cancels/fences arming and joins
-accepted expiry work before composition releases the stores. Outcome selection does not
-consume requests; canonical custom-entry request IDs acknowledge delivery within an
-explicit requester-ID scope. Home supplies its chapter ledger and fitting-prefix predicate;
-ordinary runtimes supply their singleton identity. Admission reserves at most 400 outcome
-slots (pending and settled together), refusing new requests rather than evicting old ones. Approval
-actions claim execution durably before effects. The first awaited `start()` recovers
-pre-existing claims as uncertain failures without replay; concurrent/repeated start
-and dispose join that recovery through the existing arm-work owner.
-Ordinary selection, expiry and arming exclude execution claims, so delivery does not
-join this owner's live action effects.
-`scope-resolution.ts` owns binding admission from declared Session/Project permissions,
-canonical targets, the public/storage scope mapping and the canonical sorted-qualifier
-instance identity used by resolution badges and outside-change observation.
-`settings-admission.ts` owns operational model/thinking selection and synchronous
-compaction resolution/validation; provider eligibility remains supplied I/O.
-`settings-sdk-manager.ts` owns SDK storage admission: declared Project projection,
-validation and locked raw-document merging through the public Pi storage seam.
-It never creates a second settings store; ignored repository fields remain owned
-by their canonical document and survive SDK writes.
-`settings-migration-state.ts` owns shared-store value transformation and digest
-validation; admin owns the migration transaction, backups and publication.
+Home keeps Knowledge content, provenance, revision checks, restoration and durable
+profile publication. `auditSubject` holds validation, grouped successful audit and
+awaited observer/projection under the Home stripe; failed diffs remain ungrouped.
+No Knowledge DTO or profile inverse is invented by the settings kernel.
 
 ## Contract
 
-`SettingsToolAccess` resolves and changes the current session settings and drains
-its pending outcomes as one typed `SettingsOutcomeMessage` (`tool-contract.ts`). Admin loads stores, supplies runtime option/format sources
-and applies concrete store bindings; the kernel owns read/change policy and
-transaction order. The session runtime
-supplies its own identity and appliers. Audit records
-are not settings truth, and pending approvals never apply themselves.
+`SettingsToolAccess` resolves and changes the current session or Home's delegated
+worker. Routine reversible changes apply, log and can be undone. Only irreversible,
+trust/executable authority, spend and install effects require an exact native tap;
+spend limits require it when widening. Writer grants and scope admission apply first.
+There are no settings tiers, floor overrides, pending requests, expiry, outcome
+outbox, risk-model calls or settings decision RPCs.
 
-## Invariants
+A required review alone has no effects. The model tool supplies no digest argument.
+The built-in host's dedicated `change` interaction binds a server-owned typed callback,
+not a generic form. A paired-native response checks identity, epoch, revision, answer
+shape and exact digest, then consumes the interaction before awaiting that callback.
+Its canonical `extension.respond` receipt owns effects through settlement. Stop and
+host retirement can cancel only before acceptance; afterwards they cannot falsely
+turn accepted work into a decline or replay it. The callback reacquires the actual
+target stripe and recomputes the reviewed diff before effects. Local generic RPC
+cannot confirm a native review. Direct paired-native change/Undo/Apply again requests
+likewise resubmit the exact ephemeral digest; project lifecycle also binds its typed
+intent and revalidates canonical filesystem, Git, trust and occupancy state.
 
-- No settings data, wire shape, persisted schema or policy is defined twice.
-- Writer grants protect core keys; agent-writable runtime keys apply at their declared effect point, not all hot-reloaded.
-  Keep other guidance in rules/skills/profile notes; track shrinking rigid settings by the [schema key count](../../../docs/settings-contract.md#keys).
-- Tool access is resolved at call time, never captured before settings start.
-- Expected-value preconditions compare the canonical current layer value, including
-  Session-owned fields, inside the target stripe. A history-publication failure after
-  ordinary setting effects reports an uncertain outcome: canonical command receipts
-  retain their replay fence rather than admitting the same command again.
+Unknown, changed or uncertain accepted effects require inspection, never blind
+retry under another command ID. Project actions do not invent a generic inverse.
+A running tool targeting its own project still fails the lifecycle busy guard.
 
-## Entry points
+## Undo and audit durability
 
-`SettingsToolAccess`, `ChangeRequest`, `ChangeResult`, `Resolution`,
-`SettingsModel`, `SettingsChangePath`, `SettingsChangeRecord`, `SettingsApprovals`.
+Expected-before checks, including Session-owned fields, run inside the target stripe.
+Undo checks both the original entry's history-derived consumption and its expected
+current-after value under that same stripe. Undo of Undo names the new fact, not the
+original operation. Redacted/action facts are not generically undoable.
 
-## Committed Home audit publication
+Segment replacement precedes index publication. Recovery adopts only complete,
+unambiguous bounded published bytes and never replays effects. Corrupt history
+refuses writes/history; startup reports it without failing unrelated settings reads.
+Post-effect audit failure is an uncertain outcome: canonical command receipts retain
+the replay fence rather than admitting the effect again.
 
-Home calls `validateSubjectAudit(writes, context, replayAt)` before domain effects,
-then freezes those original ordered `SubjectWrite[]`, `SubjectContext` and timestamp
-in its existing backup. After proving the domain committed, it calls
-`publishSubjectAudit(writes, context, replayAt)` for initial publication or audit-only
-recovery. Do not nest it inside `auditSubject` or replay domain effects. Command ID
-is the sole operation identity; duplicate write IDs and changed replay inputs refuse.
-The existing Changes mutex publishes one identity-addressed, closed group through
-one index cut, bounded to 1 MiB. Retry proves the same file, directory and index
-are durable, including an already indexed group. Normal Home undo reads the whole
-group. Home owns its opaque envelope, validation and forget/privacy handling;
-Knowledge remains the sole snapshot/backup/cleanup owner. This API creates no
-backup, migration journal or domain recovery engine.
+Home calls `validateSubjectAudit` before its own effects and freezes the original
+ordered writes/context/timestamp in its existing domain envelope. After proving its
+domain committed, `publishSubjectAudit` publishes or recovers only that audit. Command
+ID is the operation identity; changed replay inputs and duplicate write IDs refuse.
+The record publishes one identity-addressed closed group through one durable index
+cut, bounded to 1 MiB. Retry proves file/directory/index durability. This interface
+creates no backup, migration journal, domain recovery engine or second settings store.
 
 ## Signals
 
-Callers own persistence failure diagnostics; these stores propagate write failures.
-`TRON_SETTINGS_EXPIRY_FAILED` means a background expiry attempt failed; retained requests
-are revisited at the next known deadline or foreground admission, not in a tight retry loop.
+| Signal | One-step diagnosis |
+| --- | --- |
+| `TRON_SETTINGS_HISTORY_UNAVAILABLE` | Startup audit recovery refused. Inspect the bounded index/segments; history and writes must fail closed, without effect replay. |
+
+Persistence errors propagate to their caller. No background expiry/retry timer exists.
 
 ## Verify
 
 ```bash
-scripts/tron test gateway src/admin/settings-approvals.lock.integration.test.ts \
-  src/admin/admin.store.lock.integration.test.ts \
-  src/admin/settings-change.integration.test.ts src/admin/settings-migration.e2e.test.ts \
+scripts/tron test gateway src/admin/native-change.e2e.test.ts \
+  src/admin/settings-worker-fences.e2e.test.ts \
+  src/admin/settings-three-layer.e2e.test.ts \
+  src/admin/settings-change.integration.test.ts \
   src/admin/settings-subject-audit.e2e.test.ts
 ```
 
-The real settings and run locks cover consumers of this contract.
-
-## Not here
-
-Store loading, dynamic catalogs, concrete binding I/O and UI rendering:
-[admin](../../admin/README.md).
+Concrete store/catalog I/O and presentation belong to [admin](../../admin/README.md);
+Home profile effects remain with their typed domain owner.

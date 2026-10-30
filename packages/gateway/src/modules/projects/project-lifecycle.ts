@@ -137,23 +137,23 @@ export class ProjectLifecycle {
     };
     if (action.operation !== input.action || action.name !== input.name || !!action.github !== !!input.github
       || input.action === "rename" && action.destination !== input.newName) throw new GatewayError("invalid_request", "Project review intent does not match its typed action");
-    const review = await this.mutex.run(() => this.review(action));
+    const review = await this.mutex.run(() => this.review(action, input.reason));
     if (options.confirmation) return this.execute(action, options.confirmation.digest, actor, commandId, input.reason);
     if (!options.confirm) return { status: "review", review, intent: action, changes: [] };
     return await options.confirm(review, accepted => this.execute(action, review.digest,
       { kind: "ui", id: accepted.deviceId }, accepted.commandId, input.reason)) ?? { status: "declined", changes: [] };
   }
 
-  private async review(action: Action): Promise<ChangeReview> {
+  private async review(action: Action, reason: string): Promise<ChangeReview> {
     const preview = await this.plan(action);
-    return changeReview(action, { ...preview, requiresTap: true });
+    return changeReview(action, { ...preview, reason, requiresTap: true });
   }
 
   private execute(action: Action, digest: string, actor: Actor, commandId: string, reason: string): Promise<ProjectChangeResult> {
     if (actor.kind !== "ui") throw new GatewayError("invalid_request", "Project effects require the paired native tap");
     const changes = this.changes!;
     return changes.withTarget({ kind: "project", cwd: join(this.workspace, action.name) }, () => this.mutex.run(async () => {
-      const review = await this.review(action);
+      const review = await this.review(action, reason);
       if (review.digest !== digest) throw new GatewayError("conflict", "Project changed since review; nothing was applied");
       await changes.record.recover();
       const changeId = randomUUID();

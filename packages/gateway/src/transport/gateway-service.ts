@@ -602,7 +602,7 @@ export class GatewayService {
       throw new GatewayError("busy", "The Gateway is draining accepted work", true);
     }
     if (routed) {
-      const context = { identity: client.identity, ...(routed.kind === "read" && client.signal ? { signal: client.signal } : {}) };
+      const context = { identity: client.identity, isLocal: client.isLocal, ...(routed.kind === "read" && client.signal ? { signal: client.signal } : {}) };
       return routed.kind === "read" ? routed.handle(params, context) : this.mutation(client, method, params, () => routed.handle(params, context));
     }
     switch (method) {
@@ -1928,7 +1928,7 @@ export class GatewayService {
             integer(params.presentationRevision, "presentationRevision", 0, Number.MAX_SAFE_INTEGER),
             params.value,
             params.cancelled === undefined ? false : boolean(params.cancelled, "cancelled"),
-            { deviceId: client.identity, commandId: string(params.commandId, "commandId", { max: 160 }) },
+            client.isLocal ? undefined : { deviceId: client.identity, commandId: string(params.commandId, "commandId", { max: 160 }) },
           );
           return { answered: true };
         }, true);
@@ -2105,6 +2105,7 @@ export class GatewayService {
       case "settings.change":
         return this.mutation(client, method, params, async (workToken) => {
           rejectUnknownFields(params, ["commandId", "target", "fence", "changes", "reason", "dryRun", "confirmationDigest"], method);
+          if (client.isLocal && params.confirmationDigest !== undefined) throw new GatewayError("auth_required", "An exact change tap requires a paired native device");
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
@@ -2131,7 +2132,8 @@ export class GatewayService {
         });
       case "settings.undo":
         return this.mutation(client, method, params, async (workToken) => {
-          rejectUnknownFields(params, ["commandId", "changeId", "fence"], method);
+          rejectUnknownFields(params, ["commandId", "changeId", "fence", "confirmationDigest"], method);
+          if (client.isLocal && params.confirmationDigest !== undefined) throw new GatewayError("auth_required", "An exact change tap requires a paired native device");
           const changeId = string(params.changeId, "changeId", { max: 100 });
           const found = await this.dependencies.settingsChanges.record.entry(changeId);
           const session = found?.entry.target.kind === "session"
@@ -2139,6 +2141,7 @@ export class GatewayService {
             : undefined;
           const homeChapter = found?.entry.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.undo(changeId, {
+            ...(params.confirmationDigest === undefined ? {} : { confirmationDigest: string(params.confirmationDigest, "confirmationDigest", { min: 64, max: 64 }) }),
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(homeChapter ? { homeChapter } : {}),
@@ -2149,11 +2152,13 @@ export class GatewayService {
         // Apply again is offered on an outside change that replaced or removed a
         // value Tron wrote (docs/settings-model.md 5.6); it is never automatic.
         return this.mutation(client, method, params, async workToken => {
-          rejectUnknownFields(params, ["commandId", "changeId"], method);
+          rejectUnknownFields(params, ["commandId", "changeId", "confirmationDigest"], method);
+          if (client.isLocal && params.confirmationDigest !== undefined) throw new GatewayError("auth_required", "An exact change tap requires a paired native device");
           const changeId = string(params.changeId, "changeId", { max: 100 });
           const entry = await this.dependencies.settingsChanges.record.find(changeId);
           const homeChapter = entry?.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
           return safeJson(await this.dependencies.settingsChanges.applyAgain(changeId, {
+            ...(params.confirmationDigest === undefined ? {} : { confirmationDigest: string(params.confirmationDigest, "confirmationDigest", { min: 64, max: 64 }) }),
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(homeChapter ? { homeChapter } : {}),
@@ -2170,10 +2175,8 @@ export class GatewayService {
           ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
           ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
         });
-        // A settled request's pending fact is not shown: its outcome row is the request's row (#2050).
-        const settled = new Set(page.settled);
         return safeJson({ ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-          entries: page.entries.filter(entry => !settled.has(entry.changeId)).map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
+          entries: page.entries.map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
       }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));

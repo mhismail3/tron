@@ -42,7 +42,6 @@
     "sessions/runtime-compaction.integration.test.ts",
     "sessions/runtime-context-window.integration.test.ts",
     "sessions/runtime-control-publication.integration.test.ts",
-    "sessions/settings-outcome-durability.integration.test.ts",
     "sessions/runtime-registry-notification-read.integration.test.ts",
     "sessions/runtime-registry.integration.test.ts",
     "kernel/session/runtime-registry.ts",

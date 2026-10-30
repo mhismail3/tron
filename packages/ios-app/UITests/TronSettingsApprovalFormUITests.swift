@@ -131,6 +131,31 @@ final class TronSettingsApprovalFormUITests: XCTestCase {
         XCTAssertFalse(app.buttons["settings-approval-approve-settings-pending"].exists)
     }
 
+    /// Rendered native fixture + real AppModel/receipt/socket path, not proof
+    /// of Gateway authorization or command effects.
+    @MainActor
+    func testNativeChangeCardSendsExactScopedAnswer() {
+        continueAfterFailure = false
+        for approved in [true, false] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-ask-user-fixture", "-tron-native-change-fixture"]
+            app.launch()
+            let button = app.buttons[approved ? "Approve" : "Cancel"]
+            XCTAssertTrue(button.waitForExistence(timeout: 10), app.debugDescription)
+            expand(app, title: "Review change")
+            XCTAssertTrue(app.staticTexts["Disabled"].exists)
+            XCTAssertTrue(app.staticTexts["printf 'native witness'"].exists)
+            XCTAssertFalse(app.buttons["Submit all answers"].exists, "Native changes are not generic forms")
+            XCTAssertTrue(button.isHittable, app.debugDescription)
+            keep(app, "2128-native-change-simulator-fixture-\(approved ? "approve" : "cancel")")
+            button.tap()
+            let expected = "native change approved=\(approved) digest=\(String(repeating: "a", count: 64)) scope=ask-user-interaction/hosted-ask-user-epoch/1"
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", expected)).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["Mutation count: 1"].exists, "One native answer, no generic submission")
+            app.terminate()
+        }
+    }
+
     @MainActor
     func testAskUserToolRowReopensAndSubmits() {
         continueAfterFailure = false

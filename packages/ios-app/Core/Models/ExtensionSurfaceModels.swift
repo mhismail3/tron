@@ -207,8 +207,45 @@ package enum ExtensionInteractionResponsePolicy {
     }
 }
 
+/// Exact immutable before/after projection. Only the dedicated interaction can authorize its effect.
+package struct ChangeReview: Codable, Hashable, Sendable {
+    package struct Item: Codable, Hashable, Sendable {
+        package let label: String
+        package let before: String
+        package let after: String
+        package let detail: String?
+        package let exact: String?
+        package init(label: String, before: String, after: String, detail: String? = nil, exact: String? = nil) {
+            self.label = label; self.before = before; self.after = after; self.detail = detail; self.exact = exact
+        }
+        private enum CodingKeys: String, CodingKey { case label, before, after, detail, exact }
+        package init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decodeBoundedString(forKey: .label, maximumBytes: 4 * 1_024)
+            before = try c.decodeBoundedString(forKey: .before, maximumBytes: 32 * 1_024)
+            after = try c.decodeBoundedString(forKey: .after, maximumBytes: 32 * 1_024)
+            detail = try c.decodeBoundedStringIfPresent(forKey: .detail, maximumBytes: 32 * 1_024)
+            exact = try c.decodeBoundedStringIfPresent(forKey: .exact, maximumBytes: 32 * 1_024)
+        }
+    }
+    package let digest: String
+    package let title: String
+    package let requiresTap: Bool
+    package let reason: String?
+    package let items: [Item]
+    private enum CodingKeys: String, CodingKey { case digest, title, requiresTap, reason, items }
+    package init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        digest = try c.decodeBoundedString(forKey: .digest, maximumBytes: 64)
+        title = try c.decodeBoundedString(forKey: .title, maximumBytes: 4 * 1_024)
+        requiresTap = try c.decode(Bool.self, forKey: .requiresTap)
+        reason = try c.decodeBoundedStringIfPresent(forKey: .reason, maximumBytes: 32 * 1_024)
+        items = try c.decodeBoundedArray(Item.self, forKey: .items, maximum: 50)
+    }
+}
+
 package struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
-    package enum Method: String, Codable, Sendable { case select, confirm, input, editor, form }
+    package enum Method: String, Codable, Sendable { case select, confirm, input, editor, form, change }
     package let id: String
     package let hostEpoch: String
     package let presentationRevision: Int
@@ -220,16 +257,17 @@ package struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     package let prefill: String?
     package let expiresAt: String?
     package let form: ExtensionFormDescriptor?
+    package let review: ChangeReview?
     package let owner: ExtensionOwner?
     package let invocationId: String?
     package let operationId: String?
 
-    package init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, form: ExtensionFormDescriptor? = nil, owner: ExtensionOwner? = nil, invocationId: String? = nil, operationId: String? = nil) {
+    package init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, form: ExtensionFormDescriptor? = nil, review: ChangeReview? = nil, owner: ExtensionOwner? = nil, invocationId: String? = nil, operationId: String? = nil) {
         self.id = id; self.hostEpoch = hostEpoch; self.presentationRevision = presentationRevision; self.method = method
-        self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt; self.form = form
+        self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt; self.form = form; self.review = review
         self.owner = owner; self.invocationId = invocationId; self.operationId = operationId
     }
-    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, form, owner, invocationId, operationId }
+    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, form, review, owner, invocationId, operationId }
     package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -243,6 +281,7 @@ package struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
         prefill = try container.decodeIfPresent(String.self, forKey: .prefill)
         expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
         form = try container.decodeIfPresent(ExtensionFormDescriptor.self, forKey: .form)
+        review = try container.decodeIfPresent(ChangeReview.self, forKey: .review)
         owner = try container.decodeIfPresent(ExtensionOwner.self, forKey: .owner)
         invocationId = try container.decodeIfPresent(String.self, forKey: .invocationId)
         operationId = try container.decodeIfPresent(String.self, forKey: .operationId)
@@ -782,11 +821,27 @@ package enum ExtensionPresentationPolicy {
               (interaction.method != .editor || (interaction.options == nil && interaction.form == nil)),
               (interaction.method != .form || (interaction.options == nil && interaction.placeholder == nil && interaction.prefill == nil && interaction.message == nil && interaction.form.map({ admitForm($0) && $0.title == interaction.title }) == true)),
               (interaction.method == .form || interaction.form == nil),
+              (interaction.method == .change || interaction.review == nil),
+              (interaction.method != .change || (interaction.options == nil && interaction.placeholder == nil && interaction.prefill == nil && interaction.message == nil && interaction.form == nil && interaction.review.map({ admitReview($0) && $0.title == interaction.title }) == true)),
               interaction.options.map({ options in
                   interaction.method == .select && options.count <= 64 && Set(options).count == options.count
                     && options.allSatisfy({ boundedSafe($0, 2 * 1_024) })
               }) ?? true else { return false }
         return (try? JSONEncoder.gateway.encode(interaction).count).map { $0 <= 192 * 1_024 } ?? false
+    }
+
+    private static func admitReview(_ review: ChangeReview) -> Bool {
+        review.digest.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+            && review.requiresTap && !review.items.isEmpty && review.items.count <= 50
+            && boundedSafe(review.title, 4 * 1_024, newlines: true)
+            && (review.reason.map { boundedSafe($0, 32 * 1_024, newlines: true) } ?? true)
+            && review.items.allSatisfy { item in
+                boundedSafe(item.label, 4 * 1_024, newlines: true)
+                    && boundedSafe(item.before, 32 * 1_024, newlines: true)
+                    && boundedSafe(item.after, 32 * 1_024, newlines: true)
+                    && (item.detail.map { boundedSafe($0, 32 * 1_024, newlines: true) } ?? true)
+                    && (item.exact.map { boundedSafe($0, 32 * 1_024, newlines: true) } ?? true)
+            } && ((try? JSONEncoder.gateway.encode(review).count).map { $0 <= 32 * 1_024 } ?? false)
     }
 
     private static func admitForm(_ descriptor: ExtensionFormDescriptor) -> Bool {

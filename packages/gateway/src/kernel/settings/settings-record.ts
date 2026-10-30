@@ -147,6 +147,9 @@ export class SettingsChangeRecord {
     const candidates: ChangeEntry[] = [];
     let changed = false;
     const tail = index.segments.at(-1);
+    // A non-tail segment is immutable. A valid JSON newline truncation must not
+    // turn a complete grouped Undo into a silently partial restoration.
+    for (const segment of index.segments.slice(0, -1)) await this.indexedLines(segment);
     if (tail) {
       const rows = await this.segmentLines(tail.name);
       if (rows.length < tail.count || tail.closed && rows.length !== tail.count) throw new GatewayError("conflict", "The settings audit tail conflicts with its index");
@@ -230,34 +233,26 @@ export class SettingsChangeRecord {
   }
 
   /** Newest first. The cursor names a segment and how many of its lines remain.
-   * `settled` names the page's pending facts a later fact already settles, so a
-   * presentation can show the outcome row alone (#2050); audit keeps every fact. */
-  async page(input: { cursor?: string; limit?: number; filter?: (entry: ChangeEntry) => boolean }): Promise<{ entries: ChangeEntry[]; settled: string[]; nextCursor?: string }> {
+   * Audit keeps every fact; presentation never folds retired approval outcomes. */
+  async page(input: { cursor?: string; limit?: number; filter?: (entry: ChangeEntry) => boolean }): Promise<{ entries: ChangeEntry[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
     await this.recover();
     const index = await this.index();
     const [segmentIndex, remaining] = input.cursor ? parseCursor(input.cursor) : [index.segments.length - 1, Number.POSITIVE_INFINITY];
     const entries: ChangeEntry[] = [];
     const segment = index.segments[segmentIndex];
-    if (!segment) return { entries, settled: [] };
+    if (!segment) return { entries };
     // Bound scanned work, not just returned matches: a sparse filter over the
     // permanent audit must yield an empty page + cursor instead of a full scan.
-    const lines = await this.segmentLines(segment.name);
-    // Settling facts are newer than their pending fact: this segment and later ones.
-    const settled = new Set<string>();
-    for (const line of lines) if (line.refersTo) settled.add(line.refersTo);
-    for (let newer = segmentIndex + 1; newer < index.segments.length; newer += 1) {
-      for (const line of await this.segmentLines(index.segments[newer]!.name)) if (line.refersTo) settled.add(line.refersTo);
-    }
+    const lines = await this.indexedLines(segment);
     let end = Math.min(remaining, lines.length);
     while (end > 0 && entries.length < limit) {
       end -= 1;
       const entry = lines[end]!;
       if (!input.filter || input.filter(entry)) entries.push(entry);
     }
-    const settledPending = entries.filter(entry => settled.has(entry.changeId)).map(entry => entry.changeId);
-    if (end > 0) return { entries, settled: settledPending, nextCursor: `${segmentIndex}:${end}` };
-    return { entries, settled: settledPending, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
+    if (end > 0) return { entries, nextCursor: `${segmentIndex}:${end}` };
+    return { entries, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
   }
 
   /** An entry and every later fact that refers to it, oldest first. */
@@ -266,7 +261,7 @@ export class SettingsChangeRecord {
     const facts: ChangeEntry[] = [];
     let undone = false;
     for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
-      const lines = await this.segmentLines(index.segments[segmentIndex]!.name);
+      const lines = await this.indexedLines(index.segments[segmentIndex]!);
       for (let line = lines.length - 1; line >= 0; line -= 1) {
         const entry = lines[line]!;
         if (entry.undoOf === changeId && entry.status === "applied") undone = true;
@@ -277,17 +272,20 @@ export class SettingsChangeRecord {
     return undefined;
   }
 
-  /** The entries of one group, oldest first. A group is appended in one write, so the
-   * scan stops at the segment that holds its first entry. */
+  /** Exact complete group, oldest first. Corrupt history never authorizes a partial Undo. */
   async group(groupId: string, size: number): Promise<ChangeEntry[]> {
     const index = await this.index();
     const found: ChangeEntry[] = [];
-    for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0 && found.length < size; segmentIndex -= 1) {
-      const lines = await this.segmentLines(index.segments[segmentIndex]!.name);
-      for (let line = lines.length - 1; line >= 0 && found.length < size; line -= 1) {
-        if (lines[line]!.group?.id === groupId) found.unshift(lines[line]!);
+    for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
+      const lines = await this.indexedLines(index.segments[segmentIndex]!);
+      for (let line = lines.length - 1; line >= 0; line -= 1) {
+        const entry = lines[line]!;
+        if (entry.group?.id !== groupId) continue;
+        if (entry.group.size !== size || found.some(prior => prior.changeId === entry.changeId)) throw new GatewayError("conflict", "The settings audit group conflicts with its identity");
+        found.unshift(entry);
       }
     }
+    if (found.length !== size) throw new GatewayError("conflict", "The settings audit group is incomplete");
     return found;
   }
 
@@ -295,7 +293,7 @@ export class SettingsChangeRecord {
   async find(changeId: string): Promise<ChangeEntry | undefined> {
     const index = await this.index();
     for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
-      const found = (await this.segmentLines(index.segments[segmentIndex]!.name)).find(entry => entry.changeId === changeId);
+      const found = (await this.indexedLines(index.segments[segmentIndex]!)).find(entry => entry.changeId === changeId);
       if (found) return found;
     }
     return undefined;
@@ -303,6 +301,12 @@ export class SettingsChangeRecord {
 
   async segmentCount(): Promise<number> {
     return (await this.index()).segments.length;
+  }
+
+  private async indexedLines(segment: RecordIndex["segments"][number]): Promise<ChangeEntry[]> {
+    const rows = await this.segmentLines(segment.name);
+    if (rows.length !== segment.count) throw new GatewayError("conflict", "The settings audit segment conflicts with its indexed row count");
+    return rows;
   }
 
   private async segmentLines(name: string): Promise<ChangeEntry[]> {

@@ -61,6 +61,24 @@ export interface ExtensionHostActivity {
   readonly hasRetainedPresentation: boolean;
 }
 
+function nativeReview(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const review = value as Record<string, unknown>;
+  return Object.keys(review).every(key => ["digest", "title", "requiresTap", "reason", "items"].includes(key))
+    && typeof review.digest === "string" && /^[a-f0-9]{64}$/.test(review.digest)
+    && review.requiresTap === true && boundedSafe(review.title, 4 * 1024, true)
+    && (review.reason === undefined || boundedSafe(review.reason, 32 * 1024, true))
+    && Array.isArray(review.items) && review.items.length > 0 && review.items.length <= 50
+    && review.items.every(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+      const item = value as Record<string, unknown>;
+      return Object.keys(item).every(key => ["label", "before", "after", "detail", "exact"].includes(key))
+        && boundedSafe(item.label, 4 * 1024, true) && boundedSafe(item.before, 32 * 1024, true) && boundedSafe(item.after, 32 * 1024, true)
+        && (item.detail === undefined || boundedSafe(item.detail, 32 * 1024, true))
+        && (item.exact === undefined || boundedSafe(item.exact, 32 * 1024, true));
+    }) && bytes(review) <= 32 * 1024;
+}
+
 function bytes(value: unknown): number { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
 function clone<T>(value: T): T { return structuredClone(value); }
 function equal(left: unknown, right: unknown): boolean { return JSON.stringify(left) === JSON.stringify(right); }
@@ -360,7 +378,7 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
       || new Set(draft.pendingInteractions.map((item) => item.id)).size !== draft.pendingInteractions.length
       || draft.pendingInteractions.some((item) => typeof item !== "object" || item === null || item.id.length === 0 || item.hostEpoch !== this.hostEpoch || item.presentationRevision < 1
         || item.presentationRevision > this.revision + 1 || !boundedSafe(item.id, MAX_ID_BYTES)
-        || !["select", "confirm", "input", "editor", "form"].includes(item.method)
+        || !["select", "confirm", "input", "editor", "form", "change"].includes(item.method)
         || !boundedSafe(item.title, MAX_TITLE_BYTES, true) || (item.message !== undefined && !boundedSafe(item.message, MAX_MESSAGE_BYTES, true))
         || (item.placeholder !== undefined && !boundedSafe(item.placeholder, MAX_TITLE_BYTES))
         || (item.prefill !== undefined && !boundedSafe(item.prefill, MAX_EDITOR_DIRECTIVE_BYTES, true))
@@ -371,6 +389,8 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
           || item.prefill !== undefined || item.form !== undefined))
         || (item.method === "input" && (item.options !== undefined || item.form !== undefined))
         || (item.method === "editor" && (item.options !== undefined || item.form !== undefined))
+        || (item.method === "change" && (item.options !== undefined || item.placeholder !== undefined || item.prefill !== undefined || item.message !== undefined || item.form !== undefined || !nativeReview(item.review) || item.title !== item.review.title))
+        || (item.method !== "change" && "review" in item)
         || (item.method === "form" && (item.options !== undefined || item.placeholder !== undefined
           || item.prefill !== undefined || item.message !== undefined || !isExtensionForm(item.form)
           || item.title !== item.form.title))

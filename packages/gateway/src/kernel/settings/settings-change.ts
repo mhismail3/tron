@@ -176,11 +176,13 @@ export class SettingsChangePath {
       }
     }
     const requiresTap = planned.some(plan => plan.key.tap && (plan.key.tap !== "spend" || plan.direction === "widen"));
-    const review = changeReview({ target, planned: planned.map(plan => ({
+    const review = changeReview({ target, undoOf: context.undoOf, applyAgainOf: context.applyAgainOf, planned: planned.map(plan => ({
       key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null })) },
-      { title: planned.map(plan => plan.key.label).join(", "), requiresTap,
+      { title: planned.map(plan => plan.key.label).join(", "), requiresTap, ...(context.reason ? { reason: context.reason } : {}),
         items: planned.map(plan => ({ label: plan.key.label, before: plan.key.redacted ? "Hidden" : formatStoredSetting(plan.key.type, plan.before),
-          after: plan.key.redacted ? "Hidden" : formatStoredSetting(plan.key.type, plan.after), ...(plan.key.confirm ? { detail: plan.key.confirm } : {}) })) });
+          after: plan.key.redacted ? "Hidden" : formatStoredSetting(plan.key.type, plan.after),
+          detail: [LAYER_LABELS[plan.request.layer] + " stored value", target.kind === "session" ? target.sessionId : target.kind === "project" ? target.cwd : target.kind, plan.key.confirm].filter(Boolean).join("\n"),
+          ...(plan.key.redacted ? {} : { exact: JSON.stringify({ target, key: plan.key.id, layer: plan.request.layer, qualifiers: plan.qualifiers, op: plan.request.op, before: plan.before ?? null, after: plan.after ?? null }) }) })) });
     if (context.confirmationDigest && context.confirmationDigest !== review.digest) throw new GatewayError("conflict", "The reviewed change is stale; nothing was applied");
     if (context.dryRun) {
       let next = 0;
