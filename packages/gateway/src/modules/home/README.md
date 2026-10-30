@@ -40,12 +40,10 @@ the outbox without scanning sealed chapter files.
 
 ## Contract
 
-Home’s `monitor` tool uses the [existing automation owner](../../automations/README.md)
-for finite Home triggers (5-minute minimum, three active, 24-hour maximum expiry),
-visible and pausable in Automations. It manages only Home-created definitions.
-A result wake resumes authorized unblocked unfinished work in the same worker;
-Home arms a monitor before leaving open work idle and disarms it when done or
-blocked on the maintainer. Trigger turns never approve or renew grants.
+Home uses the standard [`schedule` tool](../../automations/README.md) and Automations UI.
+It may manage authorized automations without interactive confirmation; worker and
+trigger turns cannot mutate them. Use finite expiry and pause/delete when done or
+blocked. Triggers never approve settings, trust, profile changes or grants.
 
 ### Designation and chapters
 

@@ -255,7 +255,6 @@ const modelQueue = new ModelQueueOwner({
 let automationHomeTrigger: AutomationHomeTrigger | undefined;
 const homeComposition: HomeComposition = {
   triggerSources: () => automationHomeTrigger ? [automationHomeTrigger] : [],
-  monitor: (sessionId, id, request) => automationToolOperations.monitor(sessionId, id, request),
   modelQueue, modelRuntime,
   settings: () => settingsChanges === undefined ? undefined : { model: settingsModel, changes: settingsChanges },
   knowledge: () => knowledge,

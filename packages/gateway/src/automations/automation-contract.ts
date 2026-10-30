@@ -122,10 +122,12 @@ export function admitsAutomationAction(value: unknown): value is AutomationActio
 export function admitsAutomationProvenance(value: unknown): value is AutomationProvenance {
   const input = record(value);
   if (!input || typeof input.kind !== "string") return false;
-  if (input.kind === "mobile" || input.kind === "local") return exactKeys(input, ["kind"]);
-  if (input.kind === "home") return exactKeys(input, ["kind", "homeId", "expiresAt"])
-    && bounded(input.homeId, 200) && timestamp(input.expiresAt);
-  return input.kind === "assistant" && exactKeys(input, ["kind", "sessionId", "sourceId"])
+  if (input.expiresAt !== undefined && !timestamp(input.expiresAt)) return false;
+  const expiry = input.expiresAt === undefined ? [] : ["expiresAt"];
+  if (input.kind === "mobile" || input.kind === "local") return exactKeys(input, ["kind", ...expiry]);
+  if (input.kind === "home") return exactKeys(input, ["kind", "homeId", ...expiry])
+    && bounded(input.homeId, 200);
+  return input.kind === "assistant" && exactKeys(input, ["kind", "sessionId", "sourceId", ...expiry])
     && bounded(input.sessionId, 200) && bounded(input.sourceId, 256);
 }
 
@@ -205,19 +207,6 @@ function admitsAutomationRun(value: unknown): value is AutomationRun {
   return true;
 }
 
-export const HOME_MONITOR_LIMIT = 3;
-export const HOME_MONITOR_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
-
-/** Immutable Home attribution is also the finite lease; no separate goal state. */
-export function admitsHomeMonitor(record: AutomationRecord): boolean {
-  const provenance = record.provenance;
-  return provenance.kind === "home" && record.target?.kind === "home" && record.target.homeId === provenance.homeId
-    && record.action?.kind === "sessionPrompt" && record.action.resourceInvocation === undefined
-    && record.trigger?.kind === "interval" && record.trigger.everySeconds >= 300
-    && Date.parse(provenance.expiresAt) > Date.parse(record.createdAt)
-    && Date.parse(provenance.expiresAt) - Date.parse(record.createdAt) <= HOME_MONITOR_MAX_LIFETIME_MS;
-}
-
 export function admitsAutomationRecord(value: unknown): value is AutomationRecord {
   const input = record(value);
   if (!input) return false;
@@ -234,10 +223,9 @@ export function admitsAutomationRecord(value: unknown): value is AutomationRecor
     && Number.isSafeInteger(input.stateRevision) && (input.stateRevision as number) >= 1
     && bounded(input.name, 256)
     && (input.description === undefined || bounded(input.description, 2_048, true))
-    && ["draft", "enabled", "paused", "completed", "blocked"].includes(input.activation as string)
+    && ["draft", "enabled", "paused", "completed", "blocked", "expired"].includes(input.activation as string)
     && timestamp(input.createdAt) && timestamp(input.updatedAt)
     && admitsAutomationProvenance(input.provenance)
-    && ((input.provenance as AutomationProvenance).kind !== "home" || admitsHomeMonitor(input as unknown as AutomationRecord))
     && admitsAutomationTarget(input.target)
     && admitsAutomationTrigger(input.trigger)
     && (input.misfirePolicy === "latest" || input.misfirePolicy === "skip")
@@ -269,7 +257,7 @@ function requiredText(value: unknown, name: string, maximumBytes: number): strin
 export function admitAutomationCreateInput(value: unknown, provenance: AutomationProvenance): AutomationCreateInput {
   const input = record(value);
   if (!input) throw new GatewayError("invalid_request", "Automation definition must be an object");
-  const allowed = ["name", "description", "activation", "target", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action"];
+  const allowed = ["name", "description", "expiresAt", "activation", "target", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action"];
   if (Object.keys(input).some((key) => !allowed.includes(key))) throw new GatewayError("invalid_request", "Automation definition contains unknown fields");
   if (!admitsAutomationTrigger(input.trigger)) throw new GatewayError("invalid_request", "Automation trigger is invalid");
   if (!admitsAutomationAction(input.action)) throw new GatewayError("invalid_request", "Automation action is invalid");
@@ -296,7 +284,7 @@ export function admitAutomationCreateInput(value: unknown, provenance: Automatio
     overlapPolicy,
     executionDeadlineSeconds: deadline as number,
     action: input.action,
-    provenance,
+    provenance: { ...provenance, ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt as string }) },
   };
 }
 

@@ -9,7 +9,7 @@ enum AutomationStatusPresentation {
         if run == .running || run == .admitting || run == .queued || run == .waiting || run == .cancelling { return .tronAutomation }
         switch activation {
         case .enabled: return .tronAutomation
-        case .paused, .draft, .completed: return .tronTextMuted
+        case .paused, .draft, .completed, .expired: return .tronTextMuted
         case .blocked: return .tronError
         }
     }
@@ -22,7 +22,7 @@ enum AutomationStatusPresentation {
         if run == .failed { return "xmark.circle.fill" }
         if run == .cancelled { return "slash.circle" }
         if run == .skipped { return "arrow.right.circle" }
-        switch activation { case .enabled: return "checkmark.circle.fill"; case .paused: return "pause.circle.fill"; case .draft: return "pencil.circle"; case .completed: return "checkmark.seal"; case .blocked: return "exclamationmark.triangle.fill" }
+        switch activation { case .enabled: return "checkmark.circle.fill"; case .paused: return "pause.circle.fill"; case .draft: return "pencil.circle"; case .completed: return "checkmark.seal"; case .expired: return "clock.badge.xmark"; case .blocked: return "exclamationmark.triangle.fill" }
     }
 }
 struct AutomationDateFormatting {

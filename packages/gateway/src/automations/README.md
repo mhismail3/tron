@@ -5,7 +5,7 @@
 The Gateway is the sole scheduler and canonical owner of durable automations:
 definitions, triggers, the run ledger, dispatch into sessions and settlement. Pi
 extensions and subagents may run inside a scheduled turn but own no timer,
-definition, retry or ledger. iOS, the first-party `schedule` tool and Home’s curated `monitor` tool are clients.
+definition, retry or ledger. iOS and the first-party `schedule` tool (including Home) are clients.
 
 ## Owns
 
@@ -57,24 +57,14 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   inputs join one recovery batch. A singleton uses a hidden native resume input, bound to
   the existing canonical message before acknowledging it, rather than appending it twice.
   The execution chapter and operation bind only at actual admission, not while queued.
-- **Home monitors.** Home can create/list/pause/resume/delete only definitions with
-  immutable `home` provenance for its logical Home, never maintainer definitions.
-  `monitor create {name, message, everyMinutes, expiresAt}` enables a Home-message
-  interval; the message carries the authorized objective, refs and stop conditions.
-  Intervals are whole minutes from 5–1440; expiry is required, future, and at most
-  24 hours from creation. At most three Home monitors may be enabled installation-wide;
-  create and enable check the bound under the store mutex. First firing is one
-  interval after creation. `list` returns at most 50 newest summaries/revisions and an omitted count, never message bodies or run history; `pause|resume|delete`
-  require `automationId, expectedRevision`. Expiry cannot be extended by editing or
-  resuming. The existing scheduler completes expired monitors; pause/expiry cancels
-  unclaimed messages, while claimed inputs retain their proof owner. Unlike ordinary
-  Home automations, paused/expired monitors cannot deliver even manual Run Now.
-  Maintainer Stop of Home through `session.abort` pauses its enabled monitors before
-  acknowledgement, not maintainer automations. They remain visible/pausable in
-  Automations, attributed **Tron Home**, with expiry in detail. No approval is needed:
-  only a bounded trigger is created, never settings, trust, profile or grant authority.
-  Home resumes authorized unblocked progress on result wakes, arms a monitor before
-  leaving open work idle, and pauses/deletes it on completion or a maintainer blocker.
+- **Expiry and pause.** Optional `provenance.expiresAt` applies to every automation;
+  create definitions and `schedule create` accept `expiresAt`. Existing provenance
+  loads unchanged. Expired definitions are shown as expired, contribute no future
+  timeline occurrences or definition-count slots, and cannot run manually or automatically.
+  The generic interval minimum is 60 seconds; no Home-only interval, lifetime or count limit exists.
+  Paused definitions resume only through explicit enable, not run resolution or scheduler state writes.
+  The canonical record validator fences all publication and disk admission, including internal mutations.
+  Physical byte bounds still protect storage; expiry does not delete retained history.
 - **Dispatch.** Ordinary runs snapshot their target and concrete session ID before dispatch
   (workspace runs get a predetermined UUID created through
   `RuntimeRegistry`/`RuntimeSlot`). Existing-session leases, prompt admission and canonical
@@ -108,7 +98,10 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   retryable error, never dropped occurrences.
 - **`schedule` tool** targets its own persisted session, a new session in its
   workspace, or `home` for an attributed Home message, dedupes by tool-call identity, and refuses mutations from an
-  automation-originated turn. Paired credentials are machine-administrator
+  automation/trigger-originated turn. One tool authority check uses live session profile
+  and delegated-worker facts: Home mutates without confirmation, delegated workers
+  (including their subagents) cannot mutate, and ordinary interactive sessions retain
+  their UI confirmation. No authority comes from a trigger. Paired credentials are machine-administrator
   credentials, so any paired client may manage any automation.
   Composition supplies the canonical receipt owner's existing mutation operation;
   this tool owns no receipt lane or completion policy. Diagnostics use the shared

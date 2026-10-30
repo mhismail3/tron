@@ -7,7 +7,7 @@ export function createScheduleModule(operations: () => ScheduleToolOperations | 
     tools: ["schedule"], commands: [],
     start: () => ({ extension: session => {
       const owner = operations();
-      return owner ? createTronScheduleExtension({ sessionId: session.sessionId, operations: owner }) : undefined;
+      return owner ? createTronScheduleExtension({ session, operations: owner }) : undefined;
     } }),
   };
 }

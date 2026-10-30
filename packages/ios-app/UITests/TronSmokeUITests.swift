@@ -3612,6 +3612,30 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testAutomationExpiryLightAndDark() {
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-automation-fixture", "-automation-expiry", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            if appearance == "dark" { app.launchArguments.append("-automation-dark") }
+            app.launch()
+            XCTAssertTrue(app.buttons["dashboard.menu"].waitForExistence(timeout: 8))
+            app.buttons["dashboard.menu"].tap()
+            app.buttons["Automations"].tap()
+            let card = app.buttons["automation-card.automation-0"]
+            XCTAssertTrue(card.waitForExistence(timeout: 8))
+            XCTAssertTrue(card.label.contains("Expired"), card.label)
+            card.tap()
+            XCTAssertTrue(app.otherElements["automation-detail-summary"].waitForExistence(timeout: 5))
+            for _ in 0..<5 where !app.buttons["Run Now"].isHittable { app.swipeUp() }
+            XCTAssertFalse(app.buttons["Run Now"].isEnabled)
+            XCTAssertFalse(app.buttons["Enable"].isEnabled)
+            XCTAssertTrue(app.buttons["Edit"].isEnabled)
+            keepScreenshot(named: "automation-generic-expiry-\(appearance)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testAutomationsSheetFromTronMenu() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-automation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]

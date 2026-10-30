@@ -6,6 +6,7 @@ const ownerStorage = new AsyncLocalStorage<ExtensionOwner>();
 export interface InvocationExecutionContext {
   invocationId: string;
   operationId: string;
+  trigger?: import("./input-admission.js").InputTriggerAttribution | undefined;
 }
 const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
 

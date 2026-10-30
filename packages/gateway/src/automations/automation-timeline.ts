@@ -142,7 +142,7 @@ export function buildAutomationTimeline(
       while (dayCursor < throughMs) {
         const day = automationLocalDayBounds(dayCursor, displayTimezone);
         const rangeStart = Math.max(fromMs, day.start);
-        const rangeEnd = Math.min(throughMs, day.end);
+        const rangeEnd = Math.min(throughMs, day.end, summary.expiresAt === undefined ? Infinity : Date.parse(summary.expiresAt));
         const period = Math.max(0, Math.ceil((rangeStart - anchor) / interval));
         const first = anchor + period * interval;
         if (first < rangeEnd) {
@@ -171,7 +171,8 @@ export function buildAutomationTimeline(
       const scheduledFor = nextAutomationOccurrence(summary.trigger, afterMs);
       if (scheduledFor === undefined) break;
       const scheduledMs = Date.parse(scheduledFor);
-      if (!Number.isFinite(scheduledMs) || scheduledMs >= throughMs) break;
+      if (!Number.isFinite(scheduledMs) || scheduledMs >= throughMs
+        || summary.expiresAt !== undefined && scheduledMs >= Date.parse(summary.expiresAt)) break;
       if (scheduledMs < fromMs) {
         afterMs = Math.max(afterMs + 1, scheduledMs);
         continue;

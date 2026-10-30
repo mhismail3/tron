@@ -1796,7 +1796,6 @@ export class GatewayService {
           const operationId = optionalString(params.operationId, "operationId", 200);
           try {
             await (await this.openedSlot(client, params)).abort(kind, operationId);
-            if (kind === "agent") await this.dependencies.automations?.pauseHomeMonitors(sessionId);
           } catch (error) {
             this.dependencies.logger.log(
               "warning",

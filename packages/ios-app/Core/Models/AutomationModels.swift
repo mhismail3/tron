@@ -10,13 +10,14 @@ private struct AutomationCodingKey: CodingKey {
 // Gateway-owned automation projections. These are disposable iOS values; the
 // Gateway remains the authority for definitions, occurrences, and run state.
 package enum AutomationActivation: String, Codable, Hashable, Sendable, CaseIterable {
-    case draft, enabled, paused, completed, blocked
+    case draft, enabled, paused, completed, blocked, expired
     package var label: String {
         switch self {
         case .draft: "Draft"
         case .enabled: "Active"
         case .paused: "Paused"
         case .completed: "Completed"
+        case .expired: "Expired"
         case .blocked: "Needs attention"
         }
     }
@@ -511,11 +512,11 @@ package enum AutomationAdmissionPolicy {
     }
 
     package static func admits(_ provenance: GatewayAutomationProvenance) -> Bool {
+        if let expiry = provenance.expiresAt, GatewayTimestamp.parse(expiry) == nil { return false }
         switch provenance.kind {
         case "home":
             return provenance.sessionId == nil && provenance.sourceId == nil
                 && provenance.homeId.map({ boundedText($0, maximum: 200) }) == true
-                && provenance.expiresAt.flatMap(GatewayTimestamp.parse) != nil
         case "mobile", "local":
             return provenance.sessionId == nil && provenance.sourceId == nil
         case "assistant":

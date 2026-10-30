@@ -12,9 +12,9 @@ import {
   MAXIMUM_AUTOMATION_RECORD_BYTES,
   MAXIMUM_AUTOMATIONS,
   admitsAutomationRecord,
-  admitsHomeMonitor, admitsAutomationProvenance, HOME_MONITOR_LIMIT,
 } from "./automation-contract.js";
 import { firstAutomationOccurrence, nextAutomationOccurrence } from "./schedule.js";
+import { automationExpired } from "./types.js";
 import type {
   AutomationCreateInput,
   AutomationRecord,
@@ -115,11 +115,12 @@ function automationSummary(record: AutomationRecord): AutomationSummary {
     revision: record.revision,
     stateRevision: record.stateRevision,
     name: record.name,
-    activation: record.activation,
+    activation: automationExpired(record) ? "expired" : record.activation,
+    ...(record.provenance.expiresAt === undefined ? {} : { expiresAt: record.provenance.expiresAt }),
     actionKind: record.action.kind,
     target: clone(record.target),
     trigger: clone(record.trigger),
-    ...(record.nextOccurrenceAt === undefined ? {} : { nextOccurrenceAt: record.nextOccurrenceAt }),
+    ...(record.nextOccurrenceAt === undefined || automationExpired(record) ? {} : { nextOccurrenceAt: record.nextOccurrenceAt }),
     ...(currentRun === undefined ? {} : { currentRun }),
     ...(last === undefined ? {} : { lastRun: { ...last, ...(record.lastRun?.terminalAt ? { terminalAt: record.lastRun.terminalAt } : {}) } }),
     consecutiveFailureCount: record.consecutiveFailureCount,
@@ -220,7 +221,7 @@ export class AutomationStore {
           if (!this.records.has(id)) this.unavailableBytes += physicalBytes;
         }
       }
-      if (this.occupiedIds.size > MAXIMUM_AUTOMATIONS || this.aggregateBytes() + this.reservedTerminalBytes() > MAXIMUM_AUTOMATION_AGGREGATE_BYTES) {
+      if (this.countedDefinitions() > MAXIMUM_AUTOMATIONS || this.aggregateBytes() + this.reservedTerminalBytes() > MAXIMUM_AUTOMATION_AGGREGATE_BYTES) {
         throw new GatewayError("conflict", "Automation storage exceeds its bounded capacity");
       }
       await this.resumeMaintenanceIntent();
@@ -250,7 +251,9 @@ export class AutomationStore {
     this.assertInitialized();
     const value = this.records.get(id);
     if (!value) throw new GatewayError("not_found", "Automation was not found");
-    return clone(value);
+    const result = clone(value);
+    if (automationExpired(result)) { result.activation = "expired"; delete result.nextOccurrenceAt; }
+    return result;
   }
 
   snapshot(): AutomationRecord[] {
@@ -261,7 +264,7 @@ export class AutomationStore {
   async create(input: AutomationCreateInput): Promise<AutomationRecord> {
     return this.mutex.run(async () => {
       this.assertInitialized();
-      if (this.occupiedIds.size >= MAXIMUM_AUTOMATIONS) throw new GatewayError("busy", "Automation capacity is full", true);
+      if (this.countedDefinitions() >= MAXIMUM_AUTOMATIONS) throw new GatewayError("busy", "Automation capacity is full", true);
       let id = randomUUID();
       while (this.occupiedIds.has(id)) id = randomUUID();
       const now = new Date(Date.now()).toISOString();
@@ -289,7 +292,6 @@ export class AutomationStore {
         const nextOccurrenceAt = firstAutomationOccurrence(input.trigger, Date.now());
         if (nextOccurrenceAt !== undefined) record.nextOccurrenceAt = nextOccurrenceAt;
       }
-      this.assertHomeMonitorAdmission(record);
       await this.publishNew(record);
       return clone(record);
     });
@@ -326,6 +328,7 @@ export class AutomationStore {
       delete next.blockedReason;
       delete next.queuedLatestOccurrence;
       if (activation === "enabled") {
+        if (automationExpired(current)) throw new GatewayError("conflict", "Expired automations cannot be enabled");
         if (current.blockedReason === "outcome-unknown") {
           throw new GatewayError("conflict", "Resolve the uncertain run before enabling this automation");
         }
@@ -378,12 +381,12 @@ export class AutomationStore {
       const next = clone(current);
       if (next.lastRun) next.lastRun = resolveRun(next.lastRun);
       next.history = next.history.map(resolveRun);
-      next.activation = "enabled";
+      next.activation = current.activation === "paused" ? "paused" : "enabled";
       next.consecutiveFailureCount = outcome === "failed" ? 1 : 0;
       delete next.blockedReason;
       if (next.trigger.kind === "once") {
         delete next.nextOccurrenceAt;
-        next.activation = "completed";
+        next.activation = current.activation === "paused" ? "paused" : "completed";
       } else {
         const occurrence = nextAutomationOccurrence(next.trigger, Date.now());
         if (occurrence === undefined) throw new Error("Recurring automation did not produce a future occurrence");
@@ -416,6 +419,9 @@ export class AutomationStore {
       const next = update(clone(current));
       if (next.id !== id || next.revision !== current.revision || next.schemaVersion !== 2) {
         throw new Error("Automation state mutation changed immutable definition identity");
+      }
+      if (current.activation === "paused" && next.activation === "enabled") {
+        throw new GatewayError("conflict", "Only an explicit enable can resume a paused automation");
       }
       next.stateRevision = current.stateRevision + 1;
       next.updatedAt = new Date(Date.now()).toISOString();
@@ -479,24 +485,18 @@ export class AutomationStore {
       next.revision = current.revision + 1;
       next.stateRevision = current.stateRevision + 1;
       next.updatedAt = new Date(Date.now()).toISOString();
-      if (next.activation === "enabled" || next.activation === "draft") this.assertHomeMonitorAdmission(next);
       const normalized = JSON.parse(JSON.stringify(next)) as AutomationRecord;
       await this.publishReplacement(current, normalized);
       return clone(normalized);
     });
   }
 
-  private assertHomeMonitorAdmission(record: AutomationRecord): void {
-    if (record.provenance.kind !== "home") return;
-    if (!admitsAutomationProvenance(record.provenance) || !admitsHomeMonitor(record) || Date.parse(record.provenance.expiresAt) <= Date.now()) {
-      throw new GatewayError("invalid_request", "Home monitors require a Home message, interval of at least 5 minutes and a future expiry within 24 hours of creation");
-    }
-    const active = [...this.records.values()].filter(other => other.id !== record.id && other.provenance.kind === "home"
-      && other.activation === "enabled" && Date.parse(other.provenance.expiresAt) > Date.now()).length;
-    if (record.activation === "enabled" && active >= HOME_MONITOR_LIMIT) throw new GatewayError("conflict", "At most 3 Home monitors may be active");
+  private countedDefinitions(): number {
+    return this.occupiedIds.size - [...this.records.values()].filter(record => automationExpired(record)).length;
   }
 
   private async publishNew(record: AutomationRecord): Promise<void> {
+    this.expire(record);
     this.trimHistoryToRecordBound(record);
     if (!admitsAutomationRecord(record)) throw new Error("Automation record failed its canonical contract");
     const bytes = serializedBytes(record);
@@ -510,23 +510,7 @@ export class AutomationStore {
   }
 
   private async publishReplacement(current: AutomationRecord, next: AutomationRecord, notify = true): Promise<void> {
-    if (next.provenance.kind === "home") {
-      const expired = Date.parse(next.provenance.expiresAt) <= Date.now();
-      if (expired) next.activation = "completed";
-      if (expired || next.activation !== "enabled") {
-        delete next.nextOccurrenceAt;
-        delete next.homeWakeAfter;
-        const runs = [...(next.currentRun ? [next.currentRun] : []), ...next.pendingHomeRuns ?? []];
-        // Already claimed deliveries keep their proof owner; pause/expiry cannot
-        // undo accepted input. Unclaimed messages must not outlive their lease.
-        const cancelled = runs.filter(run => !run.homeDelivery).map(run => ({ ...run, state: "cancelled" as const,
-          reason: expired ? "monitor-expired" : "monitor-paused", terminalAt: new Date(Date.now()).toISOString() }));
-        const retained = runs.filter(run => run.homeDelivery);
-        if (retained[0]) next.currentRun = retained[0]; else delete next.currentRun;
-        next.pendingHomeRuns = retained.slice(1);
-        if (cancelled.length) { next.lastRun = cancelled.at(-1)!; next.history.push(...cancelled); }
-      }
-    }
+    this.expire(next);
     this.trimHistoryToRecordBound(next);
     if (!admitsAutomationRecord(next)) throw new Error("Automation record failed its canonical contract");
     const bytes = serializedBytes(next);
@@ -536,6 +520,21 @@ export class AutomationStore {
     this.bytes.set(next.id, bytes);
     this.terminalReservations.set(next.id, this.terminalReservation(next, bytes));
     if (notify) this.didChange(next.id);
+  }
+
+  private expire(record: AutomationRecord): void {
+    if (!automationExpired(record)) return;
+    record.activation = "expired";
+    delete record.nextOccurrenceAt;
+    delete record.queuedLatestOccurrence;
+    delete record.homeWakeAfter;
+    const runs = [...(record.currentRun ? [record.currentRun] : []), ...record.pendingHomeRuns ?? []];
+    const cancelled = runs.filter(run => !run.homeDelivery && (run.state === "queued" || run.state === "waiting"))
+      .map(run => ({ ...run, state: "cancelled" as const, reason: "automation-expired", terminalAt: new Date().toISOString() }));
+    const retained = runs.filter(run => !cancelled.some(other => other.runId === run.runId));
+    if (retained[0]) record.currentRun = retained[0]; else delete record.currentRun;
+    if (record.pendingHomeRuns) record.pendingHomeRuns = retained.slice(1);
+    if (cancelled.length) { record.lastRun = cancelled.at(-1)!; record.history.push(...cancelled); }
   }
 
   private requireCapacity(record: AutomationRecord, recordBytes: number): void {
@@ -669,7 +668,7 @@ export function settleAutomationRun(
   next.lastRun = terminal;
   next.history = boundedHistory([...record.history, terminal]);
   next.consecutiveFailureCount = consecutiveFailureCount;
-  if (circuitOpen) {
+  if (circuitOpen && next.activation !== "paused") {
     next.activation = "blocked";
     next.blockedReason = "consecutive-failures";
     delete next.nextOccurrenceAt;

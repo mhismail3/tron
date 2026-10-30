@@ -202,6 +202,7 @@ struct AutomationDetailView: View {
             HStack(spacing: TronSpacing.md) {
                 Button("Run Now") { confirmation = .run(record) }
                     .buttonStyle(TronActionButtonStyle(role: .standard))
+                    .disabled(record.activation == .expired)
                 Button("Edit") { formPresented = true }
                     .buttonStyle(TronActionButtonStyle(role: .primary))
             }
@@ -210,7 +211,7 @@ struct AutomationDetailView: View {
                     confirmation = .activation(record)
                 }
                 .buttonStyle(TronActionButtonStyle(role: .standard))
-                .disabled(record.blockedReason == "outcome-unknown")
+                .disabled(record.blockedReason == "outcome-unknown" || record.activation == .expired)
                 Button("Delete") { confirmation = .delete(record) }
                     .buttonStyle(TronActionButtonStyle(role: .destructive))
             }

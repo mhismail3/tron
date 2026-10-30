@@ -212,7 +212,8 @@ operations: RunOperations<unknown>,
 
       ownership?.signal?.throwIfAborted();
       sdkRun = ownership?.kind === "homeWake"
-        ? operations.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve, ownership.inputCancellation, ownership.cancellationEpoch, ownership.onDelivered)
+        ? withInvocationContext({ invocationId, operationId, trigger: homeWakeTrigger?.message.details.trigger }, () =>
+          operations.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve, ownership.inputCancellation, ownership.cancellationEpoch, ownership.onDelivered))
         : withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
         images,
         ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
