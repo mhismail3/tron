@@ -23,6 +23,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 const roots: string[] = [];
 const live: RuntimeRegistry[] = [];
 const results: string[] = [];
+let retainedOffersJourney: Promise<void> | undefined;
 const phone = { id: "phone", identity: "device:apps-install", isLocal: false } as ClientContext;
 const source = 'import SwiftUI\nstruct ContentView: View { var body: some View { Text("Builds") } }';
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -42,6 +43,11 @@ beforeAll(async () => {
   });
 }, 240_000);
 afterEach(async () => {
+  // Vitest's deadline reports failure without cancelling the async body. Join
+  // this storage-heavy journey before releasing its registry and fixture bytes;
+  // otherwise its accepted apps.list maintenance can keep writing during rm.
+  await retainedOffersJourney?.catch(() => {});
+  retainedOffersJourney = undefined;
   await Promise.all(live.splice(0).map(registry => registry.dispose()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   vi.unstubAllEnvs();
@@ -73,7 +79,9 @@ async function fixture() {
   await mkdir(join(root, "agent")); await mkdir(join(root, "project"));
   vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent")); vi.stubEnv("HOME", root); vi.stubEnv("PI_OFFLINE", "1");
   await writeFile(join(root, "agent/settings.json"), JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }));
-  const faux = fauxProvider({ provider: "apps-install-fixture", tokensPerSecond: 100_000 });
+  // These are storage/lifecycle journeys, not streamed-token pacing tests.
+  // Even a very high positive rate schedules one timer per tiny faux chunk.
+  const faux = fauxProvider({ provider: "apps-install-fixture", tokensPerSecond: 0 });
   return { root, faux, displayReference: null as null | { sessionId: string; artifactId: string }, ...await start(root, faux) };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -155,7 +163,11 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     await displayOwnerOf(f.registry).artifacts.revoke(reference.artifactId, reference.sessionId);
     expect(await readFile(path, "utf8")).toBe(source);
   });
-  it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", async () => {
+  it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", () => {
+    retainedOffersJourney = reclaimOffers();
+    return retainedOffersJourney;
+  });
+  async function reclaimOffers() {
     const f = await fixture();
     await tool(f, { ...offerArgs(), appId: "kept-app", name: "Kept app" });
     const keptReference = { ...f.displayReference! };
@@ -210,7 +222,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     expect(await rpc(f, "apps.review", f.displayReference!)).toMatchObject({ offer: { appId: "builds" } });
     expect(await readdir(offersRoot)).toHaveLength(2);
     results.push(`200 real offers: deleted producer source/config reclaimed, capacity reused, live offer and installed source preserved; ${durableSyncs} durable syncs in the 199-offer phase (budget 812)`);
-  });
+  }
   it("binds each offer's config to its exact canonical session/artifact, not shared source bytes", async () => {
     const f = await fixture(); await tool(f, offerArgs());
     const referenceA = { ...f.displayReference! };

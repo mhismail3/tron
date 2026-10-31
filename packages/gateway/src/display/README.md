@@ -70,6 +70,10 @@ Trusted store callers can retain a granted, digest-matched inode in their own st
 path without learning the canonical path. The caller syncs its destination directory;
 EXDEV leaves no link and requires the caller's durable copy publication. Ownership
 revocation unlinks Display's names, not another store's independently retained bytes.
+Maintenance durably publishes changed metadata only for surviving owners or readers.
+For artifacts with neither, it closes read admission, removes the directories under
+its mutation lane, and synchronizes their parent once before returning (also after
+partial failure). It never synchronizes empty metadata just to erase it immediately.
 
 **Browser live view** (`browser-live-view.v1`). `agent_browser` stays the only
 automation owner. Its `get cdp-url` result carries an opaque `browser_live` source that
@@ -118,6 +122,12 @@ Projection reads the persisted details live and after cold reload.
   performs retirement through the kernel's synchronous, best-effort `sessionRetired`
   observers; runtime slots do not retain the live-view registry.
 - Live viewing never launches, controls or closes a browser.
+
+## Signals
+
+| Signal | One-step diagnosis / boundary |
+| --- | --- |
+| Maintenance durable-write work | Run `scripts/tron test gateway src/display/display-image-lifetime.integration.test.ts -t 'durably removes unowned'`: the real fsync counter must record two retained metadata publications plus one deletion-directory sync, independent of the removed set's size. The same journey checks reader lifetime and cold-reopen authority. |
 
 ## Verify
 
