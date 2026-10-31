@@ -135,14 +135,21 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   expect((await readHomeProfileIndex(knowledge!)).items).toHaveLength(0);
   const stated = await p.turn(text, { action: "learn", kind: "fact", text, sensitive: true }, "sensitive-stated");
   expect(stated.result.status).toBe("saved");
-  const note = await knowledge!.read(stated.result.id as string) as Note;
+  let note = await knowledge!.read(stated.result.id as string) as Note;
   expect(note.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
   expect(note.content.confirmed).toBe(false);
   expect(note.content.privacyScope).toBe("private");
-  const move = await p.turn("Propose a place for that sensitive note.", { action: "reorganize", assignments: [{ id: note.id, expectedRevision: note.revisionId, path: "life/health" }], reason: "Exact review before moving private material" }, "sensitive-review", false);
-  evidence.push({ sensitivePlacementReview: move.result });
-  expect(move.result).toMatchObject({ status: "declined" });
-  expect((await knowledge!.read(note.id) as Note).revisionId).toBe(note.revisionId);
+  const move = await p.turn("Place that exact note in Life / Health without changing its content.", { action: "reorganize", assignments: [{ id: note.id, expectedRevision: note.revisionId, path: "life/health" }], reason: "Explicit selected placement of private material" }, "sensitive-placement");
+  evidence.push({ sensitivePlacement: move.result });
+  expect(move.result).toMatchObject({ status: "organized" });
+  const moved = await knowledge!.read(note.id) as Note;
+  expect({ ...moved, revisionId: note.revisionId, content: { ...moved.content, profile: note.content.profile } }).toEqual(note);
+  const changes = (await p.f.settings.settingsChanges.history({ key: "home.profile.item" })).entries;
+  const placement = changes.find(entry => entry.commandId === move.result.commandId)!;
+  await p.f.settings.settingsChanges.undo(placement.changeId, { actor: { kind: "ui", id: "maintainer" }, commandId: "undo-sensitive-placement" });
+  const restored = await knowledge!.read(note.id) as Note;
+  expect({ ...restored, revisionId: note.revisionId }).toEqual(note);
+  note = restored;
   for (const action of ["refine", "supersede"] as const) {
     // Home never edits private material alone: its edit waits on the exact card.
     const edit = await p.turn("Infer a new private fact from this short reply.", { action, id: note.id,

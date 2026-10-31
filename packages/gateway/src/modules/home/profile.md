@@ -65,26 +65,25 @@ inferring sensitive health, relationship, financial or location information;
 deliberately stated sensitive notes wait unsorted for review. For `learn`, Home
 must declare `sensitive:true`: the tool requires the text verbatim in the current
 maintainer message, and the owner refuses a personal destination or correction
-capture. These notes use canonical `privacyScope:"private"`; organizing them needs
-exact review. Classification remains Home's responsibility, not a keyword detector:
+capture. These notes use canonical `privacyScope:"private"`; an explicit organization
+changes only placement, never their private content. Classification remains Home's responsibility, not a keyword detector:
 unmarked prose is not claimed to have a semantic privacy guarantee. Corrections
 require an exact wrong-claim ID/revision relation and stay in `corrections`.
 
-Home can sort its own inferred nonbinding notes and retire its own unconfirmed
-proposals with a reason, including an unconfirmed standing/default/correction
-proposal. Sorting a confirmed/private note or a standing/default/correction kind,
-retiring another author's or confirmed note, and all content refinements require
+Explicit organization applies, logs and is undoable without another native tap.
+It preserves text, confirmation, provenance, status and history, including private
+and standing notes. Home can retire its own unconfirmed proposals with a reason.
+Retiring another author's or confirmed note, and content refinements still require
 an exact maintainer decision through the shared native `change` card
 (`SemanticUIBroker.requestChange` via `nativeChangeConfirmer`). Home's tool waits
 in the asking chat; original notes remain unchanged until the tap. Unanswered
-cards expire after 24 hours. The review shows each note's own words and its areas
-(`Unsorted › Review → Communication › Questions`); its digest binds exact before/after
-values and source revisions behind the sheet's technical disclosure. Supersede
+cards expire after 24 hours. The review's digest binds exact before/after values
+and source revisions behind the sheet's technical disclosure. Supersede
 previews show both the old note becoming superseded and the replacement's text,
 kind, confirmation, placement and source link. Stale or expired cards are refused,
 not advertised as publication retries. Accepted changes retain Changes and Undo.
 
-Organization keeps the original operation command ID through the tap, backup and
+Organization keeps the original operation command ID through the backup and
 audit. If publication fails after placement commits, Home's returned `retry_required`
 command repairs that operation's audit without applying placement again. The
 maintainer's `home.profileChange` supports the same migrate/reorganize/retry path;
@@ -118,7 +117,8 @@ originals stay unchanged. `reorganize` names only selected notes. Every destinat
 and invalid bounds refuse without silently dropping members. Placement changes only
 v2 metadata and removes old `home-file-*` labels; all other labels retain order.
 
-`ProfileStore.partitionProfile` owns one SQL publication commit. An owner-only
+Committed revision membership comes from each record head; Profile maintains no
+second reverse-revision index. `ProfileStore.partitionProfile` owns one SQL publication commit. An owner-only
 bounded backup durably holds original heads, historical bodies and prepared
 identities before writing replacement bodies. Text, IDs, authority, provenance,
 confirmation, relations, retirement, timestamps and historical bodies are preserved.

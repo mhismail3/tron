@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { ProfileStore } from "./profile-store.js";
 import { boundedProfilePartition, crashProfilePartition } from "../../../test-support/profile-partition-crash.js";
@@ -10,7 +10,8 @@ import { restoreLegacyProfileFixture } from "../../../test-support/profile-v1-fi
 import type { ProfileNoteNoteMutationRequest, ProfileNoteRecord } from "./profile-note-contract.js";
 
 const fixtures: Array<{ root: string; workspace: TronWorkspace }> = [];
-afterEach(async () => { for (const f of fixtures.splice(0)) { await f.workspace.dispose(); await rm(f.root, { recursive: true, force: true }); } });
+async function disposeFixtures() { for (const f of fixtures.splice(0)) { await f.workspace.dispose(); await rm(f.root, { recursive: true, force: true }); } }
+afterEach(disposeFixtures);
 async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
   const root = await mkdtemp(join(tmpdir(), "tron-profile-partition-"));
   const workspace = new TronWorkspace(join(root, "home")); fixtures.push({ root, workspace });
@@ -27,7 +28,7 @@ async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
       if (created.kind !== "note") throw new Error("Expected note");
       const edited = (await store.updateNote({ commandId: `partition-history-${index}`, recordId: created.id, expectedRevision: created.revisionId, record: { ...created, content: { ...created.content, body: created.content.body + "\nSecond edition." } } })).record;
       if (edited.kind !== "note") throw new Error("Expected note");
-      records.push(await restoreLegacyProfileFixture(store, request.commandId, edited, request.record.content.tags ?? []));
+      records.push(edited);
     } else {
       const draft = (await store.createNote(request)).record;
       if (draft.kind !== "note") throw new Error("Expected note");
@@ -35,10 +36,14 @@ async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
     }
   }
   if (mode === "migration") {
-    // Completed seed-operation backups are fixture artifacts, not backups of the
-    // operation under test. Canonical heads and all three body revisions stay intact.
+    // Arrange all historical placements in one real transaction, rather than
+    // repeatedly backing up the growing fixture before the crash oracle starts.
+    const commandId = "partition-seed-historical-fixture";
+    await store.partitionProfile({ commandId, mode: "reorganize", assignments: records.map(record => ({ id: record.id, expectedRevision: record.revisionId, labels: [] })) },
+      { restoring: true, create: () => ({ fixture: "historical-profile-restore" }), validate: envelope => { if ((envelope as { fixture?: string }).fixture !== "historical-profile-restore") throw new Error("Unexpected fixture recovery envelope"); } });
+    for (let index = 0; index < records.length; index++) records[index] = (await store.read(records[index]!.id))!;
     const state = join((await workspace.describe()).root, "state", "profile", "profile-backups");
-    for (let index = 0; index < 21; index++) await rm(join(state, `${profileOperationKey(`partition-create-${index}-historical-fixture`)}.json`));
+    await rm(join(state, `${profileOperationKey(commandId)}.json`));
   }
   const assignments: ProfileAssignment[] = records.map((note, index) => ({ id: note.id, expectedRevision: note.revisionId,
     ...(mode !== "legacy" ? { path: `engineering/selected-${Math.floor(index / 10)}` } : { file: index < 10 ? "core" as const : index < 20 ? "home" as const : "scopes/ui" as const }) }));
@@ -269,37 +274,63 @@ it("excluded members require an explicit eligibility decision rather than incomp
   expect(await readdir(join(root, "profile-backups"))).toEqual([]);
 });
 
-it("streams and bounds deep histories before publishing backup or replacement bodies", async () => {
-  const f = await fixture("v2");
-  let current = f.records[0]!;
-  if (current.kind !== "note") throw new Error("Expected note");
-  const body = "界".repeat(100_000);
-  for (let index = 0; index < 235; index++) current = (await f.store.updateNote({ commandId: `partition-deep-history-${index}`, recordId: current.id, expectedRevision: current.revisionId, record: { ...current, kind: "note", content: { ...current.content, body } } })).record;
-  const before = await Promise.all(f.records.map(note => f.store.read(note.id)));
-  const assignments = f.assignments.map(item => item.id === current.id ? { ...item, expectedRevision: current.revisionId } : item);
-  const workspaceRoot = (await f.workspace.describe()).root;
-  const home = join(f.root, "home");
-  await f.workspace.dispose();
-  const outcome = await boundedProfilePartition(f.root, home, assignments, "reorganize");
-  expect(outcome, outcome.stderr).toMatchObject({ code: 0, signal: null });
-  expect(JSON.parse(outcome.stdout)).toMatchObject({ status: "refused", message: expect.stringMatching(/backup exceeds its bound/) });
-  const workspace = new TronWorkspace(home);
-  await workspace.initialize();
-  try {
-    const store = new ProfileStore(workspace);
-    expect(await Promise.all(f.records.map(note => store.read(note.id)))).toEqual(before);
-    expect((await workspace.describe()).root).toBe(workspaceRoot);
-    const root = join(workspaceRoot, "state", "profile");
-    expect(await readdir(join(root, "profile-backups"))).toEqual([]);
-    let retainedRevisions = 0;
+describe("deep-history admission", () => {
+  let prepared: { f: Awaited<ReturnType<typeof fixture>>; current: ProfileNoteRecord };
+  afterAll(disposeFixtures);
+  // Five measured arrangements including shape checks took 7.51–11.38s;
+  // 25s leaves >2x headroom without charging preparation to the child oracle.
+  // The 15s behavior budget still owns the real 96 MiB child and all postconditions.
+  beforeAll(async () => {
+    const started = performance.now();
+    const f = await fixture("v2");
+    let current = f.records[0]!;
+    if (current.kind !== "note") throw new Error("Expected note");
+    const body = "界".repeat(100_000);
+    for (let index = 0; index < 235; index++) current = (await f.store.updateNote({ commandId: `partition-deep-history-${index}`, recordId: current.id, expectedRevision: current.revisionId, record: { ...current, kind: "note", content: { ...current.content, body } } })).record;
+    const recordRoot = join((await f.workspace.describe()).root, "state", "profile", "records");
+    const expectedBytes = Buffer.byteLength(JSON.stringify(current, null, 2) + "\n");
+    expect(Buffer.byteLength(body)).toBe(300_000);
     for (const note of f.records) {
-      const revisions = await readdir(join(root, "records", note.id));
-      expect(revisions).toHaveLength(note.id === current.id ? 237 : 2);
-      retainedRevisions += revisions.length;
+      const directory = join(recordRoot, note.id);
+      const names = await readdir(directory);
+      expect(names).toHaveLength(note.id === current.id ? 237 : 2);
+      if (note.id === current.id) {
+        const sizes = await Promise.all(names.map(async name => (await stat(join(directory, name))).size));
+        expect(sizes.filter(size => size === expectedBytes)).toHaveLength(235);
+      }
     }
-    await mkdir("test-results/home-profile", { recursive: true });
-    await writeFile("test-results/home-profile/migration-bounds.json", JSON.stringify({ heapMiB: 96, historicalRecordCount: retainedRevisions, outcome: JSON.parse(outcome.stdout), canonicalHeadsUnchanged: true, backupPublished: false, replacementBodiesPublished: 0 }, null, 2) + "\n");
-  } finally { await workspace.dispose(); }
+    prepared = { f, current };
+    console.info("deep-history-setup", { elapsedMs: performance.now() - started, notes: 21, revisions: 277, largeRevisions: 235, bodyBytes: 300_000 });
+  }, 25_000);
+
+  it("streams and bounds deep histories before publishing backup or replacement bodies", async () => {
+    const { f, current } = prepared;
+    const before = await Promise.all(f.records.map(note => f.store.read(note.id)));
+    const assignments = f.assignments.map(item => item.id === current.id ? { ...item, expectedRevision: current.revisionId } : item);
+    const workspaceRoot = (await f.workspace.describe()).root;
+    const home = join(f.root, "home");
+    await f.workspace.dispose();
+    const outcome = await boundedProfilePartition(f.root, home, assignments, "reorganize");
+    expect(outcome, outcome.stderr).toMatchObject({ code: 0, signal: null });
+    expect(JSON.parse(outcome.stdout)).toMatchObject({ status: "refused", message: expect.stringMatching(/backup exceeds its bound/) });
+    const workspace = new TronWorkspace(home);
+    await workspace.initialize();
+    try {
+      const store = new ProfileStore(workspace);
+      expect(await Promise.all(f.records.map(note => store.read(note.id)))).toEqual(before);
+      expect((await workspace.describe()).root).toBe(workspaceRoot);
+      const root = join(workspaceRoot, "state", "profile");
+      expect(await readdir(join(root, "profile-backups"))).toEqual([]);
+      let retainedRevisions = 0;
+      for (const note of f.records) {
+        const revisions = await readdir(join(root, "records", note.id));
+        expect(revisions).toHaveLength(note.id === current.id ? 237 : 2);
+        retainedRevisions += revisions.length;
+      }
+      await mkdir("test-results/home-profile", { recursive: true });
+      await writeFile("test-results/home-profile/migration-bounds.json", JSON.stringify({ heapMiB: 96, historicalRecordCount: retainedRevisions, outcome: JSON.parse(outcome.stdout), canonicalHeadsUnchanged: true, backupPublished: false, replacementBodiesPublished: 0 }, null, 2) + "\n");
+    } finally { await workspace.dispose(); }
+  });
 });
 
 it("refuses incomplete/stale plans and a later tag-cap overflow before any canonical head or body changes", async () => {

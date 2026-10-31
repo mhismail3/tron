@@ -67,17 +67,41 @@ async function failPublication(path: string) {
   });
 }
 
-it("a tapped organization keeps its original recovery identity through audit failure, retry and Undo", async () => {
+it("reversible organization applies without a tap, logs exact provenance and undoes without changing standing authority", async () => {
+  const { f, profile, originals, request } = await setup("v2");
+  const context = { commandId: "home-reversible-organization", actor: { kind: "home" as const, id: "home", toolCallId: "organize" },
+    author: { kind: "home" as const, sessionId: "home", entryId: "maintainer-message" }, reason: "Maintainer selected these exact destinations" };
+  const result = await profile.change(f.settings.settingsChanges, [{ action: "reorganize", assignments: request.assignments }], context);
+  expect(result.status).toBe("applied");
+  const history = (await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries;
+  expect(history).toHaveLength(originals.length);
+  expect(history.every(entry => entry.commandId === context.commandId && entry.actor.kind === "home")).toBe(true);
+  for (const original of originals) {
+    const moved = await knowledge!.read(original.id);
+    expect({ ...moved, revisionId: original.revisionId, content: { ...moved!.content, profile: original.content.profile } }).toEqual(original);
+  }
+  await f.settings.settingsChanges.undo(result.changes[0]!.changeId, { actor: { kind: "ui", id: "maintainer" }, commandId: "undo-reversible-organization" });
+  for (const original of originals) expect({ ...await knowledge!.read(original.id), revisionId: original.revisionId }).toEqual(original);
+});
+
+it("organization refuses moving a linked correction out of Corrections at the canonical owner", async () => {
+  const { f, profile, originals } = await setup("v2");
+  const learned = await profile.apply({ action: "learn", kind: "correction", text: "Exact corrected fixture claim",
+    corrects: { id: originals[2]!.id, revisionId: originals[2]!.revisionId } }, { kind: "home", sessionId: "home", entryId: "maintainer-message" }, "linked-correction-create");
+  const before = await knowledge!.read(learned.saved.id);
+  await expect(knowledge!.partitionProfile({ commandId: "misplace-linked-correction", mode: "reorganize", assignments: [{ id: learned.saved.id,
+    expectedRevision: learned.saved.revisionId, path: "engineering/release" }] })).rejects.toThrow("Corrections stay in the Corrections area");
+  expect(await knowledge!.read(learned.saved.id)).toEqual(before);
+  expect((await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries).toEqual([]);
+});
+
+it("reversible organization keeps its original recovery identity through audit failure, retry and Undo", async () => {
   const { f, profile, originals, request } = await setup("v2");
   const context = { commandId: "home-original-organization", actor: { kind: "home" as const, id: "home", toolCallId: "organize" },
     author: { kind: "home" as const, sessionId: "home", entryId: "maintainer-message" }, reason: "Exact placement review" };
   const fault = await failPublication(f.settings.settingsChanges.record.path);
-  let taps = 0;
-  await expect(profile.change(f.settings.settingsChanges, [{ action: "reorganize", assignments: request.assignments }], {
-    ...context, confirm: async (_review, apply) => { taps++; return apply({ deviceId: "maintainer", commandId: "distinct-native-tap-receipt" }); },
-  })).rejects.toThrow("Owned original group publication fault");
+  await expect(profile.change(f.settings.settingsChanges, [{ action: "reorganize", assignments: request.assignments }], context)).rejects.toThrow("Owned original group publication fault");
   fault.mockRestore();
-  expect(taps).toBe(1);
   const recovery = await knowledge!.profilePartitionRecovery(context.commandId);
   expect(recovery.committed).toBe(true);
   const heads = await Promise.all(originals.map(note => knowledge!.read(note.id)));

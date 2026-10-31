@@ -20,8 +20,6 @@ it("migrates exact legacy placement through a real Home activation and Changes U
   const turn = homeActivation(f, "Sort this inferred nonbinding note without changing its content.", [
     profileCall({ action: "migrate", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "communication/questions" }], reason: "File the original inferred capture" }, "you-centred-migrate"), say("sorted"),
   ]);
-  const { response } = await answerChangeCard(f.service, maintainer, f.slot, true, command("approve-migration"));
-  await response;
   const result = (await turn).last.messages.find(message => message.role === "toolResult" && message.toolCallId === "you-centred-migrate")?.details as { status: string };
   expect(result.status).toBe("organized");
   const migrated = await f.store.read(original.id) as typeof original;
@@ -43,8 +41,8 @@ it("migrates exact legacy placement through a real Home activation and Changes U
 it("supersedes only after an exact tap, preserves placement, and stale approval never overwrites a concurrent native edit", async () => {
   const f = await fixture("you-centred-approval");
   const original = (await f.store.createNote({ commandId: command("confirmed-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [], content: { title: "Keep unique work.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"], profile: { version: 2, path: ["engineering", "collaboration"] } } } })).record as Extract<ProfileNoteRecord, { kind: "note" }>;
-  const proposed = homeActivation(f, "Consider moving the note.", [profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "resources/cleanup" }], reason: "Exact organization proposal" }, "stale-approval"), say("the stale card applied nothing; original placement stays")]);
-  const stale = await waitFor(() => f.slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "Home's exact organization card");
+  const proposed = homeActivation(f, "Propose a replacement for this rule.", [profileCall({ action: "supersede", id: original.id, kind: "standing-decision", text: "Preserve all unique work and checkpoints.", reason: "Exact replacement proposal" }, "stale-approval"), say("the stale card applied nothing; original instruction stays")]);
+  const stale = await waitFor(() => f.slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "Home's exact content card");
   expect(await f.store.read(original.id)).toEqual(original);
   const edited = (await f.store.updateNote({ commandId: command("native-concurrent"), recordId: original.id, expectedRevision: original.revisionId, record: { ...original, content: { ...original.content, title: "Keep every unique checkpoint." } } })).record;
   const { interaction, response } = await answerChangeCard(f.service, maintainer, f.slot, true, command("stale-decision"));
