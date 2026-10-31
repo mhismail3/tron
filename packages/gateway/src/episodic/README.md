@@ -156,6 +156,10 @@ scripts/tron test gateway src/episodic
 `episodic-memory-recovery.integration.test.ts`, `episodic-reasoning-model.e2e.test.ts`,
 `home-source.e2e.test.ts`, `home-state.e2e.test.ts`, `episodic.store.lock.integration.test.ts`;
 the memory tools: `src/sessions/home-memory-tools.e2e.test.ts`.
+The browser membership RPC journey prepares its real 362-message forest in a bounded
+suite hook, then checks exact page intervals, live-view/zoom flags, the individual
+boundary and source-revision invalidation under the normal behavior hang guard.
+Its large-history CPU/read-cost journey remains separate.
 
 ## Not here
 
