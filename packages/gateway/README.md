@@ -43,10 +43,10 @@ read-only connection snapshots: [integrations](src/integrations/README.md).
 
 ## Profile and research boundaries
 
-[Profile](src/modules/home/profile.md) owns current-format personal notes. Public web
-research belongs to [workspace](src/workspace/README.md). Old Knowledge is read only
-by the [offline retirement tool](../../docs/development.md#offline-knowledge-retirement),
-never by runtime or startup conversion.
+[Profile](src/modules/home/profile.md) owns current-format personal notes. Knowledge
+files are ordinary workspace files accessed through the normal file tools, not a
+runtime-managed store. Public web research belongs to [workspace](src/workspace/README.md);
+the [Knowledge files contract](../../docs/development.md#knowledge-files) describes their current use.
 
 ## Pi SDK maintenance
 
