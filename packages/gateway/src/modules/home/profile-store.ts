@@ -639,7 +639,6 @@ export class ProfileStore {
     if (state.profileSorting !== undefined && existing === undefined && nextHead.profileRow
       && this.headVisible(state, id, nextHead)) delete state.profileSorting;
     state.records.set(id, nextHead);
-    state.catalog!.setRevisions(id, revisions);
     return { record, stateRevision: state.stateRevision + 1 };
   }
   async correct(commandId: string, recordId: string, expectedRevision: string, replacement: ProfileNoteRecordDraft, relation: ProfileNoteRecord["relations"][number]): Promise<ProfileMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Profile record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); const next = { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }; const marked = next.kind === "note" ? { ...next, content: carryNoteMarks(current, next.content) } : next; return this.putRecord(state, paths, marked, expectedRevision); }); }
@@ -661,7 +660,7 @@ export class ProfileStore {
         const record = await this.readRecord(paths, recordId, revision);
         for (const hash of recordObjectHashes(record)) state.cleanup.set(hash, true);
       }
-      state.records.delete(recordId); state.catalog!.setRevisions(recordId, []);
+      state.records.delete(recordId);
       state.suppressions.set(recordId, { excluded: true, forgotten: true, reason, updatedAt: now() });
       for (const [key, receipt] of state.receipts.entries()) if (receipt.recordIds.includes(recordId)) {
         state.receipts.set(key, { ...receipt, recordIds: [], result: { kind: "value", value: null }, invalidated: true });
@@ -684,7 +683,6 @@ export class ProfileStore {
           }
           await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600);
           state.records.set(id, headFor(scrubbed, [scrubbed.revisionId]));
-          state.catalog!.setRevisions(id, [scrubbed.revisionId]);
           state.suppressions.set(id, { excluded: true, forgotten: false, reason: "Dependent evidence was forgotten", updatedAt: now() });
           scrubbedRecordIds.add(id);
         }
