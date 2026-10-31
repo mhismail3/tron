@@ -138,7 +138,7 @@ list or keyword-derived status. Missing verification never resurrects a human ac
 Existing task/approval owners retain their lifecycle; closing a prerequisite never
 authorizes key revocation. Home lists only current open items. The Gateway enforces
 current maintainer-origin writes and canonical tool-result verification evidence.
-See [Home's contract](../../packages/gateway/src/modules/home/README.md#maintainer-obligations)
+See [Home's contract](../../packages/gateway/src/modules/home/home-obligations.md)
 for bounds, persistence and real-Gateway summary/chapter/restart regression proof.
 
 ## Regression proof and delivery
