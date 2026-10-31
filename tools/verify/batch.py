@@ -220,11 +220,13 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         if failures and re.fullmatch(r'\w+/\w+/\w+(?:\(\))?', failures[0].split(':', 1)[0]):
             selector = failures[0].split(':', 1)[0]
             result['probe'] = {'name': lane['name'], 'command': ['scripts/tron-ios-test', 'checkpoint', '--only-testing', selector], 'ios': True}
-    if lane['name'] == 'real Gateway UI journeys' and code:
-        failed_journeys = re.findall(r'Real-UI journey (\w+/\w+/\w+) completed .*\(status [1-9]\d*\)', output)
-        if len(failed_journeys) == 1:
+    if lane['name'] in ('real Gateway UI journeys', 'real Gateway boundary') and code:
+        label, command = (('Real-UI journey', 'run-ui') if lane['name'] == 'real Gateway UI journeys'
+                          else ('Focused E2E case', 'all'))
+        failed_methods = re.findall(label + r' (\w+/\w+/\w+) completed .*\(status [1-9]\d*\)', output)
+        if len(failed_methods) == 1:
             result['probe'] = {'name': lane['name'], 'ios': True, 'command': [
-                'scripts/ios-gateway-e2e-test', 'run-ui', '--only-testing', failed_journeys[0]]}
+                'scripts/ios-gateway-e2e-test', command, '--only-testing', failed_methods[0]]}
     if code != 0 and 'signature' not in result:
         output = log.read_text(errors='replace')
         result['signature'] = signature(f"{lane['name']} failed", verify.ios_failures(output), output, root)

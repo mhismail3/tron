@@ -141,9 +141,8 @@ ui_journey_connections() {
 command="${1:-all}"
 lane=""
 if (($#)); then shift; fi
-# The journey selectors `run-ui` runs, in the `-only-testing:OWNER` spelling the
-# lease holder re-execs and the runner's own option accepts, as scripts/tron-ios-test
-# keeps them.
+# One exact-method selection travels unchanged through the lease-holder re-exec.
+# Validate against the chosen command's owned cases after its defaults are set.
 selectors=()
 while (($#)); do
   case "$1" in
@@ -156,13 +155,11 @@ while (($#)); do
     --only-testing)
       (($# >= 2)) || die "--only-testing requires an owner"
       [[ -n "$2" && "$2" != -* ]] || die "invalid --only-testing owner: ${2:-missing}"
-      ui_journey_is_owned "$2" || die "$2 is not a real-UI journey this command owns (see '$0 help')"
       selectors+=("-only-testing:$2")
       shift 2
       ;;
     --only-testing:*)
       [[ "${1#--only-testing:}" != "" ]] || die "empty --only-testing owner"
-      ui_journey_is_owned "${1#--only-testing:}" || die "${1#--only-testing:} is not a real-UI journey this command owns (see '$0 help')"
       selectors+=("-only-testing:${1#--only-testing:}")
       shift
       ;;
@@ -281,9 +278,9 @@ Options:
   --lane NAME            The simulator lane, selected exactly as scripts/tron-ios-test selects it:
                          without one, a linked worktree uses its own lane and the primary
                          checkout the default lane; TRON_IOS_TEST_LANE is the environment form.
-  --only-testing OWNER   Run only these real-UI journeys; repeat for several. `run-ui`
-                         runs the journeys it owns when none is named, and refuses any
-                         selector that is not one of them.
+  --only-testing OWNER   Run only owned exact methods; repeat for several. `run-ui`
+                         accepts its UI journeys; run/all/iterate and run-lan accept
+                         only their own boundary methods (no class/suite selectors).
 
 Environment:
   TRON_IOS_TEST_LANE            the lane, as --lane
@@ -1190,8 +1187,25 @@ case "$command" in
   status|logs|-h|--help|help) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
-if ((${#selectors[@]})) && [[ "$command" != run-ui ]]; then
-  die "--only-testing applies to run-ui"
+if ((${#selectors[@]})); then
+  case "$command" in
+    run-ui)
+      for selector in "${selectors[@]/#-only-testing:/}"; do
+        ui_journey_is_owned "$selector" || die "$selector is not a real-UI journey this command owns (see '$0 help')"
+      done
+      ;;
+    run|run-lan|iterate|all)
+      for selector in "${selectors[@]/#-only-testing:/}"; do
+        owned=0
+        for boundary_case in "${e2e_test_filters[@]}"; do
+          [[ "$selector" != "$boundary_case" ]] || owned=1
+        done
+        ((owned)) || die "$selector is not a boundary method this command owns (see '$0 help')"
+      done
+      e2e_test_filters=("${selectors[@]/#-only-testing:/}")
+      ;;
+    *) die "--only-testing applies to run-ui or boundary test commands" ;;
+  esac
 fi
 if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help ]]; then
   # Only the lease holder creates the lane's state directory: a read-only
