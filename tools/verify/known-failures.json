@@ -8,15 +8,5 @@
     },
     "issue": 2130,
     "expires": "2026-11-05"
-  },
-  {
-    "testId": "packages/gateway/src/sessions/home-memory-browser-scale.e2e.test.ts::Home memory browser at scale RPC marks exact live-view membership and the individual-message boundary across pages and source changes",
-    "evidence": {
-      "command": "python3 tools/verify/gateway.py --reporter=json --outputFile=test-results/approvals-log-undo/base/gateway.json",
-      "commit": "472f33d70555dc3738bd52bd242e1829c799ee71",
-      "failureDigest": "926bf697e2d973604b254680ca01983fea11ee6b9a0f133b4467cb39d8679d45"
-    },
-    "issue": 2116,
-    "expires": "2026-11-05"
   }
 ]
