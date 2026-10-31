@@ -467,8 +467,11 @@ def batch_verdict(results: list[dict]) -> str:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog='scripts/tron verify --batch')
     parser.add_argument('--base', help='explicit main starting anchor on first use; not green until this batch proves it')
+    parser.add_argument('--repeat', action='store_true', help='rerun all lanes at the already-covered HEAD')
     parser.add_argument('--plan', action='store_true')
     args = parser.parse_args(argv)
+    if args.repeat and args.base:
+        parser.error('--repeat cannot be combined with --base')
     state = Path(verify.git('rev-parse', '--path-format=absolute', '--git-common-dir').strip()) / 'verify'
     try:
         if verify.git('status', '--porcelain', '--untracked-files=normal').strip():
@@ -490,6 +493,8 @@ def main(argv: list[str]) -> int:
         ancestry = verify.git('rev-list', '--first-parent', ref).splitlines()
         if head not in ancestry or base not in ancestry[ancestry.index(head):]:
             raise verify.VerifyError('batch base and HEAD must be ordered commits on main first-parent history')
+        if args.repeat and green['commit'] != head:
+            raise verify.VerifyError('--repeat requires HEAD to equal the last covered commit')
         commits = verify.git('rev-list', '--reverse', f'{base}..{head}').splitlines()
         files = verify.git('diff', '--name-only', base, head).splitlines()
         plan = {'base': base, 'head': head, 'commits': commits, 'files': files, 'lanes': lanes(ROOT, base)}
@@ -505,7 +510,7 @@ def main(argv: list[str]) -> int:
             current = json.loads(pointer.read_text()) if pointer.exists() else None
             if current != green:
                 raise verify.VerifyError('last-green changed while planning; rerun against its current coverage')
-            if head == base and green:
+            if head == base and green and not args.repeat:
                 print(f'batch: no uncovered commits after {head[:12]}')
                 return 0
             directory = state / 'batches' / f'{base[:12]}-{head[:12]}-{time.time_ns()}'

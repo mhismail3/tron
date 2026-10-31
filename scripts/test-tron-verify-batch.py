@@ -181,6 +181,48 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)
 
+    def test_repeat_requires_explicit_flag_and_executes_all_lanes(self):
+        self.land('good', 'yes')
+        first = self.run_batch('--base', self.base)
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        head = self.git('rev-parse', 'HEAD')
+        original = json.loads((self.root / '.git/verify/covered.json').read_text())
+        self.assertEqual(original['commit'], head)
+
+        no_op = self.run_batch()
+        self.assertEqual(no_op.returncode, 0, no_op.stdout + no_op.stderr)
+        self.assertIn('no uncovered commits', no_op.stdout)
+        self.assertEqual(len(self.reports()), 1)
+
+        repeated = self.run_batch('--repeat')
+        self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+        self.assertEqual(len(self.reports()), 2)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'green')
+        self.assertEqual(report['base'], head)
+        self.assertEqual(report['head'], head)
+        self.assertEqual(len(report['results']), 9)
+        self.assertTrue(all(result['exit'] == 0 for result in report['results']))
+        updated = json.loads((self.root / '.git/verify/covered.json').read_text())
+        self.assertEqual((updated['commit'], updated['verdict']), (head, 'green'))
+        self.assertTrue(Path(updated['report']).is_file())
+
+    def test_repeat_cannot_override_base_or_bypass_coverage_fences(self):
+        self.land('good', 'yes')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 0)
+        with_base = self.run_batch('--repeat', '--base', self.base)
+        self.assertEqual(with_base.returncode, 2)
+        self.assertIn('cannot be combined', with_base.stdout + with_base.stderr)
+        self.assertEqual(len(self.reports()), 1)
+
+        self.git('checkout', '-qb', 'off-main')
+        self.write('off-main', 'yes')
+        self.commit('off-main commit')
+        result = self.run_batch('--repeat')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('must be ordered commits on main first-parent history', result.stdout)
+        self.assertEqual(len(self.reports()), 1)
+
     def test_missing_lane_is_uncovered_but_later_lanes_execute(self):
         (self.root / 'packages/gateway/package-lock.json').unlink()
         self.commit('missing Gateway owner')
