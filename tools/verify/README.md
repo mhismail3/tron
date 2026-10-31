@@ -14,6 +14,7 @@ scripts/tron verify --module <id>               # scoped baseline: owner tests +
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
 scripts/tron verify --batch --base <green-sha>   # initialize coverage in a dedicated clean main worktree
 scripts/tron verify --batch [--plan]            # next pinned batch since the local last green
+scripts/tron verify --batch --repeat            # explicitly rerun every lane at the covered HEAD
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 ```
@@ -238,7 +239,7 @@ the Home caller must deliver it, including red/uncovered. The trigger is a separ
 
 First use requires `--base <main-anchor>`, not a claim of prior green.
 `verify/covered.json` owns the last green/qualified head; `verify/green.json` records strict green. `--base` cannot override coverage. A nonwaiting `batch.lock`
-refuses overlap; same covered HEAD does nothing; `--plan` is read-only.
+refuses overlap; same covered HEAD does nothing by default. `--repeat` explicitly reruns all nine lanes only when HEAD is exactly the last covered commit; it cannot be combined with `--base`. This provides separate batch reports for confirming an identical main SHA without deleting or resetting coverage records. `--plan` is read-only.
 After local pinned Gateway/relay dependency preparation, every required lane runs even
 after failures: locks/declared consumers (`verify --all`, not full Gateway), full default
 and nested Gateway Vitest separately, signed Mac integration build/tests, relay Workers
