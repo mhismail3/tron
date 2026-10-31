@@ -184,8 +184,8 @@ Local-network and camera usage only. Provider credentials never enter fixtures, 
 
 ### Dashboard controls
 [Automations](../Sources/UI/Automations/README.md#verify); Home view: [Chat](../Sources/UI/Chat/README.md#verify).
-### Knowledge sheet
-[Automations](../Sources/UI/Automations/README.md#verify).
+### Research files and retired Knowledge routes
+[Research files](knowledge-sources.md).
 ### Automations sheet
 [Automations](../Sources/UI/Automations/README.md#verify).
 ### Sessions settings and model search

@@ -78,19 +78,19 @@ it("a tapped organization keeps its original recovery identity through audit fai
   })).rejects.toThrow("Owned original group publication fault");
   fault.mockRestore();
   expect(taps).toBe(1);
-  const recovery = await knowledge!.store.profilePartitionRecovery(context.commandId);
+  const recovery = await knowledge!.profilePartitionRecovery(context.commandId);
   expect(recovery.committed).toBe(true);
-  const heads = await Promise.all(originals.map(note => knowledge!.store.read(note.id)));
+  const heads = await Promise.all(originals.map(note => knowledge!.read(note.id)));
   const retry = () => profile.change(f.settings.settingsChanges, [{ action: "retry", commandId: context.commandId }], context);
   const result = await retry();
   expect((await retry()).changes).toEqual(result.changes);
-  expect(await Promise.all(originals.map(note => knowledge!.store.read(note.id)))).toEqual(heads);
+  expect(await Promise.all(originals.map(note => knowledge!.read(note.id)))).toEqual(heads);
   const audit = (await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries;
   expect(audit).toHaveLength(originals.length);
   expect(audit.every(entry => entry.commandId === context.commandId)).toBe(true);
   await f.settings.settingsChanges.undo(result.changes[0]!.changeId, { actor: { kind: "ui", id: "maintainer" }, commandId: "undo-tapped-organization" });
   for (const original of originals) {
-    const restored = await knowledge!.store.read(original.id);
+    const restored = await knowledge!.read(original.id);
     expect({ ...restored, revisionId: original.revisionId }).toEqual(original);
   }
 });

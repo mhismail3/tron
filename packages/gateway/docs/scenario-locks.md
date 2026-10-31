@@ -152,7 +152,7 @@ Knowledge lock.
 | `gateway/model-recents.json` | `RecentModelStore` | `gateway/providers` |
 | `gateway/automations/` | `AutomationStore` | `gateway/automations` |
 | `gateway/uploads/`, `upload-objects/`, `upload-bodies/` | `UploadStore` | `gateway/machine` (live) |
-| `workspace/state/knowledge/` (records, SQLite catalog) | `KnowledgeStore` | `gateway/knowledge` |
+| `workspace/state/profile/` (notes, SQLite catalog, recovery controls) | `ProfileStore` | `gateway/home` |
 | `gateway/home/tasks/`, workspace-state markers | `HomeTaskStore` | `gateway/home` store-home-tasks |
 | `gateway/home/home.json`, `home/workspace/` (designation) | `HomeOwner` | `gateway/home` store-home-designation |
 | Learned profile (tagged Knowledge notes, their record entries) | profile change path | `gateway/home` store-home-profile (live) |

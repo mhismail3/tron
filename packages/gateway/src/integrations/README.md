@@ -44,9 +44,12 @@ cannot advertise an available capability.
 
 ## Entry points
 
-`GatewayService` serves connection RPCs. Knowledge adapters consume admitted
-instances and submit revision-fenced observations. The agent `connections` tool
-is read-only; it does not authorize setup, policy or credential changes.
+`GatewayService` serves connection RPCs. Production has no built-in connection
+definitions or X/Raindrop adapters and advertises no capabilities for historical
+instances. Existing connection state and credential references remain untouched;
+this retirement neither migrates nor deletes them. Native settings expose MCP
+servers, not retired Connected Services setup. The agent `connections` tool is
+read-only; it does not authorize setup, policy or credential changes.
 
 ## Signals
 
@@ -67,12 +70,15 @@ exact replay, stale policy, cancellation/late completion, disconnect, restart,
 redaction and an owner request-hash conflict from a newly paired identity.
 It leaves a normalized exchange trace at
 `packages/gateway/test-results/connections-lifecycle/trace.json` (from repo root).
-The fixture uses only a synthetic credential reference and an offline faux
-model; it never reads the user's credential store or contacts a provider.
+The fixture explicitly injects historical definitions, uses only a synthetic
+credential reference and an offline faux model; it never reads the user's store
+or contacts a provider. A separate default-production case proves absent definitions
+and capabilities, refusal of removed vendor operations, and byte-identical retained
+credential references without exposing them in snapshots.
 
 ## Not here
 
-Knowledge/provider adapters own credential resolution and provider activity;
+Provider owners retain credential resolution and provider activity;
 transport owns sockets and device-scoped command receipts. This module owns
 neither a provider usage ledger nor executable package discovery. Retirement
 of unsupported persisted definitions must preserve the existing admission

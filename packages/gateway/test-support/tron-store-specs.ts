@@ -398,10 +398,9 @@ export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/home", name: "store-home-profile",
     paths: ["workspace/state/profile", "gateway/settings"],
-    // The learned profile is personal Knowledge notes (its bytes are the Knowledge
-    // corpus's format) plus their settings record entries; recorded live so this
-    // lock owns no second copy of the Knowledge store.
-    live: "profile notes are Knowledge records; the Knowledge store lock owns their committed bytes",
+    // Record the current-format Profile owner and its Changes entries together;
+    // no retired Knowledge reader or duplicated historical corpus is involved.
+    live: "current-format Profile notes and their Changes entries recorded by their owning stores",
     record: (home) => withWorkspace(home, async (workspace) => {
       const knowledge = new ProfileStore(workspace);
       const { path } = await settingsPath(home, knowledge);

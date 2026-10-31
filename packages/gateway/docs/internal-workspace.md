@@ -9,10 +9,11 @@ inferred from pairing identity, browser preferences, or the current project.
 
 - `files/`: ordinary, deliberately retained documents. Existing filesystem tools
   may read/write these using the resolved absolute root. Subdirectories are lazy.
-- `state/<owner>/`: reserved for a real capability's managed data. Knowledge is
-  owned by `KnowledgeStore` under `state/knowledge/`; its canonical state,
-  immutable content objects, coverage, suppression and cleanup evidence must be
-  accessed through that owner, not arbitrary edits. Other namespaces have no
+- `state/<owner>/`: reserved for a real capability's managed data. Personal notes
+  belong to `ProfileStore` under `state/profile/`; its catalog, immutable revisions,
+  suppression and recovery evidence must be accessed through that owner, not
+  arbitrary edits. Research exports are ordinary files, not managed state.
+  Other namespaces have no
   generic state API. Use the capability's owning interface when one exists.
   Installed Swift apps are owned by `SwiftAppStore` under `state/apps/`
   ([swift-apps.md](swift-apps.md)); agents use the `swift_app` tool.
@@ -42,10 +43,8 @@ Secrets belong in existing credential stores, not workspace documents.
 
 `TronWorkspace`, owned by `RuntimeRegistry`, creates only an owner-only root and
 minimal lifecycle evidence at `gateway/workspace-state/initialized.json` (version
-1). This shared record's schema is frozen at `version` plus the optional
-`knowledgeInitialized` boolean: shipped builds reject unknown keys, so adding a
-feature key would make the whole workspace unavailable after rollback to one of
-them. Knowledge keeps its existing flag there. Every other feature stores setup
+1). This record accepts exactly `{version:1}`; retired Knowledge flags are not
+accepted or converted on startup. Each feature, including Profile, stores setup
 in its own strict version-1 record at
 `gateway/workspace-state/<feature>-initialized.json`; malformed or unsafe records
 are preserved and refuse only their owning feature. It reuses bounded secure
@@ -116,9 +115,9 @@ pinned provider limits.
 ## Contract for future managed-state consumers
 
 Implement storage only alongside its production capability and focused tests.
-The current managed knowledge namespace is documented in the [Knowledge README](../src/knowledge/README.md) and is
-created lazily by `KnowledgeStore`; constructing a capability service alone must
-not create real namespace state.
+The [Profile contract](../src/modules/home/profile.md) owns current-format personal
+notes. Only the offline retirement converter reads old Knowledge. Constructing a
+capability service alone must not create real namespace state.
 
 - One explicit owner per namespace; bounded reads, schema version, revision and
   validation before mutation. Reject and preserve malformed or newer data.

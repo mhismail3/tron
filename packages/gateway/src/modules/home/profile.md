@@ -2,7 +2,8 @@
 
 ## Authority and organization
 
-Personal Knowledge notes are canonical. `home-profile` marks membership; one
+Personal Profile notes in `workspace/state/profile` are canonical. Runtime accepts only
+storage version 1; only the offline retirement converter reads old Knowledge. `home-profile` marks membership; one
 `kind-*` label retains preference, standing decision, delegation default, fact or
 correction. Placement is `content.profile = {version: 2, path: string[]}`. The seven
 roots are `life`, `routines`, `communication`, `engineering`, `resources` (machines,
@@ -30,11 +31,11 @@ ID/revision references. It contains no note titles or bodies. The index is at mo
 8 KiB and pages diagnostics with `offset`; remaining references are explicit, not
 silently omitted. A fingerprint changes with canonical note revisions.
 
-V2 discovery reads the existing SQL heads' mechanical profile projection, written
-with the owning immutable note and head in the same transaction. Only historical
-heads without this projection use the old-body reader; it never writes an upgrade.
+Discovery reads the SQL heads' required mechanical profile projection, written
+with the owning immutable note and head in the same transaction. A missing projection
+refuses; no historical-body metadata fallback or startup upgrade exists.
 Suppression, scope exclusions and forgotten dependencies retain the existing head
-visibility fence. Unavailable Knowledge is not an empty successful profile.
+visibility fence. Unavailable Profile is not an empty successful profile.
 
 `profile {action:"read"}` reads the index. `profile {action:"read", path:"engineering"}`
 reads an explicit path and descendants; `inferred` and `prior` are readable too.
@@ -42,7 +43,11 @@ Record pages and the native list retain the canonical kind, creation-time, then 
 order; SQL storage-key order is not presentation order. Record pages contain at
 most sixteen notes and 32 KiB, including exact IDs,
 revisions, state, content and provenance. Inactive content requires `includeInactive:true`. An oversized record returns its canonical
-Knowledge reference and byte count, never truncated content. `nextCursor` binds
+Profile reference and byte count, never truncated content. The reference names
+`profile {action:"read",id,revisionId}`. Exact reads return at most 4,096 UTF-16
+characters with `nextOffset`; pass it as `contentOffset` with the same identity.
+Surrogate boundaries are checked. Missing revisions refuse, and exact identities
+cannot be mixed with index selectors. `nextCursor` binds
 the query and revision snapshot; changed snapshots refuse and require a new read.
 Raw offsets are only for metadata, not continuation of record pages.
 
@@ -89,7 +94,7 @@ operation inside a fresh RPC receipt. Both paths retain exact-revision fencing a
 Home's model-visible policy offers sorting at the start of a maintainer turn when
 eight notes are unsorted, at most eight per batch. “Not now” suppresses offers until
 a **new note**, not an edit, move or elapsed time. `profile {action:"defer",version}`
-binds the index's opaque arrival version. Knowledge's existing command receipt and
+binds the index's opaque arrival version. Profile's existing command receipt and
 SQL control own that decision. Creating a new readable profile record consumes
 it in that same transaction; later Forget cannot reinstate it. Old command replay
 returns only its original acknowledgement. No body, copied identity list, clock,
@@ -102,7 +107,7 @@ AGENTS.md, skills/prompts and Settings destinations remain drafts until safe Und
 ## Capacity and atomic placement
 
 Active v2 limits are 256 personal notes, 128 unsorted notes, 128 subareas and 32
-notes per subarea. Knowledge checks ordinary native writes in its SQL transaction;
+notes per subarea. Profile checks ordinary native writes in its SQL transaction;
 partition publication checks its whole after-state before backup or body writes.
 Overflow is an explicit error, never eviction or truncation. Exact Undo may restore
 an original over-bound state; subsequent writes cannot grow an exceeded dimension.
@@ -113,7 +118,7 @@ originals stay unchanged. `reorganize` names only selected notes. Every destinat
 and invalid bounds refuse without silently dropping members. Placement changes only
 v2 metadata and removes old `home-file-*` labels; all other labels retain order.
 
-`KnowledgeStore.partitionProfile` owns one SQL publication commit. An owner-only
+`ProfileStore.partitionProfile` owns one SQL publication commit. An owner-only
 bounded backup durably holds original heads, historical bodies and prepared
 identities before writing replacement bodies. Text, IDs, authority, provenance,
 confirmation, relations, retirement, timestamps and historical bodies are preserved.
@@ -123,7 +128,7 @@ A precommit crash leaves old heads authoritative. Explicit same-command retry
 reuses prepared identities; postcommit retry proves committed identities before
 repairing only the original Changes facts. The backup's versioned audit envelope
 binds original actor/reason/time, ordered writes and Undo links. Later edits never
-get replayed or overwritten by audit repair. Merely opening Knowledge does nothing.
+get replayed or overwritten by audit repair. Merely opening Profile does nothing.
 An unacknowledged result returns `retry_required` with the original command ID.
 
 Maintainer Changes Undo fences the whole current group, restores exact old
@@ -132,7 +137,7 @@ as Prior organization. Only the maintainer can resume an uncommitted Undo.
 Ordinary content Undo retains the existing path. Store-only success is not
 end-to-end curation success.
 
-Explicit Knowledge forget remains the privacy exception: the existing cleanup
+Profile storage's explicit forget remains the privacy exception: the existing cleanup
 owner removes canceled prepared bodies and forgotten/dependent backup snapshots,
 retains unrelated recovery snapshots, and clears the whole quoting audit envelope.
 Its invalidated atomic plan cannot replay. Unknown backup fields refuse cleanup

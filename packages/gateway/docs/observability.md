@@ -71,8 +71,8 @@ owner derives the default; the selectors `TRON_DATA_DIR` and `TRON_HOME_NAME` ar
 `test-support/tron-home-environment-preflight.mjs`. It is a command-line guard, not a
 Gateway log event. Regression: `npm run test:tron-home-environment`; under a failing
 shell, `node ./src/tron-home-environment-policy.mjs` prints only the variable names it
-would remove. Test-tooling signals are rows of [knowledge](../src/knowledge/README.md#signals)
-(connector credentials) and the [iOS package](../../ios-app/README.md#signals).
+would remove. Test-tooling signals are rows of the
+[iOS package](../../ios-app/README.md#signals).
 
 ## Retention budgets
 

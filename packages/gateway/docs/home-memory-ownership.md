@@ -64,7 +64,7 @@ recorded tool invocation's text/details. It does not fetch browser evidence.
 The two consumers deliberately have different contracts; a browser projection
 must not be presented as model-tool output or exact canonical evidence.
 
-Knowledge sources, notes and preserved conversation observations remain owned by
-[Knowledge](../src/knowledge/README.md), not by the episodic tree. Automatic
-Chronicle observation generation is retired; retained history and explicit
-reflection do not constitute a second Home summarizer.
+Personal notes belong to [Profile](../src/modules/home/profile.md); research
+sources are ordinary exported files. Knowledge observations and coverage have no
+runtime reader or Home memory feed. Their backup-first retirement is an explicit
+offline maintainer operation, never episodic initialization or Home-memory deletion.

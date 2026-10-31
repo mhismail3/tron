@@ -37,7 +37,6 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - Mutations serialize per session with command IDs and bounded receipts; sessions run
   concurrently. Accepted prompts survive disconnects; reconnect gets an authoritative
   snapshot; interrupted prompts are never replayed automatically.
-- Knowledge serves active Profile notes only; research is ordinary files. Observation/source retirement is an offline, backup-first maintainer operation, never startup migration or Home-memory deletion.
 - Runtime JSONL, settings, credentials, packages, resources, compaction and retries are
   canonical; iOS caches and Gateway snapshots are bounded projections, never second schemas.
 - Trust gates executable project resources but is not a sandbox, and copy says so. The

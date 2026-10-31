@@ -1,7 +1,7 @@
 {
   "store": "store-home-profile",
   "module": "gateway/home",
-  "live": "profile notes are Knowledge records; the Knowledge store lock owns their committed bytes",
+  "live": "current-format Profile notes and their Changes entries recorded by their owning stores",
   "files": [
     {
       "path": "gateway/settings/changes/000000.jsonl",
@@ -20,17 +20,17 @@
       }
     },
     {
-      "path": "workspace/state/knowledge/catalog-<id>.sqlite",
-      "content": "<61440 bytes>"
+      "path": "workspace/state/profile/catalog-<id>.sqlite",
+      "content": "<49152 bytes>"
     },
     {
-      "path": "workspace/state/knowledge/initialized.json",
+      "path": "workspace/state/profile/initialized.json",
       "content": {
         "version": 1
       }
     },
     {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "path": "workspace/state/profile/records/<id>/<id>.json",
       "content": {
         "content": {
           "confirmed": false,
@@ -66,7 +66,7 @@
       }
     },
     {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "path": "workspace/state/profile/records/<id>/<id>.json",
       "content": {
         "content": {
           "confirmed": false,
@@ -108,7 +108,7 @@
       }
     },
     {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "path": "workspace/state/profile/records/<id>/<id>.json",
       "content": {
         "content": {
           "confirmed": false,
@@ -150,7 +150,7 @@
       }
     },
     {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "path": "workspace/state/profile/records/<id>/<id>.json",
       "content": {
         "content": {
           "confirmed": false,
@@ -192,7 +192,7 @@
       }
     },
     {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "path": "workspace/state/profile/records/<id>/<id>.json",
       "content": {
         "content": {
           "confirmed": true,
@@ -232,7 +232,7 @@
       }
     },
     {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "path": "workspace/state/profile/records/<id>/<id>.json",
       "content": {
         "content": {
           "confirmed": true,
@@ -266,11 +266,11 @@
       }
     },
     {
-      "path": "workspace/state/knowledge/state.json",
+      "path": "workspace/state/profile/state.json",
       "content": {
         "catalogID": "<id>",
         "schemaVersion": 1,
-        "storageVersion": 4
+        "storageVersion": 1
       }
     }
   ],

@@ -8,7 +8,7 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
 
 `DashboardModeMenuButton`, `DashboardChrome`, `AutomationsSheet`, `AutomationDetailView`,
 `AutomationRunDetailView`, `AutomationFormView`, `AutomationPresentation`,
-`AutomationStatusPresentation`, `KnowledgeFormSheet` and `KnowledgeMutation` (shared form/mutation primitives still used by Connected Services).
+`AutomationStatusPresentation`, `KnowledgeFormSheet` and `KnowledgeMutation` (shared form/accepted-mutation primitives used by surviving settings and auth).
 
 ## Contract
 

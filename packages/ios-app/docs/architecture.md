@@ -18,7 +18,7 @@ and the two cross-module contracts live in this directory.
 | `Sources/UI/` (`Components/`, `Theme/`) | shared presentation | [Presentation](../Sources/UI/README.md) |
 | `Sources/UI/Chat/` | session shell, dashboard, chat, Manage Session, Home | [Chat](../Sources/UI/Chat/README.md) |
 | `Sources/UI/Settings/` | settings, renderer, providers, integrations | [Settings](../Sources/UI/Settings/README.md) |
-| `Sources/UI/Automations/` | dashboard selector, Automations, Knowledge | [Automations](../Sources/UI/Automations/README.md) |
+| `Sources/UI/Automations/` | dashboard selector, Automations, shared accepted-mutation primitives | [Automations](../Sources/UI/Automations/README.md) |
 | `Sources/UI/Onboarding/` | pairing, setup, workspace and model pickers | [Onboarding](../Sources/UI/Onboarding/README.md) |
 | `Sources/UI/Terminal/` | SSH/tmux Mac Terminal | [Terminal](../Sources/UI/Terminal/README.md) |
 | `Sources/UI/SwiftApps/` | Swift-app runner and card | [Swift apps](../Sources/UI/SwiftApps/README.md) |
@@ -90,13 +90,15 @@ and extension interactions render directly from snapshot contracts.
 
 [Presentation parity › Presentation activity](presentation-parity.md#presentation-activity).
 
-## Integration management projection
+## Provider and MCP settings
 
-[Settings › Integrations](../Sources/UI/Settings/README.md#contract).
+[Settings](../Sources/UI/Settings/README.md#contract) owns the surviving routes;
+Connected Services setup is absent.
 
-## Knowledge projection
+## Profile and research
 
-[Automations › Knowledge](../Sources/UI/Automations/README.md#contract).
+[Home Profile](../Sources/UI/Chat/README.md#contract) retains its existing Home sheets.
+Research sources are ordinary files; no Knowledge projection or native RPC client exists.
 
 ### Session search
 

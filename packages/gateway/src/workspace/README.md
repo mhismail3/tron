@@ -43,8 +43,8 @@ moving its product copy or changing prompt timing.
   directory for CLI children ([MCP](../../docs/mcp.md)). Tron therefore never
   rewrites Pi settings, agent definitions or workflow scripts to force `tron-core`.
   External CLI/job runners get the facts only as task text.
-- **Shared web capability.** `tron-web-research` registers one definition from
-  [the public-web owner](../knowledge/README.md#shared-public-web-research).
+- **Shared web capability.** Workspace's `web-research.ts` owns bounded public-web
+  evidence; `tron-web-research` registers its definition from `web-research-contract.ts`.
   Native children load it through required-child extensions, not ambient discovery.
   Scope-bound0600 modules under `gateway/web-research-children/` are disposable
   runtime projections: a reopened parent recreates the same path so retained child

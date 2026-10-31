@@ -38,12 +38,15 @@ servers](docs/mcp.md). Virtual models and Jev: [providers](src/providers/README.
 
 ## Connection boundaries
 
-Account envelopes and bindings: [connection management](docs/connections.md); the
-Knowledge connector authority: [knowledge](src/knowledge/README.md#contract).
+Account envelopes and bindings: [connection management](docs/connections.md);
+read-only connection snapshots: [integrations](src/integrations/README.md).
 
-## Knowledge boundaries
+## Profile and research boundaries
 
-See [knowledge module](src/knowledge/README.md) and its [contract](src/knowledge/contract.md).
+[Profile](src/modules/home/profile.md) owns current-format personal notes. Public web
+research belongs to [workspace](src/workspace/README.md). Old Knowledge is read only
+by the [offline retirement tool](../../docs/development.md#offline-knowledge-retirement),
+never by runtime or startup conversion.
 
 ## Pi SDK maintenance
 

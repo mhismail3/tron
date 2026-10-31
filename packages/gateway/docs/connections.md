@@ -1,70 +1,51 @@
 # Connection management owner
 
-`ConnectionOwner` owns only the generic account envelope for supported
-integration instances under `state/integrations/connections.json`. It does not
-own provider credentials, Knowledge records/evidence, connector checkpoints,
-assessment cohorts/usage, or remote-effect receipts. Credential values never
-enter this state; the envelope contains only an opaque credential reference and
-the presentation projection omits that reference. Pi's built-in MCP servers are
-not ConnectionOwner instances; their sole configuration authority is Pi's
-`mcp.json` (see [MCP servers](mcp.md)).
+`ConnectionOwner` owns generic account envelopes under
+`state/integrations/connections.json`. It does not own provider credentials or
+execute provider operations. Credential values never enter this state: an envelope
+holds only an opaque reference, omitted from presentation snapshots.
 
-A provider/account is represented by an opaque instance ID. Two instances of
-the same definition therefore have independent account identity, scope, policy,
-enablement, and setup operation. There is no generic `enable`/`disable` RPC.
-MCP server administration and OAuth sign-in use Pi's built-in MCP and the
-separate `mcp.*` RPCs; they do not create connection rows.
+Production defines no built-in connection adapters. X/Raindrop definitions,
+capabilities and native Connected Services setup are absent. Historical instances
+and credential references remain on disk without being advertised as available;
+retirement does not migrate them or delete credentials. Unsupported setup refuses.
+The agent `connections` tool is read-only.
 
-Jev is no longer a ConnectionOwner definition or Keychain connector. Knowledge
-and the first-party `jev` tool use Pi's `ModelRuntime.classify()`
-with the TypeSafe `jev-latest` classifier and Pi's provider credential store.
-Tron retains its qualified pre-dispatch estimate and monthly tagging ledger;
-provider credential readiness is owned by Pi and configured through Provider
-Settings. Persisted legacy `knowledge.jev` rows are hidden from connection
-projections and rejected with an instance-specific setup error while they remain
-on disk. The first accepted connection write explicitly removes those rows and
-their setup operations, persists the retirement in the same revision, and emits
-one `connection.legacy-jev-retired` event listing the retired instance IDs.
-Reads and rejected writes do not remove them. No Keychain item is read or deleted.
+Pi's built-in MCP servers are not connection instances. Their configuration
+authority is Pi's `mcp.json`; MCP administration and OAuth use the separate `mcp.*`
+RPCs ([MCP servers](mcp.md)). Model-provider credentials and sign-in likewise stay
+with their existing provider owners and Provider Settings.
 
-The accepted owner-typed commands are:
+Jev uses Pi's `ModelRuntime.classify()` and provider credential store, not a
+ConnectionOwner definition. Existing legacy `knowledge.jev` rows stay hidden and
+refuse instance-specific setup. The owner's existing accepted-write retirement
+removes those rows and setup operations in the same revision; reads and rejected
+writes remove nothing. No Keychain item is read or deleted by that retirement.
+
+## Generic envelope contract
+
+An opaque instance ID separates each account's scope, policy, enablement and setup
+operation. There is no generic `enable`/`disable` RPC. Owner commands are:
 
 - `connections.setup.begin` / `connections.setup.complete` /
   `connections.setup.cancel`;
 - `connections.policy.update`; and
 - `connections.disconnect`.
 
-Setup completion is bound to one operation ID and instance ID. A repeated pending
-setup returns that exact operation only for the same definition and method.
-Policy updates require `expectedSetupRevision` from the observed instance; the
-owner checks it under its mutation lock, after receipt replay, so stale account
-sheets cannot overwrite newer approvals or budgets. All native and Knowledge
-callers carry this precondition; an old client missing it fails closed rather
-than performing an unconditional write. No persisted-state migration is needed.
-Accepted writes have bounded command receipts and replay the exact result only
-for the same request hash. Disconnect disables future admission but does not
-claim that a provider credential was revoked; revocation remains the credential
-owner's contract. Capability status is derived per capability and per instance,
-so one unavailable capability does not become a successful empty list or hide
-another instance. Availability uses capability effects, not only overall account
-health: write capabilities require write approval, paid capabilities require
-approval and a positive budget. Knowledge credential/account observations remain
-adapter-owned evidence. An unadmitted capability whose credential observation is
-`unavailable` reports the Mac Keychain service that owns the missing or
-provider-rejected item and directs the user to the agent for the exact account,
-because the presentation projection never carries a credential reference.
-Availability is not a claim that tools are loaded into every existing
-conversation.
+Setup completion binds one operation and instance. A repeated pending setup returns
+that operation only for the same definition and method. Policy updates require the
+observed `expectedSetupRevision`, checked under the mutation lock after receipt
+replay; a missing or stale precondition refuses. Accepted writes retain bounded
+command receipts and replay only the identical request hash. Disconnect disables
+admission but never claims to revoke credentials.
 
-## Account envelope ownership
+Snapshots retain redacted instances and setup operations, with capability
+availability derived only from supported definitions and admitted effects. Unknown
+historical definitions cannot manufacture available capabilities. Credential
+readiness and provider activity remain adapter-owned observations, not consequences
+of setup intent or a claim that a tool is loaded into every conversation.
 
-Knowledge connector actions carry the exact `connectionId`; configuration rejects
-account/scope/credential fields and updates policy through `ConnectionOwner`.
-The provider state is keyed by that instance ID, while its persisted adapter
-document omits the generic envelope; `KnowledgeStore` resolves the private
-envelope only at the owning adapter boundary. Missing owner admission fails
-closed rather than falling back to a provider-keyed account.
-
-Provider-specific Knowledge behavior remains with `KnowledgeStore` and its
-connector adapter. Public X capture remains a credential-free source capability,
-not a connection instance.
+The real loopback lifecycle regression explicitly injects historical test-only
+definitions. Its separate production-default case proves absent advertisements,
+refused vendor operations and unchanged stored credential references. See the
+[integrations owner](../src/integrations/README.md) for verification.

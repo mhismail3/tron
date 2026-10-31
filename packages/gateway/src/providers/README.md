@@ -16,7 +16,7 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 Queue roles, setting-key addresses and lexical model-reference parsing belong to
 [the settings vocabulary](../kernel/settings/README.md), not provider queue execution.
 Gateway composition constructs the provider queue with the shared usage/runtime,
-projection path and lazy settings reader; Home and Knowledge share that owner.
+projection path and lazy settings reader; Home shares that owner.
 The runtime policy assembles its ordinary-session extension after the other modules
 and before worker controls, reading canonical fixed settings and the worker fact.
 
@@ -34,8 +34,8 @@ and before worker controls, reading canonical fixed settings and the worker fact
   virtual while assistant rows, context limits, usage and cost use Pi's routed
   physical model. Jev uses Pi `ModelRuntime.classify()` with TypeSafe's `jev-latest`;
   `jev-model-pricing.ts` owns the shared qualified model identity and catalog price;
-  the Knowledge decision client consumes that metadata, retaining its input bounds,
-  price ceilings and assessment versions.
+  the bounded provider decision client consumes that metadata and retains its
+  input bounds and price ceilings.
 - **`provider.usage`** (`provider-usage.v1`) queries only exact first-party shapes:
   Anthropic OAuth (subscription quota `/api/oauth/usage`; also CortexKit's
   `cortexkit-anthropic-messages` at Anthropic's host), OpenAI Codex, OpenRouter, Kimi
@@ -109,7 +109,7 @@ failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/oth
 - Usage adapters: `provider-usage.ts`; eligibility: `OpenAIModelEligibility`.
 - Queue availability and fallback for worker, background and subagent roles:
   `model-queue.ts`; Home owns worker choice at delegation. Typed queues are the
-  routing authority, not Knowledge learned-profile prose.
+  routing authority, not learned Profile prose.
 - `readWorkerQueueSelection` projects this owner's canonical fallback entries
   after the latest explicit choice. Settings can mask that progression with
   Project without resetting it to the original worker seed.

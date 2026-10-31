@@ -1,10 +1,7 @@
 import XCTest
 
-/// Connected Services sheets against the in-app scripted connection owner.
-/// Failure modes this E2E journey protects:
-/// - the delayed X credit read blocks the rest of the configured/available list;
-/// - a failed X credit read leaves an error line in the list;
-/// - a setup-required instance is incorrectly repeated under Available.
+/// Surviving provider layout and connection recovery against the hosted owner.
+/// MCP add/auth authority and token handoff are covered by TronMCPServerSheetsUITests.
 final class TronIntegrationSheetsUITests: XCTestCase {
     @MainActor
     func testOllamaUnlimitedAccessibilityAndTypeSizes() {
@@ -19,7 +16,6 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         }
     }
 
-    /// Replacing the foreground transport must not destroy an unsubmitted form.
     @MainActor
     private func launch(scenario: String = "default", dark: Bool = false, largeType: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()

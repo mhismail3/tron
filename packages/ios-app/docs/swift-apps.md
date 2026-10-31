@@ -243,7 +243,7 @@ writes after awaits; accepted install work also blocks conflicting management.
 
 ## Apps menu and Manage
 
-The Tron menu's **Apps** item (always offered beside Automations and Knowledge; not gated by the
+The Tron menu's **Apps** item (always offered beside Automations; not gated by the
 "Run Swift files" experiment, which only controls chat Run buttons) opens `InstalledAppsSheet`:
 the selected Gateway's `apps.pending` and `apps.list`, refreshed on open, pull and
 after review or runner closes; Manage updates the same catalog. Valid, uninstalled offers appear in a **Pending**

@@ -25,7 +25,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 ## Contract
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, App Customizations),
-  Accounts (indigo: Connections, Model Providers, Connected Services),
+  Accounts (indigo: Connections, Model Providers),
   Agent & Tools (the fixed Emerald identity ink: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
   System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
@@ -124,11 +124,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Update/Remove), Install Package, read-only Tron Modules and search paths. A package's detail lists
   what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks reads
   `hooks.list` (`hooks.v1`) per scope; an untrusted project says its hooks are not loaded.
-- **Integrations.** Connected Services and MCP Servers use the Providers row layout; the instance
-  ID is the only action identity. Setup accepts only opaque Mac Keychain references (X uses PKCE;
-  the Gateway exchanges and stores tokens). Policy writes carry `expectedSetupRevision`. The open
-  setup draft lives in `IntegrationSheetRoutes` above the presented content (#932). MCP Servers
-  edits Pi's global `mcp.json` only. Jev is a provider credential, not a connection.
+- **MCP.** MCP Servers uses the Providers row layout and edits Pi's global `mcp.json`
+  only. Its add/auth drafts and accepted token follow-up retain the exact destination
+  and receipt owner. Jev is a provider credential, not a connection. Retired Connected
+  Services, X OAuth/credits and Raindrop setup have no native route or consumer.
 - **Connections and devices.** Paired Macs then authorized devices, each opening its own detail
   sheet. Device rename (`device-label.v1`), source/install (`ios-device-install.v3`) and Gateway
   update, promote, rollback and **Rebuild from Source** need the focused profile (**Use This
@@ -153,13 +152,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 ## Entry points
 
 `SettingsView.swift`, `SettingsRendererView.swift`, `SettingsChangesView.swift`,
-`ProviderSettingsView.swift`, `IntegrationsSettingsView.swift`, `ConnectionSettingsView.swift`.
-
-## Signals
-
-| Signal | Meaning |
-|---|---|
-| `xsetup.*` | X setup view, binding, begin and observer boundaries in the iOS log; no client, callback, OAuth or account values |
+`ProviderSettingsView.swift`, `MCPServersSettingsView.swift`, `ConnectionSettingsView.swift`.
 
 ## Verify
 

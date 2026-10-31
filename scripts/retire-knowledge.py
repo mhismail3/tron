@@ -64,6 +64,25 @@ def safe_tree(root):
             raise ValueError('Hard-linked input is not an independent archive')
 
 
+def copy_private_file(source, destination):
+    # The archive preserves bytes, not per-file timestamps, xattrs or ACLs.
+    # copy2's metadata replication dominates small-record corpus copying.
+    with os.fdopen(os.open(source, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as reader:
+        with os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as writer:
+            shutil.copyfileobj(reader, writer)
+
+
+def copy_private_tree(source, destination):
+    if source.is_symlink():
+        raise ValueError('Symlink in archive input')
+    destination.mkdir(mode=0o700)
+    for path in source.iterdir():
+        if path.is_dir():
+            copy_private_tree(path, destination / path.name)
+        else:
+            copy_private_file(path, destination / path.name)
+
+
 def hashes(root, omit=()):
     return {str(p.relative_to(root)): digest(p.read_bytes()) for p in sorted(root.rglob('*'))
             if p.is_file() and str(p.relative_to(root)) not in omit}
@@ -151,9 +170,9 @@ def snapshot(source, backup, expected):
             if path.name.startswith(catalog.name):
                 continue
             if path.is_dir():
-                shutil.copytree(path, stage / path.name)
+                copy_private_tree(path, stage / path.name)
             else:
-                shutil.copy2(path, stage / path.name)
+                copy_private_file(path, stage / path.name)
         target = sqlite3.connect(stage / catalog.name)
         try:
             conn.backup(target)

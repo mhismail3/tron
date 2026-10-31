@@ -153,11 +153,9 @@ struct ProvidersSettingsView: View {
         refreshingCatalog = true
         catalogError = nil
         func admits() -> Bool {
-            !Task.isCancelled && IntegrationPresentationAdmission.admits(
-                presentationActive: presentationActivity.allowsPresentationPublication,
-                currentIdentity: model.knowledgePresentationIdentity, requestedIdentity: identity,
-                currentRequest: catalogRefreshGeneration, requestedRequest: ticket
-            ) && target == requestedTarget
+            !Task.isCancelled && presentationActivity.allowsPresentationPublication
+                && model.knowledgePresentationIdentity == identity
+                && catalogRefreshGeneration == ticket && target == requestedTarget
         }
         defer { if admits() { refreshingCatalog = false } }
         do {

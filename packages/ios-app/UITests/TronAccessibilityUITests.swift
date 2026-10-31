@@ -286,7 +286,8 @@ final class TronAccessibilityUITests: XCTestCase {
             for _ in 0..<8 where !mcp.isHittable { app.swipeUp() }
             XCTAssertTrue(mcp.isHittable, "MCP remains a reachable, independent owner")
             mcp.tap()
-            XCTAssertTrue(app.navigationBars["MCP Servers"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.navigationBars.staticTexts["MCP Servers"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.buttons["Add Server"].exists, "The surviving MCP destination owns its add action")
             let settingsCapture = XCTAttachment(screenshot: app.screenshot())
             settingsCapture.name = "retired-vendors-mcp-preserved-\(variant)"
             settingsCapture.lifetime = .keepAlways
