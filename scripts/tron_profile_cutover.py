@@ -61,7 +61,10 @@ def run_controller(argv, platform, log_path, leases, environment):
                 for line in child.stdout:
                     message = json.loads(line)
                     if 'call' not in message:
-                        print(json.dumps(message, indent=2), flush=True)
+                        if 'error' in message:
+                            print('profile cutover: ' + str(message['error']), file=sys.stderr, flush=True)
+                        else:
+                            print(json.dumps(message, indent=2), flush=True)
                         continue
                     try:
                         if message['call'] == 'stop':

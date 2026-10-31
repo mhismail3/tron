@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -52,7 +52,13 @@ it("bound offline cutover uses real writer leases and real Gateway reads; a lost
   const change = await client!.request("home.profileChange", { commandId: "cutover-grouped-refine", changes: originals.slice(0, 2).map(record => ({ action: "refine", id: record.id, expectedRevision: record.revisionId, text: record.content.title + " revised" })) });
   expect(change.ok).toBe(true);
   const file = (await readProfileFile(workspace))!, heads = profileFileRecords(file), backup = join(root, "backup");
-  const journalBefore = await tree(join(home, "gateway/settings/changes"));
+  const journalRoot = join(home, "gateway/settings/changes");
+  const segment = (await readdir(journalRoot)).find(name => name.endsWith(".jsonl"))!;
+  // Historical live segments are 0644 beneath private 0700 directories; retained backups are 0600.
+  await chmod(join(journalRoot, segment), 0o644);
+  const journalBefore = await tree(journalRoot);
+  const journalSource = Object.fromEntries(await Promise.all(Object.entries(journalBefore).map(async ([name, value]) =>
+    [name, { ...value, mode: "0o" + ((await lstat(join(journalRoot, name))).mode & 0o777).toString(8) }])));
   await stop();
   const legacy = join(home, "workspace/state/profile"); await mkdir(legacy, { recursive: true, mode: 0o700 });
   const histories = heads.map(head => ({ id: head.id, head: { latestRevisionId: head.revisionId, revisionIds: [...new Set([originals.find(r => r.id === head.id)!.revisionId, head.revisionId])] },
@@ -68,13 +74,14 @@ it("bound offline cutover uses real writer leases and real Gateway reads; a lost
   for (const [key, receipt] of Object.entries(file.control.commands)) insert.run("receipts", JSON.stringify(key), JSON.stringify(receipt));
   db.close();
   // Node SQLite follows umask; this fixture deliberately uses the private owning format.
-  const { chmod } = await import("node:fs/promises"); await chmod(join(legacy, "catalog-fixture.sqlite"), 0o600);
+  await chmod(join(legacy, "catalog-fixture.sqlite"), 0o600);
   await rm(join(home, "workspace/files/Profile.json"));
   await mkdir(backup, { mode: 0o700 }); await cp(legacy, join(backup, "profile"), { recursive: true }); await cp(join(home, "gateway/settings/changes"), join(backup, "changes"), { recursive: true });
+  await chmod(join(backup, "changes", segment), 0o600);
   const files = { ...Object.fromEntries(Object.entries(await tree(join(backup, "profile"))).map(([k, v]) => ["profile/" + k, v])),
     ...Object.fromEntries(Object.entries(await tree(join(backup, "changes"))).map(([k, v]) => ["changes/" + k, v])) };
   await put(join(backup, "full-backup-manifest.json"), { files });
-  await put(join(backup, "fresh-source-inventory.json"), { profile: await tree(legacy), changes: journalBefore });
+  await put(join(backup, "fresh-source-inventory.json"), { profile: await tree(legacy), changes: journalSource });
   await put(join(backup, "namespace-manifest.json"), { namespace: Object.fromEntries(await Promise.all(["gateway/workspace-state/initialized.json", "gateway/workspace-state/profile-initialized.json"].map(async name => [name, { present: true, sha256: sha(await readFile(join(home, name))) }]))) });
   await put(join(backup, "Profile.complete-export.snapshot.json"), { notes: histories, collections: { receipts: Object.entries(file.control.commands), suppressions: [], scopeExclusions: [], cleanup: [], recordCleanup: [] } });
   await cp(join(root, "backup/profile"), join(root, "original-profile"), { recursive: true });
@@ -86,6 +93,9 @@ it("bound offline cutover uses real writer leases and real Gateway reads; a lost
   await expect(ProfileCutover.prepare(home, backup, join(root, "operation"), { ...binding, source: "wrong-source" })).rejects.toThrow(/Source identity/);
   await expect(ProfileCutover.prepare(home, backup, join(root, "operation"), { ...binding, candidate: "0".repeat(64) })).rejects.toThrow(/Candidate hash/);
   await expect(ProfileCutover.prepare(home, backup, join(root, "operation"), { ...binding, manifest: "0".repeat(64) })).rejects.toThrow(/manifest mismatch/);
+  await chmod(join(backup, "changes", segment), 0o644);
+  await expect(ProfileCutover.prepare(home, backup, join(root, "operation"), binding)).rejects.toThrow(/Unsafe or oversized/);
+  await chmod(join(backup, "changes", segment), 0o600);
   await start(root);
   const owner = await ProfileCutover.prepare(home, backup, join(root, "operation"), binding);
   // A false 'zero workers/stopped' claim cannot defeat the actual runtime lease.
@@ -94,7 +104,12 @@ it("bound offline cutover uses real writer leases and real Gateway reads; a lost
   const lifecycle: CutoverLifecycle = { stop, start: () => start(root), rpc: async (method, params) => {
     const response = await client!.request(method, params); if (!response.ok) throw new Error(JSON.stringify(response.error)); return response.result;
   } };
+  await chmod(join(journalRoot, segment), 0o666);
+  await expect(owner.run(lifecycle)).rejects.toThrow(/mode 0o666; expected 0o644/);
+  expect(await tree(legacy)).toEqual(await tree(join(backup, "profile")));
+  await chmod(join(journalRoot, segment), 0o644);
   expect(await owner.run(lifecycle)).toMatchObject({ status: "verified", heads: 60, groups: 1 });
+  expect((await lstat(join(journalRoot, segment))).mode & 0o777).toBe(0o644);
   expect(await tree(join(home, "gateway/settings/changes"))).toEqual(journalBefore);
   expect(await owner.run(lifecycle, true)).toEqual({ status: "rolled-back" });
   expect(await tree(legacy)).toEqual(await tree(join(backup, "profile")));
