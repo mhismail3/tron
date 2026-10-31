@@ -797,9 +797,9 @@ describe("Tron Home research tools", () => {
       const path = join(exported, "sources", "source", revision, "source.md");
       const original = await readFile(path, "utf8");
       const [answer] = await toolAnswers(f, "read the saved source with its original citation", [
-        { name: "read_file", args: { path, offset: 1, limit: 1000 } },
+        { name: "read", args: { path, offset: 1, limit: 1000 } },
       ]);
-      expect(answer!.details).toEqual({ status: "ok" });
+      expect(answer!.isError).toBe(false);
       for (const text of ["Café", "second line", "https://example.com/source", revision]) {
         expect(answer!.text).toContain(text);
       }

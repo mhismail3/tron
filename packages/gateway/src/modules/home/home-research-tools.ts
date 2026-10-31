@@ -17,7 +17,7 @@ import type { SessionSearchRequest, SessionSearchResponse } from "../../sessions
  * head-and-tail truncation a logged tool result gets.
  *
  * INJECTION SURFACE (documented per #724): web results, fetched pages, other
- * sessions' transcripts and Knowledge records are untrusted content. Home can
+ * sessions' transcripts and Profile notes are untrusted content. Home can
  * delegate tasks under the maintainer's standing scopes, so text retrieved here
  * could try to talk Home into dispatching work. The decision for v1 is to keep
  * delegation authority exactly where it already is — standing scopes are
@@ -54,31 +54,6 @@ const SESSION_READ_PARAMETERS = Type.Object({
   before: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Preceding projected messages, default 2." })),
   after: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Following projected messages, default 2." })),
 }, { additionalProperties: false });
-
-/** Exactly the read-only subset of the Knowledge tool's actions. Write,
- * connector, curation and paid-assessment actions are structurally absent: Home
- * cannot name them, so no execute-time check can drift. */
-const KNOWLEDGE_READONLY_PARAMETERS = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("list")]),
-  query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-  id: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-  revisionId: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
-  offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 8_000_000 })),
-  cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-  kind: Type.Optional(Type.Union([Type.Literal("source"), Type.Literal("observation"), Type.Literal("note")])),
-  scope: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("research")])),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
-  includeArchived: Type.Optional(Type.Boolean()),
-  includePending: Type.Optional(Type.Boolean()),
-  sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-  entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-}, { additionalProperties: false });
-type KnowledgeReadonlyParameters = {
-  action: "search" | "recall" | "read" | "list";
-  query?: string; id?: string; revisionId?: string; offset?: number; cursor?: string;
-  kind?: "source" | "observation" | "note"; scope?: "personal" | "research"; limit?: number;
-  includeArchived?: boolean; includePending?: boolean; sessionId?: string; entryId?: string;
-};
 
 /** One result's text, capped the way a logged tool result is. */
 function bounded(text: string): string {
