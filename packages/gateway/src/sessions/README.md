@@ -142,6 +142,9 @@ scripts/tron test gateway src/sessions/runtime-registry.integration.test.ts \
   src/sessions/runtime-tool-loadout.integration.test.ts
 ```
 
+`home-request-seam.integration.test.ts` streams faux chunks without timer pacing:
+its settlement bounds exercise real request/compaction completion, not a simulated
+provider rate. Chunking and all canonical compaction assertions remain active.
 Also `src/transport/session-archive.integration.test.ts` (session-replacing commands, fork
 rows). Locks: `run.lock`, `run.store.lock`, `run-markers.lock` (`.integration.test.ts`).
 

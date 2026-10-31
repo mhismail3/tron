@@ -178,7 +178,10 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   const faux = fauxProvider({
     provider: PROVIDER,
     models: [{ id: MODEL_ID, reasoning: true, ...(options.contextWindow === undefined ? {} : { contextWindow: options.contextWindow }) }],
-    tokensPerSecond: 1_000_000,
+    // These are request/compaction boundary tests, not provider-rate tests.
+    // Positive pacing schedules a minimum-delay timer for every 40-byte chunk;
+    // a large C10 reply can exhaust the 10s settlement wait before compaction.
+    tokensPerSecond: 0,
     tokenSize: { min: 10, max: 10 },
   });
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
