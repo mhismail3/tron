@@ -3,7 +3,7 @@ import { execFile, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -126,7 +126,12 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     const offersRoot = join(f.root, "tron/workspace/state/apps/.offers");
     for (const directory of await readdir(offersRoot)) {
       const offer = JSON.parse(await readFile(join(offersRoot, directory, "offer.json"), "utf8"));
-      if (offer.appId === "invalid-source") await writeFile(join(offersRoot, directory, "App.swift"), "changed source");
+      if (offer.appId === "invalid-source") {
+        // Replace this offer's link; never mutate the shared immutable display inode.
+        const replacement = join(offersRoot, directory, "changed-source.tmp");
+        await writeFile(replacement, "changed source");
+        await rename(replacement, join(offersRoot, directory, "App.swift"));
+      }
       if (offer.appId === "invalid-metadata") await writeFile(join(offersRoot, directory, "offer.json"), "malformed metadata");
     }
     expect(await rpc(f, "apps.pending")).toEqual({ offers: [pendingReview.offer] });
@@ -135,6 +140,19 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     expect(await rpc(f, "apps.pending")).toEqual({ offers: [] });
     expect((await rpc(f, "apps.list")).apps.map((app: { id: string }) => app.id)).toEqual(["builds", "installed"]);
     results.push("pending read: valid offer only; installed, deleted-session, missing-artifact and invalid-source offers excluded; explicit install moves to installed");
+  });
+  it("retains the durable displayed source inode in an offer without republishing its bytes", async () => {
+    const f = await fixture();
+    await tool(f, offerArgs());
+    const reference = f.displayReference!;
+    const root = join(f.root, "tron/workspace/state/apps/.offers");
+    const [directory] = await readdir(root);
+    const path = join(root, directory!, "App.swift");
+    const offered = await stat(path);
+    const displayed = await stat(join(f.root, "tron/gateway/display-artifacts/artifacts", reference.artifactId, "content"));
+    expect([offered.dev, offered.ino]).toEqual([displayed.dev, displayed.ino]);
+    await displayOwnerOf(f.registry).artifacts.revoke(reference.artifactId, reference.sessionId);
+    expect(await readFile(path, "utf8")).toBe(source);
   });
   it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", async () => {
     const f = await fixture();
