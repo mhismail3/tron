@@ -70,9 +70,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - **Prove rather than imply** (inspected ≠ inferred ≠ reproduced ≠ verified); label visuals
   honestly; comments explain why. Whoever adds, moves or deletes a file updates every
   reference; commit no scratch or reports (`progress.md` is gitignored).
-- **Dependencies:** exact versions with lockfiles; Node via `scripts/tron-node exec`, not
-  the signed Gateway runtime on PATH. Pi SDK and `pi-subagents` change only atomically
-  through their updaters; a Pi behavior delta stops for a decision (Gateway README).
+- **Dependencies:** exact pins/lockfiles; Node via `scripts/tron-node exec`, not the signed
+  runtime. Pi SDK/`pi-subagents` change atomically through updaters; behavior deltas need a decision.
 
 ## Testing policy
 
@@ -90,10 +89,9 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Resources and cleanup
 
-- The Mac is shared. Reuse running servers and simulators (`scripts/tron-ios-test status
-  --all`); stop what you start (and simulators booted outside the tooling); remove your
-  temp files, fixtures and worktrees on success and failure, never leaving them to a
-  sweep. Prefer commands that exit; isolate `HOME`/`TMPDIR` for third-party suites. Tooling owns lanes (never hand-erase). Never `git stash`.
+- The Mac is shared. Inspect `scripts/tron-ios-test status --all`; reuse resources and
+  stop/remove only what you start, on every exit. Isolate suite `HOME`/`TMPDIR`; tooling
+  owns lanes (never hand-erase). Prefer commands that exit. Never `git stash`.
 - Up to 3 simulator-heavy jobs run at once across all workers (one/worktree), enforced by `scripts/ios-test-lock.py --host-slot` (a 4th waits; `scripts/tron-ios-test slots`); never hand-serialize Xcode/simulator work below the cap.
 - No broad kills (`pkill node`, `simctl shutdown all`). Stop only what you started; ask
   when unsure; never touch another session's process, lane or lease, nor Stable or its
@@ -118,9 +116,8 @@ owns deferred serial tests and risk; no phase/LOC gate, queue or auto-revert.
 
 ## Work tracking
 
-- Issues and the Project coordinate, never approve ([Git/gh skill](.agents/skills/tron-work/SKILL.md)).
-  Assign one writer per file before parallel work; use ordinary Git/gh to inspect branches/worktrees/issues.
-  Resume a settled worker for the same unfinished slice before launching its replacement.
+- Issues/Project coordinate, never approve ([Git/gh skill](.agents/skills/tron-work/SKILL.md)).
+  One writer/file; inspect with Git/gh; resume settled same-slice workers before replacing them.
   Existing claims are preservation metadata, not locks. Never edit another worker's tree, delete its branch or take over unknown or live
   work; preserve unpublished or parked checkpoints. `release`/`handoff` keep local work;
   `cleanup`/`recover` keep exact-head safeguards. After each issue lands on origin/main, sync primary main
@@ -147,7 +144,6 @@ owns deferred serial tests and risk; no phase/LOC gate, queue or auto-revert.
 ## Documentation
 - Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,
   repo runbooks `docs/development.md` and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
-- When a repository's documentation and its existing code disagree, follow the conventions used in the existing code,
-  and in your final reply or report point out each inconsistency you found between the documentation and the code.
+- If docs and code disagree, follow existing code conventions and report each inconsistency.
 - Docs state current behavior: no history, evidence or audit ledgers; indexes are generated; this charter ≤ 150 lines, other docs ≤ 2× budget.
   [check: `scripts/tron budgets`, `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]
