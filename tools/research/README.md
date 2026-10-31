@@ -1,8 +1,18 @@
 # Research scripts
 
-Small project-owned, dependency-free research helpers. Instructions live in
-[public-x](../../.agents/skills/public-x/SKILL.md); these files are source preparation,
-not an installed global resource or a Gateway provider/connection.
+Small project-owned, dependency-free research helpers. These files are source
+preparation, not an installed global resource or a Gateway provider/connection.
+Capability skills remain with the global resource owner, not a project duplicate.
+
+```sh
+scripts/tron-node exec node tools/research/public-x.mjs 'https://x.com/example/status/123456789'
+# Only when asked to retain evidence; destination must not already exist:
+scripts/tron-node exec node tools/research/public-x.mjs 'https://x.com/example/status/123456789' --output '<ordinary-file>.json'
+```
+
+Use only for explicitly requested, known public posts. The numeric ID is disclosed
+to the fixed public provider; do not submit protected posts or private bookmark
+lists without permission. This helper grants no shell, child or account access.
 
 `public-x.mjs` reads one explicitly requested public X root from FxEmbed v2 and
 optionally writes one ordinary cited JSON document, exclusively at the caller's
