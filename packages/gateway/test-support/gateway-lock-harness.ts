@@ -63,6 +63,8 @@ import { waitFor } from "./wait-for.js";
 type Step = (context: TranscriptContext, options: SimpleStreamOptions | undefined) => AssistantMessage | Promise<AssistantMessage>;
 
 export interface LockGatewayOptions {
+  /** Real diagnostic owner for journeys that exercise system.logs. */
+  readonly logger?: import("../src/transport/logger.js").GatewayLogger;
   /** Extension sources written to `<agentDir>/extensions/<name>`. */
   readonly extensions?: ReadonlyArray<{ name: string; source: string }>;
   /** Extra `settings.json` keys; the default model is always the faux model. */
@@ -326,7 +328,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       ?? { enqueue: async (push: unknown) => { notifications.push(normalizeTraceValue(push, normalization)); } },
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    logger: { log: () => {} },
+    logger: options.logger ?? { log: () => {} },
     ...(options.lifecycleRequests ? {
       requestRestart: (restartNow?: boolean) => { lifecycleRequests.push({ kind: "restart", restartNow: restartNow === true }); },
       requestStop: () => { lifecycleRequests.push({ kind: "stop" }); },
@@ -349,7 +351,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576, devices, sessions: registry, display: displayOwnerOf(registry), service,
     uploads,
     auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
-    logger: { log: () => {} } as never,
+    logger: options.logger ?? { log: () => {} } as never,
   });
   await server.listen();
   await automations?.initialize();

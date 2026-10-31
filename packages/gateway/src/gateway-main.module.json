@@ -5,7 +5,10 @@
     "gateway-main.ts",
     "index.ts",
     "main/modules.ts",
-    "main/settings-schema.ts"
+    "main/settings-schema.ts",
+    "maintenance/profile-cutover.ts",
+    "maintenance/profile-cutover-cli.ts",
+    "maintenance/profile-cutover.integration.test.ts"
   ],
   "dependsOn": [
     "gateway/apps",
@@ -21,6 +24,7 @@
     "gateway/home",
     "gateway/automations",
     "gateway/notifications",
-    "gateway/run"
+    "gateway/run",
+    "gateway/session-catalog"
   ]
 }
