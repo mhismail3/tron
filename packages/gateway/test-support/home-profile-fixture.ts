@@ -181,6 +181,7 @@ export interface Fixture {
   registry: RuntimeRegistry;
   knowledge: ProfileStore;
   store: ProfileStore;
+  workspace: ConstructorParameters<typeof ProfileStore>[0];
   project: string;
   sessionId: string;
   slot: HomeSlot;
@@ -256,7 +257,7 @@ export async function fixture(label: string): Promise<Fixture> {
   const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
-  const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
+  const state: Fixture = { registry, knowledge, store, workspace: registry.moduleHost.contract(workspaceModule), project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
   // One route answers every provider request. Home and worker requests are told
   // apart by the Home instruction head, so each script is independent of interleaving.
   faux.setResponses(Array.from({ length: 256 }, () => async (context: TranscriptContext) => {

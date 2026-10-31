@@ -120,7 +120,7 @@ owners are epic children.
 - Obligations Mohsin takes on in Home conversation live in one typed ledger in canonical Home
   history: request, reported done, verified, reopened. One tied to an issue references it and
   closes with it; a summary can never reopen a closed item.
-- Enforced by: `scripts/tron work`; ledger: #2179; joined feedback in health: #2178.
+- Enforced by: `scripts/tron work`; Home's canonical `obligation` tool; joined feedback in health: #2178.
 
 ## P8 Humans gate only taste and irreversibility
 

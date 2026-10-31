@@ -37,7 +37,7 @@ export interface ProfileNoteProvenance {
   sessionId?: string;
   branchId?: string;
   invocationId?: string;
-  /** Why this revision was written, when its writer records one (Home's profile changes do). Bounded text; ledger metadata, never evidence. */
+  /** Why the current value was written, when supplied. Bounded provenance, never evidence. */
   reason?: string;
   evidence: ProfileNoteEvidenceRef[];
 }
@@ -76,7 +76,7 @@ export interface NoteFieldQualification {
 }
 
 export interface NoteContent {
-  /** Sole current placement; absent only in pre-hierarchy revisions/Undo. */
+  /** Read projection of the current section; exact claim anchors retain captured placement. */
   profile?: import("./profile-placement.js").ProfileMetadata;
   title: string;
   body?: string;
@@ -93,9 +93,8 @@ export interface NoteContent {
    * and `kind-*` labels. Not the source tag vocabulary: a note's labels are free, bounded by
    * `NOTE_TAG_PATTERN` and `NOTE_TAGS_MAX`, and an owner alone decides what they mean. */
   tags?: string[];
-  /** Set on a note that has left active use. Its earlier revisions stay in the ledger.
-   * A draft may name `false` to return a retired note to use (an owner's undo); a stored
-   * revision never holds `false`, only `true` or nothing. */
+  /** Set on a note that has left active use. A draft may name `false` for owner Undo;
+   * ordinary stored writes retain only `true` or nothing, never an edition ledger. */
   retired?: boolean;
 }
 

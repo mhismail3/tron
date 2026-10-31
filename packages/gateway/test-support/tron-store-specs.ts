@@ -397,7 +397,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/home", name: "store-home-profile",
-    paths: ["workspace/state/profile", "gateway/settings"],
+    paths: ["workspace/files/Profile.json", "gateway/settings"],
     // Record the current-format Profile owner and its Changes entries together;
     // no retired Knowledge reader or duplicated historical corpus is involved.
     live: "current-format Profile notes and their Changes entries recorded by their owning stores",

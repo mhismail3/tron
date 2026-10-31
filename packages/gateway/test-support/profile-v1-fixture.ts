@@ -1,20 +1,15 @@
-import type { ProfileNoteNoteMutationRequest, ProfileNoteRecord } from "../src/modules/home/profile-note-contract.js";
-import { profileLabels } from "../src/modules/home/profile-notes.js";
+import { randomUUID } from "node:crypto";
 import type { ProfileStore } from "../src/modules/home/profile-store.js";
+import type { ProfileNoteNoteMutationRequest, ProfileNoteRecord } from "../src/modules/home/profile-note-contract.js";
+import { createProfileFile, profileFileRecords, readProfileFile, writeProfileFile } from "../src/modules/home/profile-file.js";
 
-/** Arrange historical data through the real privileged restore owner. Ordinary
- * note APIs must not acquire a legacy-write bypass merely for fixture setup. */
-export async function legacyProfileFixture(store: ProfileStore, commandId: string, record: ProfileNoteNoteMutationRequest["record"]): Promise<Extract<ProfileNoteRecord, { kind: "note" }>> {
-  const tags = record.content.tags ?? [];
-  const created = (await store.createNote({ commandId, record: { ...record, content: { ...record.content,
-    tags: tags.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["life"] } } } })).record;
-  if (created.kind !== "note") throw new Error("Expected fixture note");
-  return restoreLegacyProfileFixture(store, commandId, created, tags);
-}
-
-/** Restore placement after callers have arranged meaningful v2 text history. */
-export async function restoreLegacyProfileFixture(store: ProfileStore, commandId: string, current: Extract<ProfileNoteRecord, { kind: "note" }>, tags: readonly string[]): Promise<Extract<ProfileNoteRecord, { kind: "note" }>> {
-  const labels = profileLabels(tags);
-  await store.partitionProfile({ commandId: `${commandId}-historical-fixture`, mode: "reorganize", assignments: [{ id: current.id, expectedRevision: current.revisionId, labels }] }, { restoring: true, create: () => ({ fixture: "historical-profile-restore" }), validate: envelope => { if ((envelope as { fixture?: string }).fixture !== "historical-profile-restore") throw new Error("Unexpected fixture recovery envelope"); } });
-  return await store.read(current.id) as Extract<ProfileNoteRecord, { kind: "note" }>;
+/** Prior organization is current-file data, not an old storage format. Seed it
+ * with the shipped canonical codec; ordinary note APIs acquire no restore bypass. */
+export async function legacyProfileFixture(workspace: ConstructorParameters<typeof ProfileStore>[0], _commandId: string, draft: ProfileNoteNoteMutationRequest["record"]): Promise<ProfileNoteRecord> {
+  const before = await readProfileFile(workspace), timestamp = new Date().toISOString();
+  const record: ProfileNoteRecord = { ...draft, schemaVersion: 1, id: draft.id ?? randomUUID(), revisionId: randomUUID(), createdAt: draft.createdAt ?? timestamp, updatedAt: draft.updatedAt ?? timestamp };
+  await writeProfileFile(workspace, createProfileFile([...(before ? profileFileRecords(before) : []), record], { stateRevision: (before?.stateRevision ?? 0) + 1,
+    anchorCandidates: before?.anchors ?? [], ...(before ? { control: before.control } : {}) }));
+  await workspace.markFeatureInitialized("profile");
+  return record;
 }

@@ -101,6 +101,7 @@
                 "delegate",
                 "task",
                 "profile",
+                "obligation",
                 "web_search",
                 "session_search",
                 "session_read",
@@ -179,6 +180,7 @@
                 "delegate",
                 "task",
                 "profile",
+                "obligation",
                 "web_search",
                 "session_search",
                 "session_read",
@@ -272,6 +274,7 @@
                 "delegate",
                 "task",
                 "profile",
+                "obligation",
                 "web_search",
                 "session_search",
                 "session_read",
@@ -384,6 +387,50 @@
             },
             {
               "name": "profile"
+            },
+            {
+              "description": "Canonical Home maintainer-obligation ledger, not summary memory. list returns only owed items (request/reopened). request opens a stable id once, with text and a verbatim quote of this maintainer message; optional issue URL links engineering work. reported-done closes the human action on his confirmation, even without independent proof. verified closes with a successful tool-result entryId and verbatim evidenceQuote from this activation. reopened requires a NEW explicit maintainer request, never an old summary or missing verification. All writes require the current maintainer turn and its verbatim quote. Closing grants no approval, task, key revocation or other effect. Never request an already completed action under another id. For an issue-linked item, record verified closure when its issue closes with evidence.",
+              "name": "obligation",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "list",
+                      "request",
+                      "reported-done",
+                      "verified",
+                      "reopened"
+                    ],
+                    "type": "string"
+                  },
+                  "evidenceEntryId": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "evidenceQuote": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "id": "<id>",
+                  "issue": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "quote": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "type": "object"
+              }
             },
             {
               "name": "web_search"
