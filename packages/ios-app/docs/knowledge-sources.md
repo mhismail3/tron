@@ -6,7 +6,7 @@ settings sheet. The dashboard menu keeps Settings, Automations, Apps and New Ses
 
 ## Retention
 
-The offline converter preserves every committed source revision, original URI,
+The source exports retain committed revisions, original URIs,
 metadata/provenance and referenced attachment bytes. A hash manifest links original
 IDs/revisions to exact original and exported bytes. Normal file tools read the
 Markdown; no iOS catalog, corpus cache, sync owner or manifest reader exists.
@@ -25,5 +25,5 @@ checks route absence with the real native menu and Settings in Light/Dark/large 
 `TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates` keeps the existing
 native-menu continuity/selection proof using Automations.
 
-The [offline runbook](../../../docs/development.md#offline-knowledge-retirement)
-owns preservation, offline verification and maintainer-only recovery.
+The [Knowledge files contract](../../../docs/development.md#knowledge-files)
+describes ordinary reads and the retained maintainer-only recovery artifacts.
