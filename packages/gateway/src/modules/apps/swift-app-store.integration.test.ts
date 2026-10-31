@@ -1,8 +1,8 @@
 import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 /**
  * Installed Swift apps (#1157), end to end through a real RuntimeRegistry and
- * GatewayService: a faux model calls the `swift_app` tool in an ordinary
- * session, and the iPhone's RPCs (`apps.list/get/state/commit`) read and write
+ * GatewayService: a faux model offers source in an ordinary session, the paired
+ * phone explicitly reviews/installs it, and its RPCs (`apps.list/get/state/commit`) read and write
  * the same `state/apps/<id>/` store, across a Gateway restart.
  *
  * Failure modes:
@@ -45,6 +45,7 @@ afterEach(async () => {
   const disposals = await Promise.allSettled(registries.splice(0).map(registry => registry.dispose()));
   const removals = await Promise.allSettled(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   vi.unstubAllEnvs();
+  selectedInstances.clear();
   const failures = [...disposals, ...removals].flatMap(result => result.status === "rejected" ? [result.reason] : []);
   if (failures.length > 0) throw new AggregateError(failures, "swift-app-store fixture teardown failed");
 });
@@ -54,7 +55,8 @@ afterAll(async () => {
   await writeFile(join(process.cwd(), REPORT_PATH), `${JSON.stringify(report, null, 2)}\n`);
 });
 
-interface Gateway { registry: RuntimeRegistry; service: GatewayService }
+const selectedInstances = new Map<string, Map<string, string>>();
+interface Gateway { registry: RuntimeRegistry; service: GatewayService; instances: Map<string, string> }
 
 async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Promise<Gateway> {
   const agentDir = join(root, "agent");
@@ -71,12 +73,15 @@ async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Pro
   });
   registries.push(registry);
   await registry.initialize();
+  await registry.initializeBlobStorage();
   const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     sessions: registry, modules: registry.moduleHost, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
-  return { registry, service };
+  const instances = selectedInstances.get(root) ?? new Map<string, string>();
+  selectedInstances.set(root, instances);
+  return { registry, service, instances };
 }
 
 async function fixture() {
@@ -98,7 +103,8 @@ async function fixture() {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 interface ToolResult { isError: boolean; text: string; details: Record<string, unknown> }
 
-/** One agent turn whose only step calls swift_app with each of `calls`. */
+/** Real tool turn, then explicit paired-phone review/install of successful offers.
+ * Selected instance identities come from accepted installs, never fresh reads. */
 async function agentCalls(f: Fixture, gatewayNow: Gateway, calls: Array<Record<string, unknown>>): Promise<ToolResult[]> {
   const slot = await gatewayNow.registry.create(f.cwd);
   const model = f.faux.getModel();
@@ -111,19 +117,36 @@ async function agentCalls(f: Fixture, gatewayNow: Gateway, calls: Array<Record<s
   await slot.prompt("manage apps");
   await waitFor(() => (!slot.isBusy && f.contexts.length > before) || undefined, "the swift_app turn to settle");
   const messages = f.contexts.at(-1)!.messages as unknown as Array<Record<string, unknown>>;
-  return messages.filter(message => message.role === "toolResult" && message.toolName === "swift_app").map(message => ({
+  const results = messages.filter(message => message.role === "toolResult" && message.toolName === "swift_app").map(message => ({
     isError: message.isError === true,
     text: ((message.content as Array<{ text?: string }>)[0]?.text) ?? "",
     details: (message.details ?? {}) as Record<string, unknown>,
   }));
+  for (const result of results) {
+    const display = result.details.display as { artifact?: { id: string } } | undefined;
+    if (result.isError || !display?.artifact) continue;
+    const reference = { sessionId: slot.id, artifactId: display.artifact.id };
+    const review = await rpc(gatewayNow, "apps.review", reference) as any;
+    const installed = await rpc(gatewayNow, "apps.install", { ...reference, commandId: `review-${display.artifact.id}`,
+      offerId: review.offer.id, expectedRevision: review.installed?.revision ?? null,
+      expectedSourceSha256: review.installed?.sourceSha256 ?? null, expectedInstanceId: review.installed?.instanceId ?? null, upgradeToV2: false }) as any;
+    expect(installed.app.version).toBe(2);
+    gatewayNow.instances.set(installed.app.id, installed.app.instanceId);
+  }
+  return results;
 }
 
+function selectedRequest(g: Gateway, method: string, params: Record<string, unknown>): Record<string, unknown> {
+  const instance = g.instances.get(params.appId as string);
+  return instance && ["apps.commit", "apps.remove"].includes(method) && params.expectedInstanceId === undefined
+    ? { ...params, expectedInstanceId: instance } : params;
+}
 async function rpc(g: Gateway, method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-  return await g.service.invoke(client, method, params) as Record<string, unknown>;
+  return await g.service.invoke(client, method, selectedRequest(g, method, params)) as Record<string, unknown>;
 }
 
 async function rpcError(g: Gateway, method: string, params: Record<string, unknown>): Promise<{ code: string; message: string }> {
-  try { await g.service.invoke(client, method, params); } catch (error) {
+  try { await g.service.invoke(client, method, selectedRequest(g, method, params)); } catch (error) {
     return { code: (error as { code?: string }).code ?? "unknown", message: (error as Error).message };
   }
   throw new Error(`${method} unexpectedly succeeded`);
@@ -136,11 +159,20 @@ function bigSource(marker: string): string {
 }
 
 describe("installed Swift apps through the Gateway", () => {
+  it("refuses the retired direct v1 install action without creating an app or an offer", async () => {
+    const f = await fixture();
+    await writeFile(join(f.cwd, "Retired.swift"), "import SwiftUI\n");
+    const [refused] = await agentCalls(f, f, [{ action: "install", appId: "retired", name: "Retired", source: { kind: "path", path: "Retired.swift" } }]);
+    expect(refused!.isError).toBe(true);
+    expect(refused!.text).toMatch(/install|action|invalid/i);
+    expect(await rpc(f, "apps.list")).toEqual({ apps: [] });
+    expect(await rpc(f, "apps.pending")).toEqual({ offers: [] });
+  }, 60_000);
   it("lets the phone rename, reset and remove an app through idempotent receipts across restart", async () => {
     const f = await fixture();
     const source = 'import SwiftUI\nstruct ContentView: View { @AppStorage("count") var count = 0\n var body: some View { Text("\\(count)") } }';
     await writeFile(join(f.cwd, "Managed.swift"), source);
-    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "managed", name: "Managed", source: { kind: "path", path: "Managed.swift" } }]);
+    const [installed] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "managed", name: "Managed", source: { kind: "path", path: "Managed.swift" } }]);
     expect(installed!.isError).toBe(false);
     expect(await rpc(f, "apps.commit", { commandId: "manage-seed-1", appId: "managed", expectedRevision: 0, expectedSourceRevision: 1, set: [{ key: "count", value: 4 }] })).toEqual({ appId: "managed", revision: 1 });
 
@@ -178,12 +210,12 @@ describe("installed Swift apps through the Gateway", () => {
     const f = await fixture();
     const source = 'import SwiftUI\nstruct ContentView: View { var body: some View { Text("First") } }';
     await writeFile(join(f.cwd, "Installed.swift"), source);
-    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "installed", name: "Installed", source: { kind: "path", path: "Installed.swift" } }]);
+    const [installed] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "installed", name: "Installed", source: { kind: "path", path: "Installed.swift" } }]);
     expect(installed!.isError).toBe(false);
     const opened = await rpc(f, "apps.open", { appId: "installed" });
     expect(opened).toMatchObject({ app: { id: "installed", revision: 1 }, source, state: { appId: "installed", revision: 0, entries: [] } });
     await writeFile(join(f.cwd, "Installed.swift"), source.replace("First", "Second"));
-    const [reinstalled] = await agentCalls(f, f, [{ action: "install", appId: "installed", name: "Installed", source: { kind: "path", path: "Installed.swift" } }]);
+    const [reinstalled] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "installed", name: "Installed", source: { kind: "path", path: "Installed.swift" } }]);
     expect(reinstalled!.isError).toBe(false);
     const stale = await rpcError(f, "apps.commit", { commandId: "source-stale-1", appId: "installed", expectedRevision: 0,
       expectedSourceRevision: 1, set: [{ key: "count", value: 1 }] });
@@ -223,7 +255,7 @@ struct ContentView: View {
 }
 `;
     await writeFile(join(f.cwd, "Persisted.swift"), source);
-    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "persisted", name: "Persisted", source: { kind: "path", path: "Persisted.swift" } }]);
+    const [installed] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "persisted", name: "Persisted", source: { kind: "path", path: "Persisted.swift" } }]);
     expect(installed!.isError).toBe(false);
     interface NativeResult {
       batches: Array<Array<{ key: string; json: string }>>;
@@ -280,7 +312,7 @@ struct ContentView: View {
 }
 `;
     await writeFile(join(f.cwd, "Dictionaries.swift"), dictionaries);
-    const [secondInstalled] = await agentCalls(f, restarted, [{ action: "install", appId: "dictionaries", name: "Dictionaries", source: { kind: "path", path: "Dictionaries.swift" } }]);
+    const [secondInstalled] = await agentCalls(f, restarted, [{ action: "offer", feeds: [], appId: "dictionaries", name: "Dictionaries", source: { kind: "path", path: "Dictionaries.swift" } }]);
     expect(secondInstalled!.isError).toBe(false);
     const empty = await rpc(restarted, "apps.state", { appId: "dictionaries" });
     const updated = run(empty, ["update"], true, (await rpc(restarted, "apps.get", { appId: "dictionaries" })).source as string);
@@ -307,16 +339,16 @@ struct ContentView: View {
     expect(await rpc(f, "apps.list")).toEqual({ apps: [] });
 
     // F1: the agent installs; the phone lists and reads the exact source.
-    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "builds", name: "Tron builds", icon: "shippingbox", source: { kind: "path", path: "Builds.swift" } }]);
+    const [installed] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "builds", name: "Tron builds", icon: "shippingbox", source: { kind: "path", path: "Builds.swift" } }]);
     expect(installed!.isError).toBe(false);
-    expect(installed!.text).toContain("Installed Tron builds (builds)");
+    expect(installed!.text).toContain("explicit Install App review");
     const listed = (await rpc(f, "apps.list")).apps as Array<Record<string, unknown>>;
     expect(listed.map(app => [app.id, app.name, app.icon, app.revision])).toEqual([["builds", "Tron builds", "shippingbox", 1]]);
     const got = await rpc(f, "apps.get", { appId: "builds" });
     expect(got.source).toBe(sourceV1);
     const directory = join(f.tronHome, "workspace", "state", "apps", "builds");
     expect((await stat(join(directory, "data.sqlite"))).isFile()).toBe(true);
-    expect(await readFile(join(directory, "App.swift"), "utf8")).toBe(sourceV1);
+    expect(await readFile(join(directory, "sources", `${(got.app as Record<string, unknown>).sourceSha256}.swift`), "utf8")).toBe(sourceV1);
 
     // F2: commits are revisioned and receipt-idempotent.
     expect(await rpc(f, "apps.state", { appId: "builds" })).toEqual({ appId: "builds", revision: 0, entries: [] });
@@ -349,12 +381,12 @@ struct ContentView: View {
     const sourceV2 = "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"v2\") } }\n";
     await writeFile(join(files, "Builds.swift"), sourceV2);
     const [reinstalled, seeded, read] = await agentCalls(f, f, [
-      { action: "install", appId: "builds", name: "Builds", source: { kind: "internal_file", path: "apps/Builds.swift" } },
+      { action: "offer", feeds: [], appId: "builds", name: "Builds", source: { kind: "internal_file", path: "apps/Builds.swift" } },
       { action: "commit", appId: "builds", expectedRevision: 1, set: [{ key: "seen", value: 3 }], remove: ["filter"] },
       { action: "state", appId: "builds" },
     ]);
     expect([reinstalled!.isError, seeded!.isError, read!.isError]).toEqual([false, false, false]);
-    expect(reinstalled!.text).toContain("its data was kept");
+    expect(reinstalled!.text).toContain("explicit Install App review");
     expect(read!.details).toEqual({ appId: "builds", revision: 2, entries: [
       { key: "seen", value: 3 }, { key: "starred", value: ["f95544a20", { pinned: true, count: 2 }] },
     ] });
@@ -368,7 +400,7 @@ struct ContentView: View {
     expect((await rpc(restarted, "apps.state", { appId: "builds" })).revision).toBe(2);
 
     // F6: removal is explicit about deleting data, and the app is gone everywhere.
-    const [removed] = await agentCalls(f, restarted, [{ action: "remove", appId: "builds" }]);
+    const [removed] = await agentCalls(f, restarted, [{ action: "remove", appId: "builds", expectedInstanceId: restarted.instances.get("builds") }]);
     expect(removed!.isError).toBe(false);
     expect(removed!.text).toBe("Removed builds: its source and all of its stored data were deleted.");
     expect(await rpc(restarted, "apps.list")).toEqual({ apps: [] });
@@ -383,7 +415,7 @@ struct ContentView: View {
     it.each(["state", "commit", "reinstall"] as const)("refuses %s without recreating state or publishing source", async operation => {
       const f = await fixture();
       await writeFile(join(f.cwd, "App.swift"), "import SwiftUI\n// original\n");
-      const install = { action: "install", appId: "kept", name: "Kept", source: { kind: "path", path: "App.swift" } };
+      const install = { action: "offer", feeds: [], appId: "kept", name: "Kept", source: { kind: "path", path: "App.swift" } };
       expect((await agentCalls(f, f, [install]))[0]!.isError).toBe(false);
       expect(await rpc(f, "apps.commit", { commandId: "seed-state", appId: "kept", expectedRevision: 0, set: [{ key: "kept", value: 42 }] })).toEqual({ appId: "kept", revision: 1 });
       const directory = join(f.tronHome, "workspace", "state", "apps", "kept");
@@ -405,8 +437,7 @@ struct ContentView: View {
       await writeFile(join(f.cwd, "App.swift"), "import SwiftUI\n// replacement\n");
 
       if (operation === "reinstall") {
-        const [result] = await agentCalls(f, f, [install]);
-        expect(result!.isError).toBe(true);
+        await expect(agentCalls(f, f, [install])).rejects.toThrow(/state|schema/i);
       } else {
         // Revision zero must not become valid again after the original data vanished.
         const params = operation === "state" ? { appId: "kept" } : {
@@ -431,8 +462,8 @@ struct ContentView: View {
     execFileSync("mkfifo", [fifo]);
     await writeFile(join(f.cwd, "Real.swift"), "import SwiftUI\n");
     const pending = agentCalls(f, f, [
-      { action: "install", appId: "pipe", name: "Pipe", source: { kind: "path", path: "Pipe.swift" } },
-      { action: "install", appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } },
+      { action: "offer", feeds: [], appId: "pipe", name: "Pipe", source: { kind: "path", path: "Pipe.swift" } },
+      { action: "offer", feeds: [], appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } },
     ]);
     let timer: NodeJS.Timeout | undefined;
     try {
@@ -467,8 +498,8 @@ struct ContentView: View {
     // F7
     const denied = ["../Outside.swift", join(f.root, "Outside.swift"), "notes.txt", ".Hidden.swift", "Link.swift"];
     const results = await agentCalls(f, f, [
-      ...denied.map(path => ({ action: "install", appId: "denied", name: "Denied", source: { kind: "path", path } })),
-      { action: "install", appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } },
+      ...denied.map(path => ({ action: "offer", feeds: [], appId: "denied", name: "Denied", source: { kind: "path", path } })),
+      { action: "offer", feeds: [], appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } },
     ]);
     expect(results.map(result => result.isError)).toEqual([true, true, true, true, true, false]);
     expect(((await rpc(f, "apps.list")).apps as Array<{ id: string }>).map(app => app.id)).toEqual(["real"]);
@@ -476,7 +507,7 @@ struct ContentView: View {
     // F8: the recorded container vanished; reads and installs refuse rather than start over.
     await rm(join(f.tronHome, "workspace", "state", "apps"), { recursive: true });
     expect((await rpcError(f, "apps.list", {})).message).toContain("missing after they were created");
-    const [reinstall] = await agentCalls(f, f, [{ action: "install", appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } }]);
+    const [reinstall] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } }]);
     expect(reinstall!.isError).toBe(true);
     expect(reinstall!.text).toContain("missing after they were created");
 
@@ -486,7 +517,7 @@ struct ContentView: View {
   it("keeps the phone's reads during an administrative drain and refuses a commit", async () => {
     const f = await fixture();
     await writeFile(join(f.cwd, "App.swift"), "import SwiftUI\n");
-    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "kept", name: "Kept", source: { kind: "path", path: "App.swift" } }]);
+    const [installed] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "kept", name: "Kept", source: { kind: "path", path: "App.swift" } }]);
     expect(installed!.isError).toBe(false);
 
     // F9: reads are disposable and stay available; a mutation would outlive the drain.

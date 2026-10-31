@@ -66,9 +66,12 @@ reaching the bound refuses without overwriting them. No SQLite migration occurs.
    staging, retired directories, temporary files and sources outside retained history.
    Cleanup after publication cannot turn its committed result into a failed receipt.
 
-The existing named tool `install` remains a v1-only contract. It can create or
-replace v1 source while keeping its data, but cannot update/downgrade v2.
-Reviewed Install App is the v2 install/update path.
+The tool has no direct `install` action and the store has no v1 creation writer.
+Reviewed Install App is the only source install/update path. Persisted v1 reads
+and explicit backed-up upgrades remain; no installed source or data is migrated
+by reading it. Historical tests seed retained corpus bytes, not a production v1
+writer. Current persistence and source-safety journeys use actual offer/review/
+install with selected instance fences.
 
 ## State and removal
 

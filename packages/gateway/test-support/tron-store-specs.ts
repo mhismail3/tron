@@ -1,5 +1,5 @@
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -325,9 +325,13 @@ export const STORES: readonly StoreSpec[] = [
     module: "gateway/apps", name: "store-swift-apps",
     paths: ["workspace/state/apps"],
     record: (home) => withWorkspace(home, async (workspace) => {
-      const apps = new SwiftAppStore(workspace, () => { throw new Error("The v1 corpus has no display offers"); });
-      await apps.install({ appId: CORPUS_IDS.app, name: "Corpus counter", source: "import SwiftUI\nstruct CounterApp: View { var body: some View { Text(\"0\") } }\n" });
-      await apps.commit({ appId: CORPUS_IDS.app, expectedRevision: 0, set: [{ key: "count", value: 3 }], remove: [] });
+      // Historical bytes are a retained reader oracle, not a reason to keep a v1 writer.
+      const destination = join((await workspace.describe()).root, "state/apps");
+      await cp(join(import.meta.dirname, "../test-fixtures/tron-corpus/home/workspace/state/apps"), destination, { recursive: true });
+      await chmod(destination, 0o700);
+      const directory = join(destination, CORPUS_IDS.app); await chmod(directory, 0o700);
+      for (const name of ["app.json", "App.swift", "data.sqlite"]) await chmod(join(directory, name), 0o600);
+      await workspace.markFeatureInitialized("apps");
     }),
     read: (home) => withWorkspace(home, async (workspace) => {
       const apps = new SwiftAppStore(workspace, () => { throw new Error("The v1 corpus has no display offers"); });
