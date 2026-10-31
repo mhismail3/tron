@@ -308,9 +308,10 @@ struct SettingsRendererView: View {
             },
             onApplyAgain: writableLayer(for: setting) == nil ? nil : { changeID in applyAgain(changeID, rowID: setting.id) }
         )
-        // Keep the presenting control's identity while its accepted change
-        // completes; replacing it with read-only would retire its child sheet.
-        .disabled(changingID != nil || previewingID != nil)
+        // Keep accepted changes serialized, but let a model card open its picker
+        // to browse while another setting's receipt is pending. `change` still
+        // rejects any new write until the current command completes.
+        .disabled((changingID != nil && !(modelConfiguration && setting.key == "model.ref[role=chat]")) || previewingID != nil)
     }
 
     // MARK: Reads and changes
