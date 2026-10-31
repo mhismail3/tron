@@ -343,7 +343,6 @@ enum AdministrativeDrainPresentation {
         case .providerLogin: singular = "provider login"
         case .automationDispatch: singular = "automation dispatch"
         case .automationTerminalPersistence: singular = "automation completion"
-        case .knowledgeObservation: singular = "knowledge observation"
         }
         return "\(count) \(singular)\(count == 1 ? "" : "s")"
     }

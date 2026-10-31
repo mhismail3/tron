@@ -272,7 +272,6 @@ package enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Send
     case providerLogin = "provider-login"
     case automationDispatch = "automation-dispatch"
     case automationTerminalPersistence = "automation-terminal-persistence"
-    case knowledgeObservation = "knowledge-observation"
 }
 
 package struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
