@@ -231,45 +231,43 @@ The batch covers those files. Genuine build/test errors and zero-test runs still
 
 ## Explicit Mac batches
 
-Home (the batch owner under [principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship))
-or Mohsin invokes `verify --batch` in a persistent, clean worktree on landed main history.
-Ensure a simulator-job slot is available (at most three across workers); the batch itself
-runs one lane at a time. No scheduled trigger exists yet. Prepare that worktree's pinned Gateway development dependencies;
-no application install, service restart, deployment or OTA command is part of a batch.
+Home ([P2 owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)) or Mohsin
+runs `verify --batch` in a persistent clean worktree on fetched, landed main history.
+No scheduler, application install, deployment, service restart, push or automatic main revert is included. Every terminal run emits JSON `batchResult`, head and report path;
+the Home caller must deliver it, including red/uncovered. The trigger is a separate owner.
 
-First invocation requires an explicit known-green `--base`; later invocations cannot
-override it. One repository-local record at `<git-common-dir>/verify/green.json` owns
-the previous green. A nonwaiting file lock refuses simultaneous batches. The command
-pins HEAD, records **all** commits in `base..HEAD` (including merged branches), then
-runs existing owners serially: all-lock verify, unsigned shipping-iOS compile, the UI
-runner's smoke set on those products, real-Gateway boundary and real-UI journeys, and
-fixture stop. Lanes absent from a repository are not invented. Mac/relay suites and the full
-default/nested Gateway suites are not lanes yet, so no batch is checkpoint-complete under
-[principles P1](../../docs/PRINCIPLES.md#p1-trunk-is-releasable-devices-run-checkpoints) until #2174 adds them. `--skip` is not accepted for batches.
+First use requires `--base <main-anchor>`, not a claim of prior green.
+`verify/covered.json` owns the last green/qualified head; `verify/green.json` records strict green. `--base` cannot override coverage. A nonwaiting `batch.lock`
+refuses overlap; same covered HEAD does nothing; `--plan` is read-only.
+After local pinned Gateway/relay dependency preparation, every required lane runs even
+after failures: locks/declared consumers (`verify --all`, not full Gateway), full default
+and nested Gateway Vitest separately, signed Mac integration build/tests, relay Workers
+Vitest, unsigned shipping iOS compile, UI smoke `checkpoint` (build/run), real-Gateway
+boundary and real-UI journeys (installation disabled). Mac execution uses scratch HOME/TMPDIR.
+Missing owners/reports, empty/skipped evidence, deferred lanes and failed setup/cleanup
+are **uncovered**. Otherwise **green** means all passed; **qualified** requires every failure
+to match an unexpired exact registry case/digest; **red** means unwaived failure. Qualified
+advances covered history, never green; expired/changed digests waive nothing.
+Immutable `<git-common-dir>/verify/batches/` reports retain commands, logs, range age,
+lane wall times and attribution host seconds; task cleanup never removes them.
 
-Each lane runs once per batch, not once per covered commit. The next batch reuses that
-worktree's incremental build products after the normal source-stamp checks. Same green
-HEAD runs nothing. Only complete success advances green. There is no prior green if
-initialization fails. Immutable run directories under `<git-common-dir>/verify/batches/`
-retain the exact range, commits/files, commands, wall times, logs and copied verify
-report; no task-worktree cleanup removes them. `--batch --plan` changes no state.
-
-Failure preserves completed lanes immediately and leaves green unchanged. In one
-disposable worktree, the failing lane is rerun at previous green and HEAD with local
-pinned dependencies, then bisected along main's first-parent integration commits only
-when the **same failure signature** reproduces. Other failures/setup errors are
-inconclusive; a failing baseline is pre-existing. A report never invents a culprit:
-it records proven integration/files or candidate commits. The worktree retains its
-incremental products between probes and cleans its own fixture/lane/products on exit.
-If an owner refuses cleanup or cleanup is interrupted, it preserves that worktree and
-journals its exact path and completed cleanup results in `attribution/progress.json`;
-resolve those owned resources before discarding it.
-A privacy-checked `scripts/tron work issue create` files the result; a refused or
-uncertain write is recorded before dispatch in `<git-common-dir>/verify/issue-writes/`,
-keyed by range/lane. Re-running that range retains the previous outcome, including an
-unfinished attempt; resolve uncertain GitHub state manually, never create blindly again.
-No unrelated worker waits,
-main is never reverted, and failed coverage is not silently skipped by changing base.
+iOS lanes release host slots between lanes (cap three). All slots busy at admission means
+deferred/uncovered, not a reservation or batch queue; races use the runner's owning lease.
+Unsigned compile composes `ios-test-lock.py --host-slot`; its owner lacks a simulator slot.
+Attribution follows coverage: probe one Vitest file plus anchored case filter, or an
+available XCTest class/method selector, at both ends and along main's first-parent chain.
+Never rerun a whole suite diagnostically. Missing selectors yield uncovered/inconclusive;
+setup errors or changed signatures are inconclusive, a failing baseline is pre-existing.
+A non-reproducing head retains flake attempts but needs a registry entry to qualify.
+Proof requires a two-parent landing-shaped range, identical signature twice at culprit
+and an observed good first parent; search costs approximately `ceil(log2(N)) + 3` probes; other history yields candidates only. Commit/lane/signature probes in `verify/probes/`
+and range memos in `verify/attributions/` prevent repeated work. Culprit files use
+`git diff <merge>^1 <merge>`; proof prepares local `revert/<sha>` via `git revert -m 1`,
+never pushing. Conflicts and refused/interrupted resource cleanup preserve the probe
+worktree and `attribution-*/progress.json` for exact-resource recovery.
+Guarded issue writes journal before dispatch in `verify/issue-writes/`, keyed by lane
+and normalized signature, not range. Later ranges comment on the same issue. Refused,
+uncertain or unfinished writes require reconciliation, never blind replay.
 
 ## Mutation sampling
 
@@ -286,7 +284,7 @@ deferred until a known-kill probe proves activation with pinned Vitest.
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-verify.py scripts/test-tron-verify-tiers.py`
+`scripts/tron test tooling scripts/test-tron-verify.py scripts/test-tron-verify-tiers.py scripts/test-tron-verify-batch.py`
 drives real Git/CLI fixtures: affected selection, known-bad small changes, zero-test
 refusal, reproducible digests, dirty planning, descendant cleanup, batch ranges/overlap,
 bisection and refused issue authority. The iOS stand-in compiles real Swift indexes
@@ -298,3 +296,5 @@ Hardware-free
 `scripts/test-ios-test-infrastructure.py HostSlotFixture RunnerFixture.test_run_forwards_bounded_host_slot_wait_before_simulator_work RunnerFixture.test_run_waits_for_a_host_slot_while_all_are_held`
 proves bounded acquisition cleanup, forwarding, the unchanged cap and default waiting.
 A fake Gateway runner covers `mutate` timeout/interrupt; logs: `test-results/verify-cli/`.
+Batch fixtures cover all lanes, case-only merge proof, issue/probe reuse, local revert,
+verdicts and interrupted cleanup preservation; logs: `test-results/verify-batch/`.
