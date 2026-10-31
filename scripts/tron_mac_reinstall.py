@@ -432,7 +432,7 @@ class MacPlatform:
             env = dict(os.environ, TRON_APP_PATH=str(app))
             command(['/bin/bash', REPO / 'scripts/verify-mac-install.sh', '--artifact-only'],
                     'artifact-validation', env=env)
-            command([REPO / 'packages/mac-app/scripts/test-signed-pi-payload-smoke.sh', app], 'signed-runtime-smoke')
+            command([REPO / 'packages/mac-app/scripts/verify-signed-pi-payload.sh', app], 'signed-runtime-smoke')
         # Include CodeResources: the Mach-O cdhash alone does not identify resources.
         return {'team': team[1], 'cdhash': cdhash[1],
                 'resources': digest_file(safe_path(app / 'Contents/_CodeSignature/CodeResources'))}
