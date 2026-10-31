@@ -164,6 +164,10 @@ It installs no app or payload. The one-shot binding requires the prepared
 `2138-profile-cutover-20261031T180029Z` backup and source `905e0510a6`.
 The source guard excludes only the cutover implementation, its ownership manifest
 and this documentation; executable Profile reader changes still refuse.
+Backups remain strictly owner-only 0600. Live Changes may retain exact hash-bound
+original 0600/0644 file modes beneath owner-only 0700 directories; cutover never
+changes their permissions. Failures print a bounded cause chain to Terminal;
+full diagnostics remain in the private controller log.
 
 `scripts/tron profile cutover --rollback` quits/drains again, restores exact backup
 files/SQL and restarts. A failed live check performs that recovery automatically.

@@ -24,16 +24,18 @@ export interface CutoverLifecycle {
   start(): Promise<void>;
   rpc(method: string, params: Record<string, unknown>): Promise<unknown>;
 }
-type Files = Record<string, { sha256: string }>;
+type Files = Record<string, { sha256: string; mode?: string }>;
 type Receipt = { phase: string; candidate: string; manifest: string };
 const digest = (bytes: string | Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const exists = async (path: string) => lstat(path).then(() => true, error => { if (error.code === "ENOENT") return false; throw error; });
-async function privateBytes(path: string): Promise<Buffer> {
+async function privateBytes(path: string, expectedMode = 0o600): Promise<Buffer> {
   const info = await lstat(path);
-  assert(info.isFile() && !info.isSymbolicLink() && info.uid === process.getuid?.() && (info.mode & 0o777) === 0o600 && info.size <= 64 * 1_048_576, "Unsafe or oversized cutover input");
+  assert([0o600, 0o644].includes(expectedMode), "Unsupported pinned source mode");
+  assert(info.isFile() && !info.isSymbolicLink() && info.uid === process.getuid?.() && (info.mode & 0o777) === expectedMode && info.size <= 64 * 1_048_576,
+    `Unsafe or oversized cutover input: ${path} (mode 0o${(info.mode & 0o777).toString(8)}; expected 0o${expectedMode.toString(8)})`);
   return readFile(path);
 }
-async function tree(root: string): Promise<Record<string, string>> {
+async function tree(root: string, pinnedModes?: Files): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
   async function walk(path: string): Promise<void> {
     const info = await lstat(path);
@@ -41,7 +43,10 @@ async function tree(root: string): Promise<Record<string, string>> {
     if (info.isDirectory()) {
       assert.equal(info.mode & 0o777, 0o700);
       for (const name of (await readdir(path)).sort()) await walk(join(path, name));
-    } else files[relative(root, path)] = digest(await privateBytes(path));
+    } else {
+      const name = relative(root, path), mode = pinnedModes?.[name]?.mode;
+      files[name] = digest(await privateBytes(path, mode === undefined ? 0o600 : Number(mode)));
+    }
   }
   await walk(root); return files;
 }
@@ -117,7 +122,9 @@ export class ProfileCutover {
   private expected(prefix: string, files: Files): Record<string, string> {
     return Object.fromEntries(Object.entries(files).filter(([name]) => !prefix || name.startsWith(prefix)).map(([name, value]) => [prefix ? name.slice(prefix.length) : name, value.sha256]));
   }
-  private async journalUnchanged(): Promise<void> { assert.deepEqual(await tree(this.journal), this.expected("", this.sourceFiles.changes), "Changes changed; refusing destructive rollback"); }
+  // Only the original, hash-bound live journal modes may differ from backup 0600.
+  // Every enclosing directory remains owner-only 0700; never chmod live state.
+  private async journalUnchanged(): Promise<void> { assert.deepEqual(await tree(this.journal, this.sourceFiles.changes), this.expected("", this.sourceFiles.changes), "Changes changed; refusing destructive rollback"); }
   private async namespaceUnchanged(): Promise<void> {
     const namespace = JSON.parse((await privateBytes(join(this.backup, "namespace-manifest.json"))).toString()) as { namespace: Record<string, { present: boolean; sha256?: string }> };
     for (const name of ["gateway/workspace-state/initialized.json", "gateway/workspace-state/profile-initialized.json"]) {

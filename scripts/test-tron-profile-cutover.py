@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """CLI, process bridge and inherited exclusion; never invokes native Mac lifecycle."""
 from pathlib import Path
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import os
 import subprocess
 import sys
@@ -95,6 +97,14 @@ assert reply['result']['method']=='home.profileList'
             self.assertEqual(run_controller([sys.executable, '-c', child], FixtureLifecycle(), log, (), dict(os.environ)), 0)
             self.assertIn('fixture quit', log.read_text())
             self.assertIn('fixture start', log.read_text())
+
+    def test_child_failure_visible_on_terminal(self):
+        message = 'Unsafe or oversized cutover input: changes/000003.jsonl (mode 0o644; expected 0o600)'
+        child = 'import json,sys;print(json.dumps({"error":sys.argv[1]}),flush=True);sys.exit(1)'
+        with tempfile.TemporaryDirectory() as temp, redirect_stderr(io.StringIO()) as terminal, redirect_stdout(io.StringIO()):
+            code = run_controller([sys.executable, '-c', child, message], None, Path(temp) / 'log', (), dict(os.environ))
+        self.assertEqual(code, 1)
+        self.assertIn('profile cutover: ' + message, terminal.getvalue())
 
     def test_child_keeps_both_leases_after_controller_death(self):
         with tempfile.TemporaryDirectory() as temp:

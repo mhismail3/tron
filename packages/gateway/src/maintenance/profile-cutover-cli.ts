@@ -29,5 +29,11 @@ try {
     process.stdout.write(JSON.stringify({ result }) + "\n");
   }
 } catch (error) {
-  console.error(error); process.exitCode = 1;
+  console.error(error); // full diagnostics stay in the private controller log
+  const causes: string[] = [];
+  for (let count = 0; count < 3 && error instanceof Error; count++, error = error.cause) {
+    causes.push(error.message.split("\n")[0]!.slice(0, 1_000));
+  }
+  process.stdout.write(JSON.stringify({ error: causes.join("; caused by ") || "Unknown cutover failure" }) + "\n");
+  process.exitCode = 1;
 } finally { input.close(); }
