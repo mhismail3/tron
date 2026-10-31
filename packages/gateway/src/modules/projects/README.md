@@ -142,6 +142,10 @@ journey runs with real Git but no `gh` on PATH and proves exit 4 leaves a real l
 repository without remotes or trust. The success journey proves exact CLI arguments
 and remote publication. These test Gateway handling, not the installed GitHub CLI's
 authentication implementation; neither requires `gh`, Keychain or Seatbelt.
+The list scale journey publishes one real task, derives 299 persisted input records
+from those canonical bytes/name, then validates all 300 through the real Home reader.
+It measures list reads, not sequential task admission and durability; the calibrated
+bound and protection against per-folder/per-page history rescans remain unchanged.
 Native cases invoke the real Gateway module route, receipts and exact native decisions:
 create → trust → rename → untrust → archive, deny/replay, actual move eligibility,
 unsupported folders, authenticated actor provenance and disconnect ownership.

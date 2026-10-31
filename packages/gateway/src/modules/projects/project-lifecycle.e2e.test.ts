@@ -26,7 +26,12 @@ const exec = promisify(execFile);
 const artifact = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/project-lifecycle/report.json");
 const evidence: unknown[] = [];
 const roots: string[] = [];
-afterEach(async () => { await disposeFixtures(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => {
+  const disposals = await Promise.allSettled([disposeFixtures()]);
+  const removals = await Promise.allSettled(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+  const failures = [...disposals, ...removals].flatMap(result => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length) throw new AggregateError(failures, "project fixture teardown failed");
+});
 afterAll(async () => { await mkdir(dirname(artifact), { recursive: true }); await writeFile(artifact, JSON.stringify(evidence, null, 2)); });
 let command = 0;
 const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
@@ -307,11 +312,23 @@ if (args.includes("worktree")) {
     const store = (homeOwnerOf(f.registry) as unknown as { tasks: { store: { initialize(): Promise<boolean>; put(record: unknown, expected: number | null): Promise<unknown> } } }).tasks.store;
     await store.initialize();
     const intent = { text: "x".repeat(8_000) };
-    for (let index = 0; index < 300; index += 1) {
-      await store.put({ version: 1, taskId: `history-${index}`, revision: 1, homeId: "home", generation: 1, routeGeneration: 1, intent,
-        intentDigest: createHash("sha256").update(intent.text).digest("hex"), target: f.root, grantRef: null, scopeRef: null,
-        lifecycle: "pending", sessionId: null, operationId: null, stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null }, null);
-    }
+    await store.put({ version: 1, taskId: "history-0", revision: 1, homeId: "home", generation: 1, routeGeneration: 1, intent,
+      intentDigest: createHash("sha256").update(intent.text).digest("hex"), target: f.root, grantRef: null, scopeRef: null,
+      lifecycle: "pending", sessionId: null, operationId: null, stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null }, null);
+    // This is a persisted-history read oracle, not 300 sequential admissions.
+    // Derive fixture bytes/name from one real publication; production readers
+    // still validate every record. Do not copy the store's filename algorithm.
+    const directory = join(f.tronHome, "gateway", "home", "tasks");
+    const templateName = (await readdir(directory)).find(name => name.endsWith("-history-0.json"))!;
+    const template = JSON.parse(await readFile(join(directory, templateName), "utf8"));
+    const publications = await Promise.allSettled(Array.from({ length: 299 }, async (_, offset) => {
+      const taskId = `history-${offset + 1}`;
+      await writeFile(join(directory, templateName.replace(/-history-0\.json$/, `-${taskId}.json`)),
+        JSON.stringify({ ...template, taskId }), { mode: 0o600 });
+    }));
+    const publicationFailure = publications.find(result => result.status === "rejected");
+    if (publicationFailure?.status === "rejected") throw publicationFailure.reason;
+    expect((await homeOwnerOf(f.registry).taskList({ limit: 1 })).counts.active).toBe(300);
     const pass = await best(async () => {
       const started = performance.now();
       await homeOwnerOf(f.registry).taskList({ limit: 50 });
