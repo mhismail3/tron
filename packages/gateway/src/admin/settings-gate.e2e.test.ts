@@ -291,6 +291,7 @@ describe("typed settings at real runtime boundaries", () => {
     // Without a loaded chapter, every selectable name is still offered.
     const unloaded = (await options()).options;
     expect(unloaded.map(option => option.value)).toEqual([...HOME_TOOL_NAMES]);
+    expect(unloaded.map(option => option.value)).not.toContain("knowledge");
     const home = await f.designateHome();
     const registered = new Map(home.runtime.session.getAllTools().map(tool => [tool.name, tool.description]));
     const described = (await options()).options;

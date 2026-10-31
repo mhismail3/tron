@@ -326,7 +326,7 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
 function createHomeResearchModule(services: () => HomeModuleServices): ModuleDescriptor {
   return {
     name: "tron-home-research",
-    purpose: "Adds Home\'s read-only session search and cited-entry reading.",
+    purpose: "Adds Home's read-only session search and cited-entry reading.",
     tools: ["session_search", "session_read"], commands: [],
     start: () => ({ extension: () => {
       const owners = services();

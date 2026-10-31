@@ -14,7 +14,7 @@ it("workspace-state-paths: initialize, mark features, admission and availability
   const log = await storePathLock({ module: "gateway/workspace", name: "workspace-state-paths", testFileUrl: import.meta.url, owned: "gateway/workspace-state" });
   const state = join(log.home, "gateway", "workspace-state");
   const root = join(log.home, "workspace");
-  const features: TronWorkspaceFeature[] = ["knowledge", "episodic", "home-tasks", "apps"];
+  const features: TronWorkspaceFeature[] = ["profile", "episodic", "home-tasks", "apps"];
   const opened: TronWorkspace[] = [];
   const open = () => {
     const causes: TronWorkspaceUnavailableCause[] = [];
@@ -33,7 +33,7 @@ it("workspace-state-paths: initialize, mark features, admission and availability
     await log.step("no feature is initialized", () => initialized(first.workspace));
     await log.step("mark home-tasks", () => first.workspace.markFeatureInitialized("home-tasks"), "result");
     await log.step("mark home-tasks again is unchanged", () => first.workspace.markFeatureInitialized("home-tasks"), "result");
-    await log.step("mark knowledge rewrites the shared record", () => first.workspace.markFeatureInitialized("knowledge"), "result");
+    await log.step("mark Profile writes its separate feature record", () => first.workspace.markFeatureInitialized("profile"), "result");
     await log.step("mark apps twice at once", () => Promise.all([first.workspace.markFeatureInitialized("apps"), first.workspace.markFeatureInitialized("apps")]), "result");
     await log.step("marked features are initialized", () => initialized(first.workspace));
     await log.step("a second owner of the same home is unavailable", () => availability(open()));
@@ -64,20 +64,23 @@ it("workspace-state-paths: initialize, mark features, admission and availability
       return results;
     });
     await log.step("marking over an invalid feature marker is refused", () => first.workspace.markFeatureInitialized("episodic"), "refused");
+    await log.step("dispose closes the workspace", async () => { await first.workspace.dispose(); return first.workspace.describe(); });
+    await log.step("dispose again is unchanged", () => first.workspace.dispose(), "result");
     const shared: Array<[string, unknown]> = [["version 1", { version: 1 }], ["knowledge false", { version: 1, knowledgeInitialized: false }],
       ["knowledge true", { version: 1, knowledgeInitialized: true }], ["another key", { version: 1, extra: true }], ["version 2", { version: 2 }],
       ["knowledge text", { version: 1, knowledgeInitialized: "yes" }], ["a list", [{ version: 1 }]]];
-    await log.step("hand-written shared records", async () => {
+    await log.step("hand-written shared records require fresh-owner admission", async () => {
       const results: Record<string, unknown> = {};
       for (const [label, value] of shared) {
         await marker("initialized.json", value);
-        results[label] = await first.workspace.featureInitialized("knowledge").catch((error: Error) => `refused: ${error.message}`);
+        const next = open();
+        try {
+          results[label] = { ...await availability(next),
+            profileInitialized: await next.workspace.featureInitialized("profile").catch((error: Error) => `refused: ${error.message}`) };
+        } finally { await next.workspace.dispose(); }
       }
       return results;
     });
-    await log.step("dispose closes the workspace", async () => { await first.workspace.dispose(); return first.workspace.describe(); });
-    await log.step("dispose again is unchanged", () => first.workspace.dispose(), "result");
-
     await log.step("an invalid shared record makes the workspace unavailable", () => availability(open()));
     await marker("initialized.json", { version: 1 });
     await log.step("a valid shared record admits a new owner", async () => {

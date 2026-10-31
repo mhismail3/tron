@@ -5,7 +5,7 @@ import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
  * tool defaults cannot grant or remove Home's curated capabilities. */
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "schedule", "profile",
-  "web_search", "session_search", "session_read", "knowledge", "settings", "projects",
+  "web_search", "session_search", "session_read", "settings", "projects",
   "read", "write", "edit", "bash", "grep", "find", "ls",
 ];
 

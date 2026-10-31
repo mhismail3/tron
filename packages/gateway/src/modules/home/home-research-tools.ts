@@ -6,7 +6,7 @@ import type { HomeSessionReader, HomeSessionReadRequest } from "./home-session-r
 import type { SessionSearchRequest, SessionSearchResponse } from "../../sessions/session-search-contract.js";
 
 /*
- * Home's cited-session and Knowledge research tools. Generic file and shell
+ * Home's cited-session research tools. Generic file and shell
  * operations use the shared Pi tools, not a second Home-only reader.
  *
  * The same seam rules as the memory tools apply (home-memory-tools.ts): the tool

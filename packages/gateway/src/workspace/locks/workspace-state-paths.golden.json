@@ -41,7 +41,7 @@
     {
       "step": "no feature is initialized",
       "result": {
-        "knowledge": false,
+        "profile": false,
         "episodic": false,
         "home-tasks": false,
         "apps": false
@@ -77,15 +77,17 @@
       }
     },
     {
-      "step": "mark knowledge rewrites the shared record",
+      "step": "mark Profile writes its separate feature record",
       "result": "<void>",
       "files": {
         "gateway/workspace-state/home-tasks-initialized.json": {
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -103,15 +105,17 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
     {
       "step": "marked features are initialized",
       "result": {
-        "knowledge": true,
+        "profile": true,
         "episodic": false,
         "home-tasks": true,
         "apps": true
@@ -124,8 +128,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -149,8 +155,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -170,8 +178,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -186,8 +196,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -207,8 +219,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -223,8 +237,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -244,8 +260,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -268,8 +286,10 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -285,35 +305,11 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
-          "version": 1,
-          "knowledgeInitialized": true
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
-      }
-    },
-    {
-      "step": "hand-written shared records",
-      "result": {
-        "version 1": false,
-        "knowledge false": false,
-        "knowledge true": true,
-        "another key": "refused: knowledge: invalid initialization record",
-        "version 2": "refused: knowledge: invalid initialization record",
-        "knowledge text": "refused: knowledge: invalid initialization record",
-        "a list": "refused: knowledge: invalid initialization record"
-      },
-      "files": {
-        "gateway/workspace-state/apps-initialized.json": {
-          "version": 1
-        },
-        "gateway/workspace-state/episodic-initialized.json": {},
-        "gateway/workspace-state/home-tasks-initialized.json": {
-          "version": 1
-        },
-        "gateway/workspace-state/initialized.json": [
-          {
-            "version": 1
-          }
-        ]
       }
     },
     {
@@ -331,11 +327,12 @@
         "gateway/workspace-state/home-tasks-initialized.json": {
           "version": 1
         },
-        "gateway/workspace-state/initialized.json": [
-          {
-            "version": 1
-          }
-        ]
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
+        }
       }
     },
     {
@@ -349,11 +346,108 @@
         "gateway/workspace-state/home-tasks-initialized.json": {
           "version": 1
         },
+        "gateway/workspace-state/initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
+        }
+      }
+    },
+    {
+      "step": "hand-written shared records require fresh-owner admission",
+      "result": {
+        "version 1": {
+          "describe": {
+            "root": "<tmp>/home/workspace",
+            "available": true
+          },
+          "causes": [],
+          "profileInitialized": true
+        },
+        "knowledge false": {
+          "describe": {
+            "root": "<tmp>/home/workspace",
+            "available": false,
+            "reason": "unavailable"
+          },
+          "causes": [
+            "invalid-record"
+          ],
+          "profileInitialized": "refused: profile: Tron workspace is unavailable"
+        },
+        "knowledge true": {
+          "describe": {
+            "root": "<tmp>/home/workspace",
+            "available": false,
+            "reason": "unavailable"
+          },
+          "causes": [
+            "invalid-record"
+          ],
+          "profileInitialized": "refused: profile: Tron workspace is unavailable"
+        },
+        "another key": {
+          "describe": {
+            "root": "<tmp>/home/workspace",
+            "available": false,
+            "reason": "unavailable"
+          },
+          "causes": [
+            "invalid-record"
+          ],
+          "profileInitialized": "refused: profile: Tron workspace is unavailable"
+        },
+        "version 2": {
+          "describe": {
+            "root": "<tmp>/home/workspace",
+            "available": false,
+            "reason": "unavailable"
+          },
+          "causes": [
+            "invalid-record"
+          ],
+          "profileInitialized": "refused: profile: Tron workspace is unavailable"
+        },
+        "knowledge text": {
+          "describe": {
+            "root": "<tmp>/home/workspace",
+            "available": false,
+            "reason": "unavailable"
+          },
+          "causes": [
+            "invalid-record"
+          ],
+          "profileInitialized": "refused: profile: Tron workspace is unavailable"
+        },
+        "a list": {
+          "describe": {
+            "root": "<tmp>/home/workspace",
+            "available": false,
+            "reason": "unavailable"
+          },
+          "causes": [
+            "invalid-record"
+          ],
+          "profileInitialized": "refused: profile: Tron workspace is unavailable"
+        }
+      },
+      "files": {
+        "gateway/workspace-state/apps-initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/episodic-initialized.json": {},
+        "gateway/workspace-state/home-tasks-initialized.json": {
+          "version": 1
+        },
         "gateway/workspace-state/initialized.json": [
           {
             "version": 1
           }
-        ]
+        ],
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
+        }
       }
     },
     {
@@ -380,7 +474,10 @@
           {
             "version": 1
           }
-        ]
+        ],
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
+        }
       }
     },
     {
@@ -401,6 +498,9 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
           "version": 1
         }
       }
@@ -427,6 +527,9 @@
         },
         "gateway/workspace-state/initialized.json": {
           "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -446,6 +549,9 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
           "version": 1
         }
       }
@@ -472,6 +578,9 @@
         },
         "gateway/workspace-state/initialized.json": {
           "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
+          "version": 1
         }
       }
     },
@@ -496,6 +605,9 @@
           "version": 1
         },
         "gateway/workspace-state/initialized.json": {
+          "version": 1
+        },
+        "gateway/workspace-state/profile-initialized.json": {
           "version": 1
         }
       }

@@ -199,6 +199,40 @@ class Retirement(unittest.TestCase):
                 self.assertFalse(self.files.exists()); self.assertFalse(self.profile.exists())
                 shutil.rmtree(self.backup)
 
+    def assert_configured_scope_refusal(self, field, excluded):
+        control = json.loads(json.dumps(self.control))
+        control['config']['eligibility'][field] = [excluded]
+        with sqlite3.connect(self.catalog) as db:
+            db.execute('UPDATE control SET value=? WHERE id=1', (json.dumps(control),))
+            head = json.loads(db.execute("SELECT value FROM entries WHERE collection='records' AND key=?", (json.dumps('source'),)).fetchone()[0])
+            if field == 'excludedSessionIds':
+                head['sessionId'] = excluded
+            else:
+                head['scope'] = 'project'
+                head['projectId'] = excluded
+            db.execute("UPDATE entries SET value=? WHERE collection='records' AND key=?", (json.dumps(head), json.dumps('source')))
+        for index in range(2):
+            path = self.store / 'records/source' / (self.revision('source', index) + '.json')
+            source = json.loads(path.read_bytes())
+            if field == 'excludedSessionIds':
+                source['provenance']['sessionId'] = excluded
+            else:
+                source['scope'] = 'project'
+                source['provenance']['source'] = excluded
+            self.write(path, json.dumps(source).encode())
+        before = self.catalog.read_bytes()
+        result = self.run_command(ok=False)
+        self.assertIn('privacy disposition', result.stderr)
+        self.assertEqual(self.catalog.read_bytes(), before)
+        self.assertFalse(self.files.exists()); self.assertFalse(self.profile.exists())
+        self.assertTrue(self.store.exists())
+
+    def test_configured_session_exclusion_refuses_plaintext_without_disposition(self):
+        self.assert_configured_scope_refusal('excludedSessionIds', 'private-session')
+
+    def test_configured_project_exclusion_refuses_plaintext_without_disposition(self):
+        self.assert_configured_scope_refusal('excludedProjectIds', 'private-project')
+
     def test_normal_file_search_citations_private_modes_and_explicit_deletion(self):
         self.run_command()
         found = subprocess.run(['rg', '--files-with-matches', 'Café', str(self.files / 'sources')], capture_output=True, text=True, check=True)

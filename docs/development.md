@@ -242,7 +242,9 @@ before the **Knowledge namespace rename**, the cutover boundary. Resumable clean
 removes only that retired namespace; the archive retains original and orphan bytes.
 Verification checks exact exported files, note bytes, Profile controls, receipts and
 backup paths. Sealed reruns refuse deleted exports rather than restoring them.
-Suppression or scope exclusions refuse plaintext export pending explicit disposition.
+Suppression, scope-exclusion rows and configured excluded session/project IDs
+refuse plaintext export pending explicit disposition; missing or unknown eligibility
+controls refuse as well. The converter never clears privacy controls automatically.
 The new runtime reads only current Profile format and refuses either old namespace;
 it never converts at startup or falls back to the recovery archive.
 

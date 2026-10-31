@@ -225,6 +225,13 @@ def record_payloads(archive, conn):
 def export_sources(archive, files, expected, verify_only=False):
     conn, _ = database(archive)
     try:
+        control = json.loads(conn.execute('SELECT value FROM control WHERE id=1').fetchone()[0])
+        eligibility = control.get('config', {}).get('eligibility')
+        names = {'excludedSessionIds', 'excludedProjectIds'}
+        if not isinstance(eligibility, dict) or set(eligibility) != names or any(not isinstance(eligibility[name], list) or any(not isinstance(item, str) for item in eligibility[name]) for name in names):
+            raise ValueError('Invalid eligibility privacy controls')
+        if any(eligibility[name] for name in names):
+            raise ValueError('Configured scope exclusions need explicit privacy disposition before plain-file export')
         retired = {identity for identity, head in heads(conn).items() if head['kind'] != 'note'}
         for collection, key, value in rows(conn):
             if collection == 'suppressions' and json.loads(key) in retired:
