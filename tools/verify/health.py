@@ -87,7 +87,7 @@ def deploy(main: str, mac: dict | None, iphone: dict | None) -> dict:
 
 def score(main: str, reports: list[dict], mac: dict | None, iphone: dict | None) -> dict:
     exact = [r for r in reports if r.get('commit') == main and r.get('schema') == 'tron.verify.v1']
-    verdicts = Counter(r.get('verdict') if r.get('verdict') in ('passed', 'quarantined', 'failed', 'running', 'interrupted', 'incomplete') else 'unknown' for r in exact)
+    verdicts = Counter(r.get('verdict') if r.get('verdict') in ('passed', 'quarantined', 'expired', 'deferred', 'failed', 'running', 'interrupted', 'incomplete') else 'unknown' for r in exact)
     quarantined, waived, failures, attempts = set(), set(), set(), defaultdict(list)
     harness = 0
     gaps = []
@@ -96,6 +96,8 @@ def score(main: str, reports: list[dict], mac: dict | None, iphone: dict | None)
         if report.get('sourceRefusal') in ('registry-expired', 'registry-invalid'):
             refusals[report['sourceRefusal']] += 1
             gaps.append(report['sourceRefusal'])
+        if report.get('expiredEntries'):
+            gaps.append('expired registry entries block checkpoints')
         if report.get('skipped') or report.get('selection', {}).get('deferredTests'):
             gaps.append('skipped or deferred tests')
         if report.get('selection', {}).get('docsOnly'):
@@ -103,7 +105,7 @@ def score(main: str, reports: list[dict], mac: dict | None, iphone: dict | None)
         if report.get('verdict') not in ('passed', 'quarantined'):
             gaps.append('non-complete verifier outcome retained')
         for step in report.get('steps', []):
-            if step.get('status') in ('skipped', 'running', 'interrupted') and step.get('name', '').startswith('tests:'):
+            if step.get('status') in ('skipped', 'deferred', 'running', 'interrupted') and step.get('name', '').startswith('tests:'):
                 gaps.append('missing or interrupted test lane')
             qualified = {hashlib.sha256(q['testId'].encode()).hexdigest() for q in step.get('quarantined', [])}
             quarantined.update(qualified)

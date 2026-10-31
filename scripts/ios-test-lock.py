@@ -170,7 +170,7 @@ def format_slots(holders: list[str | None]) -> str:
     )
 
 
-def take_host_slot(interrupted: Callable[[], bool], resource: str) -> tuple[int, IO[str]] | None:
+def take_host_slot(interrupted: Callable[[], bool], resource: str, wait_seconds: float | None = None) -> tuple[int, IO[str]] | None:
     """Take any free host slot, waiting for one; None if a signal ended the wait.
 
     The scan is a non-blocking flock on each slot in turn, so the kernel is the
@@ -206,7 +206,10 @@ def take_host_slot(interrupted: Callable[[], bool], resource: str) -> tuple[int,
                 file=sys.stderr, flush=True,
             )
             next_report = now + HOST_SLOT_REPORT_SECONDS
-        time.sleep(HOST_SLOT_POLL_SECONDS)
+        if wait_seconds is not None and now - began >= wait_seconds:
+            print(f"{resource}: host slot wait expired; deferred", file=sys.stderr, flush=True)
+            return None
+        time.sleep(HOST_SLOT_POLL_SECONDS if wait_seconds is None else min(HOST_SLOT_POLL_SECONDS, max(0, wait_seconds - (now - began))))
     return None
 
 
@@ -374,6 +377,8 @@ def main() -> int:
     parser.add_argument("--worktree", help="the worktree whose command holds the lease, named when it is contended")
     parser.add_argument("--host-slot", action="store_true",
                         help=f"also take one of the {HOST_SLOTS} host-wide simulator slots, waiting for one, before the command starts")
+    parser.add_argument("--host-slot-wait-seconds", type=float,
+                        help="bound host-slot acquisition only; exit 73 if unavailable (default: wait indefinitely)")
     parser.add_argument("--list-host-slots", action="store_true",
                         help="take nothing: print who holds each host-wide simulator slot")
     parser.add_argument("--remove-empty-lane", action="store_true",
@@ -384,6 +389,10 @@ def main() -> int:
     arguments = parser.parse_args()
     if arguments.command[:1] == ["--"]:
         arguments.command = arguments.command[1:]
+    if arguments.host_slot_wait_seconds is not None:
+        import math
+        if not math.isfinite(arguments.host_slot_wait_seconds) or arguments.host_slot_wait_seconds < 0 or not arguments.host_slot:
+            parser.error("--host-slot-wait-seconds needs --host-slot and a finite nonnegative value")
     if arguments.list_host_slots:
         if arguments.command:
             parser.error("--list-host-slots takes no command")
@@ -471,9 +480,9 @@ def main() -> int:
                 # command.
                 metadata["waiting_for_host_slot"] = True
                 write_metadata(handle, metadata)
-                taken = take_host_slot(lambda: interrupted is not None, arguments.resource)
+                taken = take_host_slot(lambda: interrupted is not None, arguments.resource, arguments.host_slot_wait_seconds)
                 if taken is None:
-                    return 128 + (interrupted or 0)
+                    return 128 + interrupted if interrupted is not None else LOCKED_EXIT
                 slot_index, slot = taken
                 write_metadata(slot, {
                     "schema": "tron.ios-host-slot.v1",
