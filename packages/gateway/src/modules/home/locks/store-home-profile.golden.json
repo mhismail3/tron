@@ -21,7 +21,7 @@
     },
     {
       "path": "workspace/state/profile/catalog-<id>.sqlite",
-      "content": "<49152 bytes>"
+      "content": "<36864 bytes>"
     },
     {
       "path": "workspace/state/profile/initialized.json",
