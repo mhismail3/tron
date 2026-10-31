@@ -152,7 +152,28 @@ storage, verify the candidate and receipt fences, then publish it and remove the
 retired namespace from the runtime path. No archive path enters Profile control.
 The runtime replacement alone is not cutover admission proof or permission to run it.
 
-Before resuming writers, rollback restores the preserved namespace and matching
-old runtime together. After new writes, do not overwrite the file with an older
-snapshot: stop and plan an explicit forward reconciliation. Offline conversion,
+### Maintainer Terminal command
+
+`scripts/tron profile cutover --plan` validates the bound prepared backup and
+prints before/after, hashes, paths and recovery. `--apply` is the explicit Terminal
+approval: it uses the existing coordinated Mac Quit/drain, takes canonical Gateway
+and workspace writer leases plus the legacy SQLite exclusive transaction, publishes
+the validated candidate, restarts the installed app and verifies real Profile and
+Changes RPCs, native index/exact-record reads and new-process Profile diagnostics.
+It installs no app or payload. The one-shot binding requires the prepared
+`2138-profile-cutover-20261031T180029Z` backup and source `905e0510a6`.
+
+`scripts/tron profile cutover --rollback` quits/drains again, restores exact backup
+files/SQL and restarts. A failed live check performs that recovery automatically.
+Changed Profile or Changes bytes refuse destructive rollback and retain the data
+for forward reconciliation; the command reports failure, never successful recovery.
+Interrupted operations retain a private receipt and preserved namespace under
+`~/.tron-maintenance/profile-cutover/`. This data-only rollback restores the original
+legacy-Profile offline refusal under the current runtime, not a compatible old build.
+Agents may prepare/test this path but never invoke its live apply/rollback.
+
+Restoring legacy Profile functionality, rather than just its data, requires the
+preserved namespace and matching old runtime together before resuming Profile
+writers. After new writes, do not overwrite the file with an older snapshot: stop
+and plan an explicit forward reconciliation. Offline conversion,
 archive writes, rollback and live activation each remain maintainer actions.
