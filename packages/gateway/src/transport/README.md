@@ -128,8 +128,9 @@ scripts/tron test gateway src/transport/sync-protocol.integration.test.ts \
 ```
 
 `sync-protocol.integration.test.ts` covers the barrier and the retiring mobile open;
-`server-http-lifecycle.integration.test.ts` exercises the real 15 s header, 30 s
-body-idle and 300 s request deadlines (its five-minute trickling body is intended).
+`server-http-lifecycle.integration.test.ts` exercises real header and whole-request
+expiry (15 s / 300 s); body-idle checks the 30 s configuration and drives Node's
+socket timeout event through real incomplete-body teardown without a wall-clock assertion.
 Behavior locks: `transport.lock.integration.test.ts`,
 `transport.store.lock.integration.test.ts`, `command-receipts.lock.integration.test.ts`.
 

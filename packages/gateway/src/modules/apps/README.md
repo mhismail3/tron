@@ -93,7 +93,11 @@ The feed probe compiles once per file in bounded asynchronous suite preparation,
 with a private compiler cache removed at suite teardown. Each native invocation
 still starts a fresh interpreter process; compilation is not part of either
 15-second feed journey's behavior deadline. No built artifact survives the run.
-Artifacts: `test-results/apps-install/report.json`.
+The 199-offer capacity journey joins RuntimeSlot state changes and bounds real
+metadata synchronization work to 812 operations (four per offer plus fixed turn/store
+initialization); host elapsed time is not its oracle. It still checks all 200 offers,
+canonical deletion, byte reclamation, live/installed retention and capacity reuse.
+Artifacts: `test-results/apps-install/report.json` includes the observed sync count.
 Fixture kill cuts release the workspace lease first; they do not prove whole-Gateway
 ungraceful crash or power-loss recovery.
 
