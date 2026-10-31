@@ -158,9 +158,15 @@ their respective Session scopes. Compaction snapshot provenance uses `session`,
 ```bash
 scripts/ios-gateway-e2e-test all        # prepare, build, run RealGatewayPiBoundaryTests
 scripts/ios-gateway-e2e-test iterate    # after an affected Swift edit
+scripts/ios-gateway-e2e-test all --only-testing TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness
 scripts/ios-gateway-e2e-test run-lan    # the two-lane case; needs a private LAN address
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/<method>
 ```
+
+`--only-testing` selects exact owned methods, repeats in requested order and survives
+lease re-execution. Boundary `run`/`all`/`iterate` own the two default methods;
+`run-lan` owns only its LAN method, while `run-ui` owns its UI journeys. No selector
+means each command keeps its existing default sequence; foreign, class and suite selectors refuse.
 
 `run-ui` pairs the production scene against a fresh fixture per journey, leaving
 `results/<utc>-ui.*`. The invitation journey checks sent transcript content rather

@@ -4374,8 +4374,8 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
 
     def test_only_testing_refuses_a_selector_run_ui_does_not_own(self) -> None:
         """The journeys are `run-ui`'s alone — a selector for anything else, a
-        missing owner, or a selector on another command is refused before
-        anything is leased, built or renewed."""
+        missing owner, or a method from another command's catalog is refused
+        before anything is leased, built or renewed."""
         class_owner = "TronMobileUITests/RealGatewayPairAndChatUITests"
         unsupported = self.e2e("run-ui", "--only-testing", class_owner, environment=self.environment)
         self.assertEqual(unsupported.returncode, 1, unsupported.stdout + unsupported.stderr)
@@ -4385,11 +4385,76 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.assertIn("is not a real-UI journey this command owns", foreign.stderr)
         refused = self.e2e("run", "--only-testing", self.owned_ui_journeys()[0], environment=self.environment)
         self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
-        self.assertIn("--only-testing applies to run-ui", refused.stderr)
+        self.assertIn("is not a boundary method this command owns", refused.stderr)
         missing = self.e2e("run-ui", "--only-testing", environment=self.environment)
         self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
         self.assertIn("--only-testing requires an owner", missing.stderr)
         self.assertFalse((self.state / "simulator.json").exists(), "a refused selection must not lease or boot a lane")
+        self.assert_no_fixture_renewed()
+
+    def boundary_selection_run(self, command: str, selectors: list[str]) -> list[str]:
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        # Test-only old-source injection preserves a meaningful fail-before witness.
+        if os.environ.get("TRON_BOUNDARY_HARNESS_UNDER_TEST"):
+            shutil.copy2(os.environ["TRON_BOUNDARY_HARNESS_UNDER_TEST"], harness)
+        (worktree / "packages/ios-app").mkdir()
+        self.runnable_products(worktree)
+        calls = self.root / "boundary-selection-calls.txt"
+        environment = self.readiness_node_environment(self.environment)
+        environment["FAKE_XCODEBUILD_CALLS"] = str(calls)
+        try:
+            result = self.e2e(command, *(arg for owner in selectors for arg in ("--only-testing", owner)),
+                              harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return calls.read_text().splitlines()
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_boundary_default_still_runs_both_owned_methods_in_order(self) -> None:
+        self.assertEqual(self.boundary_selection_run("run", []), [
+            "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+            "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness",
+        ])
+
+    def test_boundary_selector_survives_lease_reexec_and_runs_only_requested_method(self) -> None:
+        owner = "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
+        self.assertEqual(self.boundary_selection_run("run", [owner]), [owner])
+
+    def test_boundary_repeated_selectors_preserve_requested_order(self) -> None:
+        owners = ["TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness",
+                  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"]
+        self.assertEqual(self.boundary_selection_run("run", owners), owners)
+
+    def test_boundary_all_builds_then_runs_only_selected_method(self) -> None:
+        owner = "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
+        self.assertEqual(self.boundary_selection_run("all", [owner]), [owner])
+
+    def test_boundary_iterate_builds_then_runs_only_selected_method(self) -> None:
+        owner = "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
+        self.assertEqual(self.boundary_selection_run("iterate", [owner]), [owner])
+
+    def test_boundary_lan_default_still_runs_its_single_method(self) -> None:
+        self.assertEqual(self.boundary_selection_run("run-lan", []), [
+            "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes",
+        ])
+
+    def test_boundary_lan_selector_keeps_its_single_method(self) -> None:
+        owner = "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
+        self.assertEqual(self.boundary_selection_run("run-lan", [owner]), [owner])
+
+    def test_boundary_selector_refuses_class_foreign_and_wrong_command_methods(self) -> None:
+        for command, selector in [
+            ("run", "TronMobileE2ETests/RealGatewayPiBoundaryTests"),
+            ("run", "TronMobileE2ETests/RealGatewayPiBoundaryTests/testNotOwned"),
+            ("run", "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"),
+            ("run-ui", "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"),
+        ]:
+            with self.subTest(command=command, selector=selector):
+                result = self.e2e(command, "--only-testing", selector)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("this command owns", result.stderr)
+        self.assertFalse((self.state / "simulator.json").exists())
         self.assert_no_fixture_renewed()
 
     def test_each_worktree_owns_its_default_fixture_and_products(self) -> None:

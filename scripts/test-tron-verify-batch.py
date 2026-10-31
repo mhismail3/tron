@@ -410,6 +410,26 @@ if sys.argv[1] == 'run-ui' and Path('ui-bad').exists():
         self.assertEqual((proof['status'], proof['commit']), ('proven', culprit))
         self.assertTrue(all('--only-testing' in p['command'] for p in proof['probes']))
 
+    def test_real_boundary_attribution_uses_owned_exact_method_after_build(self):
+        self.write('scripts/ios-gateway-e2e-test', '''#!/usr/bin/env python3
+import sys
+from pathlib import Path
+if sys.argv[1] == 'all' and Path('boundary-bad').exists():
+    if '--only-testing' in sys.argv: assert sys.argv[-1] == 'TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness'
+    print('failure: stable boundary failure')
+    print('Focused E2E case TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness completed in 1s (status 65); artifacts: fixture')
+    raise SystemExit(65)
+''', True)
+        self.commit('case-selecting boundary owner')
+        self.base = self.git('rev-parse', 'HEAD')
+        culprit = self.land('boundary-bad', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        proof = self.reports()[-1]['failures'][0]['attribution']
+        self.assertEqual(proof['status'], 'proven', proof)
+        self.assertEqual(proof['commit'], culprit)
+        self.assertTrue(all(p['command'][1:3] == ['all', '--only-testing'] for p in proof['probes']))
+
     def test_missing_verifier_report_and_skipped_cases_are_uncovered(self):
         command = (self.root / 'scripts/tron').read_text()
         self.write('scripts/tron', command.replace("Path('test-results/verify',sha+'.json').write_text", "# no report: "), True)
