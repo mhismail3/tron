@@ -11,7 +11,7 @@ import { awaitsWithin } from "../../../test-support/wait-for.js";
 const gateway = fileURLToPath(new URL("../../..", import.meta.url));
 const run = promisify(execFile);
 
-let staged: { root: string; app: string } | undefined;
+let staged: { root: string; app: string; preparation?: Promise<unknown> } | undefined;
 // Copying/validating the real payload is preparation, not offline activation.
 // Record ownership before the first fallible step so failed setup is cleaned too.
 beforeAll(async () => {
@@ -19,10 +19,17 @@ beforeAll(async () => {
   const app = join(root, "app");
   staged = { root, app };
   await mkdir(app);
-  await run("bash", [join(gateway, "../mac-app/scripts/stage-gateway-app.sh"), gateway, app], { timeout: 45_000 });
+  staged.preparation = run("bash", [join(gateway, "../mac-app/scripts/stage-gateway-app.sh"), gateway, app], { timeout: 45_000 });
+  await staged.preparation;
   await symlink(join(gateway, "node_modules"), join(app, "node_modules"));
 }, 60_000);
-afterAll(async () => { if (staged) await rm(staged.root, { recursive: true, force: true }); });
+afterAll(async () => {
+  if (!staged) return;
+  // Even a runner hook timeout cannot authorize deleting a still-owned copy.
+  // Setup reports its own failure; this owner joins before removing its tree.
+  await staged.preparation?.catch(() => undefined);
+  await rm(staged.root, { recursive: true, force: true });
+});
 
 it("activates a real staged Mac app offline without checkout pin or artifact access", async () => {
   const { root, app } = staged!;
