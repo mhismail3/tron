@@ -661,32 +661,25 @@ exit 7
     }
   });
 
-  it("the installed real gh refuses unauthenticated creation without network access, remotes or trust", async () => {
+  it("a spawned unauthenticated GitHub refusal retains the local repository without remotes or trust, even with no installed gh", async () => {
+    const executableRoot = await mkdtemp(join(tmpdir(), "tron-project-cli-"));
+    roots.push(executableRoot);
+    // Keep real Git, but no host gh/auth/Keychain dependency. The external port
+    // is the same spawned executable seam as the successful creation journey.
+    await symlink((await exec("/usr/bin/which", ["git"])).stdout.trim(), join(executableRoot, "git"));
+    vi.stubEnv("PATH", executableRoot);
+    await expect(exec("/usr/bin/which", ["gh"])).rejects.toMatchObject({ code: 1 });
     const f = await fixture(true);
-    const gh = (await exec("/usr/bin/which", ["gh"])).stdout.trim();
-    const config = join(f.root, "empty-gh-config");
-    const stderr = join(f.root, "real-gh.stderr");
-    await mkdir(config);
-    for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) vi.stubEnv(key, undefined);
-    vi.stubEnv("HOME", f.root);
-    vi.stubEnv("XDG_CONFIG_HOME", config);
-    vi.stubEnv("GH_CONFIG_DIR", config);
-    vi.stubEnv("GH_HOST", "github.com");
-    vi.stubEnv("GH_NO_UPDATE_NOTIFIER", "1");
-    vi.stubEnv("GH_NO_EXTENSION_UPDATE_NOTIFIER", "1");
-    // The launcher runs the installed binary with actual production arguments,
-    // then audits its empty auth state read-only, preserving create's exit code.
-    // Seatbelt denies network and Keychain service lookup for both commands.
-    const sandbox = `/usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network*)(deny mach-lookup)(deny file-read* (subpath "/Users") (subpath "/Library/Keychains"))(deny process-exec (literal "/usr/bin/security"))' ${JSON.stringify(gh)}`;
-    await writeFile(join(f.root, "gh-fixture"), `#!/bin/sh\n${sandbox} "$@" 2>${JSON.stringify(stderr)}\nstatus=$?\n${sandbox} auth status --hostname github.com >>${JSON.stringify(stderr)} 2>&1\nexit "$status"\n`);
-    const pending = await f.create("real-gh-unauthed", true);
-    await expect(readFile(stderr, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(f.decide(pending)).rejects.toMatchObject({ code: "conflict" });
-    const actualError = await readFile(stderr, "utf8");
-    expect(actualError).toMatch(/auth login/);
-    expect(await f.git("real-gh-unauthed", ["remote"])).toBe("");
-    expect((await f.trust.inspect(f.path("real-gh-unauthed"))).effectiveDecision).toBe(false);
-    evidence.push({ realGh: gh, version: (await exec(gh, ["--version"])).stdout.trim(), actualError, network: "OS-denied", credentials: "empty config, token variables absent, user-home/Keychain reads and credential service access OS-denied" });
+    const argsPath = join(f.root, "gh-args");
+    await writeFile(join(f.root, "gh-fixture"), `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argsPath)}\nprintf 'fixture: authentication required\\n' >&2\nexit 4\n`);
+    const pending = await f.create("github-unauthed", true);
+    await expect(readFile(argsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(f.decide(pending)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("GitHub command did not complete") });
+    expect((await readFile(argsPath, "utf8")).split("\n")).toEqual(["repo", "create", "github-unauthed", "--private", "--source", f.path("github-unauthed"), "--remote", "origin", ""]);
+    expect(await f.git("github-unauthed", ["rev-parse", "--is-inside-work-tree"])).toBe("true");
+    expect(await f.git("github-unauthed", ["remote"])).toBe("");
+    expect((await f.trust.inspect(f.path("github-unauthed"))).effectiveDecision).toBe(false);
+    evidence.push({ githubRefusal: "spawned exit 4", installedGh: false, remotes: [], trusted: false });
   });
 
   it("optional private GitHub creation crosses only the approved spawned fixture boundary and sets origin without a push", async () => {
