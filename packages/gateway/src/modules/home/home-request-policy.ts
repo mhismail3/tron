@@ -12,6 +12,7 @@ import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kerne
 import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
 import { HomeResponseTiming, type HomeResponseSample } from "./home-response-timing.js";
+import { homeToolAvailable } from "./home-runtime-policy.js";
 
 /*
  * Tron Home's request seam (gist §7).
@@ -490,7 +491,9 @@ export class HomeRequestPolicy {
           waitedMs: memoryView.waitedMs,
         });
       }
-      return { ...update, context: { ...context, messages: rewritten.messages } };
+      return { ...update, context: { ...context, messages: rewritten.messages,
+        tools: context.tools?.filter(tool => homeToolAvailable(tool.name, activation.kind)),
+      } };
     };
   }
 

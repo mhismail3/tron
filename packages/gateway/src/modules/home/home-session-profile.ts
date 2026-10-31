@@ -20,14 +20,11 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
     extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research", "tron-web-research"],
     resources: {
       noExtensions: true, noContextFiles: true,
-      // The composer may offer user-invocable skills/templates, but no skill is
-      // listed in Home's system prompt. Inserted resources stay user input.
-      skillsOverride: base => ({ ...base, skills: base.skills.map(skill => ({ ...skill, disableModelInvocation: true })) }),
       // These agent-directory files are not gated by any no* loader option.
       systemPromptOverride: () => undefined,
       appendSystemPromptOverride: () => [],
     },
-    projectTrust: "never", projectSettings: false, managedSubagents: false, directBash: false,
+    projectTrust: "never", projectSettings: false, managedSubagents: false, directBash: true,
     tools: [...HOME_TOOL_NAMES], modelRuntime: "gateway", acquireModelRuntime: () => services().runtime(),
     modelSelection: { physicalOnly: true, assertAllowed(model) {
       // A virtual router owns a transcript that Home’s profile does not own.
