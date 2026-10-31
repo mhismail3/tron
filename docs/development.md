@@ -215,50 +215,19 @@ owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
 beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
 and `scripts/tron version check` reports drift read-only when requested.
 
-## Offline Knowledge retirement
+## Knowledge files
 
-`scripts/retire-knowledge.py` is a one-shot offline tool, never Gateway startup
-code. It exports every committed source revision as Markdown plus exact original
-JSON and attachments; personal notes, immutable histories, accepted receipts and
-Profile controls move to the current `workspace/state/profile` owner. It grants no trust or file access. Choose the export location for the
-existing normal-file tools; Home's file reader still requires a trusted project.
+Source exports under `~/.tron/workspace/files/knowledge-export-*` are ordinary
+Markdown, exact original JSON and attachments, readable through the normal file
+tools. `MANIFEST.json` records the exported revisions and hashes. Reading them
+creates no new trust or file-access grant; Home's file reader still requires a
+trusted project. Profile remains owned by `workspace/state/profile`; Home memory,
+chats, summaries and chapters retain their existing owners.
 
-First rehearse on a copy. Supply absolute, canonical, disjoint paths and freshly
-counted source/observation/note/coverage totals; drift refuses. For example, with
-copy-only paths and counts already set:
-
-```bash
-args=(--store "$COPY_STORE" --backup "$COPY_ARCHIVE" --files "$COPY_EXPORT"
-      --expected-sources "$SOURCES" --expected-observations "$OBSERVATIONS"
-      --expected-notes "$NOTES" --expected-coverage "$COVERAGE" --offline)
-python3 scripts/retire-knowledge.py "${args[@]}"
-python3 scripts/retire-knowledge.py "${args[@]}" --verify
-```
-
-The complete original namespace and workspace marker are independently archived
-and hashed before export. Verify ordinary files and the new Profile destination
-before the **Knowledge namespace rename**, the cutover boundary. Resumable cleanup
-removes only that retired namespace; the archive retains original and orphan bytes.
-Verification checks exact exported files, note bytes, Profile controls, receipts and
-backup paths. Sealed reruns refuse deleted exports rather than restoring them.
-Suppression, scope-exclusion rows and configured excluded session/project IDs
-refuse plaintext export pending explicit disposition; missing or unknown eligibility
-controls refuse as well. The converter never clears privacy controls automatically.
-The new runtime reads only current Profile format and refuses either old namespace;
-it never converts at startup or falls back to the recovery archive.
-
-A live cutover is maintainer-only, after the verified lockstep build is ready.
-Record the prior compatible build, complete immutable archive and export manifests,
-restore prerequisites and exact approved destructive scope first. The maintainer
-establishes an exclusive offline window: `--offline` is an attestation, not proof
-or a command to stop the Gateway. The advisory archive lock serializes converters,
-not Gateway writers. Never run the converter alongside its canonical owner.
-
-After conversion and verification, only the maintainer installs/starts the new
-Gateway/Mac/iPhone build and checks Profile, ordinary source reads and unchanged
-Home memory. On failure, keep the offline window: archive restoration plus the
-prior compatible build is an explicit maintainer recovery, never an automatic
-fallback or runtime old-format reader. No agent live cutover is authorized here.
+Keep the immutable original archive and prior compatible build under
+`~/.tron-maintenance/replace/`. They are recovery artifacts, not runtime fallbacks.
+Archive restoration is an explicit maintainer-owned offline recovery operation;
+normal startup and Replace Mac App never convert or restore Knowledge data.
 
 ## Metrics
 

@@ -2,8 +2,8 @@
 """One kernel lease for the Mac replacement and physical iOS rebuild trees.
 
 Descriptors, not markers, own exclusion. Children inherit the same open-file
-lock, so killing a detached parent cannot admit a competing cutover while its
-converter or verifier still runs.
+lock, so killing a detached parent cannot admit a competing replacement while
+its build or verifier still runs.
 """
 import fcntl
 import os
@@ -60,7 +60,7 @@ class RebuildLock:
         except BlockingIOError:
             os.close(self.fd)
             self.fd = None
-            raise RebuildBusy('Another Mac/iOS rebuild still owns the rebuild lease; no second cutover or install started') from None
+            raise RebuildBusy('Another Mac/iOS rebuild still owns the rebuild lease; no second rebuild or install started') from None
         return self.fd
 
     def __exit__(self, *args):

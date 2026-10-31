@@ -36,13 +36,12 @@ class Failure(Exception):
     """A step failure with its exact, user-facing message."""
 
 
-def run(argv, log=None, timeout=600, env=None, cwd=None, check=True, pass_fds=()):
+def run(argv, log=None, timeout=600, env=None, cwd=None, check=True):
     """Run one owned command; full output goes to the step log, never stdout.
 
     A failure names the whole command and the tail of its output (stderr included)."""
     argv = [str(arg) for arg in argv]
     lease = inherited_fd()
-    pass_fds = tuple(dict.fromkeys((*pass_fds, *((lease,) if lease is not None else ()))))
     command = ' '.join([Path(argv[0]).name, *argv[1:]])
     with (open(log, 'a+') if log else tempfile.TemporaryFile('w+')) as stream:
         stream.write(f'$ {" ".join(argv)}\n')
@@ -50,7 +49,8 @@ def run(argv, log=None, timeout=600, env=None, cwd=None, check=True, pass_fds=()
         start = stream.tell()
         try:
             result = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT,
-                                    timeout=timeout, env=env, cwd=cwd, start_new_session=True, pass_fds=pass_fds)
+                                    timeout=timeout, env=env, cwd=cwd, start_new_session=True,
+                                    pass_fds=(lease,) if lease is not None else ())
         except subprocess.TimeoutExpired:
             raise Failure(f'{command} timed out after {timeout}s') from None
         if check and result.returncode != 0:
@@ -474,15 +474,6 @@ class MacPlatform:
         env = dict(os.environ, TRON_APP_PATH=str(app))
         run(['/bin/bash', self.build_root(revision) / 'scripts/verify-mac-install.sh', '--artifact-only'], log, timeout=900, env=env)
         return identity
-
-    def verify_cutover(self, app, home, exports, counts, result, log, pass_fds=()):
-        payload = self.bundled_gateway(app)
-        arch = 'node-x64' if os.uname().machine == 'x86_64' else 'node-arm64'
-        run([payload / 'runtime' / arch, '--experimental-import-meta-resolve', Path(__file__).with_name('verify-knowledge-cutover.mjs'),
-             payload, home, exports, json.dumps(counts)], result, timeout=1800,
-            env=dict(os.environ, HOME=str(self.home)), pass_fds=pass_fds)
-        with open(log, 'a') as stream:
-            stream.write(f'Offline candidate read-only gate passed; result: {result}\n')
 
     def verify_installed(self, revision, log):
         run([self.build_root(revision) / 'scripts/verify-mac-install.sh', '--require-bundled'], log, timeout=900,

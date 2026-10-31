@@ -5944,26 +5944,17 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps({"calls": self.tool_log.read_text().splitlines()}, indent=2) + "\n")
 
-    def test_mac_replace_lease_blocks_ios_build_and_ios_alone_never_runs_cutover(self) -> None:
+    def test_mac_replace_lease_blocks_ios_build_until_released(self) -> None:
         from tron_rebuild_lock import RebuildLock
-        worktree = self.make_worktree('knowledge-cutover')
-        home = Path(self.environment['HOME'])
-        store = home / '.tron/workspace/state/knowledge'
-        store.mkdir(parents=True)
-        (store / 'unchanged').write_bytes(b'original Knowledge bytes')
-        marker = home / '.tron-maintenance/knowledge-cutover-pending.json'
-        marker.parent.mkdir(mode=0o700, exist_ok=True)
-        marker.write_bytes(b'pending maintainer approval; iOS must not read or consume it')
-        with RebuildLock(marker.parent / 'rebuild.lock'):
+        worktree = self.make_worktree('rebuild-lease')
+        maintenance = Path(self.environment['HOME']) / '.tron-maintenance'
+        with RebuildLock(maintenance / 'rebuild.lock'):
             refused = self.run_tool(worktree, 'tron-ios-device', 'install', '--device-id', self.DEVICE_ONE, caller='blocked-by-mac')
             self.assertEqual(refused.returncode, 73, refused.stderr)
-            self.assertIn('no second cutover or install', refused.stderr)
+            self.assertIn('no second rebuild or install', refused.stderr)
             self.assertFalse(any(call.startswith('xcodebuild build ') for call in self.tool_calls('blocked-by-mac')))
         installed = self.run_tool(worktree, 'tron-ios-device', 'install', '--device-id', self.DEVICE_ONE, caller='ios-only')
         self.assertEqual(installed.returncode, 0, installed.stderr)
-        self.assertEqual((store / 'unchanged').read_bytes(), b'original Knowledge bytes')
-        self.assertEqual(marker.read_bytes(), b'pending maintainer approval; iOS must not read or consume it')
-        self.assertFalse(list(marker.parent.glob('replace/*/knowledge-cutover-*')))
 
     def test_install_cli_defaults_to_stable_protocol_admission_before_building(self) -> None:
         worktree = self.make_worktree("stable-target")

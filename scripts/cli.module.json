@@ -7,8 +7,6 @@
     "install-ci-tools.sh",
     "node-pin-mirrors.py",
     "run-main-source.py",
-    "retire-knowledge.py",
-    "test-retire-knowledge.py",
     "test-install-ci-tools-node.sh",
     "test-main-source.py",
     "test-tron-node.py",
