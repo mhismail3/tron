@@ -219,6 +219,11 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         if failures and re.fullmatch(r'\w+/\w+/\w+(?:\(\))?', failures[0].split(':', 1)[0]):
             selector = failures[0].split(':', 1)[0]
             result['probe'] = {'name': lane['name'], 'command': ['scripts/tron-ios-test', 'checkpoint', '--only-testing', selector], 'ios': True}
+    if lane['name'] == 'real Gateway UI journeys' and code:
+        failed_journeys = re.findall(r'Real-UI journey (\w+/\w+/\w+) completed .*\(status [1-9]\d*\)', output)
+        if len(failed_journeys) == 1:
+            result['probe'] = {'name': lane['name'], 'ios': True, 'command': [
+                'scripts/ios-gateway-e2e-test', 'run-ui', '--only-testing', failed_journeys[0]]}
     if code != 0 and 'signature' not in result:
         output = log.read_text(errors='replace')
         result['signature'] = signature(f"{lane['name']} failed", verify.ios_failures(output), output, root)
