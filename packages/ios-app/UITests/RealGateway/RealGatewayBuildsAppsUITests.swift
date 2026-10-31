@@ -53,9 +53,7 @@ extension RealGatewayPairAndChatUITests {
         app.buttons["apps.install.confirm"].tap()
         XCTAssertTrue(app.buttons["apps.install.open"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(FileManager.default.fileExists(atPath: appDirectory.appendingPathComponent("app.json").path), "Only explicit confirmation installs")
-        let reviewBar = app.navigationBars.containing(.button, identifier: "apps.install.confirm").firstMatch
-        reviewBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
-            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        buildsDismissReview(app)
         let installed = app.buttons["installed-app-row-builds"]
         XCTAssertTrue(installed.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(pending.exists, "Installed app must leave Pending")
@@ -190,7 +188,7 @@ extension RealGatewayPairAndChatUITests {
             keepScreenshot(app, name: "1162-update-error-end-\(suffix)")
         }
         XCTAssertFalse(app.buttons["apps.install.confirm"].isEnabled, "A failed accepted command cannot be replaced on another tap")
-        buildsClose(app)
+        buildsDismissReview(app)
         app.buttons["Back"].tap()
         buildsOpenApps(app)
         XCTAssertTrue(row.waitForExistence(timeout: 30), app.debugDescription)
@@ -270,6 +268,16 @@ extension RealGatewayPairAndChatUITests {
         composer.tap(); composer.typeText(text)
         XCTAssertTrue(waitForEnabled(app.buttons["Send message"], timeout: 30), app.debugDescription)
         app.buttons["Send message"].tap()
+    }
+    @MainActor private func buildsDismissReview(_ app: XCUIApplication) {
+        // Review has Info/Install, not Done. Dismiss its own toolbar, never a
+        // similarly titled control in the chat or an underlying sheet.
+        let review = app.scrollViews["apps.install.review"]
+        let bar = app.navigationBars.containing(.button, identifier: "apps.install.confirm").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 15), app.debugDescription)
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        XCTAssertTrue(review.waitForNonExistence(timeout: 15), app.debugDescription)
     }
     @MainActor private func buildsClose(_ app: XCUIApplication) {
         let done = app.buttons.matching(identifier: "Done")
