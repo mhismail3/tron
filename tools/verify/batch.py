@@ -203,8 +203,9 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         result['signature'] = signature(f"{lane['name']} failed", failures, output, root)
     output = log.read_text(errors='replace')
     if lane['name'] == 'Mac integration':
-        counts = re.findall(r'Executed (\d+) tests?', output)
-        if code == 0 and (not counts or int(counts[-1]) == 0 or re.search(r'\d+ tests? skipped', output)):
+        counts = re.findall(r'Executed (\d+) tests?|Test run with (\d+) tests?', output)
+        counts = [int(xctest or swift_testing) for xctest, swift_testing in counts]
+        if code == 0 and (not counts or counts[-1] == 0 or re.search(r'\d+ tests? skipped', output)):
             result.update(status='uncovered', reason='missing, empty or skipped XCTest evidence')
         failures = re.findall(r"Test Case '-\[([^ .]+)\.([^ ]+) ([^]]+)\]' failed", output)
         if failures:

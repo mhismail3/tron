@@ -340,6 +340,15 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(proof['probes'][-1]['outcome'], 'good')
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
+    def test_mac_swift_testing_summary_is_covered_despite_empty_xctest_suite(self):
+        binary = Path(self.temporary.name) / 'bin/xcodebuild'
+        binary.write_text('#!/bin/sh\necho "Executed 0 tests, with 0 failures"\necho "✔ Test run with 52 tests in 13 suites passed after 153 seconds."\n')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'green')
+        self.assertNotEqual(report['results'][3].get('status'), 'uncovered')
+
     def test_mac_xctest_case_filter_proves_landing_without_suite_probe(self):
         binary = Path(self.temporary.name) / 'bin/xcodebuild'
         binary.write_text('''#!/usr/bin/env python3
