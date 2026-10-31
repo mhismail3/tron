@@ -114,9 +114,9 @@ Tests run directly with `scripts/tron test tooling scripts/test-work-<name>.py`.
 Fresh worktrees prepare their own pinned Gateway development dependencies before
 Gateway checks; see [verify](../verify/README.md#worktree-dependencies). No shared
 install or global compiler substitutes. Affected checks and the known-failures
-validator run before plain-Git push; broader coverage uses explicitly requested
-local batches, not queues or required receipts. Keep evidence under `test-results/`.
+validator run before plain-Git push; broader coverage belongs to the post-land batch
+([principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)), never a queue or required receipt. Keep evidence under `test-results/`.
 
 Mac, iOS and Gateway lifecycle contracts stay with their development guides.
 Nothing here installs, deploys, replaces, restarts or promotes Stable. Never add an
-automatic release, check queue or revert to this workflow.
+automatic release, landing queue or automatic push/revert to this workflow.
