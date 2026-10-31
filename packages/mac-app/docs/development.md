@@ -115,8 +115,7 @@ leases and the three host slots; supplementary real Registry/socket/process test
 cover Home memory/Profile, settings approvals, display persistence, SSH and protocol.
 Each group names its executed probes in `test-results/checkpoint/<sha>/report.json`;
 logs and xcresults survive failures, and later groups still run after a failed probe.
-This is a smoke selection, not exhaustive product or deployed-device qualification:
-future Profile/Knowledge/approval stages update their probes as those features ship.
+This is a smoke selection, not exhaustive product or deployed-device qualification.
 It does not measure the five program metrics or claim real APNs/device validation.
 The SSH oracle starts a temporary high-port tailnet listener with fixture keys/state;
 it never changes Remote Login, user SSH keys or the live Gateway.
@@ -210,8 +209,7 @@ scripts/tron mac replace --status --follow
 
 - **Path and revision.** Fetched `origin/main`. Quick (the Gateway's source update) when the
   payload lock, dependency manifest and protocol match and `packages/mac-app` is unchanged;
-  otherwise a full signed Release build and swap. A remaining Knowledge namespace always
-  requires the full offline path.
+  otherwise a full signed Release build and swap.
 - **Runner.** Its own launchd job (`com.tron.mac.replace.<id>`) on a private script copy:
   preflight → build → verify signature → stop workers → stop Gateway → swap → start → verify →
   finish. RPC goes to the listener the `com.tron.server` PID holds on 9847 with the
@@ -228,31 +226,6 @@ scripts/tron mac replace --status --follow
 - **Swap** clones `~/.tron` (`state-snapshot`), moves the Stable payload channel and old app into
   the operation directory and installs the verified build. A failure after the swap restores and
   verifies the previous app and payloads; the snapshot is never restored over newer data.
-  For a maintainer-approved Knowledge retirement, the swap first runs the pinned
-  `retire-knowledge.py` and its read-only `--verify` while still offline, after the raw snapshot
-  and before retiring either prior artifact. A private owner-only
-  `~/.tron-maintenance/knowledge-cutover-pending.json` explicitly approves version `1`,
-  `priorAppRevision`, `priorGatewayRevision`, `converterSHA256`, `artifactDirectory` and
-  `artifactManifestSHA256` (the prior identities, not the candidate). Preflight checks every
-  `ARTIFACTS-SHA256.json` entry, recounts live records and reserves build + full logical snapshot
-  + archive/export capacity before stopping anything. Missing approval, changed identities, active Debug/Preview jobs,
-  privacy refusals or verification failures prevent candidate start. Absence of Knowledge is
-  a no-op. The bounded journal links hash-fenced counts/inventories and the independently
-  verified archive/export under `knowledge-cutover-<attempt>`; exports are ordinary workspace
-  files named `knowledge-export-<operation>-<attempt>`. On failure or interrupted execution,
-  the same rollback first restores only the Knowledge/Profile namespaces and initialization
-  markers from the verified raw snapshot, preserving displaced bytes, then verifies the prior
-  app and external payload inventories before relaunching. The decisive gate loads Profile,
-  every canonical chat, Home chapters/memory/summaries and an ordinary exported source with
-  the candidate's own shipped read owners, offline and without initializing a runtime. It
-  checks the note count and unchanged Home/chat bytes. A durable start intent is the commit
-  boundary: thereafter retries only start/verify the candidate, never reconvert or restore data.
-  The prior runtime is not qualified on converted data, so post-start failures retain the new
-  build and archive, clearly report unconfirmed health and allow Replace to retry verification.
-  Successful post-start Profile/Home/chat-catalog reads consume the approval. Archives,
-  exports, every attempt's raw snapshot and prior artifacts remain local recovery checkpoints.
-  One kernel `rebuild.lock` excludes concurrent Mac replacements and physical iOS installs;
-  converter/verifier children inherit it, so a killed runner cannot release a still-active cutover.
 - **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac
   verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`
   (current and previous kept); git and builds run with Homebrew's bin on `PATH` for git-lfs.
