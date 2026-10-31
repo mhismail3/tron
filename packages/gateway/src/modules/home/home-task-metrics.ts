@@ -16,9 +16,14 @@ const unavailable = (reason: string) => ({ status: "unavailable" as const, value
  * Retained check-ins are lower bounds: canonical history owns complete progress.
  * In particular, a terminal record's updatedAt is NOT a landed/settled timestamp. */
 export async function readHomeTaskMetrics(store: HomeTaskStore, homeId: string, input: HomeTaskMetricsRequest) {
-  for (const value of [input.from, input.to]) if (value !== undefined && (typeof value !== "string"
-    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value)))
-    throw new GatewayError("invalid_request", "task metrics: from/to must be UTC ISO timestamps ending in Z");
+  if (input.taskId !== undefined && (typeof input.taskId !== "string" || !input.taskId.trim() || input.taskId.length > 160))
+    throw new GatewayError("invalid_request", "task metrics: taskId must be a non-empty string of at most 160 characters");
+  for (const value of [input.from, input.to]) if (value !== undefined) {
+    const time = typeof value === "string" ? Date.parse(value) : NaN;
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value)
+      || !Number.isFinite(time) || new Date(time).toISOString() !== (value.includes(".") ? value : value.replace("Z", ".000Z")))
+      throw new GatewayError("invalid_request", "task metrics: from/to must be valid UTC ISO timestamps ending in Z");
+  }
   const to = input.to === undefined ? Date.now() : Date.parse(input.to);
   const from = input.from === undefined ? to - 72 * 60 * 60 * 1000 : Date.parse(input.from);
   const limit = input.limit ?? 20;

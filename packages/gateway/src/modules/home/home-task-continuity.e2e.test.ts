@@ -294,6 +294,10 @@ describe("resuming a stopped Home worker in place", () => {
       parks: { status: "partial", recordedCount: 1, recorded: [{ taskId: first.taskId, reason: "explicit-report" }] },
       tokens: { status: "partial", recordedOperations: 1, admittedOperations: 2 } });
     expect(retro.scorecard.resumesPerTask).toMatchObject({ value: null, denominator: 0 });
+    for (const taskId of ["", " ", 42, "x".repeat(161)])
+      await expect(owner.taskTool(f.home.sessionId, { action: "metrics", taskId })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(owner.taskTool(f.home.sessionId, { action: "metrics", from: "2026-02-30T00:00:00Z", to: "2026-03-03T00:00:00Z" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
     await owner.stopTask(resumed);
     await waitFor(async () => (await owner.taskStatus(resumed.taskId)).lifecycle === "terminal", "resumed worker settled");
     evidence.push({ case: "current-operation-without-inherited-blocker", page });

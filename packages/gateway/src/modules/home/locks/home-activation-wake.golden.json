@@ -2225,7 +2225,7 @@
       },
       {
         "name": "task",
-        "schema": "sha256:568c791581a58047e5d9fa56d713ebda0f2632d360dc26010cbb56128103a375"
+        "schema": "sha256:b53b0d8769f28b3b6ffcc13a71e7280eab66eb298b560bb326a70f393afc15a6"
       },
       {
         "name": "profile",
@@ -3400,16 +3400,17 @@
               }
             },
             {
-              "description": "Inspect and control the tasks you delegated. list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId and the actions each allows. status {taskId}: one task's durable record, spend and live subagent runs; no control effect. report {taskId, offset?, limit?}: a UTF-8 byte page (limit up to 4096) of a settled task's immutable report. steer {taskId, text}: send a message to a running worker without stopping it. interrupt {taskId, text?}: cancel only the worker's in-flight command or tool call (its child processes too); the worker keeps running, reads that the call was interrupted, then text as a steer. Use it to end a long or stuck command without stopping the worker. stop {taskId}: stop a running or queued worker; its session, worktree, branch, commits and claim are kept. resume {taskId, text?}: continue a stopped or settled worker in place (same session, worktree and claim; it re-asks any question the stop interrupted); the reply names the new taskId. Never delegate a replacement. rename {taskId, title}: rename the worker's session, running or settled, without interrupting it; the title shows in the session list and task list, persists, and a resume keeps it. The brief is unchanged. Control actions need only taskId: the Gateway uses the worker's current task and operation, including a later resume of the task you name. Pass operationId only to guard against acting on a newer operation than the one you read. To read or change a worker's model, thinking or other session settings, use the settings tool with taskId: a running worker uses a model, thinking or Run change from its next model request and is signalled in its steering lane; resolve's worker.lastResponse shows what its latest response ran on.",
+              "description": "Inspect and control the tasks you delegated. list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId and the actions each allows. status {taskId}: one task's durable record, spend and live subagent runs; no control effect. report {taskId, offset?, limit?}: a UTF-8 byte page (limit up to 4096) of a settled task's immutable report. metrics {from?, to?, taskId?, limit?}: read-only task retro projection; default roots delegated in the last 72 hours, at most 31 days, up to 50 lineages. UTC from/to form [from,to); taskId selects its whole lineage regardless of creation time. Retained progress is partial; missing landed, steering, wait, billing and verify data stays unavailable. No sessions opened or live state changed. steer {taskId, text}: send a message to a running worker without stopping it. interrupt {taskId, text?}: cancel only the worker's in-flight command or tool call (its child processes too); the worker keeps running, reads that the call was interrupted, then text as a steer. Use it to end a long or stuck command without stopping the worker. stop {taskId}: stop a running or queued worker; its session, worktree, branch, commits and claim are kept. resume {taskId, text?}: continue a stopped or settled worker in place (same session, worktree and claim; it re-asks any question the stop interrupted); the reply names the new taskId. Never delegate a replacement. rename {taskId, title}: rename the worker's session, running or settled, without interrupting it; the title shows in the session list and task list, persists, and a resume keeps it. The brief is unchanged. Control actions need only taskId: the Gateway uses the worker's current task and operation, including a later resume of the task you name. Pass operationId only to guard against acting on a newer operation than the one you read. To read or change a worker's model, thinking or other session settings, use the settings tool with taskId: a running worker uses a model, thinking or Run change from its next model request and is signalled in its steering lane; resolve's worker.lastResponse shows what its latest response ran on.",
               "name": "task",
               "parameters": {
                 "properties": {
                   "action": {
-                    "description": "list | status | report | steer | interrupt | stop | resume | rename.",
+                    "description": "list | status | report | metrics | steer | interrupt | stop | resume | rename.",
                     "enum": [
                       "list",
                       "status",
                       "report",
+                      "metrics",
                       "steer",
                       "interrupt",
                       "stop",
@@ -3418,8 +3419,13 @@
                     ],
                     "type": "string"
                   },
+                  "from": {
+                    "description": "metrics: inclusive UTC root-delegation cutoff; default 72 hours before to.",
+                    "format": "date-time",
+                    "type": "string"
+                  },
                   "limit": {
-                    "description": "report: page size in bytes, 1 to 4096; default 4096. list: number of tasks, 1 to 50; default 20.",
+                    "description": "report: page size in bytes, 1 to 4096; default 4096. list/metrics: number of tasks/lineages, 1 to 50; default 20.",
                     "maximum": 4096,
                     "minimum": 1,
                     "type": "integer"
@@ -3446,6 +3452,11 @@
                     "description": "rename (required): the worker session's new title, at most 80 characters on one line.",
                     "maxLength": 80,
                     "minLength": 1,
+                    "type": "string"
+                  },
+                  "to": {
+                    "description": "metrics: exclusive UTC cutoff; default now. At most 31 days after from; records are observed now, not historical versions.",
+                    "format": "date-time",
                     "type": "string"
                   }
                 },
