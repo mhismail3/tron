@@ -175,21 +175,31 @@ describe("HTTP pending-work ownership", () => {
     expect(f.logger.log.mock.calls.filter(call => call[2]?.event === "http.connection-unused")).toHaveLength(0);
   });
 
-  it("closes a body-idle request after 30 seconds without more bytes", async () => {
+  it("closes an incomplete body when its configured idle timeout fires", async () => {
     const f = await fixture();
     const peer = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(peer);
     peer.on("error", () => {});
     peer.on("data", () => {});
     await awaitsWithin(once(peer, "connect"), "idle body peer connect");
+    const listener = (f.gateway as unknown as { server: Server }).server;
+    const received = once(listener, "request");
     peer.write("POST /v1/pair HTTP/1.1\r\nHost: fixture\r\nContent-Type: application/json\r\nContent-Length: 8192\r\n\r\n{");
+    const [incoming] = await awaitsWithin(received, "incomplete body request admitted");
+    expect(incoming.complete).toBe(false);
     const server = await waitFor(() => f.serverSockets[0], "accepted idle body socket");
-    const closedAt = new Promise<bigint>((resolve) => server.once("close", () => resolve(process.hrtime.bigint())));
-    const started = process.hrtime.bigint();
-    const durationMs = Number(await awaitsWithin(closedAt, "idle body close", 45_000) - started) / 1_000_000;
-    expect(durationMs).toBeGreaterThanOrEqual(25_000);
-    expect(durationMs).toBeLessThanOrEqual(40_000);
-  }, 60_000);
+    // Cross Node's socket timeout event boundary without waiting thirty real
+    // seconds. The configured duration and the real request/response teardown
+    // remain covered; host scheduling speed is not the oracle.
+    expect(HTTP_REQUEST_IDLE_TIMEOUT_MS).toBe(30_000);
+    expect(listener.timeout).toBe(HTTP_REQUEST_IDLE_TIMEOUT_MS);
+    expect(server.timeout).toBe(HTTP_REQUEST_IDLE_TIMEOUT_MS);
+    const closed = new Promise<void>((resolve) => server.once("close", () => resolve()));
+    expect(server.destroyed).toBe(false);
+    server.emit("timeout");
+    await awaitsWithin(closed, "idle body close");
+    expect(server.destroyed).toBe(true);
+  });
 
   it("closes a body that trickles past idle timeout at the 300-second whole-request deadline", async () => {
     const f = await fixture();
