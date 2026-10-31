@@ -26,7 +26,8 @@ struct HostedWorkerToolFixture: View {
                                     }.padding(16)
                                 }.tronNavigationTitle("Transcript")
                             } else {
-                                let tool = surface == "worker-report" ? Self.reportForReview : HostedSixSmallUIFixture.checkin(blocked: true)
+                                let tool = surface.hasPrefix("worker-home-read-") ? Self.homeRead(surface)
+                                    : surface == "worker-report" ? Self.reportForReview : HostedSixSmallUIFixture.checkin(blocked: true)
                                 ToolDetailSheet(tool: tool, density: .expanded)
                                     .toolbar { ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) } }
                             }
@@ -43,6 +44,17 @@ struct HostedWorkerToolFixture: View {
             .tronTopBlur(.toolDetail).tronPresentation().tronSettingsLayout()
             .presentationDetents([.large]).presentationDragIndicator(.hidden)
         }
+    }
+
+    /// Same bounded file data, rendered through the old generic tool and the
+    /// shared Pi read presentation. This is synthetic UI evidence, not live data.
+    static func homeRead(_ surface: String) -> ChatToolPresentation {
+        let before = surface == "worker-home-read-before"
+        return tool(before ? "read_file" : "read", request: .object([
+            "path": .string("/workspace/project/notes.txt"), "offset": .number(2), "limit": .number(3)
+        ]), details: before ? .object(["status": .string("ok")]) : .object([:]),
+        content: (before ? "/workspace/project/notes.txt lines 2–4 of 12\n" : "")
+            + "line 2 of the file\nline 3 of the file\nline 4 of the file")
     }
 
     static var reportForReview: ChatToolPresentation {

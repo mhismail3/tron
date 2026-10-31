@@ -6,6 +6,8 @@ import XCTest
     func testCheckin() { capture("worker-checkin") }
     func testChips() { capture("worker-chips") }
     func testTools() { capture("worker-tools") }
+    func testHomeReadBefore() { capture("worker-home-read-before") }
+    func testHomeReadAfter() { capture("worker-home-read-after") }
 
     private func capture(_ surface: String) {
         for mode in ["light", "dark"] {
