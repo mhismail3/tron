@@ -8,5 +8,15 @@
     },
     "issue": 2130,
     "expires": "2026-11-05"
+  },
+  {
+    "testId": "packages/gateway/src/sessions/browser-fork-receipts.integration.test.ts::installed agent-browser fork receipts registers direct and parent-sealed nested live views, reloads the parent receipt, and clears aborted stash",
+    "evidence": {
+      "command": "TRON_P99_17_BROWSER_FORK_COPY=\"$PWD/../2176-two-green/test-results/browser-fork-copy\" python3 tools/verify/gateway.py src/sessions/browser-fork-receipts.integration.test.ts --reporter=default --reporter=json --outputFile.json=\"$PWD/test-results/2176/browser-fork-after.json\"",
+      "commit": "2825d33e1004db3fb2e62c074f0add474acdd27f",
+      "failureDigest": "06fe421a421bc4deb2eeba70b1f0bb55e476d822c7009835cce9e3ae916ad4a3"
+    },
+    "issue": 2186,
+    "expires": "2026-11-07"
   }
 ]
