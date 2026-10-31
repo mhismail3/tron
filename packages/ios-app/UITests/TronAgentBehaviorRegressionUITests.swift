@@ -3,6 +3,50 @@ import XCTest
 /// Production Settings -> Agent Behavior -> native lifecycle sheet over the hosted socket.
 @MainActor
 final class TronAgentBehaviorRegressionUITests: XCTestCase {
+    func testNumericMapsShowValuesWithoutRoutineEditors() {
+        continueAfterFailure = true // Record every appearance; any assertion still fails the case.
+        for home in [false, true] {
+            for (mode, dark, large) in [("light", false, false), ("dark", true, false), ("light-xxxl", false, true), ("dark-xxxl", true, true)] {
+                let app = XCUIApplication()
+                app.launchArguments = home
+                    ? ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-scope-review"] + (dark ? ["-home-dark"] : [])
+                    : ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression"] + (dark ? ["-settings-renderer-dark"] : [])
+                app.launchArguments += large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []
+                app.launch()
+                if home {
+                    XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+                    app.buttons["home-pinned-row"].tap()
+                    let ring = app.buttons["session-context-button"]
+                    XCTAssertTrue(ring.waitForExistence(timeout: 15))
+                    XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: ring)], timeout: 10), .completed)
+                    ring.tap()
+                    expand(app, "Manage Home")
+                    tap(app, "home-manage-settings")
+                    expand(app, "Home Settings")
+                } else {
+                    XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
+                    app.buttons["Open Settings"].tap()
+                    expand(app, "Global Settings")
+                    tap(app, "settings-link-Agent Behavior")
+                    expand(app, "Agent Behavior")
+                }
+                let row = app.descendants(matching: .any)["settings-row-permissions.budget.task"]
+                let viewport = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 140)
+                for _ in 0..<12 where !(row.exists && viewport.contains(row.frame)) { app.swipeUp(velocity: .slow) }
+                XCTAssertTrue(row.exists, app.debugDescription)
+                if row.exists {
+                    XCTAssertTrue(viewport.contains(row.frame), "Capture the whole numeric-map row: \(row.frame)")
+                    capture(app, "numeric-map-\(home ? "home" : "global")-\(mode)")
+                    XCTAssertTrue(row.staticTexts["input 200000"].exists, row.debugDescription)
+                    XCTAssertFalse(row.buttons["Task budget"].exists, "Use the existing agent settings/shared card, not a numeric-map form")
+                    XCTAssertFalse(row.buttons["settings-row-permissions.budget.task-reset"].exists, "A read-only map must not advertise a native reset")
+                    if home { XCTAssertTrue(row.staticTexts["Overridden"].exists, "Read-only values retain their owned-override provenance") }
+                }
+                app.terminate()
+            }
+        }
+    }
+
     func testTrustedProjectsLoadsAtMedium() {
         continueAfterFailure = false
         let app = XCUIApplication()

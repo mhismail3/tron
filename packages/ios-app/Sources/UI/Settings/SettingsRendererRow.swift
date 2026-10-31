@@ -68,7 +68,9 @@ struct SettingsRendererRow: View {
     }
 
     private var control: SettingsRowControl {
-        editable ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
+        let negotiated = editable ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
+        // Native lists edit strings only; other shapes use the existing read-only value/source row.
+        return negotiated == .list && presentation?.valueKind != "stringList" ? .readOnly : negotiated
     }
 
     /// The key's help and note, on detailed rows only; an instance's help is on its group.
@@ -182,7 +184,7 @@ struct SettingsRendererRow: View {
     /// Session and Home overrides name their state beside the title, never in
     /// the value's trailing room (#1651); Global values are not overrides.
     private var overriddenStatus: String? {
-        !modelConfiguration && canReset && editable && (control != .readOnly || presentation?.control == nil) && setting.projectSetting == nil
+        !modelConfiguration && canReset && editable && setting.projectSetting == nil
             && target.objectValue?["kind"]?.stringValue != "global" ? "Overridden" : nil
     }
 
@@ -252,22 +254,7 @@ struct SettingsRendererRow: View {
                 SettingsSecretEditor(title: title, help: presentation?.help ?? "", onChange: onChange)
             }
         case .list:
-            if presentation?.valueKind == "numberMap", let fields = presentation?.options,
-               !fields.isEmpty, fields.count <= 64,
-               fields.allSatisfy({ $0.value.stringValue != nil }),
-               Set(fields.compactMap { $0.value.stringValue }).count == fields.count,
-               Set((setting.value?.objectValue ?? [:]).keys).isSubset(of: Set(fields.compactMap { $0.value.stringValue })),
-               let range = presentation?.range, range.supportsIntegerFields,
-               setting.value == nil || setting.value?.objectValue?.values.allSatisfy({ value in
-                   if case .number(let number) = value { return Int(exactly: number) != nil }
-                   return false
-               }) == true {
-                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
-                    SettingsNumberMapEditor(title: title, help: presentation?.help ?? "", fields: fields,
-                                            range: range, values: setting.value?.objectValue ?? [:], onChange: onChange)
-                }
-            } else if presentation?.valueKind == "stringList",
-               setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
+            if setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,

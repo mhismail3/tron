@@ -11,7 +11,7 @@ import { fixture, disposeFixtures, reportCall } from "../../test-support/home-ta
 import { waitFor } from "../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import type { ExtensionInteraction } from "../protocol/types.js";
-import type { ChangeRequest } from "../kernel/settings/tool-contract.js";
+import type { ChangeRequest, Resolution } from "../kernel/settings/tool-contract.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -83,6 +83,66 @@ async function saveCase(name: string, evidence: unknown) {
 }
 
 describe("typed changes and exact native acceptance", () => {
+  it("configures numeric maps through the agent and keeps a task-budget raise behind the shared card", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [f.model]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const service = settingsService(f);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Choose numeric budgets", changes: [
+        { key: "model.thinkingBudgets", layer: "global", op: "set", value: { high: 2048 } },
+        { key: "permissions.budget.task", layer: "session", op: "set", value: { outputTokens: 100 } },
+      ] }, { id: "numeric-maps" })], { stopReason: "toolUse" }), fauxAssistantMessage("Configured"),
+    ]);
+    await home.prompt("Configure the numeric maps");
+    await waitFor(() => !home.isBusy, "numeric map changes settled");
+    expect(home.snapshot().extensionPresentation.pendingInteractions).toHaveLength(0);
+    expect(home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "numeric-maps"))
+      .toMatchObject({ type: "message", message: { role: "toolResult", isError: false } });
+    const next = await f.registry.create(f.cwd);
+    expect(next.runtime.session.settingsManager.getThinkingBudgets()).toEqual({ high: 2048 });
+    const readBudget = () => service.invoke(phone, "settings.resolve", { target: { kind: "home" }, keys: ["permissions.budget.task"] }) as Promise<Resolution>;
+    expect((await readBudget()).keys[0]!.value).toEqual({ outputTokens: 100 });
+    for (const value of [{ outputTokens: 0 }, { outputTokens: 0.5 }, { outputTokens: 10_000_000_001 }, { unoffered: 3 }]) {
+      const id = `invalid-map-${++sequence}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Invalid map probe", changes: [
+          { key: "permissions.budget.task", layer: "session", op: "set", value },
+        ] }, { id })], { stopReason: "toolUse" }), fauxAssistantMessage("Refused"),
+      ]);
+      await home.prompt("Try the invalid numeric map");
+      await waitFor(() => !home.isBusy, "invalid numeric map refused");
+      expect(home.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id))
+        .toMatchObject({ type: "message", message: { role: "toolResult", isError: true } });
+      expect((await readBudget()).keys[0]!.value).toEqual({ outputTokens: 100 });
+      expect(home.snapshot().extensionPresentation.pendingInteractions).toHaveLength(0);
+    }
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Allow a larger task", changes: [
+        { key: "permissions.budget.task", layer: "session", op: "set", value: { outputTokens: 200 } },
+      ] }, { id: "numeric-map-raise" })], { stopReason: "toolUse" }), fauxAssistantMessage("Raised"),
+    ]);
+    const raising = home.prompt("Raise the task budget");
+    const interaction = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions[0], "task-budget native card");
+    if (interaction.method !== "change") throw new Error("Expected the shared change card");
+    expect(interaction.review).toMatchObject({ requiresTap: true, items: [{ label: "Task budget", before: "output 100", after: "output 200" }] });
+    expect(JSON.parse(interaction.review.items[0]!.exact!)).toMatchObject({ target: { kind: "home" }, key: "permissions.budget.task", before: { outputTokens: 100 }, after: { outputTokens: 200 } });
+    expect((await readBudget()).keys[0]!.value).toEqual({ outputTokens: 100 });
+    await service.invoke(phone, "extension.respond", { commandId: `numeric-response-${++sequence}`, sessionId: home.id,
+      interactionId: interaction.id, hostEpoch: interaction.hostEpoch, presentationRevision: interaction.presentationRevision,
+      value: { digest: interaction.review.digest, approved: true } });
+    await raising;
+    await waitFor(() => !home.isBusy, "approved budget raise settled");
+    expect((await readBudget()).keys[0]!.value).toEqual({ outputTokens: 200 });
+    const history = await f.settings.settingsChanges.history({ key: "model.thinkingBudgets" });
+    const applied = history.entries.find(entry => entry.status === "applied")!;
+    expect(applied).toBeDefined();
+    await service.invoke(phone, "settings.undo", { commandId: `numeric-undo-${++sequence}`, changeId: applied.changeId });
+    const afterUndo = await f.registry.create(f.cwd);
+    expect(afterUndo.runtime.session.settingsManager.getThinkingBudgets()).toBeUndefined();
+    await saveCase("numeric-maps", { interaction, history, budget: (await readBudget()).keys[0]!.value });
+  });
+
   it("refuses a small input when the full Home catalog leaves no native response headroom", async () => {
     const f = await fixture(false, false, 8000);
     await setHomeMemoryModels(f.registry, [f.model]);

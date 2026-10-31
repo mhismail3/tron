@@ -78,8 +78,11 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   shared Overridden pill beside the row title. The shared settings row places Reset/Revert
   before the value: the value pill is rightmost, with independent 44-point targets.
 - **Writes.** Every write is a `settings.change`: dry run first, a refusal shows under its row and
-  `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; list and
-  numeric-map drafts write only on Save; unknown fields stay read-only. Outside-change recovery
+  `confirm` text asks before sending. Secret drafts start empty and clear on dismissal; string-list
+  drafts write only on Save. Numeric-map list controls use read-only value/provenance rows instead of
+  a native form; agents configure them through `settings`, including the shared native card for a
+  task-budget raise and logged Undo for
+  reversible changes. Unknown fields stay read-only. Outside-change recovery
   remains an explicit inline Apply again action beneath the same value control, not a row-opening
   detail link. The real-Gateway outside-change journey verifies the live value, receipt-backed restore
   and marker removal on that row. The Gateway supplies override presence and permissions;
@@ -180,8 +183,11 @@ scripts/ios-gateway-e2e-test run-ui \
 ```
 
 `TronSettingsScopeRowsUITests` checks read-only queue values, independent Revert and Project
-inspection. `TronSmokeUITests` keeps direct model/thinking, shared list/numeric-map editing,
-approvals and Changes coverage. Its painted-geometry journey measures the primitive and generic
+inspection. `TronSmokeUITests` keeps direct model/thinking, shared string-list/secret editing,
+read-only numeric-map/no-write inspection, approvals and Changes coverage.
+`TronAgentBehaviorRegressionUITests` checks numeric-map values without native editor/reset routes in
+light/dark and XXXL; Gateway `native-change.e2e.test.ts` owns actual agent numeric-map changes,
+next-Pi-session admission, spend-card acceptance and Undo. Its painted-geometry journey measures the primitive and generic
 schema controls at both text sizes and appearances; background sampling stays outside the whole
 action cluster so a left-hand reset cannot sample its neighboring value pill.
 The surviving memory/provider/queued-editor journeys in

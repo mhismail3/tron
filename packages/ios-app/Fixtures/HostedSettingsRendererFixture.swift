@@ -411,7 +411,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         return .object(["entries": .array(entries)])
     }
 
-    private var weights: [String: JSONValue] = ["red": .number(2)]
+    private let weights: [String: JSONValue] = ["red": .number(2)]
 
     private func historyEntry() -> JSONValue {
         // A redacted entry carries no before/after values, so it cannot be undone.
@@ -619,7 +619,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "sources.extensions": extensions = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
-            case "lab.weights": weights = value?.objectValue ?? [:]
             case "lab.password": hasSecret = value?.stringValue?.isEmpty == false
             default: break
             }

@@ -99,15 +99,6 @@ struct SettingsRange: Decodable, Equatable, Sendable {
     let max: Double
     let step: Double?
     let unit: String?
-
-    /// Numeric-map fields require exactly representable bounds before Double → Int conversion.
-    var supportsIntegerFields: Bool {
-        let exactLimit = 9_007_199_254_740_991.0
-        guard min >= 0, max >= min, max <= exactLimit,
-              Int(exactly: min) != nil, Int(exactly: max) != nil else { return false }
-        guard let step else { return true }
-        return step > 0 && step <= exactLimit && Int(exactly: step) != nil
-    }
 }
 
 struct SettingsOptionsSource: Decodable, Equatable, Sendable {
