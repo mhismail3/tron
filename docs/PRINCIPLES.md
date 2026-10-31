@@ -71,9 +71,10 @@ counts, a green-rate number. None of these is a quota.
   expired red. It stops Home from proposing a checkpoint until fixed; a checkpoint Mohsin
   requests anyway lists it, and his install is the acceptance.
 - Enforced by: `tools/verify` (selection, registry digests, batch, bisection). Full-suite
-  lanes, all-lane runs, case-only attribution and issue dedupe: #2174. Expiry and renewal
-  semantics and deferred iOS selections: #2175, due before #2130's entry expires on
-  2026-11-05 (today an expired entry fails every run). Trigger and staleness: #2176.
+  lanes, all-lane runs, case-only attribution and issue dedupe: #2174. Registry validation
+  enforces seven-day reproduction windows and one retained renewal; selections report
+  expired reds without blocking authorship and defer bounded iOS admission. Trigger and
+  staleness: #2176.
 
 ## P3 Tests are deterministic or they are bugs
 

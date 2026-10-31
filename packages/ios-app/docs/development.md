@@ -129,7 +129,10 @@ Each worktree has its own lane, DerivedData and products; run one simulator job 
 3 simulator-heavy jobs run at once on the Mac, across all worktrees and workers: `scripts/ios-test-lock.py
 --host-slot` takes one of 3 slots for every `tron-ios-test` build or run, profiler run, Gateway E2E command
 and `tron-ios-simulator install`, waits (naming the holders) when all are taken, and
-`scripts/tron-ios-test slots` shows them. The Development simulator and each device hold host-wide
+`scripts/tron-ios-test slots` shows them. `tron-ios-test --host-slot-wait-seconds N`
+opts into bounded acquisition (exit 73 when unavailable), without timing out admitted
+work or changing the default unbounded wait. Pre-land verify uses 30 seconds and reports
+unavailable iOS checks/tests as deferred, never passed; the batch retains unbounded admission. The Development simulator and each device hold host-wide
 leases (exit 73 names the holder). Neither
 PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test status --all`.
 

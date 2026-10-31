@@ -84,15 +84,28 @@ failing `evidence.command`, full base `evidence.commit`, SHA-256
 `evidence.failureDigest`, owner `issue` number and ISO `expires` date. The digest
 covers the full failure-message array (JSON, `ensure_ascii=False`), replacing only
 the checkout root with `<repo>`; a changed failure inside the same test refuses.
-The commit must be an ancestor of HEAD. Expiry is 00:00 UTC on the named date.
+The commit must be an ancestor of HEAD. Expiry is 00:00 UTC on the named date,
+strictly after the reproduction commit's UTC date and at most seven days later.
+A case may be renewed once: retain the original entry, then append its renewal with
+`renewedFrom` equal to the original `evidence.commit`. Renewal requires a new descendant
+reproduction commit dated on/after the original expiry and a newly reproduced digest
+(the same defect may have the same digest). Its own expiry has the same seven-day bound.
+The validator checks reachable registry history, so deleting entries after a fix does
+not reset a case's renewal budget. A second renewal is refused; fix or revert instead.
 Gateway waivers require fresh current-main reproductions and raw logs/JSON. Swift cases under `packages/mac-app/Tests/Integration/` may instead record explicit branch observations with original commit, exact xcresult failure-text-array digest and owner issue; they never enter the waiver map or waive Mac failures. Restoring ancestry never makes branch evidence main evidence.
 
-Tests execute unchanged. Only exact, unexpired case AND digest matches allow exit 0
-with verdict `quarantined`; `failedTests`, passing counts, logs and each expiry/issue
-remain visible. This is not an unqualified pass. Unknown failures, suite/runtime
-errors, missing reports, malformed or expired entries exit 1. Expiry blocks even
-unselected cases; remove/repair entries, never silently renew without new evidence.
-No wildcard/file waiver, retries, alternate runner or legacy verdict mode.
+Tests execute unchanged. Exact, unexpired case AND digest matches allow exit 0
+with verdict `quarantined` (qualified, never green); `failedTests`, passing counts,
+logs and each expiry/issue remain visible. Exact expired matches instead yield
+`expired` (exit 0 pre-land), retaining `expiredReds`, not waiving them as qualified.
+Every selection lists all `expiredEntries`, even unrelated ones: expiry never blocks
+authorship, but blocks checkpoint proposals. `--all` reports `expired` whenever any
+entry is expired so the batch cannot qualify it. Unknown/changed signatures,
+suite/runtime errors, missing reports and malformed registry data still exit 1.
+Health retains expired/deferred verdicts and counts expired failures as unwaived reds.
+A selection always records `checkpointEligible: false`: only a complete post-land batch
+can establish checkpoint eligibility. A maintainer-requested install despite expiry
+must list the expired red explicitly. No wildcard/file waiver, retries or alternate runner.
 
 Verify runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
 counts to `test-results/measure/`; its counts and errors never fail verify.
@@ -114,8 +127,10 @@ ordinary journeys. `--module` does not widen to unrelated kernel locks;
 `--update-locks` remains confined to the named owner's locks.
 
 Small changes run only what can catch a regression in them:
-- **Markdown** selects no module: documentation checks are its evidence. An actual
-  Markdown-only diff needs no Gateway dependencies ([tools/docs](../docs/README.md)).
+- **Documentation** (Markdown or assets owned by `repo/docs`, except module manifests)
+  selects no module: static/documentation checks are its evidence. Deleted assets
+  use base ownership too. Such a diff needs no Gateway dependencies
+  ([tools/docs](../docs/README.md)); ordinary code without tests still fails.
 - A module whose change is **only its own tests and goldens** (`*.golden.*`,
   `Goldens/`) runs those tests, plus its locks when a golden changed. Nothing
   else reads them, so it neither widens nor adds dependents' locks. Code
@@ -127,7 +142,7 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 
 | Tier | Changed inputs | Evidence before landing |
 |---|---|---|
-| **none** | Empty diff or Markdown only | Static/documentation checks; no executable tests |
+| **none** | Empty diff or documentation only | Static/documentation checks; no executable tests |
 | **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests + transitive consumer locks/declarations |
 | **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus all-lock/full-lane coverage in the next batch |
 
@@ -203,7 +218,8 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
 `ios-app/` module runs the iOS lane unless `--skip ios`:
 1. **`ios build`.** If this worktree's test products and index are stamped for
    this commit on a clean tree (the stamp `layers ios` trusts), they are reused. Otherwise
-   it runs `scripts/tron-ios-test build`. So `verify` builds once per commit,
+   it runs `scripts/tron-ios-test build`. Pre-land build/run commands pass
+   `--host-slot-wait-seconds 30` to the existing admission owner. So `verify` builds once per commit,
    and a second run reuses that build.
 2. **`layers ios`** on that build's index store. A stale or missing index is a
    failure, never a skip; there is no symbol-scan fallback.
@@ -218,8 +234,13 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
 
 `scripts/tron-ios-test` keeps the lane, lease (exit 73 when busy) and cleanup
 ownership. Run one simulator job per worktree. Its `build` and `run` take one of the
-three host-wide simulator slots and wait, naming the holders, when all are taken;
-verify has no other wait.
+three host-wide simulator slots and wait, naming the holders, when all are taken.
+The explicit bound applies only to acquisition, never admitted build/test execution;
+no option retains the default unbounded wait, including `--all` in a batch. Exit 73
+from build or run records the iOS steps and selected files as `deferred`, exit 0,
+never as passed. A deferred build also defers the index check and its selected tests;
+other affected checks still run. Genuine build/test errors and zero-test runs fail.
+The complete batch covers these files; verify adds no second slot owner.
 
 ## Explicit Mac batches
 
@@ -296,5 +317,10 @@ writes the real stamp; `run` writes an XCTest-style `summary.json`) for the iOS
 lane: locks-only selection, one reused build, the real `layers ios`, failing or
 empty summaries, and extension files. Real Git/process fixtures also exercise tiers,
 dirty planning, interrupted descendant cleanup/partial reports, exact green ranges,
-nonwaiting overlap refusal, failure bisection and unavailable issue authority. Over a fake Gateway runner it covers
+nonwaiting overlap refusal, failure bisection and unavailable issue authority. Registry fixtures
+cover expired exact/changed digests, one retained renewal, deletion-reset refusal, seven-day
+admission, and deleted non-Markdown documentation versus zero-test code. Hardware-free
+`scripts/test-ios-test-infrastructure.py HostSlotFixture RunnerFixture.test_run_forwards_bounded_host_slot_wait_before_simulator_work RunnerFixture.test_run_waits_for_a_host_slot_while_all_are_held`
+proves bounded acquisition cleanup, forwarding, the unchanged cap and default waiting.
+Over a fake Gateway runner it covers
 `mutate`'s timeout and interrupt. Output is kept in `test-results/verify-cli/`.

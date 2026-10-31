@@ -1478,6 +1478,19 @@ shutil.copytree(source, clone)
             lambda: bool(self.simctl_calls("create")),
         )
 
+    def test_run_forwards_bounded_host_slot_wait_before_simulator_work(self) -> None:
+        environment = self.contained_environment(self.root)
+        environment['TRON_IOS_SIMULATOR_STATE_DIR'] = str(self.root / 'development-state')
+        holders = self.hold_host_slots(environment, host_slot_count())
+        try:
+            result = self.invoke(extra_args=['--host-slot-wait-seconds', '0', '--only-testing', 'TronMobileUITests/StubTests'])
+            self.assertEqual(result.returncode, 73, result.stderr)
+            self.assertIn('host slot wait expired; deferred', result.stderr)
+            self.assertFalse(self.simctl_calls('create'))
+            self.assertEqual((self.state / 'lease.lock').read_text(), '')
+        finally:
+            self.stop_host_slot_holders(holders)
+
     def test_keep_booted_is_reused_by_the_next_run_in_the_lane(self) -> None:
         """SIM-1: --keep-booted serves a test-fix loop and still releases at the end.
 
@@ -2048,6 +2061,29 @@ with open(state / 'events', 'a', encoding='utf-8') as events:
         self.assertEqual(len(overlaps), self.cap + 1)
         self.assertEqual(max(overlaps), self.cap, "the jobs must overlap up to the cap and never beyond it")
         self.assertIn("took host slot", stderr.read_text())
+
+    def test_bounded_wait_defers_without_starting_and_releases_lane(self) -> None:
+        holders = self.hold_host_slots(self.environment, self.cap)
+        lease = self.root / 'bounded/lease.lock'
+        try:
+            result = self.run_script([
+                sys.executable, str(LOCK), '--lock', str(lease), '--host-slot',
+                '--host-slot-wait-seconds', '0', '--', sys.executable, '-c',
+                "from pathlib import Path; Path('started').touch()",
+            ], self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            self.assertEqual(result.returncode, 73, result.stderr)
+            self.assertIn('host slot wait expired; deferred', result.stderr)
+            self.assertFalse((self.root / 'started').exists())
+            self.assertEqual(lease.read_text(), '')
+            self.assertEqual(len(self.host_slot_files(self.environment)), self.cap)
+        finally:
+            self.stop_host_slot_holders(holders)
+        # The same lease can immediately run; zero wait does not time out admitted work.
+        result = self.run_script([
+            sys.executable, str(LOCK), '--lock', str(lease), '--host-slot',
+            '--host-slot-wait-seconds', '0', '--', sys.executable, '-c', 'import time; time.sleep(0.2)',
+        ], self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_a_killed_holders_slot_is_reclaimed(self) -> None:
         """Failure mode 3: a killed holder frees its slot once the job it admitted is gone."""

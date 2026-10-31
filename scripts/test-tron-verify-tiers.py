@@ -12,6 +12,143 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 
+class QuarantinePolicyTests(fixture.VerifyCase):
+    def expired_fixture(self):
+        from datetime import datetime, timedelta, timezone
+        r = self.repo
+        # Reproduction and registry commits use controlled Git timestamps, not wall waits.
+        old = datetime.now(timezone.utc) - timedelta(days=8)
+        r.env.update(GIT_AUTHOR_DATE=old.isoformat(), GIT_COMMITTER_DATE=old.isoformat())
+        entry = fixture.QuarantineTests.fixture(self)
+        entry['expires'] = (old.date() + timedelta(days=7)).isoformat()
+        r.write('tools/verify/known-failures.json', json.dumps([entry]))
+        r.commit('expired main red')
+        r.env.pop('GIT_AUTHOR_DATE')
+        r.env.pop('GIT_COMMITTER_DATE')
+        return entry
+
+    def test_expiry_never_blocks_authorship_but_is_not_qualified(self):
+        r = self.repo
+        entry = self.expired_fixture()
+        for module, verdict in [('repo/alpha', 'passed'), ('gateway/sample', 'expired')]:
+            result = r.verify('--module', module)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = r.report()
+            self.assertEqual(report['verdict'], verdict)
+            self.assertEqual(report['expiredEntries'][0]['testId'], entry['testId'])
+            self.assertFalse(report['checkpointEligible'])
+            self.assertIn('EXPIRED RED', result.stdout)
+        step = next(s for s in report['steps'] if s['name'] == 'tests: gateway')
+        self.assertEqual(step['quarantined'], [])
+        self.assertEqual(step['expiredReds'][0]['testId'], entry['testId'])
+        card = r.health()['fields']['mainReds']
+        self.assertEqual(card['verifierOutcomes'], {'expired': 1})
+        self.assertEqual(card['newRedSignatures'], 1)
+        self.assertEqual(card['quarantinedCases'], 0)
+        self.assertTrue((r.path / 'packages/gateway/test-results-executed').exists())
+        raw = json.loads((r.path / 'packages/gateway/report-input.json').read_text())
+        raw['testResults'][0]['assertionResults'][0]['failureMessages'] = ['new defect']
+        r.write('packages/gateway/report-input.json', json.dumps(raw))
+        r.commit('new digest is not an expired main red')
+        result = r.verify('--module', 'gateway/sample')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(r.report()['verdict'], 'failed')
+
+    def test_one_renewal_requires_retained_original_and_fresh_reproduction(self):
+        import copy
+        from datetime import datetime, timedelta, timezone
+        r = self.repo
+        entry = self.expired_fixture()
+        renewed = copy.deepcopy(entry)
+        renewed['renewedFrom'] = entry['evidence']['commit']
+        r.write('README.md', '# Fresh reproduction\n')
+        r.commit('fresh reproduction')
+        renewed['evidence']['commit'] = r.git('rev-parse', 'HEAD')
+        renewed['expires'] = (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()
+        for entries, expected in [([renewed], 1), ([entry, {**renewed, 'evidence': entry['evidence']}], 1), ([entry, renewed], 0)]:
+            r.write('tools/verify/known-failures.json', json.dumps(entries))
+            r.commit('renewal admission')
+            result = r.verify('--module', 'gateway/sample')
+            self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        self.assertEqual(r.report()['verdict'], 'quarantined')
+        # Removing the original/renewed evidence cannot reset the case budget.
+        r.write('tools/verify/known-failures.json', '[]')
+        r.commit('temporarily fixed')
+        r.write('README.md', '# Another reproduction\n')
+        r.commit('second reproduction')
+        third = copy.deepcopy(renewed)
+        third['renewedFrom'] = renewed['evidence']['commit']
+        third['evidence']['commit'] = r.git('rev-parse', 'HEAD')
+        for entries in ([entry, renewed, third], [{k: v for k, v in third.items() if k != 'renewedFrom'}]):
+            r.write('tools/verify/known-failures.json', json.dumps(entries))
+            r.commit('second renewal refused')
+            result = r.verify('--module', 'repo/alpha')
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+
+class DocumentationAssetTests(fixture.VerifyCase):
+    def test_deleted_non_markdown_doc_is_static_only_but_code_still_needs_tests(self):
+        r = self.repo
+        r.git('rm', 'mods/alpha/test-alpha.py')
+        r.write('docs/docs.module.json', json.dumps({'layer': 'L5', 'owns': ['**']}))
+        r.write('docs/retired.diff', 'archived prose\n')
+        r.commit('documentation asset')
+        r.git('branch', '-f', 'base')
+        r.git('rm', 'docs/retired.diff')
+        r.commit('delete documentation asset')
+        result = r.verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(r.report()['selection']['tier'], 'none')
+        self.assertEqual(r.report()['passingTests'], 0)
+        r.write('mods/alpha/alpha.py', 'VALUE = 2\n')
+        r.commit('real code without tests')
+        result = r.verify()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('zero tests ran', result.stdout)
+
+
+class IosDeferralTests(fixture.VerifyCase):
+    def test_busy_build_defers_named_tests_without_passing_them(self):
+        r = self.repo
+        fixture.IosLaneTests.ios_fixture(self)
+        r.write('scripts/tron-ios-test', '#!/bin/sh\necho "host slot wait expired; deferred"\nexit 73\n')
+        (r.path / 'scripts/tron-ios-test').chmod(0o755)
+        r.write('packages/ios-app/Sources/UI/Chat/ChatView.swift', 'struct Changed {}\n')
+        r.commit('busy admission')
+        result = r.verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = r.report()
+        self.assertEqual(report['verdict'], 'deferred')
+        self.assertFalse(report['checkpointEligible'])
+        self.assertEqual(report['passingTests'], 0)
+        tests = next(s for s in report['steps'] if s['name'] == 'tests: ios')
+        self.assertEqual(tests['status'], 'deferred')
+        self.assertEqual(tests['deferredTests'], ['packages/ios-app/UITests/Locks/FixtureLockTests.swift'])
+        self.assertIn('--host-slot-wait-seconds', next(s for s in report['steps'] if s['name'] == 'ios build')['command'])
+
+
+    def test_busy_run_defers_after_successful_build_without_hiding_real_errors(self):
+        r = self.repo
+        fixture.IosLaneTests.ios_fixture(self)
+        r.write('packages/ios-app/Sources/UI/Chat/ChatView.swift', 'struct Changed {}\n')
+        r.commit('selected iOS source')
+        r.env['FIXTURE_IOS_BUSY'] = 'run'
+        result = r.verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = r.report()
+        self.assertEqual(report['verdict'], 'deferred')
+        self.assertEqual(report['passingTests'], 0)
+        self.assertEqual(next(s for s in report['steps'] if s['name'] == 'ios build')['status'], 'ok')
+        step = next(s for s in report['steps'] if s['name'] == 'tests: ios')
+        self.assertEqual(step['status'], 'deferred')
+        self.assertEqual(len(step['deferredTests']), 1)
+        del r.env['FIXTURE_IOS_BUSY']
+        r.env['FIXTURE_IOS_FAIL'] = 'TronMobileUITests/FixtureLockTests/testChat()'
+        failed = r.verify()
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertEqual(r.report()['verdict'], 'failed')
+
+
 class TierTests(fixture.VerifyCase):
     def plan(self, *args):
         result = self.repo.verify(*args, '--plan')

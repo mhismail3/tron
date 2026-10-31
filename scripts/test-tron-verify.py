@@ -38,6 +38,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -79,7 +80,7 @@ class Repo:
             "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
             "scripts/ios-test-build-identity.py", ".github/**", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
             "tooling.module.json"]}))
-        for name, layer in (("alpha", "L3"), ("beta", "L3"), ("core", "L1"), ("docs", "L5")):
+        for name, layer in (("alpha", "L3"), ("beta", "L3"), ("core", "L1"), ("untested", "L5")):
             self.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": layer, "owns": ["**"]}))
             self.write(f"mods/{name}/{name}.py", f"VALUE = '{name}'\n")
         self.write("mods/alpha/test-alpha.py", PASSING)
@@ -303,7 +304,7 @@ class QuarantineTests(VerifyCase):
         r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\npackages/gateway/test-results-executed\n")
         r.commit("report protocol producer")
         entry = {"testId": path + "::sample known failure", "evidence": {"command": "scripts/tron test gateway src/sample.integration.test.ts",
-                 "commit": r.git("rev-parse", "HEAD"), "failureDigest": hashlib.sha256(json.dumps(["Error: original defect"]).encode()).hexdigest()}, "issue": 2128, "expires": "2099-01-01"}
+                 "commit": r.git("rev-parse", "HEAD"), "failureDigest": hashlib.sha256(json.dumps(["Error: original defect"]).encode()).hexdigest()}, "issue": 2128, "expires": (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()}
         return entry
 
     def test_exact_quarantine_is_qualified_and_unknown_or_suite_errors_fail(self):
@@ -363,10 +364,10 @@ class QuarantineTests(VerifyCase):
                 self.assertEqual(card['verifierOutcomes'], {'failed': 1})
                 self.assertNotEqual(card['status'], 'available')
 
-    def test_expired_duplicate_and_malformed_entries_fail_loudly(self):
+    def test_overlong_duplicate_and_malformed_entries_fail_loudly(self):
         r = self.repo
         entry = self.fixture()
-        for entries in ([{**entry, "expires": "2000-01-01"}], [entry, entry], [{**entry, "evidence": {}}],
+        for entries in ([{**entry, "expires": "2099-01-01"}], [entry, entry], [{**entry, "evidence": {}}],
                         [{**entry, "evidence": {**entry["evidence"], "commit": "0" * 40}}]):
             with self.subTest(entries=entries):
                 r.write("tools/verify/known-failures.json", json.dumps(entries))
@@ -377,7 +378,7 @@ class QuarantineTests(VerifyCase):
                 self.assertFalse((r.path / "packages/gateway/test-results-executed").exists())
                 card = r.health()['fields']['mainReds']
                 self.assertEqual(card['verifierOutcomes'], {'failed': 1})
-                expected = 'registry-expired' if entries[0].get('expires') == '2000-01-01' else 'registry-invalid'
+                expected = 'registry-invalid'
                 self.assertEqual(card['sourceRefusals'], {expected: 1})
                 self.assertIsNone(card['numerator'])
 
@@ -599,8 +600,8 @@ class SelectionTests(VerifyCase):
 
     def test_a_selection_without_tests_fails_as_zero_test(self) -> None:
         r = self.repo
-        r.write("mods/docs/docs.py", "VALUE = 'prose'\n")
-        r.commit("docs change")
+        r.write("mods/untested/untested.py", "VALUE = 'code without tests'\n")
+        r.commit("code change")
         result = r.verify("--changed")
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("zero tests ran: an empty selection is not evidence", result.stdout)
@@ -619,7 +620,7 @@ class FastPathTests(VerifyCase):
         self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
         report = r.report()
         self.assertEqual((report["selection"]["tests"], report["selection"]["modules"], report["passingTests"]), ([], [], 0))
-        self.assertIn("Markdown-only change", report["message"])
+        self.assertIn("documentation-only change", report["message"])
         self.assertEqual({step["name"]: step["status"] for step in report["steps"]}["agent policy"], "ok")
         # Known-bad: prose that breaks a documentation rule fails the run.
         r.write("AGENTS.md", "# Charter\n")
@@ -703,6 +704,7 @@ IOS_TEST_STUB = r"""#!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 echo "$*" >>"$FIXTURE_IOS_CALLS"
+if [[ "${FIXTURE_IOS_BUSY:-}" == "$1" ]]; then echo 'host slot wait expired; deferred'; exit 73; fi
 case "$1" in
   build)
     mkdir -p "$TRON_IOS_TEST_DERIVED_DATA/Build/Products"
@@ -768,8 +770,8 @@ class IosLaneTests(VerifyCase):
                              ("ok", "ok", 1))
         self.assertEqual(digests[0], digests[1])
         self.assertIn("already stamped for this commit", steps["ios build"]["detail"])
-        self.assertEqual(calls.read_text().splitlines(), ["build", "run --only-testing TronMobileUITests/FixtureLockTests",
-                                                          "run --only-testing TronMobileUITests/FixtureLockTests"])
+        self.assertEqual(calls.read_text().splitlines(), ["build --host-slot-wait-seconds 30", "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests",
+                                                          "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"])
 
         failed = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
                                 env={**r.env, "FIXTURE_IOS_FAIL": "TronMobileUITests/FixtureLockTests/testChat()"},
@@ -787,7 +789,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(module.returncode, 1, module.stdout)
         self.assertIn("selected tests were not run: ios-lanes", module.stdout)
         self.assertEqual(calls.read_text().splitlines(), [
-            "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
+            "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
 
     def test_source_module_baseline_reaches_transitive_consumers_locks_without_widening(self) -> None:
         r = self.repo
@@ -805,7 +807,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(report["selection"]["tests"], [f"{ios}/UITests/Locks/FixtureLockTests.swift"])
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(calls.read_text().splitlines(), [
-            "build", "run --only-testing TronMobileUITests/FixtureLockTests"])
+            "build --host-slot-wait-seconds 30", "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"])
         # Module baselines add consumer locks, not their journeys or unrelated kernel locks.
         self.assertNotIn("widened to every lock", baseline.stdout)
         # Recording remains confined to the explicitly named owner's locks.
@@ -830,7 +832,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(module.returncode, 1, module.stdout + module.stderr)
         self.assertIn("ios-lanes: 2 file(s)", module.stdout)
         self.assertEqual(calls.read_text().splitlines()[-1],
-                         "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests")
+                         "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests")
         # A file that names no XCTestCase class fails loudly, unless the run skips iOS.
         r.write(f"{ios}/StrayUITests.swift", "struct Helper {}\n")
         r.commit("stray")
