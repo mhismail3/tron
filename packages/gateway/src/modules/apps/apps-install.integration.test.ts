@@ -3,9 +3,11 @@ import { execFile, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { workspaceModule } from "../../workspace/workspace-module.js";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -108,6 +110,20 @@ function offerArgs(feeds: string[] = []) { return { action: "offer", appId: "bui
 function installParams(review: Record<string, any>, commandId: string, upgradeToV2 = false) {
   return { commandId, ...review.reference, offerId: review.offer.id, expectedRevision: review.installed?.revision ?? null,
     expectedSourceSha256: review.installed?.sourceSha256 ?? null, expectedInstanceId: review.installed?.instanceId ?? null, upgradeToV2 };
+}
+
+async function legacyFixture(f: Fixture, name = "Builds"): Promise<void> {
+  // Seed a historical persisted consumer from committed bytes, never a retired tool writer.
+  const directory = join(f.root, "tron/workspace/state/apps/builds");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await cp(fileURLToPath(new URL("../../../test-fixtures/tron-corpus/home/workspace/state/apps/corpus-counter/data.sqlite", import.meta.url)), join(directory, "data.sqlite"));
+  await chmod(join(directory, "data.sqlite"), 0o600);
+  const database = new DatabaseSync(join(directory, "data.sqlite"));
+  try { database.exec("DELETE FROM state; UPDATE meta SET value=0 WHERE name='revision'"); } finally { database.close(); }
+  await writeFile(join(directory, "App.swift"), source, { mode: 0o600 });
+  await writeFile(join(directory, "app.json"), JSON.stringify({ version: 1, id: "builds", name, revision: 1,
+    sourceSha256: sha(source), sourceBytes: Buffer.byteLength(source), updatedAt: new Date().toISOString() }, null, 2) + "\n", { mode: 0o600 });
+  await f.registry.moduleHost.contract(workspaceModule).markFeatureInitialized("apps");
 }
 
 function publish(f: Fixture, title: string): void {
@@ -289,7 +305,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     }
   });
   it("takes a fresh v1 backup after a failed upgrade and later state edits, retaining the earlier backup", async () => {
-    const f = await fixture(); await tool(f, { action: "install", appId: "builds", name: "Legacy Builds", source: { kind: "path", path: "Builds.swift" } });
+    const f = await fixture(); await legacyFixture(f, "Legacy Builds");
     await rpc(f, "apps.commit", { commandId: "backup-first-state", appId: "builds", expectedRevision: 0, set: [{ key: "draft", value: "first backup" }] });
     const directory = join(f.root, "tron/workspace/state/apps/builds");
     const firstBytes = await readFile(join(directory, "data.sqlite"));
@@ -545,7 +561,7 @@ struct ContentView: View {
 
   it("keeps named v1 reads unchanged and requires a backed-up opt-in update to v2 without changing SQLite", async () => {
     const f = await fixture();
-    await tool(f, { action: "install", appId: "builds", name: "Builds", source: { kind: "path", path: "Builds.swift" } });
+    await legacyFixture(f);
     const directory = join(f.root, "tron/workspace/state/apps/builds");
     const before = await Promise.all(["app.json", "App.swift", "data.sqlite"].map(name => readFile(join(directory, name))));
     expect(await rpc(f, "apps.get", { appId: "builds" })).toMatchObject({ app: { version: 1 }, source });
