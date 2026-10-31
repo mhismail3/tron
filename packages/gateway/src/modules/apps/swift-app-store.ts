@@ -376,8 +376,14 @@ export class SwiftAppStore {
         if (await count() >= 200) throw new GatewayError("conflict", "At most 200 app offers may be retained; discard an unused offer first");
         await ensureOwnerDirectory(directory);
       }
-      await durableAtomicWriteText(join(directory, "App.swift"), input.source);
-      await durableAtomicWriteJson(join(directory, "offer.json"), offer);
+      // Readers share this mutex and require both documents. Publish independent
+      // files together, but join both durable writes even on failure before the
+      // mutation releases ownership; a late write must not race a successor.
+      const publications = await Promise.allSettled([
+        durableAtomicWriteText(join(directory, "App.swift"), input.source),
+        durableAtomicWriteJson(join(directory, "offer.json"), offer),
+      ]);
+      for (const publication of publications) if (publication.status === "rejected") throw publication.reason;
       return { offer };
     });
   }

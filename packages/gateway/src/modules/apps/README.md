@@ -27,6 +27,9 @@ it does not publish, execute source, network or create a second index.
 - `offer` creates an exact source/configuration display; it never installs.
   Review/install require its producing session/artifact grant, not caller SHA
   authority. Identical bytes in another display do not inherit an offer.
+  Source and offer metadata publish concurrently under the existing store mutex;
+  both durable writes settle before success or failure releases that mutex.
+  Readers still validate both documents; incomplete offers are never installable.
 - Reviewed install/update uses existing transport mutation receipts and fences
   the reviewed head/instance. Accepted uncertain commands never replay on reconnect.
 - V1 remains readable through the named reader. Only explicit opted-in update
