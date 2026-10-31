@@ -27,11 +27,10 @@ git merge --no-edit FETCH_HEAD
 
 On conflict, stop; keep the branch/index/worktree and resolve deliberately. Never
 stash, reset away work, or retry a failed merge blindly. Review reused rerere
-resolutions. Run `scripts/tron verify --plan` then `scripts/tron verify` and the
-actual affected checks. Fresh worktrees prepare pinned Gateway dependencies via
-`scripts/tron-node exec npm --prefix packages/gateway ci --include=dev` when needed.
-For a committed review use `git diff --binary --full-index <base> HEAD --`;
-run `scripts/personal-info-guard.sh --stdin` before sharing any exported patch.
+resolutions. Run `scripts/tron verify --plan`, affected checks and registry validation.
+Obtain independent ACCEPT for test edits; follow the [oracle policy](../../../tools/verify/test-oracles.md).
+Prepare pinned Gateway dependencies only when selected checks need them. Review with
+`git diff --binary --full-index <base> HEAD --`; privacy-check exported patches.
 
 ## Publish
 
@@ -45,8 +44,9 @@ A non-fast-forward refusal preserves your candidate. Fetch/integrate again;
 rerun tests only if integration changed their dependencies. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
-Sync tracked-clean primary main only when strictly behind, using
-`git merge --ff-only origin/main`; preserve untracked files.
+After landing, run full Gateway coverage for runtime/Pi changes and the explicit batch
+for full-tier changes; fix/revert new reds. Sync tracked-clean primary main only when
+strictly behind with `git merge --ff-only origin/main`; preserve untracked files.
 
 ## Issues and preservation
 

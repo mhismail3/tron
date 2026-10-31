@@ -44,8 +44,7 @@ against `config/ci-toolchain.env` (`scripts/install-ci-tools.sh node`). It uses
 the primary checkout's `.ci-tools`, so one install serves every linked worktree.
 It refuses a signed Gateway payload or app-bundle runtime, which Tron agent shells have first on `PATH` but which cannot load
 unsigned native add-ons and has no `npx`. Packaging, `scripts/tron dev`,
-`scripts/tron ci|chat|diagnose`, the iOS Gateway E2E harness, the profiler and
-`scripts/tron work verify` all use it.
+`scripts/tron ci|chat|diagnose`, the iOS Gateway E2E harness, the profiler and verify all use it.
 `scripts/tron` sets `PYTHONDONTWRITEBYTECODE=1` so native npm builds never write
 `__pycache__` into the pinned npm tree, which the digest in
 `config/ci-toolchain.env` rejects (#638).
@@ -119,9 +118,9 @@ reused PID based on `kill -0` alone. The supervisor atomically publishes bounded
 is the intentional authenticated restart drain; other exits consume a bounded
 restart budget and eventually become `failed`.
 
-After source changes, an agent or the maintainer restarts the Debug Gateway
-with `scripts/tron dev restart` for loopback, or adds `--tailscale` when iOS
-must reach it. `scripts/tron dev` runs every mode under a minimal, allow-listed
+Only after workers stop/park cleanly, use `scripts/tron dev restart` for Debug
+loopback, or add `--tailscale` when iOS must reach it; production rebuild/delivery
+remains maintainer-owned. `scripts/tron dev` runs every mode under a minimal, allow-listed
 environment, so an agent shell's inherited Stable Gateway values (subagent root,
 channel, payload identity, session) never reach the Debug build, deploy helper,
 supervisor or Gateway. The Debug Gateway is one shared resource: check
@@ -291,13 +290,12 @@ always allowed.
 budget. It fails only a change that creates a production file over 800 lines, or
 a doc above twice its budget. [Budget rules](../tools/budgets/README.md).
 
-`scripts/tron verify --plan` explains affected selection; `scripts/tron verify`
-runs it, stopping at the first failure and retaining per-step wall times in
-`test-results/verify/<sha>.json`. Markdown-only changes need static/docs evidence,
-not executable tests. Higher-risk changes require affected checks now and broad
-coverage in the existing explicit batch. Exact known failures remain visible,
-owned and expiring. [Verify](../tools/verify/README.md) owns the executable rules;
-the [oracle policy](../tools/verify/test-oracles.md) owns what a surviving test proves.
+Run affected checks and registry validation before plain-Git fast-forward landing;
+run broad runtime coverage after landing, using the explicit batch for full-tier changes.
+Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
+owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tools/verify/test-oracles.md)
+owns fail-before/pass-after, justified test edits with independent ACCEPT, and exact
+owner/signature/expiry quarantine. No maintainer test-text approval or retry-to-green.
 
 At most 3 simulator-heavy jobs run at once on this Mac, across all worktrees and workers. The
 iOS test runner (`scripts/tron-ios-test` build/run, so `verify` too), the profiler, the Gateway

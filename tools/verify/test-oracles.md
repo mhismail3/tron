@@ -1,11 +1,9 @@
 # Test-oracle policy
 
-A test earns its place by detecting a named surviving product regression through
-shipped logic or its actual boundary. State the action, observed outcome and why
-a broken implementation would fail. A mock, copied algorithm, private call or
-source-text match is not proof of wiring, authority, ordering, cleanup or rendering.
-Use the fewest faithful oracles; the charter's four bounded production-logic
-groups do not replace real process/Gateway/Pi/native evidence where needed.
+Detect a named surviving regression through shipped logic or its actual boundary.
+For bugs, retain fail-before/pass-after evidence: action, outcome and why the broken
+implementation fails. Mocks, copied algorithms, private calls and source-text matches
+cannot prove wiring, authority, ordering, cleanup or rendering. Use few faithful oracles.
 
 ## Retire a reader, not its protection
 
@@ -25,14 +23,13 @@ race using actual evidence.
 
 ## Goldens, assertions and timeouts
 
-Workers may update intended-behavior assertions, fixtures, timeouts and goldens;
-no maintainer test-text approval is required. Explain the cause, inspect the actual
-delta against intended behavior, re-record only the affected witness through its
-owner, then run the comparison. Never auto-bless unexplained reds. Normalization
-must not erase the protected distinction. A still image does not prove interaction.
-Subjective new design/taste goes to the maintainer with actual inline visuals;
-objective gates belong to Home. Follow the charter's risk-based reviewer rule,
-not a blanket reviewer queue for test text.
+Workers may update intended-behavior assertions, fixtures, timeouts and goldens
+without maintainer test-text approval. Explain the cause and intended delta;
+re-record only the affected witness through its owner and run the comparison.
+A non-author reviewer names each surviving oracle, checks for weakening and explicitly
+ACCEPTs the final change. Never auto-bless unexplained reds or normalize away the
+protected distinction. Subjective design goes to the maintainer with inline visuals;
+Home owns objective gates. A still image does not prove interaction.
 
 ## Quarantine is visible, temporary evidence
 

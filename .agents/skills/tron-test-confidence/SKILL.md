@@ -5,31 +5,25 @@ description: Judge whether an integration or E2E test proves its behavior, clean
 
 # Test confidence
 
-Apply [project rules](../../../AGENTS.md): keep the fewest faithful oracles.
-The four bounded production-logic groups named in the charter are allowed;
-actual wiring, I/O, authority, ordering and rendering still need real boundaries.
+Apply [project rules](../../../AGENTS.md) and the [oracle policy](../../../tools/verify/test-oracles.md).
+Use the fewest faithful checks; bounded logic cannot substitute for wiring or rendering.
 
-## Judge a test
+## Judge the oracle
 
-Trace the product risk to the real entrypoint, its owner, the setup, the action,
-and the assertion. Ask whether the test would fail if the real behavior broke.
-A test that only reasserts a mock, fixture constant, source text or private call
-proves nothing. Observe a public result: durable bytes, admission, projection
-identity or the presented interface. Rendered text, targets and chrome need
-rendered witnesses; whole-tree equality is not an interaction oracle. Mark any boundary the suite does not cross as a gap, and do not
-claim coverage for it.
+Trace risk → real entrypoint → owner → action → observable assertion. Explain why
+broken shipped behavior fails; mocks, constants, source text and private calls do not
+prove it. Bugs need fail-before/pass-after. Name a retired check's surviving oracle
+or file a gap. Mark boundaries not crossed; whole AX-tree equality is not interaction.
 
-## Diagnose a flake
+## Diagnose and change
 
-Preserve the first failure, its seed or ordering, its configuration, and its log.
-Separate a scheduling assumption from a production race using the owning event.
-Prefer bounded waits on that event to fixed sleeps. Confirm cleanup on success,
-failure, timeout, and cancellation. Isolate files, ports, processes, global state,
-and simulator lanes. Never loosen an assertion, update a golden, add a retry, or
-skip a case to obtain green. Compare against the unchanged base before calling a
-failure pre-existing.
+Preserve the first failure, seed/order, configuration and log. Separate scheduling
+assumptions from product races using bounded owner-event waits. Confirm cleanup on
+success, failure, timeout and cancellation; isolate files, ports, processes and lanes.
+Reproduce on unchanged base before claiming a base red; quarantine only exact cases
+with owner, signature and expiry. No retry/skip/tolerance change to manufacture green.
 
-## Report
-
-State the tests that ran with their counts, the failures and skips, and the
-boundaries that remain untested. A green run is not a complete risk assessment.
+Intended-behavior golden/assertion/fixture/timeout edits need cause and delta evidence,
+not a maintainer tap. Get non-author ACCEPT naming surviving oracles; subjective
+visual choices go to the maintainer. Report counts, skips, quarantines and untested
+boundaries honestly; a green subset is not complete coverage.
