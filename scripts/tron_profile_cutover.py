@@ -96,6 +96,13 @@ def run_controller(argv, platform, log_path, leases, environment):
                 raise
 
 
+def verify_gateway_source(root=ROOT, source=SOURCE):
+    # The owning cutover documentation ships with this command, not the reader.
+    subprocess.run(['git', '-C', root, 'diff', '--quiet', source, 'HEAD', '--', 'packages/gateway/src',
+                    ':(exclude)packages/gateway/src/maintenance', ':(exclude)packages/gateway/src/gateway-main.module.json',
+                    ':(exclude)packages/gateway/src/modules/home/profile.md'], check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Exact prepared Profile migration; maintainer Terminal only. Prints before/after and rollback. No app install.')
     action = parser.add_mutually_exclusive_group(required=True)
@@ -109,8 +116,7 @@ def main():
     platform.admit()
     if subprocess.check_output(['git', '-C', ROOT, 'status', '--porcelain', '--untracked-files=no'], text=True).strip():
         raise Failure('commit the reviewed cutover implementation first')
-    subprocess.run(['git', '-C', ROOT, 'diff', '--quiet', SOURCE, 'HEAD', '--', 'packages/gateway/src',
-                    ':(exclude)packages/gateway/src/maintenance', ':(exclude)packages/gateway/src/gateway-main.module.json'], check=True)
+    verify_gateway_source()
     active = json.loads((platform.active_payload() / 'manifest.json').read_text())
     if active.get('sourceRevision') != SOURCE:
         raise Failure('Stable payload source mismatch; this command is bound to ' + SOURCE)
