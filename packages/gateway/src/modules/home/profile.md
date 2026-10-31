@@ -12,6 +12,12 @@ devices and services together), `projects` (owned projects and pointers only), a
 is separate holding space, not an eighth personal area. Inactive originals stay unchanged.
 Depth is at most four segments including the root. Segments are lowercase slugs.
 
+The version-2 codec in `profile-file.ts` defines one hierarchical `files/Profile.json`:
+current records, only exact linked correction claim anchors, and Not now state.
+The hierarchy alone owns current placement. Its secure, bounded file I/O does not
+admit or convert live storage: Gateway's canonical owner remains version 1.
+Neither the codec nor exact record reads consult an offline archive.
+
 Placement, kind and confirmation are distinct. Sorting cannot grant execution
 permission, promote confirmation, split a note, revoke explicit standing authority
 or rewrite provenance. Home chooses relevance and worker brief content; Gateway
@@ -46,8 +52,13 @@ revisions, state, content and provenance. Inactive content requires `includeInac
 Profile reference and byte count, never truncated content. The reference names
 `profile {action:"read",id,revisionId}`. Exact reads return at most 4,096 UTF-16
 characters with `nextOffset`; pass it as `contentOffset` with the same identity.
-Surrogate boundaries are checked. Missing revisions refuse, and exact identities
-cannot be mixed with index selectors. `nextCursor` binds
+Surrogate boundaries are checked. An exact revision is readable only when it is
+the current head or a committed wrong-claim revision linked by a current Correction.
+Retired Corrections retain their links; removing the last link releases read access.
+Other revisions, including missing identities, refuse with `conflict` and
+`details.kind = "profile_revision_unavailable"`, never an empty result or an archive
+fallback. Ordinary current-ID lookup still returns no note when absent. Exact
+identities cannot be mixed with index selectors. `nextCursor` binds
 the query and revision snapshot; changed snapshots refuse and require a new read.
 Raw offsets are only for metadata, not continuation of record pages.
 

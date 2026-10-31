@@ -23,9 +23,9 @@ const PROFILE_PARAMETERS = Type.Object({
   corrects: Type.Optional(Type.Object({ id: Type.String({ minLength: 16, maxLength: 80 }), revisionId: Type.String({ minLength: 16, maxLength: 80 }) }, { additionalProperties: false, description: "correction: exact wrong claim. Home never invents a claim or confirmation." })),
   text: Type.Optional(Type.String({ minLength: 1, maxLength: PROFILE_TEXT_MAX, description: "learn, refine and supersede: one line of the item's text, as the maintainer states it." })),
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Exact Profile note ID; read requires its revisionId. Also used by refine, supersede and retire." })),
-  revisionId: Type.Optional(Type.String({ minLength: 16, maxLength: 80, description: "read: the exact immutable revision from a Profile content reference." })),
+  revisionId: Type.Optional(Type.String({ minLength: 16, maxLength: 80, description: "read: the current head revision or an exact wrong-claim revision linked by a current Correction. Other historical revisions are unavailable." })),
   contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 2_097_152, description: "read with id/revisionId: UTF-16 character offset into canonical record JSON, continued only with nextOffset." })),
-  assignments: Type.Optional(Type.Array(Type.Object({ id: Type.String({ minLength: 1, maxLength: 200 }), expectedRevision: Type.String({ minLength: 16, maxLength: 80 }), path: Type.String({ minLength: 1, maxLength: 131 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 500, description: "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and history stay unchanged." })),
+  assignments: Type.Optional(Type.Array(Type.Object({ id: Type.String({ minLength: 1, maxLength: 200 }), expectedRevision: Type.String({ minLength: 16, maxLength: 80 }), path: Type.String({ minLength: 1, maxLength: 131 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 500, description: "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and correction claims stay unchanged." })),
   commandId: Type.Optional(Type.String({ minLength: 1, maxLength: 160, description: "retry: the ORIGINAL operation command returned with retry_required; never a new operation identity." })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: PROFILE_REASON_MAX, description: "Why the change is made. Required for retire; recorded in the ledger." })),
 }, { additionalProperties: false });
@@ -199,7 +199,7 @@ function savedText(saved: HomeProfileSaved, request: ProfileRequest): string {
   const text = request.text?.trim();
   switch (saved.action) {
     case "learn": return `Saved profile item note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text}`;
-    case "refine": return `Refined profile item note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text ?? saved.previousText}. Revision ${saved.previousRevisionId} is kept in its history.`;
+    case "refine": return `Refined profile item note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text ?? saved.previousText}. Undo is available in shared Changes.`;
     case "supersede": return `Superseded profile item note ${saved.supersededId} with note ${saved.id} (${saved.kind}, inferred until you confirm it): ${text}.`;
     default: return `Retired profile item note ${saved.id}: ${saved.previousText}. It no longer applies. Reason: ${request.reason?.trim()}`;
   }

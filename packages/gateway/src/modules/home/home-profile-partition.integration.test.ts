@@ -84,6 +84,32 @@ it("reversible organization applies without a tap, logs exact provenance and und
   for (const original of originals) expect({ ...await knowledge!.read(original.id), revisionId: original.revisionId }).toEqual(original);
 });
 
+it("Profile keeps a linked claim, refuses unanchored revisions and undoes through shared Changes", async () => {
+  const { f, profile, originals } = await setup("v2");
+  const wrong = originals[2]!;
+  const author = { kind: "ui" as const, id: "maintainer" };
+  const correction = await profile.change(f.settings.settingsChanges, [{ action: "learn", kind: "correction", text: "Exact correction of the original fixture claim",
+    corrects: { id: wrong.id, revisionId: wrong.revisionId } }], { commandId: "one-file-correction", actor: author,
+    author: { kind: "maintainer" }, reason: "Maintainer corrected this exact wrong claim" });
+  const first = await profile.change(f.settings.settingsChanges, [{ action: "refine", id: wrong.id, expectedRevision: wrong.revisionId, text: "Intermediate revised fixture statement" }],
+    { commandId: "one-file-first-edit", actor: author, author: { kind: "maintainer" }, reason: "Explicit first edit" });
+  const unanchored = first.saved[0]!.revisionId;
+  const second = await profile.change(f.settings.settingsChanges, [{ action: "refine", id: wrong.id, expectedRevision: unanchored, text: "Latest current fixture statement" }],
+    { commandId: "one-file-second-edit", actor: author, author: { kind: "maintainer" }, reason: "Explicit second edit" });
+  expect(await knowledge!.read(wrong.id, wrong.revisionId)).toEqual(wrong);
+  expect((await knowledge!.read(correction.saved[0]!.id))!.relations).toContainEqual({ type: "corrects", recordId: wrong.id, revisionId: wrong.revisionId });
+  await expect(knowledge!.read(wrong.id, unanchored)).rejects.toMatchObject({ code: "conflict", details: { kind: "profile_revision_unavailable", id: wrong.id, revisionId: unanchored } });
+  await f.settings.settingsChanges.undo(second.changes[0]!.changeId, { actor: author, commandId: "one-file-shared-undo" });
+  expect((await knowledge!.read(wrong.id))!.content.title).toBe("Intermediate revised fixture statement");
+  expect(await knowledge!.read(wrong.id, wrong.revisionId)).toEqual(wrong);
+  await f.settings.settingsChanges.undo(correction.changes[0]!.changeId, { actor: author, commandId: "one-file-correction-undo" });
+  const retiredCorrection = (await knowledge!.read(correction.saved[0]!.id))!;
+  expect(retiredCorrection.content.retired).toBe(true);
+  expect(await knowledge!.read(wrong.id, wrong.revisionId)).toEqual(wrong);
+  await knowledge!.forget("one-file-forget-correction", retiredCorrection.id, "Remove the last fixture claim link", retiredCorrection.revisionId);
+  await expect(knowledge!.read(wrong.id, wrong.revisionId)).rejects.toMatchObject({ code: "conflict", details: { kind: "profile_revision_unavailable" } });
+});
+
 it("organization refuses moving a linked correction out of Corrections at the canonical owner", async () => {
   const { f, profile, originals } = await setup("v2");
   const learned = await profile.apply({ action: "learn", kind: "correction", text: "Exact corrected fixture claim",

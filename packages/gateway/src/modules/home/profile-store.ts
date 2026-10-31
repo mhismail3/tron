@@ -9,6 +9,7 @@ import { durableAtomicWriteJson, durableRemove, syncDurably } from "../../founda
 import { readSecureJson, SecureJsonFileError } from "../../foundation/secure-json.js";
 import { DEFAULT_PROFILE_NOTE_CONFIG, PROFILE_NOTE_SCHEMA_VERSION, type ProfileNoteConfig, type ProfileNoteListRequest, type ProfileNoteListResponse, type ProfileNoteEvidenceRef, type ProfileNoteRecord, type ProfileNoteRecordDraft, type ProfileNoteNoteMutationRequest, validateProfileNoteConfig, validateProfileNoteRecord, assertProfileNoteId } from "./profile-note-contract.js";
 import { ProfileCatalog, type ProfileTable } from "./profile-catalog.js";
+import { unavailableProfileRevision } from "./profile-file.js";
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../../protocol/json-budget.js";
 import { profileNoteRow, type ProfileNoteRow, type ProfileRecordRow, assertProfileCapacity } from "./profile-placement.js";
@@ -480,15 +481,27 @@ export class ProfileStore {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision");
     return this.readState(async (state, paths) => {
       const head = state.records.get(id);
-      if (!head) return null;
+      if (!head) { if (revision !== undefined) throw unavailableProfileRevision(id, revision); return null; }
       const selected = revision ?? head.latestRevisionId;
-      if (!head.revisionIds.includes(selected)) throw new ProfileStoreError("invalid", "Requested revision is not committed for this record");
+      if (!head.revisionIds.includes(selected)) throw unavailableProfileRevision(id, selected);
+      if (selected !== head.latestRevisionId) {
+        let anchored = false;
+        // Only current relations can retain an old claim. Neither a historical
+        // relation nor a backup/receipt makes an arbitrary edition readable.
+        for (const [sourceId, source] of state.records.entries()) {
+          if (!source.recordRefs.includes(id) || !this.headVisible(state, sourceId, source, true)) continue;
+          const current = await this.readRecordOrRemoved(paths, state, sourceId, source.latestRevisionId);
+          if (current?.relations.some(relation => relation.type === "corrects" && relation.recordId === id && relation.revisionId === selected)) { anchored = true; break; }
+        }
+        if (!anchored) throw unavailableProfileRevision(id, selected);
+      }
       const record = await this.readRecordOrRemoved(paths, state, id, selected);
       const latest = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
-      if (!record || !latest) return null;
-      // Visibility is governed by the current head even when an audit caller
-      // asks for an older immutable revision.
-      if (this.recordHardErased(state, record) || this.recordHardErased(state, latest)) return null;
+      if (!record || !latest || this.recordHardErased(state, record) || this.recordHardErased(state, latest)) {
+        if (revision !== undefined) throw unavailableProfileRevision(id, selected);
+        return null;
+      }
+      // Current visibility still governs a retained correction claim.
       if (!includeSuppressed && (this.recordExcluded(state, record) || this.recordExcluded(state, latest))) return null;
       return record;
     });
