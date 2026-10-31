@@ -11,12 +11,12 @@ profileReportFile("test-results/home-profile/you-centred.json");
 
 it("migrates exact legacy placement through a real Home activation and Changes Undo restores its exact tags and prior organization", async () => {
   const f = await fixture("you-centred-migrate");
-  const original = await legacyProfileFixture(f.store, command("legacy-seed"), {
+  const original = await legacyProfileFixture(f.workspace, command("legacy-seed"), {
     kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [], reason: "Original inferred capture" }, relations: [],
     content: { title: "Prefers concise questions.", body: "Keep this exact body.", role: "fact", confirmed: false,
       tags: ["fixture-first", "home-file-home", "home-profile", "kind-fact", "fixture-last"] },
   });
-  const retired = await legacyProfileFixture(f.store, command("legacy-retired"), { kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [] }, relations: [], content: { title: "An inactive original stays byte-for-byte unchanged.", role: "fact", confirmed: false, retired: true, tags: ["home-profile", "kind-fact", "home-file-home"] } });
+  const retired = await legacyProfileFixture(f.workspace, command("legacy-retired"), { kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [] }, relations: [], content: { title: "An inactive original stays byte-for-byte unchanged.", role: "fact", confirmed: false, retired: true, tags: ["home-profile", "kind-fact", "home-file-home"] } });
   const turn = homeActivation(f, "Sort this inferred nonbinding note without changing its content.", [
     profileCall({ action: "migrate", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "communication/questions" }], reason: "File the original inferred capture" }, "you-centred-migrate"), say("sorted"),
   ]);

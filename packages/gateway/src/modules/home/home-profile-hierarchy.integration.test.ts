@@ -1,8 +1,7 @@
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, stat } from "node:fs/promises";
+import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
 import { answerChangeCard } from "../../../test-support/native-change.js";
-import { workspaceModule } from "../../workspace/workspace-module.js";
 import { expect, it, vi } from "vitest";
 import * as durability from "../../foundation/durable-json.js";
 import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command, history, undo, maintainer } from "../../../test-support/home-profile-fixture.js";
@@ -16,7 +15,7 @@ it("malformed partition labels leave valid discovery/read intact and disclose ex
     const record = { kind: "note" as const, scope: "personal" as const, provenance: { actor: "agent" as const, source: "malformed-fixture", evidence: [] }, relations: [], content: { title, role: "fact" as const, confirmed: false, tags: ["home-profile", ...labels] } };
     seeded.push(labels.length === 2 && labels[1] === "home-file-core"
       ? (await f.store.createNote({ commandId: command("valid-seed"), record: { ...record, content: { ...record.content, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["communication"] } } } })).record
-      : await legacyProfileFixture(f.store, command("malformed-seed"), record));
+      : await legacyProfileFixture(f.workspace, command("malformed-seed"), record));
   }
   const turn = await homeActivation(f, "Inspect the index without choosing a repair.", [profileCall({ action: "read" }, "malformed-index"), say("inspection only")]);
   const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-index")?.details as { status: string; index: string; unclassified: number };
@@ -75,17 +74,21 @@ it("file and diagnostic metadata both page without inserting note text or droppi
 
 it("the real Home profile tool retries one original label group and native Changes Undo restores malformed labels at their exact positions", async () => {
   const f = await fixture("hierarchy-organize-tool");
-  const original = await legacyProfileFixture(f.store, command("organize-seed"), { kind: "note", scope: "personal",
+  const original = await legacyProfileFixture(f.workspace, command("organize-seed"), { kind: "note", scope: "personal",
     provenance: { actor: "user", source: "explicit-standing-rule", evidence: [] }, relations: [],
     content: { title: "Never publish without approval.", body: "Preserve the full binding instruction.", role: "decision", confirmed: true,
       tags: ["home-file-unknown", "home-profile", "kind-standing-decision", "home-file-home", "fixture-label"] } });
   await mkdir(f.record.path, { recursive: true });
   const parent = await stat(f.record.path);
   const sync = durability.syncDurably;
-  let failed = false;
+  let failed = false, prepared = false;
+  const prepare = SettingsChangePath.prototype.prepareSubjectAudit;
+  const preparation = vi.spyOn(SettingsChangePath.prototype, "prepareSubjectAudit").mockImplementation(async function (this: SettingsChangePath, ...args) {
+    const reference = await prepare.apply(this, args); prepared = true; return reference;
+  });
   const fault = vi.spyOn(durability, "syncDurably").mockImplementation(async handle => {
     const actual = await handle.stat();
-    if (!failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned tool audit publication fault"); }
+    if (prepared && !failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned tool audit publication fault"); }
     await sync(handle);
   });
   const settled = await homeActivation(f, "Put this note in Engineering / Release, preserving the confirmed instruction.", [
@@ -95,23 +98,27 @@ it("the real Home profile tool retries one original label group and native Chang
   expect(f.slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
   const advertised = settled.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details as { status: string; commandId: string };
   expect(advertised).toMatchObject({ status: "retry_required" });
-  const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "profile", "profile-backups");
-  const backups = await Promise.all((await readdir(directory)).map(async name => JSON.parse(await readFile(join(directory, name), "utf8")) as { operation: { commandId: string; envelope?: { context?: { actor?: { toolCallId?: string } } } } }));
-  const originalOperations = backups.filter(backup => backup.operation.envelope?.context?.actor?.toolCallId === "organize-tool-first");
-  expect(originalOperations).toHaveLength(1);
-  const pending = originalOperations[0]!.operation;
+  const recovery = await f.store.profilePartitionRecovery(advertised.commandId);
+  expect(recovery.committed).toBe(true);
+  if (!recovery.committed) throw new Error("Expected a committed publication proof");
+  const originalPreparation = await f.record.group(recovery.reference.groupId, recovery.reference.size);
+  expect(originalPreparation).toHaveLength(1);
+  const pending = originalPreparation[0]!;
+  expect(pending.actor.toolCallId).toBe("organize-tool-first");
   expect(advertised.commandId).toBe(pending.commandId);
-  expect(await history(f)).toEqual([]);
+  expect((await history(f)).map(entry => entry.status)).toEqual(["started"]);
   const committed = await f.store.read(original.id) as typeof original;
   expect(committed).toEqual({ ...original, revisionId: committed.revisionId, content: { ...original.content,
     tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["engineering", "release"] } } });
-  fault.mockRestore();
+  fault.mockRestore(); preparation.mockRestore();
   const next = await homeActivation(f, "Retry only the original organization operation.", [profileCall({ action: "retry", commandId: advertised.commandId }, "organize-tool-retry"), say("acknowledged")]);
   const organized = next.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-retry")?.details as { status: string; commandId: string; changeIds: string[] };
   expect(organized).toMatchObject({ status: "organized", commandId: pending.commandId });
   expect(organized.changeIds).toHaveLength(1);
   expect(await f.store.read(original.id)).toEqual(committed);
-  const audit = await history(f);
+  const completeHistory = await history(f);
+  expect(completeHistory).toHaveLength(2);
+  const audit = completeHistory.filter(entry => entry.status === "applied");
   expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ commandId: pending.commandId, actor: { kind: "home", toolCallId: "organize-tool-first" },
     before: { text: "Never publish without approval.", confirmed: true, fileLabels: [{ index: 0, tag: "home-file-unknown" }, { index: 3, tag: "home-file-home" }] },
@@ -120,7 +127,7 @@ it("the real Home profile tool retries one original label group and native Chang
   await undo(f, organized.changeIds[0]!, "native-undo-labels");
   const restored = await f.store.read(original.id);
   expect({ ...restored, revisionId: original.revisionId }).toEqual(original);
-  const undoEntries = (await history(f)).filter(entry => entry.undoOf);
+  const undoEntries = (await history(f)).filter(entry => entry.undoOf && entry.status === "applied");
   expect(undoEntries.map(entry => entry.undoOf)).toEqual(organized.changeIds);
   recordCase("tool-original-envelope-retry-native-label-undo", { originalCommand: pending.commandId, originalToolCall: "organize-tool-first", changeIds: organized.changeIds, exactMalformedLabelsRestored: true });
 });
@@ -142,23 +149,27 @@ it("a stale organization revision is refused, not advertised as a recoverable au
 
 it.each(["migrate", "reorganize"] as const)("maintainer profileChange %s repairs its audit with original-command retry and supports Undo", async action => {
   const f = await fixture(`native-${action}-retry`);
-  const original = await legacyProfileFixture(f.store, command("native-seed"), { kind: "note", scope: "personal",
+  const original = await legacyProfileFixture(f.workspace, command("native-seed"), { kind: "note", scope: "personal",
     provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],
     content: { title: "Keep this exact instruction.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision", "home-file-core"] } });
   await mkdir(f.record.path, { recursive: true });
   const parent = await stat(f.record.path);
   const sync = durability.syncDurably;
-  let failed = false;
+  let failed = false, prepared = false;
+  const prepare = SettingsChangePath.prototype.prepareSubjectAudit;
+  const preparation = vi.spyOn(SettingsChangePath.prototype, "prepareSubjectAudit").mockImplementation(async function (this: SettingsChangePath, ...args) {
+    const reference = await prepare.apply(this, args); prepared = true; return reference;
+  });
   const fault = vi.spyOn(durability, "syncDurably").mockImplementation(async handle => {
     const actual = await handle.stat();
-    if (!failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned native profile audit fault"); }
+    if (prepared && !failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned native profile audit fault"); }
     await sync(handle);
   });
   const originalCommand = command(`native-${action}`);
   await expect(f.service.invoke(maintainer, "home.profileChange", { commandId: originalCommand, reason: "Exact native placement",
     changes: [{ action, assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }] }] })).rejects.toThrow("Owned native profile audit fault");
-  fault.mockRestore();
-  expect(await history(f)).toEqual([]);
+  fault.mockRestore(); preparation.mockRestore();
+  expect((await history(f)).map(entry => entry.status)).toEqual(["started"]);
   const committed = await f.store.read(original.id) as typeof original;
   expect(committed.content.profile).toEqual({ version: 2, path: ["engineering", "release"] });
   const retry = () => f.service.invoke(maintainer, "home.profileChange", { commandId: command("native-repair"), changes: [{ action: "retry", commandId: originalCommand }] }) as Promise<{ status: string; changes: Array<{ changeId: string }> }>;
@@ -167,7 +178,9 @@ it.each(["migrate", "reorganize"] as const)("maintainer profileChange %s repairs
   expect(repaired.changes).toHaveLength(1);
   expect((await retry()).changes).toEqual(repaired.changes);
   expect(await f.store.read(original.id)).toEqual(committed);
-  expect(await history(f)).toEqual([expect.objectContaining({ commandId: originalCommand, actor: { kind: "ui", id: maintainer.identity } })]);
+  const completeHistory = await history(f);
+  expect(completeHistory).toHaveLength(2);
+  expect(completeHistory.filter(entry => entry.status === "applied")).toEqual([expect.objectContaining({ commandId: originalCommand, actor: { kind: "ui", id: maintainer.identity } })]);
   await undo(f, repaired.changes[0]!.changeId, "native-organization-undo");
   expect({ ...await f.store.read(original.id), revisionId: original.revisionId }).toEqual(original);
 });

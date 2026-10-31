@@ -221,8 +221,10 @@ Source exports under `~/.tron/workspace/files/knowledge-export-*` are ordinary
 Markdown, exact original JSON and attachments, readable through the normal file
 tools. `MANIFEST.json` records the exported revisions and hashes. Reading them
 creates no new trust or file-access grant; Home's file reader still requires a
-trusted project. Profile remains owned by `workspace/state/profile`; Home memory,
-chats, summaries and chapters retain their existing owners.
+trusted project. Profile is owned by `ProfileStore` in the hierarchical current
+`workspace/files/Profile.json`; unreferenced old revisions require maintainer-approved
+offline archival, never runtime fallback. Home memory, chats, summaries and chapters
+retain their existing owners.
 
 Keep the immutable original archive and prior compatible build under
 `~/.tron-maintenance/replace/`. They are recovery artifacts, not runtime fallbacks.

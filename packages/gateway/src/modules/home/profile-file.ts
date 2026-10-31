@@ -1,16 +1,34 @@
-import { lstat, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, readdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { GatewayError } from "../../errors.js";
 import type { ResourceRoot } from "../../kernel/resources/resource-root.js";
-import { durablePublishBoundedJson } from "../../foundation/durable-json.js";
+import { durablePublishBoundedJson, durableRemove } from "../../foundation/durable-json.js";
 import { readSecureJson } from "../../foundation/secure-json.js";
 import { PROFILE_AREAS, profilePath } from "./profile-placement.js";
-import { validateProfileNoteRecord, type ProfileNoteRecord } from "./profile-note-contract.js";
+import { DEFAULT_PROFILE_NOTE_CONFIG, validateProfileNoteConfig, validateProfileNoteRecord, type ProfileNoteConfig, type ProfileNoteRecord } from "./profile-note-contract.js";
+import type { SubjectAuditReference, SubjectContext } from "../../kernel/settings/settings-change.js";
+import type { ProfilePartitionRequest } from "./profile-notes.js";
 
 export const PROFILE_FILE_BYTES = 64 * 1_048_576;
 const ROOTS = [...Object.keys(PROFILE_AREAS), "inferred", "prior"];
 type FileNote = Omit<ProfileNoteRecord, "content"> & { content: Omit<ProfileNoteRecord["content"], "profile"> };
 export interface ProfileSection { notes: FileNote[]; children: Record<string, ProfileSection> }
+export interface ProfileSuppression { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string }
+export interface ProfileScopeExclusion { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string }
+export interface ProfileFileCommand {
+  operation: string; requestHash: string; createdAt: string; recordIds: string[]; invalidated?: boolean;
+  result?: { kind: "record"; recordId: string; revisionId: string; stateRevision: number } | { kind: "value"; value: unknown };
+  partition?: { request: ProfilePartitionRequest; context: SubjectContext; replayAt: string; revisions: Record<string, string>; undoOf: Record<string, string> };
+  audit?: SubjectAuditReference;
+  auditPending?: boolean;
+}
+export interface ProfileFileControl {
+  config: ProfileNoteConfig;
+  suppressions: Record<string, ProfileSuppression>;
+  scopeExclusions: Record<string, ProfileScopeExclusion>;
+  commands: Record<string, ProfileFileCommand>;
+}
+export const emptyProfileControl = (): ProfileFileControl => ({ config: structuredClone(DEFAULT_PROFILE_NOTE_CONFIG), suppressions: {}, scopeExclusions: {}, commands: {} });
 /** The hierarchy owns current placement; it is not duplicated inside its notes.
  * Anchors are immutable claim evidence, never another current-value projection. */
 export interface ProfileFile {
@@ -20,6 +38,7 @@ export interface ProfileFile {
   sections: Record<string, ProfileSection>;
   anchors: ProfileNoteRecord[];
   deferred?: string;
+  control: ProfileFileControl;
 }
 const key = (id: string, revisionId: string) => JSON.stringify([id, revisionId]);
 const fail = (message: string): never => { throw new GatewayError("conflict", message, false, { kind: "profile_file_invalid" }); };
@@ -27,7 +46,7 @@ function object(value: unknown): value is Record<string, unknown> { return !!val
 function note(value: unknown): ProfileNoteRecord {
   let record: ProfileNoteRecord;
   try {
-    if (!object(value) || Object.keys(value).some(field => !["kind", "scope", "provenance", "relations", "content", "schemaVersion", "id", "revisionId", "createdAt", "updatedAt"].includes(field))) fail("Unknown Profile record field");
+    if (!object(value) || Object.keys(value).some(field => !["kind", "scope", "provenance", "relations", "content", "schemaVersion", "id", "revisionId", "createdAt", "updatedAt", "temporal"].includes(field))) fail("Unknown Profile record field");
     record = validateProfileNoteRecord(value);
   } catch { return fail("Invalid Profile record"); }
   if (record.scope !== "personal" || !record.content.tags?.includes("home-profile")) fail("The Profile file accepts only personal Profile notes");
@@ -70,30 +89,45 @@ export function profileFileRecords(file: ProfileFile): ProfileNoteRecord[] {
 }
 
 export function validateProfileFile(value: unknown): ProfileFile {
-  if (!object(value) || Object.keys(value).some(field => !["format", "version", "stateRevision", "sections", "anchors", "deferred"].includes(field))
+  if (!object(value) || Object.keys(value).some(field => !["format", "version", "stateRevision", "sections", "anchors", "deferred", "control"].includes(field))
     || value.format !== "tron-profile" || value.version !== 2 || !Number.isSafeInteger(value.stateRevision) || (value.stateRevision as number) < 0
     || !Array.isArray(value.anchors) || (value.deferred !== undefined && (typeof value.deferred !== "string" || !/^[a-f0-9]{64}$/.test(value.deferred)))) fail("Unsupported Profile file format");
   const file = value as unknown as ProfileFile;
+  if (!object(file.control) || Object.keys(file.control).some(field => !["config", "suppressions", "scopeExclusions", "commands"].includes(field))
+    || !object(file.control.suppressions) || !object(file.control.scopeExclusions) || !object(file.control.commands)) fail("Invalid Profile control metadata");
+  try { validateProfileNoteConfig(file.control.config); } catch { fail("Invalid Profile configuration"); }
+  for (const command of Object.values(file.control.commands)) {
+    if (!object(command) || typeof command.operation !== "string" || !/^[a-f0-9]{64}$/.test(command.requestHash) || !Number.isFinite(Date.parse(command.createdAt)) || !Array.isArray(command.recordIds)) fail("Invalid Profile command receipt");
+    const checkMetadata = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      for (const [field, nested] of Object.entries(value)) {
+        if (["body", "content", "history", "record", "originals", "prepared", "text"].includes(field)) fail("Profile command metadata cannot retain historical bodies");
+        checkMetadata(nested);
+      }
+    };
+    checkMetadata(command);
+  }
   const records = profileFileRecords(file);
   const current = new Set(records.map(references));
   const needed = claims(records);
   const anchors = new Set<string>();
   for (const raw of file.anchors) {
     const record = note(raw), identity = references(record);
-    if (!needed.has(identity) || current.has(identity) || anchors.has(identity)) fail("Profile cannot retain an unreferenced, duplicated or current claim as historical data");
+    if (!needed.has(identity) || current.has(identity) || file.control.suppressions[record.id]?.forgotten || anchors.has(identity)) fail("Profile cannot retain an unreferenced, duplicated or current claim as historical data");
     anchors.add(identity);
   }
-  for (const identity of needed) if (!current.has(identity) && !anchors.has(identity)) fail("A linked correction has no exact claim anchor");
+  for (const record of records) if (file.control.suppressions[record.id]?.forgotten) fail("A forgotten Profile body cannot remain current");
+  for (const identity of needed) if (!current.has(identity) && !anchors.has(identity) && !file.control.suppressions[JSON.parse(identity)[0]]?.forgotten) fail("A linked correction has no exact claim anchor");
   return file;
 }
 
 /** Construction may receive prior current heads as anchor candidates. Only exact
  * claims still linked by current Corrections survive; no history list is copied. */
 export function createProfileFile(records: readonly ProfileNoteRecord[], input: {
-  anchorCandidates?: readonly ProfileNoteRecord[]; stateRevision?: number; deferred?: string;
+  anchorCandidates?: readonly ProfileNoteRecord[]; stateRevision?: number; deferred?: string; control?: ProfileFileControl;
 } = {}): ProfileFile {
   const file: ProfileFile = { format: "tron-profile", version: 2, stateRevision: input.stateRevision ?? 0,
-    sections: Object.fromEntries(ROOTS.map(root => [root, { notes: [], children: {} }])), anchors: [],
+    sections: Object.fromEntries(ROOTS.map(root => [root, { notes: [], children: {} }])), anchors: [], control: input.control ?? emptyProfileControl(),
     ...(input.deferred !== undefined ? { deferred: input.deferred } : {}) };
   for (const raw of records) {
     const record = note(raw), path = record.content.profile?.path ?? ["prior"];
@@ -116,7 +150,7 @@ export function createProfileFile(records: readonly ProfileNoteRecord[], input: 
     if (previous && JSON.stringify(previous) !== JSON.stringify(record)) fail("Conflicting bodies for one correction claim identity");
     candidates.set(identity, record);
   }
-  for (const identity of needed) if (!current.has(identity)) file.anchors.push(candidates.get(identity) ?? fail("A linked correction has no exact claim anchor"));
+  for (const identity of needed) if (!current.has(identity) && !file.control.suppressions[JSON.parse(identity)[0]]?.forgotten) file.anchors.push(candidates.get(identity) ?? fail("A linked correction has no exact claim anchor"));
   return validateProfileFile(file);
 }
 
@@ -132,7 +166,7 @@ export function readProfileFileRecord(file: ProfileFile, id: string, revisionId?
   if (current && (revisionId === undefined || revisionId === current.revisionId)) return current;
   if (revisionId !== undefined) {
     const anchor = file.anchors.find(record => record.id === id && record.revisionId === revisionId);
-    if (anchor && claims(records).has(key(id, revisionId))) return anchor;
+    if (anchor && !file.control.suppressions[id]?.forgotten && claims(records).has(key(id, revisionId))) return anchor;
     throw unavailableProfileRevision(id, revisionId);
   }
   return null;
@@ -153,6 +187,17 @@ export async function readProfileFile(workspace: Pick<ResourceRoot, "describe">)
   if (!path) return undefined;
   const read = await readSecureJson<unknown>(path, PROFILE_FILE_BYTES);
   return read.present ? validateProfileFile(read.value) : undefined;
+}
+/** Only the serialized file owner calls this after admitting a valid canonical
+ * snapshot. Stages are discarded, never alternate data or recovery inputs. */
+export async function discardProfileFileStages(workspace: Pick<ResourceRoot, "describe">): Promise<void> {
+  const path = await location(workspace, false);
+  if (!path) return;
+  for (const name of await readdir(dirname(path))) if (/^Profile\.json\.\d+\.[a-f0-9]{12}\.tmp$/.test(name)) {
+    const stage = join(dirname(path), name), info = await lstat(stage);
+    if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o600) fail("Unsafe Profile publication stage");
+    await durableRemove(stage);
+  }
 }
 export async function writeProfileFile(workspace: Pick<ResourceRoot, "describe">, file: ProfileFile): Promise<void> {
   validateProfileFile(file);

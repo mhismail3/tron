@@ -290,20 +290,25 @@ export class SettingsChangePath {
     return { writes, context, replayAt: first.at };
   }
 
-  /** Home freezes these original inputs in its existing backup before domain effects. */
+  /** Validate original inputs before the domain owner accepts its body-free intent. */
   validateSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): void {
     this.record.validateAppendOnce(this.subjectPublication(writes, context, replayAt));
   }
 
   /** Publishes only facts for proven committed effects; it never replays the domain. */
-  async publishSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
+  async publishSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string,
+    withCommitProof?: (publish: () => Promise<void>) => Promise<void>): Promise<ChangeResult> {
     if (this.disposed) throw new GatewayError("conflict", "Settings changes are disposed");
-    return this.mutexFor({ kind: "home" }).run(() => this.publishSubjectAuditInStripe(writes, context, replayAt));
+    return this.mutexFor({ kind: "home" }).run(() => this.publishSubjectAuditInStripe(writes, context, replayAt, withCommitProof));
   }
 
-  private async publishSubjectAuditInStripe(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
+  private async publishSubjectAuditInStripe(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string,
+    withCommitProof?: (publish: () => Promise<void>) => Promise<void>): Promise<ChangeResult> {
     const entries = this.subjectPublication(writes, context, replayAt);
-      await this.record.appendOnce(entries).catch(error => { throw asUncertainOutcome(error, "Committed Profile audit could not be published"); });
+      const publish = async () => { await this.record.appendOnce(entries).catch(error => { throw asUncertainOutcome(error, "Committed Profile audit could not be published"); }); };
+      // Stripe → domain proof lock → journal. Release the proof lock before observers
+      // read the domain; preparation never takes this stripe in the opposite order.
+      if (withCommitProof) await withCommitProof(publish); else await publish();
       const changes: ChangeOutcome[] = entries.map(entry => ({ changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!,
         layer: "session", status: "applied", before: entry.before ?? null, after: entry.after ?? null }));
       if (entries.length) await Promise.resolve().then(() => this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) }))

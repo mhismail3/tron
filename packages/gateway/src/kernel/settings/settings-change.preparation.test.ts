@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "vitest";
-import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.js";
+import { fixture, disposeFixtures } from "../../../test-support/home-task-fixture.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { ProfileStore } from "../../modules/home/profile-store.js";
 import { HomeProfileItems } from "../../modules/home/home-profile.js";
@@ -38,5 +38,11 @@ it("prepares a cold-readable, idempotent Home audit without applying domain writ
   expect(published.status).toBe("applied");
   expect((await coldChanges.history({ key: "home.profile.item" })).entries.filter(entry => entry.status === "applied")).toHaveLength(2);
   expect(await coldChanges.prepareSubjectAudit(writes, context, replayAt)).toEqual(ref);
-  expect((await coldChanges.history({ key: "home.profile.item" })).entries.filter(entry => entry.status === "started")).toHaveLength(2);
-}, 60_000);
+  const retained = [];
+  let cursor: string | undefined;
+  do {
+    const page = await coldChanges.history({ key: "home.profile.item", ...(cursor ? { cursor } : {}) });
+    retained.push(...page.entries); cursor = page.nextCursor;
+  } while (cursor);
+  expect(retained.filter(entry => entry.status === "started")).toHaveLength(2);
+});
