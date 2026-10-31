@@ -233,13 +233,11 @@ The batch covers those files. Genuine build/test errors and zero-test runs still
 
 Home ([P2 owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)) or Mohsin
 runs `verify --batch` in a persistent clean worktree on fetched, landed main history.
-No scheduler, application install, deployment, service restart, push or automatic main
-revert is included. Every terminal run emits JSON `batchResult`, head and report path;
+No scheduler, application install, deployment, service restart, push or automatic main revert is included. Every terminal run emits JSON `batchResult`, head and report path;
 the Home caller must deliver it, including red/uncovered. The trigger is a separate owner.
 
-First use requires `--base <main-anchor>`, not a claim of prior green. Thereafter
-`<git-common-dir>/verify/covered.json` owns the last green/qualified head; `green.json`
-records only strict green. `--base` cannot override coverage. A nonwaiting `batch.lock`
+First use requires `--base <main-anchor>`, not a claim of prior green.
+`verify/covered.json` owns the last green/qualified head; `verify/green.json` records strict green. `--base` cannot override coverage. A nonwaiting `batch.lock`
 refuses overlap; same covered HEAD does nothing; `--plan` is read-only.
 After local pinned Gateway/relay dependency preparation, every required lane runs even
 after failures: locks/declared consumers (`verify --all`, not full Gateway), full default
@@ -250,8 +248,8 @@ Missing owners/reports, empty/skipped evidence, deferred lanes and failed setup/
 are **uncovered**. Otherwise **green** means all passed; **qualified** requires every failure
 to match an unexpired exact registry case/digest; **red** means unwaived failure. Qualified
 advances covered history, never green; expired/changed digests waive nothing.
-Immutable `verify/batches/` reports retain commands, logs, range age, per-lane wall times
-and attribution host seconds. Task cleanup never removes them.
+Immutable `<git-common-dir>/verify/batches/` reports retain commands, logs, range age,
+lane wall times and attribution host seconds; task cleanup never removes them.
 
 iOS lanes release host slots between lanes (cap three). All slots busy at admission means
 deferred/uncovered, not a reservation or batch queue; races use the runner's owning lease.
@@ -262,8 +260,7 @@ Never rerun a whole suite diagnostically. Missing selectors yield uncovered/inco
 setup errors or changed signatures are inconclusive, a failing baseline is pre-existing.
 A non-reproducing head retains flake attempts but needs a registry entry to qualify.
 Proof requires a two-parent landing-shaped range, identical signature twice at culprit
-and an observed good first parent; search costs approximately `ceil(log2(N)) + 3` probes.
-Other history yields candidates only. Commit/lane/signature probes in `verify/probes/`
+and an observed good first parent; search costs approximately `ceil(log2(N)) + 3` probes; other history yields candidates only. Commit/lane/signature probes in `verify/probes/`
 and range memos in `verify/attributions/` prevent repeated work. Culprit files use
 `git diff <merge>^1 <merge>`; proof prepares local `revert/<sha>` via `git revert -m 1`,
 never pushing. Conflicts and refused/interrupted resource cleanup preserve the probe
@@ -299,6 +296,5 @@ Hardware-free
 `scripts/test-ios-test-infrastructure.py HostSlotFixture RunnerFixture.test_run_forwards_bounded_host_slot_wait_before_simulator_work RunnerFixture.test_run_waits_for_a_host_slot_while_all_are_held`
 proves bounded acquisition cleanup, forwarding, the unchanged cap and default waiting.
 A fake Gateway runner covers `mutate` timeout/interrupt; logs: `test-results/verify-cli/`.
-Batch fixtures cover all required lanes, exact-case merge proof, issue/probe reuse, local
-revert preparation, uncovered/qualified verdicts and interrupted cleanup preservation;
-logs: `test-results/verify-batch/`.
+Batch fixtures cover all lanes, case-only merge proof, issue/probe reuse, local revert,
+verdicts and interrupted cleanup preservation; logs: `test-results/verify-batch/`.
