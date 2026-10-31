@@ -272,6 +272,9 @@ successor wake's acknowledgement, then waits for both `hasActiveAgentRun` and
 `isBusy` to clear before proving logical prompting uses that successor without
 duplicating the result or changing sealed bytes.
 Managed queue persistence allows 60 s for two cold reopens; crash suites cover process abandonment, not power loss.
+Ambient-artifact retirement prepares managed activation/canonical seeding in a bounded
+hook. The normal behavior guard covers event handshakes at both disposal cuts, real
+canonical-byte equality and post-retirement extension-event silence, not fixture startup.
 Backlog fixtures budget the full current Home catalog plus output reserve; the
 never-fit case must still prove a large report is referenced, its small successor
 arrives inline in order, and bounded immutable pages reconstruct the exact report.
