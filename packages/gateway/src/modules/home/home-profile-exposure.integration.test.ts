@@ -19,7 +19,7 @@ it.skipIf(!process.env.TRON_PROFILE_BASELINE)("measures metadata and explicit-re
   expect(records).toHaveLength(21);
   const f = await fixture("private-exposure");
   for (const [index, value] of records.entries()) {
-    await legacyProfileFixture(f.store, `exposure-seed-${index}-note`, { kind: "note", id: value.id, scope: "personal", createdAt: value.updatedAt, updatedAt: value.updatedAt, provenance, relations: [], content: value.content });
+    await legacyProfileFixture(f.workspace, `exposure-seed-${index}-note`, { kind: "note", id: value.id, scope: "personal", createdAt: value.updatedAt, updatedAt: value.updatedAt, provenance, relations: [], content: value.content });
   }
   const turn = await homeActivation(f, "Inspect discovery metadata only.", [say("index seen")]);
   const index = profileSection(turn.first.systemPrompt);

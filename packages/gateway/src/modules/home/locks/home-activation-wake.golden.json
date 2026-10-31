@@ -1848,6 +1848,7 @@
           "delegate",
           "task",
           "profile",
+          "obligation",
           "web_search",
           "session_search",
           "session_read",
@@ -1867,7 +1868,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:61d0e7ee9f18eb5f71a3a4a78409f70a0bff826a5ab5f6a5c2d388688cb87fda",
+        "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6",
         "messages": [
           {
             "role": "user",
@@ -1890,6 +1891,7 @@
           "delegate",
           "task",
           "profile",
+          "obligation",
           "web_search",
           "session_search",
           "session_read",
@@ -1909,7 +1911,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:61d0e7ee9f18eb5f71a3a4a78409f70a0bff826a5ab5f6a5c2d388688cb87fda",
+        "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6",
         "messages": [
           {
             "role": "user",
@@ -1944,6 +1946,7 @@
           "delegate",
           "task",
           "profile",
+          "obligation",
           "web_search",
           "session_search",
           "session_read",
@@ -1960,7 +1963,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:61d0e7ee9f18eb5f71a3a4a78409f70a0bff826a5ab5f6a5c2d388688cb87fda",
+        "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6",
         "messages": [
           {
             "role": "user",
@@ -2045,7 +2048,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:61d0e7ee9f18eb5f71a3a4a78409f70a0bff826a5ab5f6a5c2d388688cb87fda"
+      "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6"
     },
     {
       "caller": "home-delegated",
@@ -2053,7 +2056,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:61d0e7ee9f18eb5f71a3a4a78409f70a0bff826a5ab5f6a5c2d388688cb87fda"
+      "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6"
     },
     {
       "caller": "home-wake",
@@ -2061,7 +2064,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:61d0e7ee9f18eb5f71a3a4a78409f70a0bff826a5ab5f6a5c2d388688cb87fda"
+      "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6"
     }
   ],
   "requestOptions": [
@@ -2229,7 +2232,11 @@
       },
       {
         "name": "profile",
-        "schema": "sha256:51177d28bd5a2848232962f9f5362928ce70f2e88cac7103ce148034321e1d5b"
+        "schema": "sha256:7c4018de5cf487ab1901eaaa535635bf1f987db88f41ff7c21f09916932dae01"
+      },
+      {
+        "name": "obligation",
+        "schema": "sha256:8ae2421a157ae46c2c08d661dbc0ff138967a8a3445680bef837472a395746db"
       },
       {
         "name": "web_search",
@@ -2424,6 +2431,7 @@
           "date",
           "memory_search",
           "profile",
+          "obligation",
           "delegate",
           "task"
         ]
@@ -2711,6 +2719,7 @@
                 "delegate",
                 "task",
                 "profile",
+                "obligation",
                 "web_search",
                 "session_search",
                 "session_read",
@@ -2790,6 +2799,7 @@
                 "delegate",
                 "task",
                 "profile",
+                "obligation",
                 "web_search",
                 "session_search",
                 "session_read",
@@ -2884,6 +2894,7 @@
                 "delegate",
                 "task",
                 "profile",
+                "obligation",
                 "web_search",
                 "session_search",
                 "session_read",
@@ -3514,7 +3525,7 @@
                     "description": "read an explicit file or the metadata index; learn, refine, supersede or retire an item."
                   },
                   "assignments": {
-                    "description": "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and history stay unchanged.",
+                    "description": "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and correction claims stay unchanged.",
                     "items": {
                       "additionalProperties": false,
                       "properties": {
@@ -3625,7 +3636,7 @@
                     "type": "string"
                   },
                   "revisionId": {
-                    "description": "read: the exact immutable revision from a Profile content reference.",
+                    "description": "read: the current head revision or an exact wrong-claim revision linked by a current Correction. Other historical revisions are unavailable.",
                     "maxLength": 80,
                     "minLength": 16,
                     "type": "string"
@@ -3645,6 +3656,50 @@
                     "maxLength": 64,
                     "minLength": 64,
                     "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "type": "object"
+              }
+            },
+            {
+              "description": "Canonical Home maintainer-obligation ledger, not summary memory. list returns only owed items (request/reopened). request opens a stable id once, with text and a verbatim quote of this maintainer message; optional issue URL links engineering work. reported-done closes the human action on his confirmation, even without independent proof. verified closes with a successful tool-result entryId and verbatim evidenceQuote from this activation. reopened requires a NEW explicit maintainer request, never an old summary or missing verification. All writes require the current maintainer turn and its verbatim quote. Closing grants no approval, task, key revocation or other effect. Never request an already completed action under another id. For an issue-linked item, record verified closure when its issue closes with evidence.",
+              "name": "obligation",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "list",
+                      "request",
+                      "reported-done",
+                      "verified",
+                      "reopened"
+                    ],
+                    "type": "string"
+                  },
+                  "evidenceEntryId": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "evidenceQuote": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "id": "<id>",
+                  "issue": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "quote": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 2000,
                     "type": "string"
                   }
                 },

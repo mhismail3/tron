@@ -67,6 +67,8 @@ export interface SettingsWriters {
 /** A subject operation restores partial writes before returning failed; the domain projects its typed result. */
 export interface SubjectWrite { id: string; before: unknown; after: unknown; direction: "widen" | "narrow"; undoOf?: string }
 export type SubjectContext = Pick<ChangeContext, "actor" | "reason"> & { commandId: string };
+export interface SubjectAuditReference { groupId: string; size: number; digest: string }
+export interface PreparedSubjectAudit { writes: SubjectWrite[]; context: SubjectContext; replayAt: string }
 export type SubjectMutation<T> = { context: SubjectContext; writes: readonly SubjectWrite[] } & (
   { status: "applied"; result: T } | { status: "failed"; error: unknown; failure: string }
 );
@@ -240,20 +242,73 @@ export class SettingsChangePath {
       } catch (error) { throw asUncertainOutcome(error, "Profile applied but its result could not be published"); }
   }
 
-  /** Home freezes these original inputs in its existing backup before domain effects. */
+  /** Persist replayable intent in the existing Changes record without publishing applied facts. */
+  async prepareSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<SubjectAuditReference> {
+    if (!writes.length) throw new GatewayError("invalid_request", "Prepared Home subject audit requires at least one write");
+    if (writes.some(write => write.direction !== "widen")) {
+      throw new GatewayError("invalid_request", "Prepared Home subject audit supports widen writes only");
+    }
+    const groupId = `home-profile-started:${subjectAuditDigest(context.commandId)}`;
+    const entries = this.subjectPublication(writes, context, replayAt, "started", "home-profile-started-entry");
+    await this.record.appendOnce(entries).catch(error => { throw asUncertainOutcome(error, "Profile preparation could not be recorded"); });
+    // Hash exactly what the owner made durable, not a locally reconstructed encoding.
+    const stored = await this.record.group(groupId, writes.length);
+    return { groupId, size: writes.length, digest: subjectAuditDigest(stored) };
+  }
+
+  /** Cold-read the immutable prepared group; it contains the original values needed by Undo. */
+  async readPreparedSubjectAudit(ref: SubjectAuditReference): Promise<PreparedSubjectAudit> {
+    if (!ref || typeof ref.groupId !== "string" || !ref.groupId.startsWith("home-profile-started:")
+      || !Number.isSafeInteger(ref.size) || ref.size < 1 || typeof ref.digest !== "string" || !/^[a-f0-9]{64}$/u.test(ref.digest)) {
+      throw new GatewayError("invalid_request", "Invalid prepared Home subject audit reference");
+    }
+    const entries = await this.record.group(ref.groupId, ref.size);
+    if (subjectAuditDigest(entries) !== ref.digest) throw new GatewayError("conflict", "The prepared Home subject audit digest conflicts");
+    const first = entries[0]!;
+    if (!first.group || first.group.id !== ref.groupId || first.group.size !== entries.length
+      || !first.commandId || !Number.isFinite(Date.parse(first.at)) || first.status !== "started") {
+      throw new GatewayError("conflict", "The prepared Home subject audit is not a started group");
+    }
+    const context: SubjectContext = { commandId: first.commandId, actor: first.actor, ...(first.reason ? { reason: first.reason } : {}) };
+    if (ref.groupId !== `home-profile-started:${subjectAuditDigest(context.commandId)}`) {
+      throw new GatewayError("conflict", "The prepared Home subject audit group conflicts with its command");
+    }
+    const notes = new Set<string>();
+    const writes = entries.map(entry => {
+      const note = entry.qualifiers?.note;
+      if (entry.status !== "started" || entry.target.kind !== "home" || entry.layer !== "session" || entry.key !== HOME_PROFILE_SUBJECT.id
+        || entry.op !== "set" || entry.commandId !== context.commandId || JSON.stringify(entry.actor) !== JSON.stringify(context.actor)
+        || entry.reason !== context.reason || entry.at !== first.at || entry.group?.id !== ref.groupId || entry.group.size !== entries.length
+        || !entry.qualifiers || Object.keys(entry.qualifiers).length !== 1 || typeof note !== "string" || !note || notes.has(note)
+        || entry.failure !== undefined || entry.action !== undefined || entry.redacted !== undefined
+        || entry.changeId !== subjectAuditIdentity("home-profile-started-entry", context.commandId, note)) {
+        throw new GatewayError("conflict", "The prepared Home subject audit contains an invalid entry");
+      }
+      notes.add(note);
+      return { id: note, before: entry.before ?? null, after: entry.after ?? null, direction: "widen" as const, ...(entry.undoOf ? { undoOf: entry.undoOf } : {}) };
+    });
+    return { writes, context, replayAt: first.at };
+  }
+
+  /** Validate original inputs before the domain owner accepts its body-free intent. */
   validateSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): void {
     this.record.validateAppendOnce(this.subjectPublication(writes, context, replayAt));
   }
 
   /** Publishes only facts for proven committed effects; it never replays the domain. */
-  async publishSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
+  async publishSubjectAudit(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string,
+    withCommitProof?: (publish: () => Promise<void>) => Promise<void>): Promise<ChangeResult> {
     if (this.disposed) throw new GatewayError("conflict", "Settings changes are disposed");
-    return this.mutexFor({ kind: "home" }).run(() => this.publishSubjectAuditInStripe(writes, context, replayAt));
+    return this.mutexFor({ kind: "home" }).run(() => this.publishSubjectAuditInStripe(writes, context, replayAt, withCommitProof));
   }
 
-  private async publishSubjectAuditInStripe(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): Promise<ChangeResult> {
+  private async publishSubjectAuditInStripe(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string,
+    withCommitProof?: (publish: () => Promise<void>) => Promise<void>): Promise<ChangeResult> {
     const entries = this.subjectPublication(writes, context, replayAt);
-      await this.record.appendOnce(entries).catch(error => { throw asUncertainOutcome(error, "Committed Profile audit could not be published"); });
+      const publish = async () => { await this.record.appendOnce(entries).catch(error => { throw asUncertainOutcome(error, "Committed Profile audit could not be published"); }); };
+      // Stripe → domain proof lock → journal. Release the proof lock before observers
+      // read the domain; preparation never takes this stripe in the opposite order.
+      if (withCommitProof) await withCommitProof(publish); else await publish();
       const changes: ChangeOutcome[] = entries.map(entry => ({ changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!,
         layer: "session", status: "applied", before: entry.before ?? null, after: entry.after ?? null }));
       if (entries.length) await Promise.resolve().then(() => this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) }))
@@ -261,15 +316,15 @@ export class SettingsChangePath {
       return { status: "applied", changes };
   }
 
-  private subjectPublication(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string): ChangeEntry[] {
+  private subjectPublication(writes: readonly SubjectWrite[], context: SubjectContext, replayAt: string, status: ChangeStatus = "applied",
+    identityPrefix = "home-profile-entry"): ChangeEntry[] {
     if (!context.commandId?.trim() || !Number.isFinite(Date.parse(replayAt)) || new Set(writes.map(write => write.id)).size !== writes.length
       || writes.some(write => !write.id || !["widen", "narrow"].includes(write.direction))) {
       throw new GatewayError("invalid_request", "Home audit requires its original command, timestamp and unique ordered writes");
     }
-    const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-    const group = { id: `home-profile:${digest(context.commandId)}`, size: writes.length };
-    return writes.map(write => ({ ...this.subjectEntry(write, context, "applied", undefined,
-      { at: replayAt, changeId: `home-profile-entry:${digest([context.commandId, write.id])}` }), group,
+    const group = { id: `${status === "started" ? "home-profile-started" : "home-profile"}:${subjectAuditDigest(context.commandId)}`, size: writes.length };
+    return writes.map(write => ({ ...this.subjectEntry(write, context, status, undefined,
+      { at: replayAt, changeId: subjectAuditIdentity(identityPrefix, context.commandId, write.id) }), group,
       ...(write.undoOf ? { undoOf: write.undoOf } : {}) }));
   }
 
@@ -591,6 +646,11 @@ export class SettingsChangePath {
       ...(failure ? { failure } : {}), ...(git ? { git } : {}),
       ...(context.undoOf ? { undoOf: context.undoOf } : {}), ...(context.applyAgainOf ? { applyAgainOf: context.applyAgainOf } : {}) };
   }
+}
+
+function subjectAuditDigest(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+function subjectAuditIdentity(prefix: string, commandId: string, writeId: string): string {
+  return `${prefix}:${subjectAuditDigest([commandId, writeId])}`;
 }
 
 function bindingNeedsModel(binding: Binding): boolean {

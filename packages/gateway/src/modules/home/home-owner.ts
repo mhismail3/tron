@@ -2,7 +2,9 @@ import type { TaskWorkerControl, TaskControlRefusalReason } from "../../kernel/d
 import type { InputEnvelope, InputDelivery, InputTrigger, InputMessage, InputTriggerInbox } from "../../kernel/host/input-admission.js";
 import type { ImageContent } from "../../kernel/pi/ai.js";
 import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
-import { visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
+import { readCanonicalSession, visitCanonicalSessionEntries } from "../../kernel/session/canonical-reader.js";
+import { HOME_OBLIGATION, admitObligation, replayObligations, owed, type ObligationEvent, type ObligationRequest } from "./home-obligations.js";
+import { createHash } from "node:crypto";
 import type { NotificationService } from "../../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
@@ -252,6 +254,70 @@ export class HomeOwner {
       ...(request.thinking === undefined ? {} : { thinking: request.thinking }) };
     if (this.record !== record) throw new GatewayError("conflict", "Home changed during task admission");
     return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, choice, signal, confirm ? { confirm } : undefined);
+  }
+
+  /** The ledger lives only in canonical chapter history. This tool has no effect grants
+   * and no transport writer; the current Home activation owns every append. */
+  async obligationTool(sessionId: string, callId: string, request: ObligationRequest): Promise<unknown> {
+    admitObligation(request);
+    return this.recordMutex.run(async () => {
+      const record = this.record;
+      if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home obligations are unavailable");
+      const slot = await this.options.runtimes.acquire(sessionId);
+      const branch = slot.sessionManager.getBranch();
+      const items = new Map<string, import("./home-obligations.js").ObligationItem>();
+      let count = 0;
+      for (const chapter of (await this.readHomeSource()).chapters) {
+        const entries = chapter.sessionId === sessionId ? branch : (await readCanonicalSession({ ...chapter, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes })).branch.map(entry => entry.raw as unknown as SessionEntry);
+        count += entries.filter(entry => entry.type === "custom" && entry.customType === HOME_OBLIGATION).length;
+        if (count > 10000) throw new GatewayError("conflict", "Home obligation history exceeds 10000 events; no partial list is available");
+        replayObligations(entries, chapter.sessionId, items);
+      }
+      if (request.action === "list") {
+        const result = { items: [...items.values()].filter(owed), total: items.size };
+        if (Buffer.byteLength(JSON.stringify(result)) > 128 * 1024) throw new GatewayError("conflict", "Home owed list exceeds 128 KiB; no partial list is available");
+        return result;
+      }
+      const activation = this.policies.get(sessionId)?.contextEvidence();
+      if (!activation?.activationOpen || activation.kind !== "user") throw new GatewayError("invalid_request", "Obligation writes require the current maintainer turn, not a worker, trigger or old message");
+      const start = activation.activationStartEntryId === null ? 0 : branch.findIndex(entry => entry.id === activation.activationStartEntryId) + 1;
+      const source = branch.slice(start).find(entry => entry.type === "message" && entry.message.role === "user");
+      const textOf = (entry: SessionEntry | undefined): string => {
+        if (entry?.type !== "message" || (entry.message.role !== "user" && entry.message.role !== "toolResult")) return "";
+        const content = entry.message.content;
+        return typeof content === "string" ? content : content.filter(block => block.type === "text").map(block => block.text).join("\n");
+      };
+      if (!source || !textOf(source).includes(request.quote!)) throw new GatewayError("invalid_request", "Quote must be verbatim in this activation's maintainer message");
+      const receiptId = `obligation-${createHash("sha256").update(`${sessionId}\0${callId}`).digest("hex")}`;
+      const existing = branch.find(entry => entry.type === "custom" && entry.customType === HOME_OBLIGATION && (entry.data as ObligationEvent).receiptId === receiptId);
+      const before = items.get(request.id!);
+      if (existing?.type === "custom") {
+        const event = existing.data as ObligationEvent;
+        if (event.id !== request.id || event.action !== request.action || event.source.entryId !== source.id || event.source.quote !== request.quote
+          || event.text !== request.text || event.issue !== request.issue || event.evidence?.entryId !== request.evidenceEntryId || event.evidence?.quote !== request.evidenceQuote) {
+          throw new GatewayError("conflict", "Obligation receipt identity has different input");
+        }
+        return { item: before, receiptId };
+      }
+      if (count >= 10000 || (request.action === "request" && items.size >= 1000)) throw new GatewayError("conflict", "Home obligation history is full; no event was appended");
+      if (request.action === "request" ? !!before : !before) throw new GatewayError("conflict", "Obligation id already exists or is unavailable; never re-create a closed item");
+      if (request.action === "reopened") {
+        if (owed(before!) || before!.latest.source.entryId === source.id) throw new GatewayError("conflict", "Reopening requires a new maintainer message for a closed obligation");
+      } else if (before && !owed(before) && !(request.action === "verified" && before.state === "reported-done")) {
+        throw new GatewayError("conflict", "The human action is already closed; missing proof cannot reopen it");
+      }
+      let evidence: ObligationEvent["evidence"];
+      if (request.action === "verified") {
+        const entry = branch.slice(start).find(candidate => candidate.id === request.evidenceEntryId);
+        if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.isError || !textOf(entry).includes(request.evidenceQuote!)) throw new GatewayError("invalid_request", "Verification requires a successful tool result and verbatim evidence from this activation");
+        evidence = { sessionId, entryId: entry.id, quote: request.evidenceQuote! };
+      }
+      const event: ObligationEvent = { receiptId, id: request.id!, action: request.action, source: { sessionId, entryId: source.id, quote: request.quote! },
+        ...(request.text ? { text: request.text } : {}), ...(request.issue ? { issue: request.issue } : {}), ...(evidence ? { evidence } : {}) };
+      await slot.persistCanonicalCustomEntry(HOME_OBLIGATION, JSON.parse(JSON.stringify(event)), receiptId);
+      return { item: { id: event.id, text: before?.text ?? event.text!, ...(before?.issue || event.issue ? { issue: before?.issue ?? event.issue } : {}),
+        state: event.action, request: before?.request ?? event.source, latest: event }, receiptId };
+    });
   }
 
   /** Read the live session, not designation-time defaults or a learned note. The

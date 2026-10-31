@@ -13,6 +13,7 @@ import { HOME_TASK_THINKING_LEVELS, type HomeTaskWorkerChoice } from "./home-tas
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 import { nativeChangeConfirmer, type NativeChangeRequest } from "../../kernel/host/native-change.js";
 import { homeToolAvailable } from "./home-runtime-policy.js";
+import { obligationTool, type ObligationRequest } from "./home-obligations.js";
 
 /**
  * Tron Home's operating context. Home is designated, and every activation runs on
@@ -37,6 +38,7 @@ export const HOME_OPERATING_CONTEXT = [
   "Give each delegation a stable unique taskId, explicit intent and target directory, and always a title of at most 80 characters that names the work: it becomes the worker session's name. Accepted task IDs cannot replay work. Compose each delegation's intent as the brief. Decide which profile information is relevant, after reading it; include only context and explicit standing constraints the worker needs, with provenance where useful. The Gateway does not choose, insert or require copying profile content. The brief says plainly whether the worker should delegate subagents and how, following the Learned profile; the Gateway appends the subagent model queue's current availability to the brief and tells the worker to launch subagents on the queue's model tron/subagent, which moves along the queue on a usage-limit error, so name another subagent model only when the work needs a specific one; never write 'if your session can', since the brief's delegation is the maintainer's request. Ask workers to send lightweight checkin updates at milestones and about every 30 minutes. The worker must call report with exact acceptance evidence; an ordinary reply or check-in is not success. Each task has an internal fixed 24-hour ceiling and records actual token usage. Use task list to see your tasks, ids and latest timestamped check-ins, task status to read one task's recent check-ins, durable spend and results, task steer {taskId, text} to message a running worker, task interrupt {taskId, text?} to cancel only a running worker's current command (for example a long land or test run) while it keeps working, task stop {taskId} to stop one, and task rename {taskId, title} to retitle a worker's session without interrupting it. To continue a stopped or settled worker, use task resume {taskId, text?}, never a new delegation: it keeps the same session, worktree and claim and re-asks its pending question. Control actions need only the taskId; the Gateway resolves the worker's current operation. You and the maintainer share steering in accepted session-lane order; viewing never takes control. Routine check-ins never wake or push. A worker needsAttention check-in with a blocker may wake Home, rate-limited across resumes; it does not stop the worker. Use task status or steer to help. A settled result wakes Home with its attributed work message; a result the wake cannot take arrives on the next maintainer message. Oversized reports arrive by immutable reference: use task report {taskId, offset} to read them in UTF-8 byte pages. A pending-count line describes the remaining inbox. Task completion wakes Home once with its results and sends one push for that wake, or the task-finished push while Home is paused, disabled or blocked; do not assume task success from admission.",
   "Authorization scopes and one-use grants are maintainer-controlled. A task no standing scope covers waits in this chat for the maintainer's tap on its exact grant card; you cannot approve your own grant. If he declines, nothing runs. A consumed request cannot mint another grant; never replay a refused task identity.",
 
+  "Maintainer obligations live only in canonical Home history through obligation, never in episodic summaries or Profile. Before listing what the maintainer owes, call obligation list and list only those open items. Record requests with evidence; close the human action with reported-done when he confirms it, even if verification is missing. verified is separate evidence, not another owed human action. Only a NEW explicit maintainer request can reopen a closed item; old pending summaries cannot. Closing grants no effect or approval. Never recreate a completed action under a new id.",
   "Compaction is disabled for Home, so this conversation's history stays canonical and grows as it is used.",
 ].join("\n");
 
@@ -169,7 +171,8 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
   task: (request: unknown, confirm?: ConfirmChange) => Promise<unknown>,
   knowledge: () => ProfileStore | undefined,
   profileChanges: () => HomeProfileChangeAccess | undefined, requestChange: NativeChangeRequest,
-  activation: () => "user" | "wake" | undefined): ExtensionFactory {
+  activation: () => "user" | "wake" | undefined,
+  obligations: (callId: string, request: ObligationRequest) => Promise<unknown>): ExtensionFactory {
   return (pi) => {
     // Provider tool filtering is not execution authority: a provider may emit an
     // unadvertised call. Re-read canonical origin at the execution boundary too.
@@ -177,6 +180,7 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
       : { block: true, reason: "This tool requires the current maintainer turn; wake content cannot grant file or shell mutation authority." });
     for (const tool of homeMemoryTools(memoryTools)) pi.registerTool(tool);
     pi.registerTool(homeProfileTool(profileChanges, knowledge, requestChange));
+    pi.registerTool(obligationTool(obligations));
     pi.registerTool({ name: "delegate", label: "Delegate", annotations: { openWorldHint: false }, description: "Dispatch finite work once in a trusted project. Optional model and thinking override the typed Home worker profile field by field and require a short reason. Returns admission identity, not success; results are stored separately.",
       parameters: Type.Object({ taskId: Type.String({ minLength: 1, maxLength: 160 }), title: Type.Optional(Type.String({ minLength: 1, maxLength: 80, description: "A short name for the work, at most 80 characters. It becomes the worker session's name." })),
         intent: Type.String({ minLength: 1, maxLength: 65536 }), target: Type.String({ minLength: 1, maxLength: 4096 }),
