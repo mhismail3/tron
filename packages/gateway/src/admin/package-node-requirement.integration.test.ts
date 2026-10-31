@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { PackageService } from "./package-service.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
+import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../kernel/delegation/managed-subagents.js";
 
 /**
  * #243: a Pi package whose `engines.node` excludes the Gateway's Node installs
@@ -45,6 +46,48 @@ interface ListedPackage {
   provides: { skills: string[] };
   nodeRequirement?: { range: string; runtime: string; status: string };
 }
+
+it("refuses managed-package mutation before admission while ordinary package controls remain usable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-managed-package-control-"));
+  roots.push(root);
+  const agentDir = join(root, "agent"), cwd = join(root, "workspace");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+  const settingsPath = join(agentDir, "settings.json");
+  const settings = JSON.stringify({ packages: [] });
+  await writeFile(settingsPath, settings);
+  const managed = ManagedSubagents.activateForStartup(join(root, "tron"));
+  const managedRoot = managed.verify();
+  const receiptPath = join(managedRoot, "tron-install-receipt.json");
+  const receipt = await readFile(receiptPath, "utf8");
+  const gateway = new GatewayService({ display: {} as never,
+    sessions: { isAdministrativeDrainStarted: false },
+    packages: new PackageService(agentDir, new TrustService(agentDir), () => {}, undefined, managed),
+    receipts: new CommandReceiptStore(join(root, "receipts")),
+    globalProviderResources: { requestReload: () => {} }, broadcast: () => {},
+  } as unknown as GatewayServiceDependencies);
+  const inventory = await gateway.invoke(client, "packages.list", { cwd }) as { packages: Array<{ source: string; scope: string }> };
+  expect(inventory.packages).toContainEqual(expect.objectContaining({ source: MANAGED_SUBAGENTS_SOURCE, scope: "user" }));
+  for (const action of ["remove", "update"]) {
+    await expect(gateway.invoke(client, `packages.${action}`, { commandId: `managed-${action}`, cwd, source: MANAGED_SUBAGENTS_SOURCE }))
+      .rejects.toMatchObject({ code: "conflict", message: "Tron manages pi-subagents; package commands cannot change its bundled payload" });
+  }
+  expect(await readFile(settingsPath, "utf8")).toBe(settings);
+  expect(managed.verify()).toBe(managedRoot);
+  expect(await readFile(receiptPath, "utf8")).toBe(receipt);
+
+  const source = await fixturePackage(root, "ordinary-control");
+  await gateway.invoke(client, "packages.install", { commandId: "ordinary-install", cwd, source });
+  const listed = await gateway.invoke(client, "packages.list", { cwd }) as typeof inventory;
+  const ordinary = listed.packages.find(row => row.source !== MANAGED_SUBAGENTS_SOURCE)!;
+  expect(ordinary).toBeDefined();
+  for (const action of ["update", "remove"]) {
+    await expect(gateway.invoke(client, `packages.${action}`, { commandId: `ordinary-${action}`, cwd, source: ordinary.source }))
+      .resolves.toMatchObject({ operationId: expect.any(String) });
+  }
+  expect(managed.verify()).toBe(managedRoot);
+  expect(await readFile(receiptPath, "utf8")).toBe(receipt);
+});
 
 describe("packages.list projects each package's engines.node against the Gateway runtime", () => {
   it("warns for unsatisfied and invalid ranges, omits a missing one, and never blocks install", async () => {
