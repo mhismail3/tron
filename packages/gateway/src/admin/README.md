@@ -29,6 +29,12 @@ Durable stores: `<tronHome>/gateway/settings/` (`changes/`,
 
 ## Contract
 
+The pinned `tron:pi-subagents@…#…` package source identifies Tron's bundled payload, not a
+user-managed package. Package commands refuse that exact source before mutation admission;
+ordinary configured packages retain install/update/remove. The real package-RPC regression in
+`package-node-requirement.integration.test.ts` verifies refusal and unchanged managed receipt,
+with ordinary-package controls through the same Gateway/Pi owner.
+
 `packages.checkUpdates` validates the Pi manager's own return type without a second DTO.
 The real Gateway/SDK/child-process lock pins accepted fields and user/project scopes,
 256 accepted updates and the 257-item conflict. Oversized/duplicate identities,

@@ -1,4 +1,4 @@
-import { managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
+import { MANAGED_SUBAGENTS_SOURCE, managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -198,6 +198,9 @@ export class PackageService {
 
   async mutate(action: "install" | "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {
     return this.trackAdministrative((work) => this.mutex.run(async () => {
+      if (source === MANAGED_SUBAGENTS_SOURCE) {
+        throw new GatewayError("conflict", "Tron manages pi-subagents; package commands cannot change its bundled payload");
+      }
       const operationId = randomUUID();
       let manager: DefaultPackageManager | undefined;
       // Set at mutation admission, before invoking the SDK. The pinned SDK has
