@@ -62,8 +62,8 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
       const names = context.availableTools.map(tool => tool.name);
       if (profile === "home") {
         expect(names.sort()).toEqual([
-          "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "profile",
-          "projects", "read_file", "session_read", "session_search", "settings", "task", "web_search", "zoom",
+          "ask_user", "bash", "date", "delegate", "display", "edit", "find", "grep", "knowledge", "ls", "memory_search", "profile",
+          "projects", "read", "session_read", "session_search", "settings", "task", "web_search", "write", "zoom",
         ]);
         // The executable allowlist alone can hide tools from a loaded provider;
         // Home must exclude the extension itself, not merely hide its tools.

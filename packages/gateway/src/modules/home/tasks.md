@@ -1,7 +1,9 @@
 # Home tasks
 
-Owner: [gateway/home](README.md). Home delegates finite project work through `delegate` into
-ordinary worker sessions; each worker seals an immutable report, and results reach Home through
+Owner: [gateway/home](README.md). Home may work directly with shared file/shell tools on a
+maintainer turn or delegate finite project work through `delegate` into ordinary worker sessions.
+General file/shell mutations are unavailable on wakes; existing task grants are unchanged.
+Each worker seals an immutable report, and results reach Home through
 the wake inbox. The contract spans the Home owner, RuntimeSlot and `DelegationOperations`, the
 managed subagent provider and the iOS task surfaces. Signals: [home module](README.md#signals).
 

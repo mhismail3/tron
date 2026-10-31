@@ -492,7 +492,7 @@ export class HomeRequestPolicy {
         });
       }
       return { ...update, context: { ...context, messages: rewritten.messages,
-        tools: context.tools?.filter(tool => homeToolAvailable(tool.name, activation.kind)),
+        ...(context.tools ? { tools: context.tools.filter(tool => homeToolAvailable(tool.name, activation.kind)) } : {}),
       } };
     };
   }
@@ -518,7 +518,7 @@ export class HomeRequestPolicy {
           activation,
         );
       }
-      const framed = homeSystemFrame(transformed, homeSystemText(await this.systemPromptFor(activation)));
+      const framed = homeSystemFrame(transformed, homeSystemText(await this.systemPromptFor(activation)), activation.kind);
       this.assertContextNotMutated(framed, activation);
       // Use the same settings-aware converter as this agent's loop; bare
       // conversion would reject Pi's supported image-blocking replacement.
@@ -825,17 +825,18 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
 
 /** One replacement head for framing and both budget checks. Declarations belong
  * to instructions; a separately counted profile has no declarations of its own. */
-function systemMessage(text: string, messages?: readonly AgentMessage[]): AgentMessage {
+function systemMessage(text: string, messages?: readonly AgentMessage[], kind?: HomeActivationKind): AgentMessage {
   const current = messages ? getCurrentSystemMessage(messages as never) : undefined;
-  return { role: "system", content: text, ...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
+  const toolsAdded = kind === undefined ? current?.toolsAdded : current?.toolsAdded?.filter(tool => homeToolAvailable(tool.name, kind));
+  return { role: "system", content: text, ...(toolsAdded ? { toolsAdded } : {}),
     timestamp: current?.timestamp ?? (messages ? Date.now() : 0) } as AgentMessage;
 }
 
 /** Frames a request's system messages as one head holding Home's system prompt,
  * shaped as the SDK's forced-prompt projection shapes its head: the tools the
  * request declares stay on it, and every other system message is dropped. */
-function homeSystemFrame(messages: readonly AgentMessage[], system: string): AgentMessage[] {
-  return [systemMessage(system, messages), ...messages.filter(message => message.role !== "system")];
+function homeSystemFrame(messages: readonly AgentMessage[], system: string, kind: HomeActivationKind): AgentMessage[] {
+  return [systemMessage(system, messages, kind), ...messages.filter(message => message.role !== "system")];
 }
 
 /** The messages a request starting after `boundaryIndex` would NOT send: the

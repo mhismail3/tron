@@ -55,7 +55,8 @@ it("uses an explicit creation profile once, then reconstructs an unrecorded sess
   const first = await slot.context() as unknown as Tools;
   const firstTools = first.availableTools.map(tool => tool.name);
   expect(firstTools).toContain("delegate");
-  expect(firstTools).not.toContain("write");
+  expect(firstTools).toEqual(expect.arrayContaining(["read", "write", "edit", "bash", "grep", "find", "ls"]));
+  expect(firstTools).not.toContain("read_file");
 
   await slot.replaceRuntimeForProfile(async () => {});
   expect(homeOwnerOf(f.registry).profileFor(slot.id, slot.cwd)).toBe("unnamed");

@@ -1,5 +1,3 @@
-import { open, realpath, stat } from "node:fs/promises";
-import { dirname, isAbsolute } from "node:path";
 import { Type, type TSchema } from "../../kernel/pi/ai.js";
 import type { ToolDefinition } from "../../kernel/pi/coding-agent.js";
 import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS } from "../../episodic/episodic-contract.js";
@@ -9,10 +7,8 @@ import type { HomeSessionReader, HomeSessionReadRequest } from "./home-session-r
 import type { SessionSearchRequest, SessionSearchResponse } from "../../sessions/session-search-contract.js";
 
 /*
- * Home's curated read-only research tools (#724):
- * Tron session search, Knowledge lookup, and file reading limited to explicitly
- * trusted projects. Home stays delegate-only for real work; these tools only let
- * it find things out and remember them.
+ * Home's cited-session and Knowledge research tools. Generic file and shell
+ * operations use the shared Pi tools, not a second Home-only reader.
  *
  * The same seam rules as the memory tools apply (home-memory-tools.ts): the tool
  * definitions are constant — no timestamp, no session state, no per-turn text —
@@ -40,10 +36,6 @@ export interface HomeResearchHost {
   sessionRead: HomeSessionReader;
   knowledge: () => KnowledgeService | undefined;
   sessionSearch: () => ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
-  /** True only for a directory an explicit recorded trust decision covers.
-   * The "always" default-trust setting never counts here: Home may read only
-   * what the maintainer deliberately trusted. */
-  explicitlyTrustedDirectory: (path: string) => Promise<boolean>;
 }
 
 /** Tool-result details: small, typed and durable in the transcript, so a reader
@@ -52,10 +44,6 @@ export type HomeResearchToolDetails =
   | { status: "ok" }
   | { status: "refused"; reason: string }
   | { status: "unavailable"; owner: "session-search" | "knowledge" };
-
-/** Bounded whole-file read window; `read_file` pages with `offset` beyond it. */
-const READ_FILE_MAX_BYTES = 4 * 1_024 * 1_024;
-const READ_FILE_DEFAULT_LINES = 1_000;
 
 const SESSION_SEARCH_PARAMETERS = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 512, description: "Text to find across this installation's chats." }),
@@ -93,12 +81,6 @@ type KnowledgeReadonlyParameters = {
   kind?: "source" | "observation" | "note"; scope?: "personal" | "research"; limit?: number;
   includeArchived?: boolean; includePending?: boolean; sessionId?: string; entryId?: string;
 };
-
-const READ_FILE_PARAMETERS = Type.Object({
-  path: Type.String({ minLength: 1, maxLength: 4_096, description: "Absolute path of a file inside an explicitly trusted project." }),
-  offset: Type.Optional(Type.Integer({ minimum: 1, description: "First line to return, 1-based. Default: 1." })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5_000, description: "Lines to return. Default: 1000." })),
-}, { additionalProperties: false });
 
 /** One result's text, capped the way a logged tool result is. */
 function bounded(text: string): string {
@@ -150,43 +132,9 @@ async function knowledgeLookup(host: HomeResearchHost, parameters: KnowledgeRead
   }
 }
 
-async function readTrustedFile(host: HomeResearchHost, path: string, offset: number, limit: number) {
-  if (!isAbsolute(path)) return refused("read_file requires an absolute path.");
-  let canonical: string;
-  try {
-    canonical = await realpath(path);
-    if (!(await stat(canonical)).isFile()) return refused("read_file reads regular files only.");
-  } catch {
-    return refused("read_file: the file does not exist or cannot be resolved.");
-  }
-  // The canonical (symlink-resolved) location decides trust, so a link inside a
-  // trusted project cannot reach outside it.
-  if (!(await host.explicitlyTrustedDirectory(dirname(canonical)))) {
-    return refused("read_file is limited to files inside explicitly trusted projects; this path has no recorded trust decision.");
-  }
-  let text: string;
-  let clipped = false;
-  const handle = await open(canonical, "r");
-  try {
-    const size = (await handle.stat()).size;
-    const window = Math.min(size, READ_FILE_MAX_BYTES);
-    const buffer = Buffer.alloc(window);
-    await handle.read(buffer, 0, window, 0);
-    clipped = size > window;
-    text = buffer.toString("utf8");
-  } finally {
-    await handle.close();
-  }
-  const lines = text.split("\n");
-  const page = lines.slice(offset - 1, offset - 1 + limit);
-  if (page.length === 0) return refused(`read_file: offset ${offset} is beyond the readable window (${lines.length} lines${clipped ? ", first 4 MiB only" : ""}).`);
-  const header = `${canonical} lines ${offset}-${offset + page.length - 1} of ${lines.length}${clipped ? " (first 4 MiB of a larger file)" : ""}`;
-  return ok(`${header}\n${page.join("\n")}`);
-}
-
 /**
- * The four Home research definitions resolve each owner per call.
- * All four are always registered: the tool list heads every
+ * The Home research definitions resolve each owner per call.
+ * All are always registered: the tool list heads every
  * cached prefix, so availability must answer inside a result, never by changing
  * the registration surface between activations.
  */
@@ -224,17 +172,6 @@ export function homeResearchTools(host: HomeResearchHost): Array<ToolDefinition<
       parameters: KNOWLEDGE_READONLY_PARAMETERS,
       executionMode: "sequential",
       execute: async (_toolCallId, request: KnowledgeReadonlyParameters, signal) => knowledgeLookup(host, request, signal),
-    },
-    {
-      name: "read_file",
-      // docs/settings-model.md 5.4: declares it reads no open-world content.
-      annotations: { openWorldHint: false },
-      label: "Read file",
-      description: "Read a file inside an explicitly trusted project, bounded, by absolute path with optional 1-based line offset and limit. Read-only; no directory listing, no writes.",
-      parameters: READ_FILE_PARAMETERS,
-      executionMode: "sequential",
-      execute: async (_toolCallId, request: { path: string; offset?: number; limit?: number }) =>
-        readTrustedFile(host, request.path, request.offset ?? 1, request.limit ?? READ_FILE_DEFAULT_LINES),
     },
   ];
 }

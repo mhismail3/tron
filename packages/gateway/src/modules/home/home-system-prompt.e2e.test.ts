@@ -110,13 +110,16 @@ describe("Home system prompt at the request seam", () => {
     expect(requests[1]!.user.endsWith("apply it")).toBe(true);
     // A prompt chip expands without arguments; the typed text follows it once (#311).
     expect(requests[2]!.user).toBe("GLOBAL PROMPT BODY\n\nargument");
-    // Home's system prompt is unchanged: no skill or prompt is listed or loaded into it.
+    // Shared resource discovery lists global skill metadata, not executable
+    // project resources or preloaded skill/prompt bodies.
     for (const request of requests) {
       expect(request.system).toHaveLength(1);
-      expect(request.system[0]).not.toContain("global-skill");
-      expect(request.system[0]).not.toContain("Global skill description marker");
+      expect(request.system[0]).toContain("global-skill");
+      expect(request.system[0]).toContain("Global skill description marker");
+      expect(request.system[0]).not.toContain("GLOBAL SKILL BODY");
       expect(request.system[0]).not.toContain("GLOBAL PROMPT BODY");
-      expect(request.system[0]).not.toContain("<skills>");
+      expect(request.system[0]).not.toContain("project-skill");
+      expect(request.system[0]).not.toContain("project-prompt");
     }
     expect(requests[1]!.system).toEqual(requests[0]!.system);
     expect(requests[2]!.system).toEqual(requests[0]!.system);

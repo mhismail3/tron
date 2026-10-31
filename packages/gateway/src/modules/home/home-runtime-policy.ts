@@ -9,23 +9,12 @@ export const HOME_TOOL_NAMES: readonly string[] = [
   "read", "write", "edit", "bash", "grep", "find", "ls",
 ];
 
-const WAKE_READ_TOOLS = new Set(["read", "grep", "find", "ls", "ask_user", "display", "zoom", "date", "memory_search", "web_search", "session_search", "session_read", "knowledge"]);
-const WAKE_READ_ACTIONS: Readonly<Record<string, readonly string[]>> = {
-  task: ["list", "status", "report"],
-  settings: ["resolve"],
-  profile: ["list", "read"],
-  schedule: ["list", "show"],
-};
+const MUTATING_GENERAL_TOOLS = new Set(["write", "edit", "bash"]);
 
-/** Admission uses the canonical activation, never a retrieved instruction or a
- * remembered user turn. Unknown tools fail closed on unattended wakes. */
+/** Only a canonical maintainer activation admits general file/shell mutations.
+ * Existing Home capabilities retain their own grants and approval boundaries. */
 export function homeToolAvailable(name: string, kind: "user" | "wake" | undefined): boolean {
-  return kind === "user" || (kind === "wake" && (WAKE_READ_TOOLS.has(name) || Object.hasOwn(WAKE_READ_ACTIONS, name)));
-}
-
-export function homeToolAllowed(name: string, input: Record<string, unknown>, kind: "user" | "wake" | undefined): boolean {
-  return homeToolAvailable(name, kind) && (kind === "user" || WAKE_READ_TOOLS.has(name)
-    || WAKE_READ_ACTIONS[name]?.includes(String(input.action)) === true);
+  return HOME_TOOL_NAMES.includes(name) && (kind === "user" || !MUTATING_GENERAL_TOOLS.has(name));
 }
 
 /** Select descriptions from the first native lineage member, never loading a

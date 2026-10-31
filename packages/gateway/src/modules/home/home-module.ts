@@ -49,6 +49,7 @@ export interface HomeModuleServices {
   requestPolicy: RequestPolicyHook;
   inputAdmission: InputAdmissionPolicy;
   profile: HomeSessionProfileServices;
+  activation(sessionId: string): "user" | "wake" | undefined;
   appendGuard: HomeAppendGuardServices;
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange): Promise<HomeTaskHandle>;
@@ -57,7 +58,6 @@ export interface HomeModuleServices {
   knowledge: KnowledgeService | undefined;
   search(): ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
   read: HomeSessionReader;
-  explicitlyTrustedDirectory(path: string): Promise<boolean>;
 }
 
 /** The composition's Home inputs: platform owners and log sinks, never the registry. */
@@ -201,7 +201,12 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     modelQueues: () => homeTaskModelQueues((role, scope) => sessions.modelQueueOf(role, scope)),
     availability: (role, signal, queue) => platform.modelQueue?.availability(role, signal, queue),
   };
+  const activation = (sessionId: string) => {
+    const evidence = owner.requestPolicyFor(sessionId)?.contextEvidence();
+    return evidence?.activationOpen ? evidence.kind : undefined;
+  };
   return {
+    activation,
     knowledge: platform.knowledge(), read: (request, signal) => readHomeSessionEntry(sessions, owner, request, signal),
     delegate: (sessionId, request, signal, confirm) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal, confirm),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
@@ -245,13 +250,8 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request, confirm) => owner.taskTool(sessionId, request, confirm),
-    profileChanges: session => homeProfileChanges(session, platform.settings()?.changes, platform.knowledge, () => {
-      const evidence = owner.requestPolicyFor(session.sessionId())?.contextEvidence();
-      return evidence?.kind === "user" && evidence.activationOpen;
-    }),
-    explicitlyTrustedDirectory: async path => {
-      try { return (await platform.trust.inspect(path)).savedDecision === true; } catch { return false; }
-    },
+    profileChanges: session => homeProfileChanges(session, platform.settings()?.changes, platform.knowledge,
+      () => activation(session.sessionId()) === "user"),
   };
 }
 
@@ -317,7 +317,8 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
       return createTronHomeExtension(() => owners.memory(session.sessionId()),
         (request, signal, confirm) => owners.delegate(session.sessionId(), request, signal, confirm),
         (request, confirm) => owners.task(session.sessionId(), request, confirm),
-        () => owners.knowledge, () => owners.profileChanges(session), session.requestChange);
+        () => owners.knowledge, () => owners.profileChanges(session), session.requestChange,
+        () => owners.activation(session.sessionId()));
     } }; },
   };
 }
@@ -325,14 +326,13 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
 function createHomeResearchModule(services: () => HomeModuleServices): ModuleDescriptor {
   return {
     name: "tron-home-research",
-    purpose: "Adds Home's read-only session search, cited-entry reading, Knowledge lookup and trusted-project file reading.",
-    tools: ["session_search", "session_read", "knowledge", "read_file"], commands: [],
+    purpose: "Adds Home's read-only session search, cited-entry reading and Knowledge lookup.",
+    tools: ["session_search", "session_read", "knowledge"], commands: [],
     start: () => ({ extension: () => {
       const owners = services();
       return pi => {
         const tools = homeResearchTools({
           knowledge: () => owners.knowledge, sessionSearch: owners.search, sessionRead: owners.read,
-          explicitlyTrustedDirectory: owners.explicitlyTrustedDirectory,
         });
         for (const tool of tools) pi.registerTool(tool);
       };

@@ -1,5 +1,5 @@
-import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
-import { readFile, writeFile } from "node:fs/promises";
+import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -81,7 +81,7 @@ describe("Home wakes on its own task results (#749)", () => {
 
     const wakeTools: string[][] = [];
     const wakeReply: FauxResponseFactory = context => {
-      wakeTools.push((context.tools ?? []).map(tool => tool.name));
+      wakeTools.push(getCurrentTools(context.messages).map(tool => tool.name));
       return fauxAssistantMessage([fauxToolCall("write", { path, content: "wake escaped" }),
         fauxToolCall("bash", { command: `printf escaped > '${shellPath}'` })], { stopReason: "toolUse" });
     };
@@ -101,7 +101,6 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);
 
     // A subsequent real maintainer turn regains shared tools, not the last wake's ceiling.
-    await writeFile(path, "after");
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("edit", { path, oldText: "after", newText: "next maintainer" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Next maintainer turn finished"),

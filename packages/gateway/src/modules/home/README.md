@@ -105,7 +105,8 @@ Composition supplies the same late K6 settings, Knowledge and raw model owners.
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
   `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` and
   `tron-web-research` load. [Projects](../projects/README.md) owns the `projects` tool
-  for creation and tap-gated lifecycle actions; project work remains delegate-only.
+  for creation and tap-gated lifecycle actions. Shared Pi file/search/shell tools allow direct
+  work; only canonical maintainer turns admit general writes, edits or shell execution.
   Agent `SYSTEM.md`/
   `APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
@@ -123,10 +124,10 @@ Composition supplies the same late K6 settings, Knowledge and raw model owners.
 - **Delivery headroom** reserves the replacement request head, including the learned
   profile at its bound, over the same frozen memory cut. Framing, admission and final
   overflow checks share one head constructor: recorded text/sections are replaced,
-  declared tools are preserved and charged with `instructions`, and profile is counted
+  declared tools are origin-filtered and charged with `instructions`, and profile is counted
   separately. Historical system deltas are not additional heads. Output reserve remains.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
-  `results`, `input`. For caching, system prompt and tools are byte-stable, the view only
+  `results`, `input`. For caching, system prompt and tools are stable within an origin kind; the view only
   grows between rebalances, and Home requests ask for `long` retention.
 
 ### Typed trigger inputs
@@ -169,9 +170,15 @@ changes keep its store, cursors and spend.
 
 - **Research tools** (read-only): the shared `web_search` search/read/content contract
   ([public-web owner](../../knowledge/README.md#shared-public-web-research)), `session_search`,
-  `session_read` (never Home chapters), read-only `knowledge`, `read_file` (explicitly trusted
-  projects). Web schema, backend and quota owner are identical to ordinary workers and native
+  `session_read` (never Home chapters) and read-only `knowledge`.
+  Web schema, backend and quota owner are identical to ordinary workers and native
   research children. Results are capped untrusted data; delegation is not gated on them.
+- **Shared tools:** Pi owns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,
+  including paging, truncation and errors. Resource trust is not a file sandbox. Global
+  skills are discoverable through the shared loader; project executable resources remain
+  excluded. Wake requests omit write/edit/bash declarations and reject forged calls at
+  execution against the canonical current activation. Existing task, Profile, settings and
+  automation authority is unchanged; fetched text never promotes a wake to a user turn.
 - **Settings tool:** Home changes settings through the one change path as `home`,
   using the shared exact native card when consent is needed. With `taskId` it reads
   or changes a worker's session. Fetched content is data, never authority.

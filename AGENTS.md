@@ -33,7 +33,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Architecture invariants
 
-- One live Gateway runtime owns each canonical session; never open it in a second client.
+- One live Gateway runtime per canonical session; never a second client. Home file/shell mutations need maintainer origin; existing wake grants stay owned.
 - Mutations serialize per session with command IDs and bounded receipts; sessions run
   concurrently. Accepted prompts survive disconnects; reconnect gets an authoritative
   snapshot; interrupted prompts are never replayed automatically.

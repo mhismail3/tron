@@ -2,8 +2,8 @@ import { workspaceModule } from "../workspace/workspace-module.js";
 import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
- * `web_fetch`, `session_search`, `session_read`, `knowledge` and `read_file` registered by the
- * real `tron-home-research` module, called by a faux model inside real
+ * `session_search`, `session_read`, `knowledge` and shared `read` registered by the
+ * real Home and Pi modules, called by a faux model inside real
  * activations on a designated Home, with the request seam live and counted.
  *
  * Failure modes these cases exist for, written before the code they test:
@@ -11,8 +11,7 @@ import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-regi
  *     (`context-mutated`, `projection-mismatch`, a nonce or digest failure);
  *  F2 an unbounded tool result enters the transcript (the memory projection's
  *     30,000-character cap must hold at the tool, not only at projection);
- *  F3 `read_file` escapes trust: a default-trusted or untrusted path, or a
- *     symlink inside a trusted project resolving outside it;
+ *  F3 shared file paging or error semantics diverge from the worker's reader;
  *  F4 a Knowledge write action is reachable from Home;
  *  F5 `web_fetch` reaches a private destination (SSRF) or follows a redirect to
  *     one;
@@ -444,7 +443,7 @@ describe("Tron Home research tools", () => {
     await ordinary.prompt("please remember RESEARCH-NEEDLE-ALPHA");
     await waitFor(() => (ordinary.snapshot().configurationBlocker === null) || undefined, "ordinary settled", { boundMs: 30_000 });
 
-    // A trusted-project file for read_file.
+    // A trusted-project file for the shared reader.
     const filePath = join(f.project, "notes.txt");
     await writeFile(filePath, Array.from({ length: 12 }, (_, i) => `line ${i + 1} of the trusted file`).join("\n"));
 
@@ -485,9 +484,8 @@ describe("Tron Home research tools", () => {
     expect(knowledge!.details).toEqual({ status: "ok" });
     expect(knowledge!.text).toContain("Research fixture note");
 
-    const [file] = await toolAnswers(f, "read the notes", [{ name: "read_file", args: { path: filePath, offset: 2, limit: 3 } }]);
-    expect(file!.details).toEqual({ status: "ok" });
-    expect(file!.text).toContain("lines 2-4 of 12");
+    const [file] = await toolAnswers(f, "read the notes", [{ name: "read", args: { path: filePath, offset: 2, limit: 3 } }]);
+    expect(file!.isError).toBe(false);
     expect(file!.text).toContain("line 2 of the trusted file");
     expect(file!.text).not.toContain("line 5 of the trusted file");
 
@@ -508,7 +506,7 @@ describe("Tron Home research tools", () => {
     });
   }, 120_000);
 
-  it("keeps every result under the projection cap, refuses SSRF and trust escapes, and cannot reach Knowledge writes", async () => {
+  it("bounds shared web results, refuses SSRF, uses shared file semantics and cannot reach Knowledge writes", async () => {
     const f = await fixture("bounds");
 
     // F2: the complete shared-tool JSON, including citations and diagnostics,
@@ -531,28 +529,27 @@ describe("Tron Home research tools", () => {
     // Only the redirecting hop itself was fetched; neither private target was.
     expect(f.fetchedUrls.slice(fetchedBefore)).toEqual(["https://example.org/redirect-private"]);
 
-    // F3: no explicit trust decision means no read, even though files exist.
-    const untrustedFile = join(f.root, "untrusted.txt");
-    await writeFile(untrustedFile, "must not be readable");
-    // A symlink inside the trusted project resolving outside it is refused on
-    // its canonical location.
-    const link = join(f.project, "escape.txt");
-    await symlink(untrustedFile, link);
-    // Home's own workspace carries an explicit `false` decision from designation.
+    // Shared file tools are not a project sandbox. Resource trust still gates
+    // executable project resources; it does not create a second file reader.
+    const localFile = join(f.root, "local.txt");
+    await writeFile(localFile, "shared file content");
+    const link = join(f.project, "linked.txt");
+    await symlink(localFile, link);
     const homeWorkspaceFile = join(f.tronHome, "gateway", "home", "workspace", "inside-home.txt");
     await writeFile(homeWorkspaceFile, "home workspace content");
-    const [untrusted, escaped, homeFile, relative] = await toolAnswers(f, "try unsafe reads", [
-      { name: "read_file", args: { path: untrustedFile } },
-      { name: "read_file", args: { path: link } },
-      { name: "read_file", args: { path: homeWorkspaceFile } },
-      { name: "read_file", args: { path: "relative/path.txt" } },
+    const [localRead, linked, relative, missing] = await toolAnswers(f, "use the shared reader", [
+      { name: "read", args: { path: localFile } },
+      { name: "read", args: { path: link } },
+      { name: "read", args: { path: "inside-home.txt" } },
+      { name: "read", args: { path: "missing-file.txt" } },
     ]);
-    for (const answer of [untrusted, escaped, homeFile]) {
-      expect(answer!.details).toMatchObject({ status: "refused" });
-      expect(answer!.text).toContain("explicitly trusted projects");
+    for (const answer of [localRead, linked]) {
+      expect(answer!.isError).toBe(false);
+      expect(answer!.text).toContain("shared file content");
     }
-    expect(relative!.details).toMatchObject({ status: "refused" });
-    expect(relative!.text).toContain("absolute path");
+    expect(relative!.isError).toBe(false);
+    expect(relative!.text).toContain("home workspace content");
+    expect(missing!.isError).toBe(true);
 
     // F4: a Knowledge write action is structurally outside the Home schema, so
     // the SDK refuses the arguments before the service is ever reached.

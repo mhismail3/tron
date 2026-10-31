@@ -488,7 +488,7 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([
       fauxAssistantMessage(fauxToolCall("memory_search", { query: secret })),
       fauxAssistantMessage(fauxToolCall("date", { id: "invalid" })),
-      fauxAssistantMessage(fauxToolCall("read_file", { path: `${secret}/missing.txt` })),
+      fauxAssistantMessage(fauxToolCall("read", { path: `${secret}/missing.txt` })),
       fauxAssistantMessage(fauxToolCall("unregistered_capability", {})),
       fauxAssistantMessage(`visible ${secret}`),
     ]);
@@ -503,13 +503,13 @@ describe("Tron Home activations end to end", () => {
     expect(timing.queueMs).not.toBeNull();
     expect(timing.modelMs).toBeGreaterThanOrEqual(0);
     expect(timing.toolMs).toBeGreaterThanOrEqual(0);
-    // read_file's domain refusal is a normally completed execution; exercise an
-    // actual SDK execution error separately, without inspecting result content.
+    // Missing-file reads and a failing subprocess exercise the shared SDK error
+    // path independently, without inspecting private result content.
     const ordinary = await f.registry.create(f.agentDir);
     f.faux.setResponses([fauxAssistantMessage(fauxToolCall("bash", { command: "exit 7" })), fauxAssistantMessage("done")]);
     await ordinary.prompt("execute the bounded failing command");
     await waitUntil(() => !ordinary.isBusy);
-    expect(f.capabilityRecords.map(record => record.status)).toEqual(["ok", "refused", "ok", "unknown", "error"]);
+    expect(f.capabilityRecords.map(record => record.status)).toEqual(["ok", "refused", "error", "unknown", "error"]);
     for (const record of f.capabilityRecords) {
       expect(Object.keys(record).sort()).toEqual(["count", "latencyBucket", "name", "status"]);
       expect(record.count).toBe(1);

@@ -85,6 +85,8 @@ Prove the failure or unnecessary mechanism before replacing it. Prefer removing
 the cause or using the existing owner/platform API over adding a second path.
 Update affected callers, registration, configuration, tests, and owning docs in
 one coherent change; search again for superseded consumers and interfaces.
+For Home tool cuts, preserve cited-session/memory tools and existing grants; reuse
+shared file/shell tools and prove canonical user/wake admission at the real runtime.
 For dependency changes, check exact-version official migration guidance and use
 the repository's package/generation workflow rather than editing generated output.
 
