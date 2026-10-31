@@ -34,18 +34,24 @@ Prepare pinned Gateway dependencies only when selected checks need them. Review 
 
 ## Publish
 
-After affected evidence passes, push without force:
+After affected evidence passes, land a merge whose first parent is the fetched main, so
+main's first-parent chain stays its integration history (the batch bisects it). The branch
+already contains `FETCH_HEAD`, so this merge is conflict-free with the tested tree:
 
 ```bash
-git push origin HEAD:main
+BRANCH=$(git branch --show-current)
+git checkout --detach FETCH_HEAD
+git merge --no-ff --no-edit "$BRANCH"
+git diff --quiet "$BRANCH" HEAD && git push origin HEAD:main
+git checkout "$BRANCH"
 ```
 
 A non-fast-forward refusal preserves your candidate. Fetch/integrate again;
 rerun tests only if integration changed their dependencies. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
-After landing, run full Gateway coverage for runtime/Pi changes and the explicit batch
-for full-tier changes; fix/revert new reds. Sync tracked-clean primary main only when
+Do not run full suites after landing: the post-land batch owns that coverage
+([principles P2](../../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Sync tracked-clean primary main only when
 strictly behind with `git merge --ff-only origin/main`; preserve untracked files.
 
 ## Issues and preservation

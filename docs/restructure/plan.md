@@ -1,7 +1,7 @@
 # Structure and verification contracts
 
-[AGENTS.md](../../AGENTS.md) owns engineering policy. The current program and
-execution order live in epic #2132,
+[AGENTS.md](../../AGENTS.md) and [principles](../PRINCIPLES.md) own engineering policy. The current program and
+execution order live in epic #2173,
 not a repository phase plan. Tool owners below define executable behavior.
 
 ## 3. Metrics, definitions and targets

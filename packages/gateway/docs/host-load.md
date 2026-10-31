@@ -5,7 +5,8 @@ Home starts every authorized task without a running cap or queue.
 observation, never permission to start work or a reason to delay landing.
 
 Workers run their relevant tests directly. There is no shared CPU/memory
-admission, gate, merge lock, hosted check workflow or automatic main revert.
+admission, gate, merge lock, hosted check workflow or automatic main revert; the
+post-land batch ([principles P2](../../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)) never blocks a worker.
 One worktree runs at most one iOS simulator job at a time, and at most three
 simulator jobs run at once across all worktrees: a fourth waits for a free slot
 (`scripts/ios-test-lock.py --host-slot`) and never while one is free. Exact-device/simulator leases

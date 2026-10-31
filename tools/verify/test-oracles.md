@@ -40,6 +40,6 @@ expired entry, missing report or runtime error is not waived. Quarantine is not 
 product fix or an unqualified pass; never silently renew it. Assign new main reds
 within one hour, otherwise fix/revert or quarantine with reproduced evidence.
 
-Run affected checks before landing; broad post-land coverage uses the existing
-explicit batch owner, not duplicated per-worker suites. Report counts, skips,
+Run affected checks before landing; broad post-land coverage belongs to the
+[batch owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship), not duplicated per-worker suites. Report counts, skips,
 quarantines and untested boundaries honestly. See [test-confidence procedures](../../.agents/skills/tron-test-confidence/SKILL.md).

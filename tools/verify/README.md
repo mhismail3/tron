@@ -2,8 +2,8 @@
 
 `scripts/tron verify` mechanically plans a change, runs its affected checks locally,
 and reports broader coverage needed after landing. The manifests and their dependency
-and dynamic-edge graph are the selection authority. No queue, landing gate, hosted CI,
-automatic scheduler or revert is involved. A previous test pass never substitutes for
+and dynamic-edge graph are the selection authority. No merge queue, landing gate or hosted
+CI is involved, and nothing here pushes or reverts main ([principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md) and [on-demand health contract](health-design.md#on-demand-command).
 
@@ -129,7 +129,7 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 |---|---|---|
 | **none** | Empty diff or Markdown only | Static/documentation checks; no executable tests |
 | **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests + transitive consumer locks/declarations |
-| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus all-lock/full-lane coverage in the next explicit batch |
+| **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus all-lock/full-lane coverage in the next batch |
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
 requires a full batch. Unchanged files in the existing serial `gateway-nested` list
@@ -223,10 +223,10 @@ verify has no other wait.
 
 ## Explicit Mac batches
 
-Mohsin or an explicitly requested Home task invokes `verify --batch` in a persistent,
-clean worktree on landed main history. Ensure a simulator-job slot is available (at
-most three across workers); the batch itself runs one lane at a time. No daemon or
-schedule is created. Prepare that worktree's pinned Gateway development dependencies;
+Home (the batch owner under [principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship))
+or Mohsin invokes `verify --batch` in a persistent, clean worktree on landed main history.
+Ensure a simulator-job slot is available (at most three across workers); the batch itself
+runs one lane at a time. No scheduled trigger exists yet. Prepare that worktree's pinned Gateway development dependencies;
 no application install, service restart, deployment or OTA command is part of a batch.
 
 First invocation requires an explicit known-green `--base`; later invocations cannot
@@ -235,9 +235,9 @@ the previous green. A nonwaiting file lock refuses simultaneous batches. The com
 pins HEAD, records **all** commits in `base..HEAD` (including merged branches), then
 runs existing owners serially: all-lock verify, unsigned shipping-iOS compile, the UI
 runner's smoke set on those products, real-Gateway boundary and real-UI journeys, and
-fixture stop. Lanes absent from a repository are not invented; this repository has
-all of them. Mac/relay-specific suites remain their owners' explicitly selected
-checks, not implied coverage. `--skip` is not accepted for batches.
+fixture stop. Lanes absent from a repository are not invented. Mac/relay suites and the full
+default/nested Gateway suites are not lanes yet, so no batch is checkpoint-complete under
+[principles P1](../../docs/PRINCIPLES.md#p1-trunk-is-releasable-devices-run-checkpoints) until #2174 adds them. `--skip` is not accepted for batches.
 
 Each lane runs once per batch, not once per covered commit. The next batch reuses that
 worktree's incremental build products after the normal source-stamp checks. Same green
