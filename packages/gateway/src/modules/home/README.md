@@ -130,6 +130,11 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   `results`, `input`. For caching, system prompt and tools are stable within an origin kind; the view only
   grows between rebalances, and Home requests ask for `long` retention.
 
+### Maintainer obligations
+
+The Home-only `obligation` tool uses canonical history, not summaries, for current
+owed items. See [its source/effect contract and proof](home-obligations.md).
+
 ### Typed trigger inputs
 
 `kernel/host/input-admission.ts` defines the source attribution, route and inbox ports.

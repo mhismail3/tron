@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ObligationRequest } from "./home-obligations.js";
 import { lstat, stat } from "node:fs/promises";
 import { readCanonicalSession } from "../../kernel/session/canonical-reader.js";
 import { GatewayError } from "../../errors.js";
@@ -54,6 +55,7 @@ export interface HomeModuleServices {
   memory(sessionId: string): HomeMemoryToolAccess | undefined;
   delegate(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange): Promise<HomeTaskHandle>;
   task(sessionId: string, request: unknown, confirm?: ConfirmChange): Promise<unknown>;
+  obligation(sessionId: string, callId: string, request: ObligationRequest): Promise<unknown>;
   profileChanges(session: SessionContext): HomeProfileChangeAccess | undefined;
   knowledge: ProfileStore | undefined;
   search(): ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
@@ -250,6 +252,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
     },
     memory: sessionId => owner.memoryToolsFor(sessionId),
     task: (sessionId, request, confirm) => owner.taskTool(sessionId, request, confirm),
+    obligation: (sessionId, callId, request) => owner.obligationTool(sessionId, callId, request),
     profileChanges: session => homeProfileChanges(session, platform.settings()?.changes, platform.knowledge,
       () => activation(session.sessionId()) === "user"),
   };
@@ -308,7 +311,7 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
   return {
     name: "tron-home",
     purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
-    tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"], commands: [], dependsOn: [workspaceModule],
+    tools: ["zoom", "date", "memory_search", "delegate", "task", "profile", "obligation"], commands: [], dependsOn: [workspaceModule],
     start: host => { started(host); return { profiles: [homeSessionProfile(() => services().profile)], hooks: {
       profileDecision: (sessionId, cwd) => { const name = services().profile.decision(sessionId, cwd); return name === "unnamed" ? "unrecorded" : name; },
       runSettled: () => services().runSettled, sessionLineage: () => services().lineage, kernelLifecycle: () => services().lifecycle, taskLedger: () => services().taskLedger, requestPolicy: () => services().requestPolicy,
@@ -318,7 +321,8 @@ function createHomeModule(services: () => HomeModuleServices, started: (host: Ga
         (request, signal, confirm) => owners.delegate(session.sessionId(), request, signal, confirm),
         (request, confirm) => owners.task(session.sessionId(), request, confirm),
         () => owners.knowledge, () => owners.profileChanges(session), session.requestChange,
-        () => owners.activation(session.sessionId()));
+        () => owners.activation(session.sessionId()),
+        (callId, request) => owners.obligation(session.sessionId(), callId, request));
     } }; },
   };
 }
