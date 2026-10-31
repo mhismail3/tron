@@ -201,6 +201,27 @@ describe("HTTP pending-work ownership", () => {
     expect(server.destroyed).toBe(true);
   });
 
+  it("configures native request deadlines and answers Node's timeout error with 408 before closing", async () => {
+    const f = await fixture();
+    const listener = (f.gateway as unknown as { server: Server }).server;
+    expect(listener.headersTimeout).toBe(15_000);
+    expect(listener.requestTimeout).toBe(300_000);
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    await awaitsWithin(once(peer, "connect"), "deadline peer connect");
+    const server = await waitFor(() => f.serverSockets[0], "accepted deadline peer");
+    const closed = new Promise<void>(resolve => server.once("close", () => resolve()));
+    const response = capture(peer);
+    // Node's public clientError event carries ERR_HTTP_REQUEST_TIMEOUT for
+    // header and whole-request expiry. Keep native expiry/trickle coverage
+    // separately; this proves the Gateway's configured bounds and event path.
+    listener.emit("clientError", Object.assign(new Error("Request timeout"), { code: "ERR_HTTP_REQUEST_TIMEOUT" }), server);
+    expect(await response).toContain("HTTP/1.1 408 Request Timeout");
+    await awaitsWithin(closed, "deadline peer closed after 408");
+    expect(server.destroyed).toBe(true);
+  });
+
   it("closes a body that trickles past idle timeout at the 300-second whole-request deadline", async () => {
     const f = await fixture();
     const peer = createConnection({ host: "127.0.0.1", port: f.port });
