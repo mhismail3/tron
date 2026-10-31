@@ -22,9 +22,6 @@ import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-regi
  * The retained artifact is `test-results/home-research-tools/report.json`.
  */
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
@@ -777,25 +774,14 @@ describe("Tron Home research tools", () => {
   it("reads every exported source revision and citation through the existing Home file tool", async () => {
     const f = await fixture("plain-source-citation");
     const exported = join(f.project, "research");
-    // Reuse the converter's sole synthetic persisted-store fixture, then invoke
-    // its real CLI subprocess. No source bytes or conversion logic are copied.
-    const fixtureScript = fileURLToPath(new URL("../../../../scripts/test-retire-knowledge.py", import.meta.url));
-    await promisify(execFile)("python3", ["-c", [
-      "import runpy,shutil,sys",
-      "fixture=runpy.run_path(sys.argv[1])['Retirement']()",
-      "fixture.setUp()",
-      "try:",
-      " fixture.run_command()",
-      " shutil.copytree(fixture.files,sys.argv[2])",
-      "finally: fixture.doCleanups()",
-    ].join("\n"), fixtureScript, exported]);
-    const manifest = JSON.parse(await readFile(join(exported, "MANIFEST.json"), "utf8"));
-    expect(manifest.counts.sourceRevisions).toBe(2);
-    const revisions = manifest.sources.map((source: { revision: string }) => source.revision);
-    expect(new Set(revisions).size).toBe(2);
-    for (const revision of revisions) {
-      const path = join(exported, "sources", "source", revision, "source.md");
-      const original = await readFile(path, "utf8");
+    // Exported sources are ordinary files, not a live converter or store. Seed
+    // two immutable editions and exercise the shipped Home reader through Pi.
+    for (const revision of ["edition-one", "edition-two"]) {
+      const directory = join(exported, "sources", "source", revision);
+      await mkdir(directory, { recursive: true });
+      const path = join(directory, "source.md");
+      const original = `# Café\n\nhttps://example.com/source\nRevision: ${revision}\n\nsecond line\n`;
+      await writeFile(path, original);
       const [answer] = await toolAnswers(f, "read the saved source with its original citation", [
         { name: "read", args: { path, offset: 1, limit: 1000 } },
       ]);
