@@ -27,7 +27,7 @@ async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
       if (created.kind !== "note") throw new Error("Expected note");
       const edited = (await store.updateNote({ commandId: `partition-history-${index}`, recordId: created.id, expectedRevision: created.revisionId, record: { ...created, content: { ...created.content, body: created.content.body + "\nSecond edition." } } })).record;
       if (edited.kind !== "note") throw new Error("Expected note");
-      records.push(await restoreLegacyProfileFixture(store, request.commandId, edited, request.record.content.tags ?? []));
+      records.push(edited);
     } else {
       const draft = (await store.createNote(request)).record;
       if (draft.kind !== "note") throw new Error("Expected note");
@@ -35,10 +35,14 @@ async function fixture(mode: "legacy" | "v2" | "migration" = "legacy") {
     }
   }
   if (mode === "migration") {
-    // Completed seed-operation backups are fixture artifacts, not backups of the
-    // operation under test. Canonical heads and all three body revisions stay intact.
+    // Arrange all historical placements in one real transaction, rather than
+    // repeatedly backing up the growing fixture before the crash oracle starts.
+    const commandId = "partition-seed-historical-fixture";
+    await store.partitionProfile({ commandId, mode: "reorganize", assignments: records.map(record => ({ id: record.id, expectedRevision: record.revisionId, labels: [] })) },
+      { restoring: true, create: () => ({ fixture: "historical-profile-restore" }), validate: envelope => { if ((envelope as { fixture?: string }).fixture !== "historical-profile-restore") throw new Error("Unexpected fixture recovery envelope"); } });
+    for (let index = 0; index < records.length; index++) records[index] = (await store.read(records[index]!.id))!;
     const state = join((await workspace.describe()).root, "state", "profile", "profile-backups");
-    for (let index = 0; index < 21; index++) await rm(join(state, `${profileOperationKey(`partition-create-${index}-historical-fixture`)}.json`));
+    await rm(join(state, `${profileOperationKey(commandId)}.json`));
   }
   const assignments: ProfileAssignment[] = records.map((note, index) => ({ id: note.id, expectedRevision: note.revisionId,
     ...(mode !== "legacy" ? { path: `engineering/selected-${Math.floor(index / 10)}` } : { file: index < 10 ? "core" as const : index < 20 ? "home" as const : "scopes/ui" as const }) }));
