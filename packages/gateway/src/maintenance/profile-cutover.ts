@@ -52,6 +52,13 @@ function child(root: string, name: string): string {
 async function syncDirectory(path: string): Promise<void> {
   const fd = await open(path, "r"); try { await syncDurably(fd); } finally { await fd.close(); }
 }
+async function syncTree(path: string): Promise<void> {
+  const info = await lstat(path);
+  if (info.isDirectory()) {
+    for (const name of await readdir(path)) await syncTree(join(path, name));
+  }
+  await syncDirectory(path); // same durable fsync owner for files and directories
+}
 function sqlRows(db: DatabaseSync): unknown {
   assert.equal(db.prepare("PRAGMA integrity_check").get()!.integrity_check, "ok");
   return [db.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all(),
@@ -139,6 +146,7 @@ export class ProfileCutover {
     const dbName = Object.keys(this.sourceFiles.profile).find(name => name.endsWith(".sqlite"))!;
     const restoredDb = new DatabaseSync(join(staging, dbName), { readOnly: true }), backupDb = new DatabaseSync(join(this.backup, "profile", dbName), { readOnly: true });
     try { assert.deepEqual(sqlRows(restoredDb), sqlRows(backupDb)); } finally { restoredDb.close(); backupDb.close(); }
+    await syncTree(staging);
     if (await exists(this.published)) await rm(this.published);
     await syncDirectory(dirname(this.published)); await rename(staging, this.legacy); await syncDirectory(dirname(this.legacy));
     assert.deepEqual(await tree(this.legacy), this.expected("profile/", this.backupFiles));
