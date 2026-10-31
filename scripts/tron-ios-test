@@ -93,7 +93,9 @@ Stable exits: 65 test failure, 66 destination, 70 build failure, 73 same-resourc
 lease busy, 74 runner failure, 75 process timeout. Signals retain conventional exits.
 Host-wide, at most 3 simulator-heavy jobs run at once across every worktree and worker
 (checkpoint, prepare, build, run, diagnose, the profiler, the Gateway E2E harness and
-`scripts/tron-ios-simulator install` each take one of 3 slots). A fourth waits, printing
+`scripts/tron-ios-simulator install` each take one of 3 slots). With
+--host-slot-wait-seconds N, acquisition exits 73 after N seconds if no slot is free;
+the bound never times out an admitted build or test. By default a fourth waits, printing
 who holds the slots and how long it has waited, and starts the moment one frees; a
 killed or crashed holder frees its slot. Do not hand-serialize Xcode or simulator work
 below that cap. Run one simulator job per worktree at a time; every lane has its own
@@ -277,6 +279,7 @@ selectors=()
 keep_booted=0
 all_simulators=0
 lane_target=""
+host_slot_wait=""
 unowned_udid=""
 unowned_name=""
 while (($#)); do
@@ -291,6 +294,12 @@ while (($#)); do
       [[ "${1#--only-testing:}" != "" ]] || die "empty --only-testing owner"
       selectors+=("-only-testing:${1#--only-testing:}")
       shift
+      ;;
+    --host-slot-wait-seconds)
+      (($# >= 2)) || die "--host-slot-wait-seconds requires seconds"
+      [[ "$2" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "invalid host slot wait: $2"
+      host_slot_wait="$2"
+      shift 2
       ;;
     --keep-booted)
       keep_booted=1
@@ -473,6 +482,7 @@ if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
   # Every command that builds or runs on a simulator takes one of the three
   # host-wide simulator slots (waiting for it); `clean` only deletes.
   [[ "$command" == clean ]] || locker_arguments+=(--host-slot)
+  [[ -z "$host_slot_wait" ]] || locker_arguments+=(--host-slot-wait-seconds "$host_slot_wait")
   # `clean` empties the lane down to its lease file, which only the holder can
   # remove safely: it still holds the lease once the command tree has ended.
   [[ "$command" == clean ]] && locker_arguments+=(--remove-empty-lane)

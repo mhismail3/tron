@@ -13,7 +13,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -254,10 +254,15 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         touched = sorted(modules[target]["owned"])
     else:
         touched = changed_paths(base) if paths is None else sorted(paths)
-        docs = [path for path in touched if is_doc(path)]
+        # A deleted documentation asset still belongs to its base owner.
+        gone = [path for path in touched if path not in tracked]
+        if gone:
+            base_modules = ownership.check(base)[0]["modules"]
+            owner = {**{path: key for key, module in base_modules.items() for path in module["owned"]}, **owner}
+        docs = [path for path in touched if is_doc(path) or (owner.get(path) == "repo/docs" and not path.endswith(".module.json"))]
         if docs:
-            reasons.append(f"{len(docs)} Markdown file(s): the documentation checks cover them; they select no test")
-        code = [path for path in touched if not is_doc(path)]
+            reasons.append(f"{len(docs)} documentation file(s): the documentation checks cover them; they select no test")
+        code = [path for path in touched if path not in docs]
         unowned = [path for path in code if path not in owner and path in tracked]
         # A deleted or renamed-away path is owned as of the base revision.
         gone = [path for path in code if path not in tracked]
@@ -343,7 +348,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         for module in modules.values():
             for command in module.get("verify", []):
                 batch_tests |= declared_files(command, tracked)
-    docs_only = mode == "changed" and all(is_doc(path) for path in touched)
+    docs_only = mode == "changed" and len(docs) == len(touched)
     # Generated doc blocks are built from Markdown, manifests and Gateway sources (tools/docs/README.md).
     doc_inputs = mode == "all" or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     tier = "none" if docs_only else "full" if mode == "all" or full_reasons else "partial"
@@ -419,7 +424,7 @@ class Run:
 
 
 def known_failures() -> dict[str, dict]:
-    """One exact-case registry; invalid or expired entries cannot waive any check."""
+    """Validate retained original/renewal evidence; expiry is a verdict, not invalid data."""
     path = ROOT / "tools/verify/known-failures.json"
     try:
         if path.stat().st_size > 128 * 1024:
@@ -429,7 +434,7 @@ def known_failures() -> dict[str, dict]:
             raise ValueError("expected an array of at most 100 entries")
         known = {}
         for entry in entries:
-            if not isinstance(entry, dict) or set(entry) != {"testId", "evidence", "issue", "expires"}:
+            if not isinstance(entry, dict) or set(entry) not in ({"testId", "evidence", "issue", "expires"}, {"testId", "evidence", "issue", "expires", "renewedFrom"}):
                 raise ValueError("each entry needs testId, evidence, issue and expires")
             identity, evidence = entry["testId"], entry["evidence"]
             if not isinstance(identity, str) or "::" not in identity:
@@ -439,8 +444,11 @@ def known_failures() -> dict[str, dict]:
             mac_observation = file.startswith("packages/mac-app/Tests/Integration/") and file.endswith(".swift")
             if not (gateway_case or mac_observation) or ".." in Path(file).parts or not case.strip() or not (ROOT / file).is_file():
                 raise ValueError(f"invalid testId: {identity}")
-            if identity in known:
-                raise ValueError(f"duplicate testId: {identity}")
+            previous = known.get(identity)
+            if previous and (previous.get("renewedFrom") or entry.get("renewedFrom") != previous["evidence"]["commit"]):
+                raise ValueError(f"duplicate testId or second renewal: {identity}")
+            if not previous and "renewedFrom" in entry:
+                raise ValueError(f"renewal must retain its original entry first: {identity}")
             if type(entry["issue"]) is not int or entry["issue"] <= 0 or not isinstance(evidence, dict) or set(evidence) != {"command", "commit", "failureDigest"}:
                 raise ValueError(f"missing owner issue or failing evidence: {identity}")
             if not isinstance(evidence["command"], str) or not evidence["command"].strip() or not isinstance(evidence["commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", evidence["commit"]):
@@ -449,14 +457,51 @@ def known_failures() -> dict[str, dict]:
                 raise ValueError(f"invalid failureDigest: {identity}")
             git("merge-base", "--is-ancestor", evidence["commit"], "HEAD")
             expiry = date.fromisoformat(entry["expires"])
-            if expiry.isoformat() != entry["expires"] or expiry <= datetime.now(timezone.utc).date():
-                raise ValueError(f"expired quarantine: {identity} (expiry {entry['expires']}, issue #{entry['issue']})")
+            reproduced = datetime.fromisoformat(git("show", "-s", "--format=%cI", evidence["commit"]).strip().replace("Z", "+00:00")).astimezone(timezone.utc).date()
+            if expiry.isoformat() != entry["expires"] or not reproduced < expiry <= reproduced + timedelta(days=7):
+                raise ValueError(f"quarantine must expire within 7 days of reproduction: {identity}")
+            if previous:
+                if evidence["commit"] == previous["evidence"]["commit"] or reproduced < date.fromisoformat(previous["expires"]):
+                    raise ValueError(f"renewal needs a fresh reproduction after expiry: {identity}")
+                git("merge-base", "--is-ancestor", previous["evidence"]["commit"], evidence["commit"])
             known[identity] = entry
+        # Git retains renewal history even after a fixed case leaves the registry.
+        # A removed original cannot reset the one-renewal budget on re-registration.
+        history: dict[str, set[str]] = {}
+        for revision in git("log", "--format=%H", "--", "tools/verify/known-failures.json").splitlines():
+            try:
+                old_entries = json.loads(git("show", f"{revision}:tools/verify/known-failures.json"))
+            except (ValueError, VerifyError):
+                continue
+            if not isinstance(old_entries, list):
+                continue
+            for old in old_entries:
+                if isinstance(old, dict) and isinstance(old.get("evidence"), dict):
+                    identity, commit = old.get("testId"), old["evidence"].get("commit")
+                    if identity in known and isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}", commit):
+                        try:
+                            git("merge-base", "--is-ancestor", commit, "HEAD")
+                        except VerifyError:
+                            continue
+                        history.setdefault(identity, set()).add(commit)
+        retained = {}
+        for entry in entries:
+            retained.setdefault(entry["testId"], set()).add(entry["evidence"]["commit"])
+        for identity, commits in history.items():
+            if len(commits) > 2 or not commits <= retained[identity]:
+                raise ValueError(f"renewal history must be retained; at most one renewal: {identity}")
         # Swift observations are retained provenance, never executable waivers.
-        # The Mac runner must still pass; only Gateway case IDs reach quarantine.
-        return {identity: entry for identity, entry in known.items() if identity.startswith(f"{GATEWAY}/src/")}
+        # The Mac runner must still pass; matching is only applied to Gateway reports.
+        return known
     except (OSError, ValueError, TypeError, VerifyError) as error:
         raise VerifyError(f"known-failures: {error}") from error
+
+
+def expired_failures(known: dict[str, dict]) -> list[dict]:
+    """All stale records are checkpoint blockers, never pre-land admission failures."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    return [{"testId": identity, "expires": entry["expires"], "issue": entry["issue"]}
+            for identity, entry in known.items() if entry["expires"] <= today]
 
 
 def failure_digest(messages: list[str]) -> str:
@@ -554,7 +599,7 @@ def per_file(interpreter: str, files: list[str]) -> str:
     return " && ".join(f"echo {shlex.quote(FILE_MARKER + path)} && {interpreter} {shlex.quote(path)}" for path in files)
 
 
-def test_spec(group: str, files: list[str], selectors: list[str], logs: Path):
+def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True):
     """One command definition shared by planning and execution."""
     node = [str(ROOT / "scripts/tron-node"), "exec"]
     if group in ("gateway", "gateway-nested"):
@@ -564,7 +609,7 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path):
                         f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]],
                 ROOT / GATEWAY, vitest_count(report))
     if group == "ios":
-        return ([str(ROOT / "scripts/tron-ios-test"), "run", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
+        return ([str(ROOT / "scripts/tron-ios-test"), "run", *(["--host-slot-wait-seconds", "30"] if ios_wait else []), *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group == "node-gateway":
         return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
     if group == "node":
@@ -607,6 +652,7 @@ def main(argv: list[str]) -> int:
 
     try:
         known = known_failures()
+        expired = expired_failures(known)
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         if not args.plan:
@@ -615,7 +661,7 @@ def main(argv: list[str]) -> int:
             import batch
             directory = ROOT / 'test-results/verify'
             directory.mkdir(parents=True, exist_ok=True)
-            refusal = 'registry-expired' if 'expired quarantine:' in str(error) else 'registry-invalid'
+            refusal = 'registry-invalid'
             batch.save(directory / f'{sha}.json', {
                 'schema': 'tron.verify.v1', 'commit': sha, 'verdict': 'failed',
                 'sourceRefusal': refusal, 'message': refusal, 'selection': selection, 'steps': [], 'groups': {},
@@ -624,6 +670,8 @@ def main(argv: list[str]) -> int:
                 'attemptId': str(time.time_ns()),
             })
         return 1
+    for entry in expired:
+        print(f"    EXPIRED RED: {entry['testId']} — expiry {entry['expires']}, issue #{entry['issue']}; blocks checkpoints, not authorship", flush=True)
     nested, mac_terminal = nested_files()
     groups: dict[str, list[str]] = {}
     try:
@@ -681,13 +729,13 @@ def main(argv: list[str]) -> int:
             commands += [{"name": label, "command": command, "cwd": "." if label == "layers gateway" else GATEWAY}
                          for label, command in gateway_checks]
         if ios_lane:
-            commands.append({"name": "ios build", "command": [ios_test, "build"], "reuse": "only if current build stamp is fresh"})
+            commands.append({"name": "ios build", "command": [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])], "reuse": "only if current build stamp is fresh"})
         commands.append({"name": "layers ios", "command": [tron, "layers", "ios", "--base", base], "requires": "fresh iOS index"})
         for group, files in sorted(groups.items()):
             if group in NOT_DRIVEN or skipped_group(group):
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
-                command, cwd, _ = test_spec(group, files, selectors, ROOT / "test-results/verify" / sha)
+                command, cwd, _ = test_spec(group, files, selectors, ROOT / "test-results/verify" / sha, ios_wait=name != "all")
                 commands.append({"name": f"tests: {group}", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         deferred_commands = []
         if selection["deferredTests"]:
@@ -718,6 +766,13 @@ def main(argv: list[str]) -> int:
 
     def finish(verdict: str, message: str, announce: bool = True) -> int:
         quarantined = [entry for step in run.steps for entry in step.get("quarantined", [])]
+        expired_reds = [entry for step in run.steps for entry in step.get("expiredReds", [])]
+        if verdict == "passed" and any(step["status"] == "deferred" for step in run.steps):
+            verdict = "deferred"
+            message += "; iOS acquisition deferred to batch, NOT a test pass"
+        if verdict == "passed" and (expired_reds or (name == "all" and expired)):
+            verdict = "expired"
+            message += "; exact expired reds; NOT checkpoint eligible"
         if verdict == "passed" and quarantined:
             verdict = "quarantined"
             message += f"; {len(quarantined)} known failure(s), NOT an unqualified pass"
@@ -729,6 +784,9 @@ def main(argv: list[str]) -> int:
                   "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
+                  "expiredEntries": expired,
+                  # A selection, even --all, is not the complete post-land batch.
+                  "checkpointEligible": False,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}
         temporary = report_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -736,7 +794,7 @@ def main(argv: list[str]) -> int:
         if announce:
             print(f"verify: {verdict.upper()} — {message}", flush=True)
             print(f"verify: report {report_path.relative_to(ROOT)} (result digest {report['resultDigest'][:16]})", flush=True)
-        return 0 if verdict in ("passed", "quarantined") else 1
+        return 0 if verdict in ("passed", "quarantined", "expired", "deferred") else 1
 
     run.on_update = lambda: finish("interrupted" if any(s["status"] == "interrupted" for s in run.steps) else "running",
                                    "partial results; verification is not complete", announce=False)
@@ -755,13 +813,22 @@ def main(argv: list[str]) -> int:
         # The iOS reference check reads the index of this commit's own test build (plan §6.7, #1459). The iOS
         # lane builds it when the stamp is stale; a selection without iOS reports it skipped, never passed.
         stale = ios_index_stale()
+        ios_deferred = False
         if ios_lane:
             if stale is None:
-                run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build"])
-            elif run.step("ios build", [ios_test, "build"])["status"] == "failed":
-                return finish("failed", "ios build failed")
-            stale = None
-        if stale is not None:
+                run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])])
+            else:
+                built = run.step("ios build", [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])])
+                if built["exit"] == 73:
+                    built.update(status="deferred", deferredTests=groups.get("ios", []))
+                    ios_deferred = True
+                elif built["status"] == "failed":
+                    return finish("failed", "ios build failed")
+            if not ios_deferred:
+                stale = None
+        if ios_deferred:
+            run.skipped("layers ios", "iOS slot unavailable; build/index/tests deferred to batch")
+        elif stale is not None:
             run.skipped("layers ios", f"no fresh iOS index for this commit: {stale}")
         elif run.step("layers ios", [tron, "layers", "ios", "--base", base])["status"] == "failed":
             return finish("failed", "layers ios failed")
@@ -778,7 +845,11 @@ def main(argv: list[str]) -> int:
                 not_run.append(group)
                 run.skipped(label, f"{len(files)} file(s) need their own {group} lane(s), which verify does not drive; pass --skip {group.split('-')[0]} to accept")
                 continue
-            command, cwd, count = test_spec(group, files, selectors, run.logs)
+            if group == "ios" and ios_deferred:
+                run.skipped(label, "iOS build admission deferred to batch")
+                run.steps[-1].update(status="deferred", deferredTests=files)
+                continue
+            command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all")
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
             env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if group == "ios" and args.update_locks else update
@@ -790,28 +861,36 @@ def main(argv: list[str]) -> int:
                 result["failedTests"] = list(failed)
                 print("\n".join(f"    failed: {identity}" for identity in failed), flush=True)
                 if result["exit"] == 1 and complete and all(identity in known and digest == known[identity]["evidence"]["failureDigest"] for identity, digest in failed.items()):
-                    result.update(status="quarantined", tests=count(""), quarantined=[
-                        {"testId": identity, "expires": known[identity]["expires"], "issue": known[identity]["issue"]} for identity in failed])
+                    expired_ids = {entry["testId"] for entry in expired}
+                    result.update(status="expired" if expired_ids & failed.keys() else "quarantined", tests=count(""),
+                        quarantined=[{"testId": identity, "expires": known[identity]["expires"], "issue": known[identity]["issue"]}
+                                     for identity in failed if identity not in expired_ids],
+                        expiredReds=[entry for entry in expired if entry["testId"] in failed])
                     for entry in result["quarantined"]:
                         print(f"    QUARANTINED: {entry['testId']} — expires {entry['expires']}, issue #{entry['issue']}", flush=True)
                     run.on_update()
             elif group == "ios":
+                if result["exit"] == 73:
+                    result.update(status="deferred", deferredTests=files)
+                    continue
                 if result["status"] == "failed":
                     result["failedTests"] = ios_failures((ROOT / result["log"]).read_text(errors="replace"))
                     print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
             if result["status"] == "failed":
                 return finish("failed", f"{label} failed")
-            if not result.get("tests") and not result.get("quarantined"):
+            if not result.get("tests") and not result.get("quarantined") and not result.get("expiredReds"):
                 result["status"] = "failed"
                 return finish("failed", f"{label} ran zero passing tests: an empty group is not evidence")
         passing = sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))
         if not_run:
             return finish("incomplete", f"selected tests were not run: {', '.join(not_run)} (pass --skip to accept explicitly)")
+        if passing == 0 and any(step["status"] == "deferred" for step in run.steps):
+            return finish("passed", "affected checks passed; iOS tests deferred to full batch")
         if passing == 0 and selection["docsOnly"]:
-            return finish("passed", "Empty or Markdown-only change: static/documentation checks are its evidence")
+            return finish("passed", "Empty or documentation-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:
             return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred; full batch is not green")
-        if passing == 0 and not any(step.get("quarantined") for step in run.steps):
+        if passing == 0 and not any(step.get("quarantined") or step.get("expiredReds") for step in run.steps):
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len([step for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"])
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"
