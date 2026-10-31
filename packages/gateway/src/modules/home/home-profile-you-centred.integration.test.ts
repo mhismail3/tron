@@ -1,6 +1,4 @@
 import { expect, it } from "vitest";
-import { rename } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { answerChangeCard } from "../../../test-support/native-change.js";
@@ -25,8 +23,10 @@ it("migrates exact legacy placement through a real Home activation and Changes U
   const migrated = await f.store.read(original.id) as typeof original;
   expect(migrated.content).toEqual({ ...original.content, tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["communication", "questions"] } });
   expect({ ...migrated, revisionId: original.revisionId, content: original.content }).toEqual(original);
-  expect(await f.store.read(original.id, original.revisionId)).toEqual(original);
-  const audit = await history(f);
+  await expect(f.store.read(original.id, original.revisionId)).rejects.toMatchObject({ details: { kind: "profile_revision_unavailable" } });
+  const completeHistory = await history(f);
+  expect(completeHistory).toHaveLength(2);
+  const audit = completeHistory.filter(entry => entry.status === "applied");
   expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ before: { fileLabels: [{ index: 1, tag: "home-file-home" }] }, after: { profile: { version: 2, path: ["communication", "questions"] } } });
   await undo(f, audit[0]!.changeId, "you-centred-undo");
@@ -79,14 +79,11 @@ it("exposes eight unsorted notes at a maintainer turn without bodies, and refuse
   recordCase("triage-threshold-metadata-and-batch-cap", { unsorted: originals.length, indexBytes: Buffer.byteLength(index.index), oversizedBatchUnchanged: true, suppression: "conversation evidence and prompt guidance; faux model is not behavioral proof of semantic discretion" });
 }, 120_000);
 
-it("discovers SQL profile metadata without immutable bodies, bounds query-fenced pages, and links and protects a confirmed correction", async () => {
+it("discovers current-file metadata without disclosing bodies, bounds query-fenced pages, and links and protects a confirmed correction", async () => {
   const f = await fixture("you-centred-pages");
   const originals: Array<Extract<ProfileNoteRecord, { kind: "note" }>> = [];
   for (let index = 0; index < 21; index++) originals.push((await f.store.createNote({ commandId: command("page-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [] }, relations: [], content: { title: `Opaque statement ${index}.`, body: "x".repeat(index === 20 ? 40_000 : 500), role: "fact", confirmed: false, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["engineering", index === 20 ? "large" : "pages"] } } } })).record as Extract<ProfileNoteRecord, { kind: "note" }>);
   const large = originals[20]!;
-  const bodyPath = join(dirname(f.project), "tron", "workspace", "state", "profile", "records", large.id, `${large.revisionId}.json`);
-  await rename(bodyPath, `${bodyPath}.hidden`);
-  try {
     const discovery = await homeActivation(f, "Read only metadata and a disjoint path.", [profileCall({ action: "read" }, "bodyless-index"), profileCall({ action: "read", path: "engineering/pages" }, "first-page"), say("Read.")]);
     const metadata = discovery.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "bodyless-index")?.details as { index: string };
     expect(metadata.index).toContain("Engineering");
@@ -103,7 +100,6 @@ it("discovers SQL profile metadata without immutable bodies, bounds query-fenced
     const stale = await homeActivation(f, "An old cursor must not silently mix snapshots.", [profileCall({ action: "read", path: "engineering/pages", cursor: page.nextCursor }, "stale-page"), say("Restart.")]);
     const refusal = stale.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "stale-page")?.details as { status: string; reason: string };
     expect(refusal.status).toBe("refused"); expect(refusal.reason).toContain("snapshot changed");
-  } finally { await rename(`${bodyPath}.hidden`, bodyPath); }
   const linked = await homeActivation(f, "This is the corrected claim; propose it in Corrections.", [profileCall({ action: "read", path: "engineering/large" }, "large-page"), profileCall({ action: "learn", kind: "correction", text: "The large example is a synthetic claim, not personal truth.", corrects: { id: large.id, revisionId: large.revisionId } }, "linked-correction"), say("Proposed.")]);
   const referenced = linked.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "large-page")?.details as { items: Array<{ contentReference: { id: string; revisionId: string } }> };
   expect(referenced.items[0]!.contentReference).toMatchObject({ tool: "profile", action: "read", id: large.id, revisionId: large.revisionId });
@@ -119,7 +115,7 @@ it("discovers SQL profile metadata without immutable bodies, bounds query-fenced
   await (await answerChangeCard(f.service, maintainer, f.slot, false, command("decline-correction"))).response;
   const hold = (await attempted).last.messages.find(message => message.role === "toolResult" && message.toolCallId === "correction-hold")?.details as { status: string };
   expect(hold.status).toBe("declined"); expect(await f.store.read(correction.id)).toEqual(confirmed);
-  recordCase("metadata-pages-and-confirmed-correction", { disjointMissingBodyReadSucceeded: true, pageSizes: [16, 4], staleCursorRefused: true, largeReferenceExact: true, linkedCorrectionHeldForExactCard: true });
+  recordCase("metadata-pages-and-confirmed-correction", { currentFileMetadataOnly: true, pageSizes: [16, 4], staleCursorRefused: true, largeReferenceExact: true, linkedCorrectionHeldForExactCard: true });
 }, 120_000);
 
 it("reads an oversized exact Profile reference through the surviving tool without truncation or split Unicode", async () => {
