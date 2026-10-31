@@ -285,6 +285,15 @@ describe("resuming a stopped Home worker in place", () => {
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({ taskId: resumed.taskId, lifecycle: "active", attention: false, checkins: [] });
     expect((await owner.taskStatus(first.taskId)).checkins).toHaveLength(1);
+    const retro = await owner.taskTool(f.home.sessionId, { action: "metrics", taskId: resumed.taskId }) as
+      import("./home-task-metrics.js").HomeTaskMetrics;
+    // The resumed record copies the earlier check-in. Count its attributed ID
+    // once, retain the blocker verbatim, and never call an active cohort complete.
+    expect(retro.tasks[0]).toMatchObject({ taskId: first.taskId, resumes: 1,
+      needsAttention: { status: "partial", retainedCount: 1, retained: [{ taskId: first.taskId, blocker: "Old approval", attention: "requested" }] },
+      parks: { status: "partial", recordedCount: 1, recorded: [{ taskId: first.taskId, reason: "explicit-report" }] },
+      tokens: { status: "partial", recordedOperations: 1, admittedOperations: 2 } });
+    expect(retro.scorecard.resumesPerTask).toMatchObject({ value: null, denominator: 0 });
     await owner.stopTask(resumed);
     await waitFor(async () => (await owner.taskStatus(resumed.taskId)).lifecycle === "terminal", "resumed worker settled");
     evidence.push({ case: "current-operation-without-inherited-blocker", page });
@@ -309,6 +318,12 @@ describe("resuming a stopped Home worker in place", () => {
     expect(page.items).toHaveLength(2);
     expect(page.items.map((row: any) => [row.taskId, row.operationNumber])).toEqual([[resumed.taskId, 2], [first.taskId, 1]]);
     expect((await owner.taskStatus("refused-history.resume-1")).operationId).toBeNull();
+    const retro = await owner.taskTool(f.home.sessionId, { action: "metrics", taskId: first.taskId }) as
+      import("./home-task-metrics.js").HomeTaskMetrics;
+    expect(retro.tasks[0]).toMatchObject({ taskId: first.taskId, resumes: 1, operationRecords: 3,
+      tokens: { status: "recorded", admittedOperations: 2, recordedOperations: 2 } });
+    expect(retro.tasks[0]!.operations.filter(operation => operation.admitted)).toHaveLength(2);
+    expect(retro.scorecard.resumesPerTask).toMatchObject({ value: 1, denominator: 1, admittedResumes: 1 });
     expect(f.signals.filter(record => record.event === "home.task.history-summary").at(-1)?.counts)
       .toMatchObject({ lineages: 1, operations: 2, resumes: 1, complete: 1 });
     evidence.push({ case: "refused-admission-not-a-worker-operation", page });

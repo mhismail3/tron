@@ -10,6 +10,7 @@ import type { HomeTaskPolicy } from "./home-task-worker-choice.js";
 import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
 import { HomeGlobalResources } from "./home-global-resources.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
+import { readHomeTaskMetrics } from "./home-task-metrics.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskGrantApproval, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
@@ -323,6 +324,7 @@ export class HomeOwner {
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw refuse(new GatewayError("conflict", "Home task control is unavailable"));
     const { action } = request;
+    if (action === "metrics") return readHomeTaskMetrics(this.tasks.store, record.homeId, request);
     if (action === "list" || (action === "status" && request.taskId === undefined)) {
       const catalog = await owner.controlCatalog(request.limit ?? 20).catch(error => {
         if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return { tasks: [], counts: { active: 0, finished: 0 }, more: false };

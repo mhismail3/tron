@@ -158,9 +158,22 @@ next startup; it is not treated as a successful cleanup.
   canonical read refuses rather than mixing operation versions.
 - `home.taskStatus` remains the exact named operation, adding result, worker model,
   subagents and ≤ 20 live runs. Historical task records and worker sessions are not deleted.
-- Home's `task` tool (`list`, `status`, `report`, `steer`, `interrupt`, `stop`, `resume`,
-  `rename`) acts only on its own identity and generation; refusals name the state and the
-  action to use (`home.task.control`). Rename writes the canonical session name.
+- Home's `task` tool (`list`, `status`, `report`, `metrics`, `steer`, `interrupt`, `stop`,
+  `resume`, `rename`) acts only on its own identity and generation; refusals name the
+  state and action to use (`home.task.control`). Rename writes the canonical session name.
+- `task {action:"metrics", from?, to?, taskId?, limit?}` is a read-only current-record
+  retro projection. Default: roots created in the last 72 hours, inclusive `from`,
+  exclusive `to`; explicit UTC ISO windows are at most 31 days. A named task selects
+  its full lineage regardless of creation time. Rows default to 20, max 50, with
+  `coverage.more`; per-lineage arrays keep the latest 50 with counts/truncation metadata.
+  Admitted resumes exclude refused admissions; copied check-ins deduplicate by original
+  identity. Retained attention/parks and terminal-record resumes/task remain partial,
+  never complete canonical history or landed-slice metrics. Missing spend is null;
+  prompt tokens reuse the existing legacy-inclusive/fresh-plus-cache helper. Landing,
+  steering, typed waits, billing and non-task health joins are unavailable with reasons.
+  A changed namespace/write count, more than 10,000 records or a response above 256 KiB
+  refuses; reduce the page or name a task. No session acquisition, new state or logs.
+  Blocker text stays Home-private. See the [loop design](../../../../../tools/home-retro/DESIGN.md).
 - Interrupt aborts only in-flight tool calls (bash: SIGINT, SIGTERM, SIGKILL 5 s apart, abandoned
   after 15 s) and queues `text` as steering. Stop persists `stopIntent`, aborts and joins the
   root prompt; an orphan active task is reconciled from its file at once.

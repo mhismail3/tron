@@ -183,8 +183,8 @@ describe("Home's task tool on the wire (#961)", () => {
     const definition = wire.requests[0]!.tools!.find(tool => tool.name === "task")!;
     const schema = definition.input_schema as { type: string; properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
     expect(schema.type).toBe("object");
-    expect(Object.keys(schema.properties).sort()).toEqual(["action", "limit", "offset", "operationId", "taskId", "text", "title"]);
-    expect(schema.properties.action!.enum).toEqual(["list", "status", "report", "steer", "interrupt", "stop", "resume", "rename"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["action", "from", "limit", "offset", "operationId", "taskId", "text", "title", "to"]);
+    expect(schema.properties.action!.enum).toEqual(["list", "status", "report", "metrics", "steer", "interrupt", "stop", "resume", "rename"]);
     expect(schema.required).toEqual(["action"]);
     for (const [field, property] of Object.entries(schema.properties)) expect(property.description, field).toBeTruthy();
     expect(definition.description).toMatch(/stop \{taskId\}/u);
@@ -325,6 +325,43 @@ describe("Home's task tool on the wire (#961)", () => {
     const report = await homeCalls("task", { action: "report", taskId: "wire-worker" });
     expect(report.isError, report.text).toBe(false);
     expect(report.json()).toMatchObject({ taskId: "wire-worker", offset: 0 });
+
+    // Retro reads the real admitted/resumed operations and the existing durable
+    // token owner through Home's provider-visible tool, never opens the worker.
+    const taskDirectory = join(f.tronHome, "gateway", "home", "tasks");
+    const files = (await readdir(taskDirectory)).sort();
+    const beforeMetrics = await Promise.all(files.map(file => readFile(join(taskDirectory, file), "utf8")));
+    const metricsCall = await homeCalls("task", { action: "metrics", taskId: "wire-worker" });
+    expect(metricsCall.isError, metricsCall.text).toBe(false);
+    const metrics = metricsCall.json();
+    expect(metrics.coverage).toMatchObject({ matchedLineages: 1, returnedLineages: 1, more: false, checkins: "retained-only" });
+    expect(metrics.tasks).toHaveLength(1);
+    expect(metrics.tasks[0]).toMatchObject({ taskId: "wire-worker", resumes: 1, delegateToLandedMs: null,
+      steerCount: null, waitingMs: { fullSuite: null, lock: null, reviewer: null }, spendUsd: null,
+      tokens: { status: "recorded", recordedOperations: 2, admittedOperations: 2 } });
+    const firstRecord = await homeOwnerOf(f.registry).taskStatus("wire-worker");
+    const resumedRecord = await homeOwnerOf(f.registry).taskStatus("wire-worker.resume-1");
+    const promptTokens = (spend: NonNullable<typeof firstRecord.spend>) => spend.inputTokens + (spend.cacheReadTokens ?? 0) + (spend.cacheWriteTokens ?? 0);
+    expect(metrics.tasks[0].tokens.prompt).toBe(promptTokens(firstRecord.spend!) + promptTokens(resumedRecord.spend!));
+    expect(metrics.scorecard.resumesPerTask).toMatchObject({ status: "partial", value: 1, denominator: 1, admittedResumes: 1 });
+    for (const field of ["approvalToMain", "deployLag", "mainReds", "flakeRate"])
+      expect(metrics.scorecard[field]).toMatchObject({ status: "unavailable", value: null });
+    expect(JSON.stringify(metrics)).not.toContain("Finite work");
+    expect(JSON.stringify(metrics)).not.toContain(f.cwd);
+    expect(await Promise.all(files.map(file => readFile(join(taskDirectory, file), "utf8")))).toEqual(beforeMetrics);
+    expect((await readdir(taskDirectory)).sort()).toEqual(files);
+    await expect(homeOwnerOf(f.registry).taskTool(workerSession, { action: "metrics" })).rejects.toThrow(/Home task control is unavailable/u);
+    const from = new Date(firstRecord.createdAt).toISOString();
+    const to = new Date(firstRecord.createdAt + 1).toISOString();
+    const included = await homeCalls("task", { action: "metrics", from, to, limit: 1 });
+    expect(included.json().tasks.map((task: { taskId: string }) => task.taskId)).toEqual(["wire-worker"]);
+    const excluded = await homeCalls("task", { action: "metrics", from: new Date(firstRecord.createdAt - 1).toISOString(), to: from });
+    expect(excluded.json()).toMatchObject({ tasks: [], scorecard: { resumesPerTask: { value: null, denominator: 0 } } });
+    for (const input of [{ from: to, to: from }, { from: "invalid" }, { limit: 51 }, { taskId: "missing" },
+      { from: "2026-01-01T00:00:00Z", to: "2026-03-01T00:00:00Z" }]) {
+      expect((await homeCalls("task", { action: "metrics", ...input })).isError, JSON.stringify(input)).toBe(true);
+    }
+    evidence.push({ metrics: metricsCall.json(), boundaryWindow: included.json() });
   }, 120_000);
 });
 
