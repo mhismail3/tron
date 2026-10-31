@@ -22,4 +22,3 @@ Malformed history refuses rather than reporting nothing owed. Bounds are 1000 it
 10000 events and a 128 KiB owed response; exceeding them refuses a partial result.
 `home-obligations.e2e.test.ts` crosses real Home tool execution, lossy summary compaction,
 chapter rollover and cold Gateway restart, preserving native compaction refusal.
-

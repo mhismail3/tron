@@ -271,7 +271,7 @@ export class HomeOwner {
         const entries = chapter.sessionId === sessionId ? branch : (await readCanonicalSession({ ...chapter, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes })).branch.map(entry => entry.raw as unknown as SessionEntry);
         count += entries.filter(entry => entry.type === "custom" && entry.customType === HOME_OBLIGATION).length;
         if (count > 10000) throw new GatewayError("conflict", "Home obligation history exceeds 10000 events; no partial list is available");
-        replayObligations(entries, items);
+        replayObligations(entries, chapter.sessionId, items);
       }
       if (request.action === "list") {
         const result = { items: [...items.values()].filter(owed), total: items.size };
@@ -291,7 +291,15 @@ export class HomeOwner {
       const receiptId = `obligation-${createHash("sha256").update(`${sessionId}\0${callId}`).digest("hex")}`;
       const existing = branch.find(entry => entry.type === "custom" && entry.customType === HOME_OBLIGATION && (entry.data as ObligationEvent).receiptId === receiptId);
       const before = items.get(request.id!);
-      if (existing?.type === "custom") return { item: before, receiptId };
+      if (existing?.type === "custom") {
+        const event = existing.data as ObligationEvent;
+        if (event.id !== request.id || event.action !== request.action || event.source.entryId !== source.id || event.source.quote !== request.quote
+          || event.text !== request.text || event.issue !== request.issue || event.evidence?.entryId !== request.evidenceEntryId || event.evidence?.quote !== request.evidenceQuote) {
+          throw new GatewayError("conflict", "Obligation receipt identity has different input");
+        }
+        return { item: before, receiptId };
+      }
+      if (count >= 10000 || (request.action === "request" && items.size >= 1000)) throw new GatewayError("conflict", "Home obligation history is full; no event was appended");
       if (request.action === "request" ? !!before : !before) throw new GatewayError("conflict", "Obligation id already exists or is unavailable; never re-create a closed item");
       if (request.action === "reopened") {
         if (owed(before!) || before!.latest.source.entryId === source.id) throw new GatewayError("conflict", "Reopening requires a new maintainer message for a closed obligation");

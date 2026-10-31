@@ -36,7 +36,7 @@ export interface ObligationRequest {
 const refuse = (message: string): never => { throw new GatewayError("invalid_request", `obligation: ${message}`); };
 
 /** Fail closed on corrupt/contradictory events, never turn an unreadable ledger into empty. */
-export function replayObligations(entries: readonly SessionEntry[], items = new Map<string, ObligationItem>()): Map<string, ObligationItem> {
+export function replayObligations(entries: readonly SessionEntry[], sessionId: string, items = new Map<string, ObligationItem>()): Map<string, ObligationItem> {
   const prior = new Map<string, SessionEntry>();
   for (const entry of entries) {
     if (entry.type === "message") prior.set(entry.id, entry);
@@ -44,6 +44,9 @@ export function replayObligations(entries: readonly SessionEntry[], items = new 
     const event = entry.data as ObligationEvent;
     if (!event || !event.receiptId || !event.id || !event.source?.entryId || !event.source.sessionId || !event.source.quote
       || !ACTIONS.includes(event.action) || event.action === ("list" as string)) refuse("canonical event is invalid");
+    if (event.source.sessionId !== sessionId || (event.evidence && event.evidence.sessionId !== sessionId)) refuse("event source names a different chapter");
+    admitObligation({ action: event.action, id: event.id, quote: event.source.quote, ...(event.text === undefined ? {} : { text: event.text }),
+      ...(event.issue === undefined ? {} : { issue: event.issue }), ...(event.evidence ? { evidenceEntryId: event.evidence.entryId, evidenceQuote: event.evidence.quote } : {}) });
     const source = prior.get(event.source.entryId);
     if (source?.type !== "message" || source.message.role !== "user" || !messageText(source).includes(event.source.quote)) refuse("maintainer source is unavailable");
     if (event.evidence) {
