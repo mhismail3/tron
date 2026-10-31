@@ -30,7 +30,7 @@ promotion: `scripts/gateway-payload-deploy.mjs` ([host control](../../gateway/sr
 - **Staging cancellation.** The staging shell owns each copying/validation command in
   its Bash job table. Signal/exit cleanup stops and joins those jobs before the caller
   can remove the private tree; Python heredoc input is preserved. Real payload copying
-  is bounded fixture preparation, separate from offline activation behavior.
+  is bounded fixture preparation in the offline integration test, not activation behavior.
 - **Freshness.** `ensure-gateway-bundle.sh` accepts an existing payload only after
   `--verify-only` (read-only): integrity, a freshly compiled launcher's fingerprint, runtime
   hashes and architectures, safe symlinks, immutable modes, exact aliases, then
@@ -88,6 +88,10 @@ packages/mac-app/scripts/test-bundle-gateway-rebuild.sh [--gnu-shadow|--cleanup-
 packages/mac-app/scripts/test-tron-gateway-npm.sh
 packages/mac-app/scripts/test-update-payload-fingerprint.sh
 ```
+
+`verify-signed-pi-payload.sh BUILT_TronMac.app` requires the explicit built/signed
+artifact. Reinstall/checkpoint own its invocation; it is not an argumentless auto-test
+and never discovers or substitutes an installed app.
 
 The verifier matrix exits 2 (`generated-input precondition`) when its baseline is stale and runs
 no cases; stage current inputs explicitly (an authorized operation), never rewrite pins. Strict

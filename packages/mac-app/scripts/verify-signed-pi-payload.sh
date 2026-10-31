@@ -5,7 +5,7 @@
 set -euo pipefail
 APP_PATH="${1:-}"
 [[ -n "$APP_PATH" && "$APP_PATH" == *.app ]] || {
-  echo "usage: test-signed-pi-payload-smoke.sh BUILT_TronMac.app" >&2
+  echo "usage: verify-signed-pi-payload.sh BUILT_TronMac.app" >&2
   exit 64
 }
 APP_PATH="$(realpath "$APP_PATH")"
