@@ -61,7 +61,7 @@ describe("Tron Home learned profile", () => {
     recordCase("prompt-stability", { stableWhileUnchanged: true, movesOnChange: true });
   }, 120_000);
 
-  it("F3: refine preserves history; explicit reads distinguish active, superseded and retired records", async () => {
+  it("F3: refine replaces the current head with shared audit; explicit reads distinguish active, superseded and retired records", async () => {
     const f = await fixture("lifecycle");
     await homeActivation(f, "remember a", [
       profileCall({ action: "learn", kind: "preference", text: "Use metric units." }, "call-life-1"),
@@ -80,7 +80,15 @@ describe("Tron Home learned profile", () => {
     expect(refined.content.confirmed).toBe(true);
     expect(refined.content.tags).toEqual(["home-profile", "kind-preference"]);
     expect(refined.content.profile).toEqual({ version: 2, path: ["inferred", "review"] });
-    expect((await noteAt(f, original!.id, originalRevision)).content.title).toBe("Use metric units.");
+    // Refine retains before/after in shared Changes, not a general revision archive.
+    expect(await noteAt(f, original!.id, refined.revisionId)).toEqual(refined);
+    await expect(noteAt(f, original!.id, originalRevision)).rejects.toMatchObject({
+      code: "conflict", details: { kind: "profile_revision_unavailable", id: original!.id, revisionId: originalRevision },
+    });
+    expect((await history(f)).filter(entry => refine.changes.some(change => change.changeId === entry.changeId)))
+      .toEqual([expect.objectContaining({ status: "applied", qualifiers: { note: original!.id },
+        before: expect.objectContaining({ text: "Use metric units.", revisionId: originalRevision }),
+        after: expect.objectContaining({ text: "Use metric units everywhere.", revisionId: refined.revisionId }) })]);
     const afterRefine = await homeActivation(f, "after refine", [say("ok")]);
     const refinedSection = profileSection(afterRefine.first.systemPrompt);
     expect(refinedSection).not.toContain("Use metric units everywhere.");
@@ -95,7 +103,7 @@ describe("Tron Home learned profile", () => {
     expect((await readProfilePage(f, "inferred", undefined, true)).items).toEqual([expect.objectContaining({ id: original!.id, status: "superseded" }), expect.objectContaining({ id: (replaced as { id: string }).id, text: "Use metric units, and state conversions.", status: "active" })]);
     const replacement = await noteAt(f, (replaced as { id: string }).id);
     expect(replacement.relations).toEqual([{ type: "supersedes", recordId: original!.id, revisionId: refined.revisionId }]);
-    // The superseded record stays readable as history.
+    // Superseded status does not erase the note's current head.
     expect((await noteAt(f, original!.id)).content.title).toBe("Use metric units everywhere.");
 
     const retire = await change(f, [{ action: "retire", id: replacement.id, expectedRevision: replacement.revisionId, reason: "The maintainer changed topic." }], "life-retire");
@@ -114,7 +122,7 @@ describe("Tron Home learned profile", () => {
     expect(retired.content.retired).toBe(true);
     expect(retired.provenance.reason).toBe("The maintainer changed topic.");
     expect((await readProfilePage(f, "inferred", undefined, true)).items).toEqual([expect.objectContaining({ id: original!.id, status: "superseded" }), expect.objectContaining({ id: replacement.id, status: "retired" })]);
-    recordCase("refine-supersede-retire", { refinedRevisionKept: true, supersededStatusRead: true, retiredStatusRead: true });
+    recordCase("refine-supersede-retire", { unanchoredRevisionRefused: true, refineAuditKept: true, supersededStatusRead: true, retiredStatusRead: true });
   }, 120_000);
 
   it("F4: a retired item cannot be refined, and a superseded item cannot be superseded again", async () => {

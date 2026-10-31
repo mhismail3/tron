@@ -57,7 +57,10 @@ snapshot; changed snapshots refuse rather than mix pages.
 
 Invalid kinds and Prior metadata produce exact diagnostic references. Gateway
 never invents a kind or destination. The native unclassified count remains kind-only.
-Retired and superseded notes stay readable, never active by placement alone.
+Retired and superseded notes stay readable as current heads, never active by
+placement alone. Refine replaces a head; its previous text remains in shared
+Changes before/after facts for Undo, not a generally readable historical revision.
+Only a current Correction's exact claim link retains an older edition for reads.
 
 ## Home proposals and maintainer decisions
 
