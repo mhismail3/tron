@@ -100,8 +100,6 @@ export class ProfileCatalog {
           CREATE INDEX records_kind_date ON entries(collection, json_extract(value, '$.kind'), json_extract(value, '$.sortAt') DESC, key) WHERE collection = 'records';
           CREATE INDEX records_scope_date ON entries(collection, json_extract(value, '$.scope'), json_extract(value, '$.sortAt') DESC, key) WHERE collection = 'records';
           CREATE INDEX records_kind_scope_date ON entries(collection, json_extract(value, '$.kind'), json_extract(value, '$.scope'), json_extract(value, '$.sortAt') DESC, key) WHERE collection = 'records';
-          CREATE TABLE revision_owners (revision TEXT PRIMARY KEY, record TEXT NOT NULL);
-          CREATE INDEX revision_record ON revision_owners(record);
         `);
       } else {
         const version = this.database.prepare("PRAGMA user_version").get()?.user_version;
@@ -124,15 +122,6 @@ export class ProfileCatalog {
   close(): void {
     try { if (this.transaction) this.database.exec("ROLLBACK"); }
     finally { this.transaction = false; this.database.close(); }
-  }
-  setRevisions(record: string, revisions: string[]): void {
-    this.database.prepare("DELETE FROM revision_owners WHERE record = ?").run(record);
-    const insert = this.database.prepare("INSERT INTO revision_owners(revision, record) VALUES (?, ?)");
-    for (const revision of revisions) insert.run(revision, record);
-  }
-  revisionOwner(revision: string): string | undefined {
-    const row = this.database.prepare("SELECT record FROM revision_owners WHERE revision = ?").get(revision);
-    return row ? String(row.record) : undefined;
   }
 
   /** Callers supply fixed SQL fragments only; all user filters/cursors are bound. */

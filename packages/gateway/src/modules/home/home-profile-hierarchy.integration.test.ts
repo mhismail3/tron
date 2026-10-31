@@ -1,7 +1,6 @@
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
-import { waitFor } from "../../../test-support/wait-for.js";
 import { answerChangeCard } from "../../../test-support/native-change.js";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { expect, it, vi } from "vitest";
@@ -80,13 +79,6 @@ it("the real Home profile tool retries one original label group and native Chang
     provenance: { actor: "user", source: "explicit-standing-rule", evidence: [] }, relations: [],
     content: { title: "Never publish without approval.", body: "Preserve the full binding instruction.", role: "decision", confirmed: true,
       tags: ["home-file-unknown", "home-profile", "kind-standing-decision", "home-file-home", "fixture-label"] } });
-  // Home's protected organization waits in its turn for the maintainer's exact card.
-  const first = homeActivation(f, "Propose this exact release placement, preserving the confirmed instruction.", [
-    profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }], reason: "Explicit placement-only organization" }, "organize-tool-first"), say("the reviewed operation needs its original publication retry"),
-  ]);
-  const card = await waitFor(() => f.slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "Home's exact profile card");
-  expect(card.review!.items[0]).toMatchObject({ before: "Prior organization", after: "Engineering › Release" });
-  expect(await f.store.read(original.id)).toEqual(original);
   await mkdir(f.record.path, { recursive: true });
   const parent = await stat(f.record.path);
   const sync = durability.syncDurably;
@@ -96,9 +88,11 @@ it("the real Home profile tool retries one original label group and native Chang
     if (!failed && actual.dev === parent.dev && actual.ino === parent.ino) { failed = true; throw new Error("Owned tool audit publication fault"); }
     await sync(handle);
   });
-  const { response } = await answerChangeCard(f.service, maintainer, f.slot, true, command("approve-organize"));
-  await expect(response).rejects.toThrow("Owned tool audit publication fault");
-  const settled = await first;
+  const settled = await homeActivation(f, "Put this note in Engineering / Release, preserving the confirmed instruction.", [
+    profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }], reason: "Explicit placement-only organization" }, "organize-tool-first"), say("the operation needs its original publication retry"),
+  ]);
+  expect(failed).toBe(true);
+  expect(f.slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
   const advertised = settled.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-first")?.details as { status: string; commandId: string };
   expect(advertised).toMatchObject({ status: "retry_required" });
   const directory = join((await f.registry.moduleHost.contract(workspaceModule).describe()).root, "state", "profile", "profile-backups");
@@ -131,19 +125,17 @@ it("the real Home profile tool retries one original label group and native Chang
   recordCase("tool-original-envelope-retry-native-label-undo", { originalCommand: pending.commandId, originalToolCall: "organize-tool-first", changeIds: organized.changeIds, exactMalformedLabelsRestored: true });
 });
 
-it("a stale organization card is refused, not advertised as a recoverable audit failure", async () => {
+it("a stale organization revision is refused, not advertised as a recoverable audit failure", async () => {
   const f = await fixture("stale-organization");
   const original = (await f.store.createNote({ commandId: command("stale-seed"), record: { kind: "note", scope: "personal",
     provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],
     content: { title: "Original instruction.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"], profile: { version: 2, path: ["communication"] } } } })).record;
-  const turn = homeActivation(f, "Review this placement.", [profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }], reason: "Exact placement" }, "stale-organize"), say("refused")]);
-  await waitFor(() => f.slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "profile card");
   await f.service.invoke(maintainer, "home.profileChange", { commandId: command("new-native-edit"), changes: [{ action: "refine", id: original.id, expectedRevision: original.revisionId, text: "New native instruction." }] });
   const current = await f.store.read(original.id);
-  const { response } = await answerChangeCard(f.service, maintainer, f.slot, true, command("stale-tap"));
-  await expect(response).rejects.toThrow(/Profile changed since this exact/);
-  const result = (await turn).last.messages.find(message => message.role === "toolResult" && message.toolCallId === "stale-organize")?.details;
-  expect(result).toMatchObject({ status: "refused", action: "reorganize", reason: expect.stringMatching(/Profile changed since this exact/) });
+  const turn = await homeActivation(f, "Put the earlier revision in Engineering / Release.", [profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }], reason: "Exact placement" }, "stale-organize"), say("refused")]);
+  expect(f.slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
+  const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "stale-organize")?.details;
+  expect(result).toMatchObject({ status: "refused", action: "reorganize", reason: expect.stringMatching(/revision is stale/) });
   expect(result).not.toHaveProperty("commandId");
   expect(await f.store.read(original.id)).toEqual(current);
 });
