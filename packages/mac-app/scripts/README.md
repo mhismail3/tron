@@ -27,6 +27,10 @@ promotion: `scripts/gateway-payload-deploy.mjs` ([host control](../../gateway/sr
   launcher and icon from a private staging root by backup renames; failure restores the prior
   projection. macOS tools are used by absolute path (`/usr/bin/find`, `/usr/bin/stat`,
   `/bin/realpath`, …); any write bit or failed scan is refused.
+- **Staging cancellation.** The staging shell owns each copying/validation command in
+  its Bash job table. Signal/exit cleanup stops and joins those jobs before the caller
+  can remove the private tree; Python heredoc input is preserved. Real payload copying
+  is bounded fixture preparation, separate from offline activation behavior.
 - **Freshness.** `ensure-gateway-bundle.sh` accepts an existing payload only after
   `--verify-only` (read-only): integrity, a freshly compiled launcher's fingerprint, runtime
   hashes and architectures, safe symlinks, immutable modes, exact aliases, then
@@ -67,6 +71,12 @@ parser (no escapes):
 | `app/package.json`, `app/package-lock.json` | ≤ 64 KiB, ≤ 16 MiB |
 
 `runtimeEpoch` is a freshness nonce sealed by the tree and signature, not a source input.
+
+## Signals
+
+| Signal | Interpretation / next check |
+|---|---|
+| Staging exit 143 | TERM interrupted staging after its owned writers joined; inspect the original caller timeout/error rather than a cleanup race. `managed-subagents.payload.integration.test.ts` gates the real copy and checks writer absence at shell exit. |
 
 ## Verify
 
