@@ -290,7 +290,9 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
                 outcome = execute(root, lane, attempt)
             finally:
                 stop_fixture(root, attempt / 'stop')
-            if outcome['exit'] == 0:
+            if outcome.get('status') == 'uncovered' or outcome.get('exit') is None:
+                state = 'unknown'
+            elif outcome['exit'] == 0:
                 state = 'good'
             elif failed.get('signature') and outcome.get('signature') == failed['signature']:
                 state = 'bad'

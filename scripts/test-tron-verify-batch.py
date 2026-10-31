@@ -83,6 +83,9 @@ data={'numPassedTests':0 if failed else 1,'numFailedTests':1 if failed else 0,
 if (root/'changed-signature').exists() and '-t' in args and failed:
     data['testResults'][0]['assertionResults'][0]['failureMessages']=['AssertionError: different failure']
 if (root/'skipped').exists(): data['numPendingTests']=1
+if (root/'empty-probe').exists() and '-t' in args and not failed:
+    data['numPassedTests']=0
+    data['testResults']=[]
 if not (root/'missing-report').exists(): output.write_text(json.dumps(data))
 raise SystemExit(1 if failed else 0)
 ''')
@@ -315,6 +318,17 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['verdict'], 'red')
         self.assertEqual(report['failures'][0]['attribution']['status'], 'flake observed; registry entry required')
         self.assertEqual(len(report['failures'][0]['attribution']['probes']), 2)
+
+    def test_empty_case_probe_is_unknown_not_good_parent_evidence(self):
+        self.land('empty-probe', 'yes')
+        self.base = self.git('rev-parse', 'HEAD')
+        self.land('bad', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        proof = self.reports()[-1]['failures'][0]['attribution']
+        self.assertEqual(proof['status'], 'inconclusive')
+        self.assertEqual(proof['probes'][0]['outcome'], 'unknown')
+        self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
     def test_second_culprit_reproduction_is_required(self):
         self.land('unstable-repeat', 'yes')
