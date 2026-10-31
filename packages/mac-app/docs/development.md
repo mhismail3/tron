@@ -232,18 +232,27 @@ scripts/tron mac replace --status --follow
   `retire-knowledge.py` and its read-only `--verify` while still offline, after the raw snapshot
   and before retiring either prior artifact. A private owner-only
   `~/.tron-maintenance/knowledge-cutover-pending.json` explicitly approves version `1`,
-  `priorAppRevision`, `priorGatewayRevision` and `converterSHA256` (the prior identities,
-  not the candidate). Missing approval, changed prior identities, active Debug/Preview jobs,
+  `priorAppRevision`, `priorGatewayRevision`, `converterSHA256`, `artifactDirectory` and
+  `artifactManifestSHA256` (the prior identities, not the candidate). Preflight checks every
+  `ARTIFACTS-SHA256.json` entry, recounts live records and reserves build + full logical snapshot
+  + archive/export capacity before stopping anything. Missing approval, changed identities, active Debug/Preview jobs,
   privacy refusals or verification failures prevent candidate start. Absence of Knowledge is
   a no-op. The bounded journal links hash-fenced counts/inventories and the independently
   verified archive/export under `knowledge-cutover-<attempt>`; exports are ordinary workspace
   files named `knowledge-export-<operation>-<attempt>`. On failure or interrupted execution,
   the same rollback first restores only the Knowledge/Profile namespaces and initialization
   markers from the verified raw snapshot, preserving displaced bytes, then verifies the prior
-  app and external payload inventories before relaunching. Any Profile change after candidate
-  start refuses data rollback and leaves the runtime offline for a recovery decision; it never
-  overwrites newly accepted Profile work. Success removes the pending approval. Archives,
-  exports, the raw snapshot and prior artifacts remain local recovery checkpoints.
+  app and external payload inventories before relaunching. The decisive gate loads Profile,
+  every canonical chat, Home chapters/memory/summaries and an ordinary exported source with
+  the candidate's own shipped read owners, offline and without initializing a runtime. It
+  checks the note count and unchanged Home/chat bytes. A durable start intent is the commit
+  boundary: thereafter retries only start/verify the candidate, never reconvert or restore data.
+  The prior runtime is not qualified on converted data, so post-start failures retain the new
+  build and archive, clearly report unconfirmed health and allow Replace to retry verification.
+  Successful post-start Profile/Home/chat-catalog reads consume the approval. Archives,
+  exports, every attempt's raw snapshot and prior artifacts remain local recovery checkpoints.
+  One kernel `rebuild.lock` excludes concurrent Mac replacements and physical iOS installs;
+  converter/verifier children inherit it, so a killed runner cannot release a still-active cutover.
 - **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac
   verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`
   (current and previous kept); git and builds run with Homebrew's bin on `PATH` for git-lfs.

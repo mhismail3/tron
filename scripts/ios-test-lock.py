@@ -367,6 +367,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lock", type=Path)
     parser.add_argument("--marker", type=Path)
+    parser.add_argument("--rebuild-lock", type=Path, help="also exclude Mac replacement for a physical iOS install")
     parser.add_argument("--development-state", type=Path)
     parser.add_argument("--keep-booted", action="store_true")
     parser.add_argument("--resource", default="iOS test simulator", help="what the lease protects, named when it is contended")
@@ -414,6 +415,7 @@ def main() -> int:
         interrupted: int | None = None
         held = False
         slot: IO[str] | None = None
+        rebuild_owner = None
 
         def forward(signum: int, _frame: object) -> None:
             nonlocal interrupted
@@ -512,6 +514,20 @@ def main() -> int:
                 # Named like the lease's so a process the command detaches on
                 # purpose can drop it too.
                 environment["TRON_IOS_TEST_SLOT_FD"] = str(slot.fileno())
+            rebuild_fds = ()
+            if arguments.rebuild_lock is not None:
+                from tron_rebuild_lock import RebuildLock, RebuildBusy
+                rebuild_owner = RebuildLock(arguments.rebuild_lock)
+                try:
+                    rebuild_fds = (rebuild_owner.__enter__(),)
+                except RebuildBusy as error:
+                    print(f'STOP: {error}', file=sys.stderr)
+                    return LOCKED_EXIT
+                environment['TRON_REBUILD_LOCK_FD'] = str(rebuild_fds[0])
+                environment['TRON_REBUILD_LOCK_PATH'] = str(arguments.rebuild_lock)
+            elif os.environ.get('TRON_REBUILD_LOCK_FD') is not None:
+                from tron_rebuild_lock import inherited_fd
+                rebuild_fds = (inherited_fd(),)
             process = subprocess.Popen(
                 arguments.command,
                 env=environment,
@@ -520,7 +536,7 @@ def main() -> int:
                 # The lease's own descriptor: the flock then lives exactly as
                 # long as the command tree, so a sweep cannot release the
                 # simulator while a command a killed holder started still runs.
-                pass_fds=(handle.fileno(),) if slot is None else (handle.fileno(), slot.fileno()),
+                pass_fds=((handle.fileno(),) if slot is None else (handle.fileno(), slot.fileno())) + rebuild_fds,
             )
             if interrupted is not None:
                 # A signal that arrived while the command was starting is still
@@ -536,6 +552,8 @@ def main() -> int:
                 )
             return status
         finally:
+            if rebuild_owner is not None:
+                rebuild_owner.__exit__(None, None, None)
             for signum, handler in previous.items():
                 signal.signal(signum, handler)
             # Another holder owns this lane; its metadata is not ours to clear.

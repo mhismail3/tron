@@ -22,6 +22,12 @@ packages/ios-app/scripts/test-build-matrix-policy.sh  # optimized Tron Device se
 scripts/tron-ios-device compile                       # unsigned LocalDevice compile, no device or lease
 ```
 
+Physical `install` also holds the same inherited kernel rebuild lease as Mac replacement,
+before protocol admission/build/signing. Contention exits 73 without building or installing.
+An iOS-only rebuild never reads/consumes a Knowledge cutover approval or runs the converter;
+Mac replacement owns that offline transaction. `compile` takes neither physical-device nor
+Mac-replacement lease and never installs.
+
 UI validation defines `HOSTED_TEST`, so a green UI run does not prove the shipping app compiles:
 run `compile` after changing app views or their model APIs.
 

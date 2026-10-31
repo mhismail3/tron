@@ -32,6 +32,7 @@ from tron_mac_replace_journal import Journal, TERMINAL_STATES, describe, now, pr
 from tron_mac_replace_platform import Failure, MacPlatform, capture, git, git_succeeds, run  # noqa: E402
 from tron_mac_replace_rpc import RpcError  # noqa: E402
 import tron_mac_replace_knowledge as knowledge  # noqa: E402
+from tron_rebuild_lock import RebuildLock, RebuildBusy  # noqa: E402
 
 LIBC = ctypes.CDLL(None, use_errno=True)
 DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
@@ -131,7 +132,33 @@ class Runner:
         return self.journal.step_log(step)
 
     def run(self):
-        if (self.data['swap'].get('previousApp') or self.data['swap'].get('knowledge')) and self.data['state'] not in ('succeeded',):
+        try:
+            with RebuildLock(self.platform.maintenance / 'rebuild.lock') as fd:
+                self.rebuild_fd = fd
+                keys = ('TRON_REBUILD_LOCK_FD', 'TRON_REBUILD_LOCK_PATH')
+                previous = {key: os.environ.get(key) for key in keys}
+                os.environ.update(TRON_REBUILD_LOCK_FD=str(fd), TRON_REBUILD_LOCK_PATH=str(self.platform.maintenance / 'rebuild.lock'))
+                try:
+                    return self.run_locked()
+                finally:
+                    for key, value in previous.items():
+                        if value is None:
+                            os.environ.pop(key, None)
+                        else:
+                            os.environ[key] = value
+        except RebuildBusy as error:
+            if self.data['swap'].get('knowledge'):
+                self.journal.note(str(error))
+            else:
+                self.journal.begin_attempt({'pid': os.getpid(), 'startedAt': now()})
+                self.journal.start_step('preflight')
+                self.journal.fail_step('preflight', str(error) + '; current app and data are unchanged')
+                self.journal.settle('failed')
+            return 1
+
+    def run_locked(self):
+        committed = bool(self.data['swap'].get('candidateStartRequested') and self.data['swap'].get('knowledge'))
+        if not committed and (self.data['swap'].get('previousApp') or self.data['swap'].get('knowledge')) and self.data['state'] not in ('succeeded',):
             # A runner that died after the swap (crash, reboot) left no verdict:
             # restore the previous app before trying again.
             self.journal.note('the previous attempt stopped after the swap; restoring the previous app first')
@@ -143,6 +170,10 @@ class Runner:
         try:
             for item in self.data['steps']:
                 step = item['name']
+                if committed and step not in ('start', 'verify', 'finish'):
+                    self.journal.start_step(step)
+                    self.journal.finish_step(step, 'committed offline cutover retained; only candidate start/verification resumes')
+                    continue
                 if item['state'] == 'done' and self.reuse(step):
                     self.journal.note(f'{step}: reused from attempt {self.data["attempt"] - 1}')
                     continue
@@ -179,6 +210,7 @@ class Runner:
         platform.admit()
         if knowledge.required(platform) and (path != 'full' or knowledge.approval(platform) is None):
             raise Failure('Knowledge retirement requires a maintainer-approved pending offline full replacement')
+        knowledge.preflight(platform, self.journal, Path(__file__).with_name('retire-knowledge.py'), DISK_RESERVE[path])
         checks = []
         if (platform.maintenance / 'active.json').exists():
             raise Failure('a manual `scripts/tron mac reinstall` operation is active; finish it with '
@@ -325,16 +357,17 @@ class Runner:
             blocker = platform.offline_blocker()
             if blocker:
                 raise Failure(f'not offline before the swap: {blocker}')
-            snapshot = operation / 'state-snapshot'
+            snapshot = operation / f'state-snapshot-{self.data["attempt"]}'
             if snapshot.exists():
-                shutil.rmtree(snapshot)
+                raise Failure(f'raw snapshot already exists; preserving it rather than overwriting: {snapshot}')
             # One APFS clonefile of the whole tree: a consistent, space-shared
             # rollback point taken while every Stable writer is stopped.
             if LIBC.clonefile(os.fsencode(platform.tron_home), os.fsencode(snapshot), 0) != 0:
                 raise Failure(f'could not snapshot {platform.tron_home}: {os.strerror(ctypes.get_errno())}')
             swap['snapshot'] = str(snapshot)
             self.journal.save()
-            knowledge.convert(platform, self.journal, Path(__file__).with_name('retire-knowledge.py'))
+            knowledge.convert(platform, self.journal, Path(__file__).with_name('retire-knowledge.py'),
+                              (self.rebuild_fd, lock))
             # Each move is journaled before it happens; rollback restores by what exists,
             # so a runner that dies between journal and rename still recovers.
             channel = platform.stable_channel()
@@ -382,6 +415,8 @@ class Runner:
         if knowledge.required(self.platform):
             raise Failure('Knowledge namespace remains; new Gateway was not started')
         if self.data['swap'].get('knowledge'):
+            if not self.data['swap']['knowledge'].get('gatePassed'):
+                raise Failure('Offline candidate read-only health gate did not pass; new runtime was not started')
             self.data['swap']['candidateStartRequested'] = True
             self.journal.save()
         self.platform.launch_app(self.log('start'))
@@ -415,6 +450,7 @@ class Runner:
             self.platform.verify_installed(self.revision, self.log('verify'))
             result['cdhash'] = identity['cdhash']
             result['team'] = identity['team']
+        knowledge.post_start(self.platform, self.journal)
         self.platform.refresh_guard(self.root, self.revision, self.log('verify'))
         self.data['result'] = result
         return f'{self.revision[:9]} on protocol {protocol}' + (f', cdhash {result["cdhash"][:12]}' if 'cdhash' in result else '')
@@ -448,6 +484,15 @@ class Runner:
     # Failure handling ----------------------------------------------------
     def recover(self):
         swap = self.data['swap']
+        if swap.get('knowledge') and swap.get('candidateStartRequested'):
+            self.journal.note('Cutover committed at candidate start. Converted data, new app and archive retained; '
+                              'automatic data/app rollback is disabled because the prior runtime is not qualified on converted data. '
+                              'Re-tap Replace to resume candidate start/health verification; do not restore over accepted work.')
+            self.data['error']['message'] += (f' Knowledge conversion is committed and data retained. New build {self.revision[:9]} '
+                                               'remains installed; runtime health is unconfirmed. No data rollback was attempted. '
+                                               'Re-tap Replace to retry this build; keep the recovery archive.')
+            self.journal.settle('failed')
+            return
         if swap.get('previousApp') or swap.get('knowledge'):
             self.rollback()
             return
@@ -502,7 +547,8 @@ class Runner:
             if from_revision and info.get('sourceRevision') != from_revision:
                 raise Failure(f'restored Gateway reports {info.get("sourceRevision")}, expected {from_revision}')
             self.data['rollback'] = {'state': 'restored', 'endedAt': now(),
-                                     'detail': f'previous app restored; {detail}; ~/.tron snapshot kept at {swap.get("snapshot")}'}
+                                     'detail': (f'Knowledge data restored byte-for-byte; prior app and selected payload restored; ' if swap.get('knowledge') else '')
+                                               + f'previous app restored; {detail}; ~/.tron snapshot kept at {swap.get("snapshot")}'}
             self.journal.settle('rolled-back')
         except Exception as error:  # noqa: BLE001
             self.data['rollback'] = {'state': 'failed', 'endedAt': now(), 'detail': f'{error} (log: {log})'}
@@ -553,7 +599,7 @@ def launch_runner(platform, journal, script_dir):
     """Detach the runner as its own launchd job, from a private copy of this script."""
     operation = journal.directory
     runtime = private_mkdir(operation / 'runner')
-    for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc', '_knowledge')), 'retire-knowledge.py', *platform.runner_files()):
+    for name in (*(f'tron_mac_replace{part}.py' for part in ('', '_journal', '_platform', '_rpc', '_knowledge')), 'retire-knowledge.py', 'verify-knowledge-cutover.mjs', 'tron_rebuild_lock.py', *platform.runner_files()):
         shutil.copy2(Path(script_dir) / name, runtime / name)
     label = runner_label(journal.data['id'])
     plist = operation / 'runner.plist'
@@ -585,6 +631,9 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
             journal.save()
             launch_runner(platform, journal, script_dir or Path(__file__).resolve().parent)
             return journal, 'resuming interrupted'
+        if journal and journal.data['state'] == 'failed' and journal.data['swap'].get('knowledge') and journal.data['swap'].get('candidateStartRequested'):
+            launch_runner(platform, journal, script_dir or Path(__file__).resolve().parent)
+            return journal, 'resuming committed cutover verification'
         decided = plan(platform, root)
         if decided['path'] == 'none':
             raise Failure(decided['reason'])

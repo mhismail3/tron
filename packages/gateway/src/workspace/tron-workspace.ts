@@ -144,7 +144,13 @@ export class TronWorkspace {
    * a feature namespace cannot be mistaken for a fresh installation. */
   async featureInitialized(feature: TronWorkspaceFeature): Promise<boolean> {
     if (!(await this.describe()).available) throw new Error(`${feature}: Tron workspace is unavailable`);
-    const marker = this.featureMarker(feature);
+    return TronWorkspace.featureInitializedExisting(this.home, feature);
+  }
+
+  /** Offline readers share the canonical marker admission without acquiring
+   * ownership, initializing directories, or starting an automatic writer. */
+  static async featureInitializedExisting(home: string, feature: TronWorkspaceFeature): Promise<boolean> {
+    const marker = join(home, "gateway", "workspace-state", `${feature}-initialized.json`);
     try {
       const read = await readSecureJson<unknown>(marker, 128);
       if (!read.present) return false;

@@ -14,6 +14,8 @@
     "tron_mac_replace_knowledge.py",
     "tron_mac_replace_platform.py",
     "tron_mac_replace_rpc.py",
+    "tron_rebuild_lock.py",
+    "verify-knowledge-cutover.mjs",
     "validate-native-host.py",
     "verify-mac-install.sh"
   ]

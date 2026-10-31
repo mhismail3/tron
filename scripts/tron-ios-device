@@ -327,6 +327,10 @@ hold_device_lease() {
     if [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$lease" ]]; then
         return
     fi
+    if [[ "${1:-}" == "install" ]]; then
+        exec python3 "$LOCKER" --lock "$lease" --resource "physical iOS device $device_id" \
+            --worktree "$ROOT_DIR" --rebuild-lock "$HOME/.tron-maintenance/rebuild.lock" -- "$0" "$@" --device-id "$device_id"
+    fi
     exec python3 "$LOCKER" --lock "$lease" --resource "physical iOS device $device_id" \
         --worktree "$ROOT_DIR" -- "$0" "$@" --device-id "$device_id"
 }
@@ -812,6 +816,12 @@ main() {
             esac
             ;;
         install)
+            # Serialize with Replace Mac App before any signing/build/install.
+            # The descriptor survives the device lease's recursive invocation.
+            local rebuild_lock="$HOME/.tron-maintenance/rebuild.lock"
+            if [[ -n "${TRON_REBUILD_LOCK_FD:-}" ]]; then
+                python3 "$ROOT_DIR/scripts/tron_rebuild_lock.py" "$rebuild_lock" --verify-inherited || exit $?
+            fi
             parse_common_args "$@"
             validate_install_pair
             device_id="$(resolve_device_id)"

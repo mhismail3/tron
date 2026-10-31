@@ -114,13 +114,23 @@ class Retirement(unittest.TestCase):
                 self.process = None
                 self.launches = []
                 self.fail_start = False
+                self.fail_health = False
+                self.old_app_revision = 'old-app'
+                self.old_runtime_revision = 'old-runtime'
+                self.pidfile = fixture.root / 'fixture-process.json'
 
             @property
             def tron_home(self):
                 return fixture.home
 
             def app_running(self):
-                return self.process is not None and self.process.poll() is None
+                if self.process is not None:
+                    return self.process.poll() is None
+                if not self.pidfile.exists():
+                    return False
+                pid = json.loads(self.pidfile.read_text())['pid']
+                row = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'state=,command='], capture_output=True, text=True).stdout.strip()
+                return bool(row and not row.startswith('Z') and str(fixture.home) in row)
 
             def offline_blocker(self):
                 return 'fixture process still running' if self.app_running() else None
@@ -129,6 +139,14 @@ class Retirement(unittest.TestCase):
                 return 'absent'  # This fixture owns child processes, not host jobs.
 
             def quit_app(self, log):
+                if self.process is None and self.app_running():
+                    import os
+                    import time
+                    os.kill(json.loads(self.pidfile.read_text())['pid'], 15)
+                    for _ in range(100):
+                        if not self.app_running():
+                            break
+                        time.sleep(0.02)
                 if self.process is not None:
                     if self.app_running():
                         self.process.terminate()
@@ -136,26 +154,49 @@ class Retirement(unittest.TestCase):
                     self.process.stdout.close()
                     self.process.stderr.close()
                     self.process = None
+                self.pidfile.unlink(missing_ok=True)
 
             def launch_app(self, log):
+                if self.app_running():
+                    self.info = self.system_info()
+                    return
+                if self.process is not None:
+                    self.quit_app(None)
                 revision = json.loads((self.bundled_gateway(self.installed) / 'manifest.json').read_text())['sourceRevision']
                 self.launches.append(revision)
                 program = ('import json,sys,time; from pathlib import Path; '
-                           'home=Path(sys.argv[1]); revision=sys.argv[2]; '
-                           'assert revision=="old-app" or not (home/"workspace/state/knowledge").exists(), "unconverted data"; '
-                           'print(json.dumps({"sourceRevision": "old-runtime" if revision=="old-app" else revision,"protocolVersion":1}),flush=True); time.sleep(60)')
+                           'home=Path(sys.argv[1]); revision=sys.argv[2]; oldapp=sys.argv[3]; oldruntime=sys.argv[4]; '
+                           'assert revision==oldapp or not (home/"workspace/state/knowledge").exists(), "unconverted data"; '
+                           'print(json.dumps({"sourceRevision": oldruntime if revision==oldapp else revision,"protocolVersion":1}),flush=True); time.sleep(60)')
                 if self.fail_start and revision == 'new':
                     program = 'raise SystemExit(42)'
-                self.process = subprocess.Popen([sys.executable, '-u', '-c', program, str(self.tron_home), revision], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                elif self.fail_health and revision == 'new':
+                    program = program.replace('time.sleep(60)', 'raise SystemExit(43)')
+                self.process = subprocess.Popen([sys.executable, '-u', '-c', program, str(self.tron_home), revision, self.old_app_revision, self.old_runtime_revision], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                self.pidfile.write_text(json.dumps({'pid': self.process.pid, 'revision': revision}))
                 line = self.process.stdout.readline()
                 if not line:
                     self.quit_app(None)
                     raise replace.Failure('fixture candidate process failed before readiness')
                 self.info = json.loads(line)
+                if self.fail_health and revision == 'new':
+                    self.process.wait(timeout=3)
+
+            def verify_cutover(self, app, home, exports, counts, result, log, pass_fds=()):
+                from tron_mac_replace_platform import run
+                payload = fixture.root / 'reader-payload'
+                if not payload.exists():
+                    payload.mkdir()
+                    (payload / 'app').symlink_to(REPO / 'packages/gateway', target_is_directory=True)
+                node = subprocess.run([REPO / 'scripts/tron-node'], capture_output=True, text=True, check=True).stdout.strip()
+                run([node, '--experimental-import-meta-resolve', REPO / 'scripts/verify-knowledge-cutover.mjs', payload, home, exports, json.dumps(counts)], result, timeout=120, pass_fds=pass_fds)
 
             def system_info(self):
                 if not self.app_running():
                     raise replace.RpcError('unreachable', 'fixture process stopped')
+                if self.process is None:
+                    revision = json.loads(self.pidfile.read_text())['revision']
+                    return {'sourceRevision': self.old_runtime_revision if revision == self.old_app_revision else revision, 'protocolVersion': 1}
                 return self.info
 
             def mutation(self, *args, **kwargs):
@@ -175,7 +216,16 @@ class Retirement(unittest.TestCase):
         self.write(platform.bundled_gateway(candidate) / 'manifest.json', b'{"sourceRevision":"new"}')
         platform.maintenance.mkdir(mode=0o700, parents=True)
         pending = platform.maintenance / 'knowledge-cutover-pending.json'
-        self.write(pending, json.dumps({'version': 1, 'priorAppRevision': 'old-app', 'priorGatewayRevision': 'old-runtime', 'converterSHA256': hashlib.sha256(SCRIPT.read_bytes()).hexdigest()}).encode())
+        artifacts = self.root / 'approved-artifacts'
+        artifacts.mkdir(mode=0o700)
+        for name in ('CUTOVER.md', 'cutover.py', 'restore-data.py'):
+            self.write(artifacts / name, b'Fixture operator preparation; never executed.\n')
+        shutil.copyfile(SCRIPT, artifacts / SCRIPT.name)
+        manifest = artifacts / 'ARTIFACTS-SHA256.json'
+        self.write(manifest, json.dumps({path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in artifacts.iterdir()}).encode())
+        self.write(pending, json.dumps({'version': 1, 'priorAppRevision': 'old-app', 'priorGatewayRevision': 'old-runtime',
+            'converterSHA256': hashlib.sha256(SCRIPT.read_bytes()).hexdigest(), 'artifactDirectory': str(artifacts),
+            'artifactManifestSHA256': hashlib.sha256(manifest.read_bytes()).hexdigest()}).encode())
         journal = Journal.create(platform.store / 'copy-operation', 'copy-operation', 'full', 'copy hook test', {'root': str(REPO), 'revision': 'new', 'fromRevision': 'old-runtime'})
         journal.data['artifact'] = {'path': str(candidate), 'cdhash': 'fixture'}
         # Exercise the complete production hook, start and exception/recovery loop.
@@ -229,17 +279,21 @@ class Retirement(unittest.TestCase):
         self.assertFalse(self.marker.with_name('profile-initialized.json').exists())
         self.assertTrue(list(runner.journal.directory.glob('knowledge-cutover-*/archive/BACKUP.json')))
 
-    def test_replace_candidate_start_failure_restores_old_app_payload_and_data(self):
+    def test_replace_candidate_start_failure_keeps_committed_new_app_and_converted_data(self):
         runner, platform, pending = self.replacement()
         original = self.catalog.read_bytes()
         platform.fail_start = True
         self.assertEqual(runner.run(), 1)
-        self.assertEqual(runner.data['state'], 'rolled-back', runner.data.get('error'))
-        self.assertEqual(platform.launches, ['new', 'old-app'])
-        self.assertEqual(self.catalog.read_bytes(), original)
+        self.assertEqual(runner.data['state'], 'failed', runner.data.get('error'))
+        self.assertEqual(platform.launches, ['new'])
+        self.assertFalse(self.store.exists())
         self.assertTrue(pending.exists())
-        self.assertFalse(self.profile.exists())
+        self.assertTrue(self.profile.exists())
         self.assertTrue(list(runner.journal.directory.glob('knowledge-cutover-*/archive/BACKUP.json')))
+        platform.fail_start = False
+        self.assertEqual(runner.run(), 0, runner.data.get('error'))
+        self.assertEqual(platform.launches, ['new', 'new'])
+        self.assertFalse(pending.exists())
 
     def test_replace_process_crash_after_conversion_recovers_before_any_candidate_start(self):
         import tron_mac_replace as replace
@@ -247,7 +301,7 @@ class Retirement(unittest.TestCase):
         runner, platform, pending = self.replacement()
         original = self.catalog.read_bytes()
         # exec a fresh interpreter: macOS system frameworks are not fork-safe.
-        program = "import sys,os,runpy; from pathlib import Path; sys.path.insert(0,sys.argv[1]); m=runpy.run_path(sys.argv[1]+'/test-retire-knowledge.py'); f=m['Retirement']('test_plain_files_and_new_profile_preserve_every_committed_revision'); f.root=Path(sys.argv[2]); f.home=f.root/'tron'; r,p,_=f.replacement(resume=True); r.journal.begin_attempt({'pid':os.getpid()}); r.step_swap_app(); os._exit(97)"
+        program = "import sys,os,runpy; from pathlib import Path; sys.path.insert(0,sys.argv[1]); m=runpy.run_path(sys.argv[1]+'/test-retire-knowledge.py'); f=m['Retirement']('test_plain_files_and_new_profile_preserve_every_committed_revision'); f.root=Path(sys.argv[2]); f.home=f.root/'tron'; r,p,_=f.replacement(resume=True)\ndef trace(frame,event,arg):\n if event=='call' and frame.f_code.co_name=='step_start': os._exit(97)\n return trace\nsys.settrace(trace);r.run()"
         child = subprocess.run([sys.executable, '-c', program, str(SCRIPT.parent), str(self.root)], capture_output=True, text=True)
         self.assertEqual(child.returncode, 97, child.stderr)
         recovered = replace.Runner(platform, Journal(runner.journal.directory).load())
@@ -275,6 +329,166 @@ class Retirement(unittest.TestCase):
         self.assertEqual(platform.launches, ['old-app'])
         self.assertEqual(self.catalog.read_bytes(), before)
         self.assertFalse(self.profile.exists())
+
+    def test_replace_gate_failure_uses_new_read_owner_and_rolls_back_before_start(self):
+        runner, platform, pending = self.replacement()
+        path = self.store / 'records/profile' / (self.revision('profile', 1) + '.json')
+        record = json.loads(path.read_bytes())
+        record['schemaVersion'] = 999
+        self.write(path, json.dumps(record).encode())
+        original = path.read_bytes()
+        self.assertEqual(runner.run(), 1)
+        self.assertEqual(runner.data['state'], 'rolled-back', runner.data.get('error'))
+        self.assertEqual(platform.launches, ['old-app'])
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(self.profile.exists())
+        self.assertTrue(pending.exists())
+        self.assertIn('verify-knowledge-cutover', runner.data['error']['message'])
+
+    def test_replace_preflight_artifact_counts_and_capacity_refuse_without_stop(self):
+        import tron_mac_replace_knowledge as hook
+        from tron_mac_replace_platform import Failure
+        runner, platform, pending = self.replacement()
+        platform.launch_app(None)
+        before = self.catalog.read_bytes()
+        hook.preflight(platform, runner.journal, SCRIPT, 0)
+        proof = json.loads((runner.journal.directory / 'knowledge-preflight.json').read_text())
+        self.assertEqual(proof['counts'], {'sources': 1, 'observations': 1, 'notes': 1, 'coverage': 1})
+        with self.assertRaisesRegex(Failure, 'free bytes'):
+            hook.preflight(platform, runner.journal, SCRIPT, 2 ** 63)
+        (self.root / 'approved-artifacts/cutover.py').write_text('changed bytes')
+        with self.assertRaisesRegex(Failure, 'SHA-256 mismatch'):
+            hook.preflight(platform, runner.journal, SCRIPT, 0)
+        self.assertTrue(platform.app_running())
+        self.assertEqual(platform.launches, ['old-app'])
+        self.assertEqual(before, self.catalog.read_bytes())
+
+    def test_replace_shared_lock_excludes_second_replace_and_ios_rebuild(self):
+        import tron_mac_replace as replace
+        from tron_rebuild_lock import RebuildLock
+        runner, platform, pending = self.replacement()
+        lock = platform.maintenance / 'rebuild.lock'
+        runner.data['steps'].insert(0, {'name': 'preflight', 'state': 'pending'})
+        with RebuildLock(lock):
+            self.assertEqual(runner.run(), 1)
+            self.assertEqual(platform.launches, [])
+            ios = subprocess.run([sys.executable, SCRIPT.parent / 'tron_rebuild_lock.py', lock,
+                sys.executable, '-c', 'raise SystemExit(99)'], capture_output=True, text=True)
+            self.assertEqual(ios.returncode, 73)
+            self.assertIn('no second cutover', ios.stderr)
+        self.assertTrue(self.store.exists())
+        self.assertTrue(pending.exists())
+        runner.data['steps'] = [step for step in runner.data['steps'] if step['name'] != 'preflight']
+        self.assertEqual(runner.run(), 0, runner.data.get('error'))
+
+    def test_replace_precommit_process_crash_matrix_restores_before_retry(self):
+        import tron_mac_replace as replace
+        from tron_mac_replace_journal import Journal
+        cases = [
+            ('tron_mac_replace.py', 'knowledge.convert(platform, self.journal,', 1),
+            ('tron_mac_replace_knowledge.py', 'run(args + extra,', 2),
+            ('tron_mac_replace_knowledge.py', "write_json_atomic(operation / 'CONVERTED.json',", 1),
+            ('tron_mac_replace.py', "if knowledge.required(self.platform):", 1),
+        ]
+        program = "import sys,os,runpy; from pathlib import Path; sys.path.insert(0,sys.argv[1]); m=runpy.run_path(sys.argv[1]+'/test-retire-knowledge.py'); f=m['Retirement']('test_plain_files_and_new_profile_preserve_every_committed_revision'); f.root=Path(sys.argv[2]); f.home=f.root/'tron'; r,p,_=f.replacement(resume=True); target,prefix,wanted=sys.argv[3],sys.argv[4],int(sys.argv[5]); hits=0\ndef trace(frame,event,arg):\n global hits\n if event=='line' and frame.f_code.co_filename.endswith('/'+target) and Path(frame.f_code.co_filename).read_text().splitlines()[frame.f_lineno-1].strip().startswith(prefix):\n  hits+=1\n  if hits==wanted: os._exit(97)\n return trace\nsys.settrace(trace);r.run()"
+        for target, prefix, occurrence in cases:
+            with self.subTest(boundary=prefix):
+                fixture = Retirement('test_plain_files_and_new_profile_preserve_every_committed_revision')
+                fixture.setUp()
+                try:
+                    runner, platform, pending = fixture.replacement()
+                    original = fixture.catalog.read_bytes()
+                    child = subprocess.run([sys.executable, '-c', program, str(SCRIPT.parent), str(fixture.root), target, prefix, str(occurrence)], capture_output=True, text=True)
+                    self.assertEqual(child.returncode, 97, child.stderr)
+                    recovered = replace.Runner(platform, Journal(runner.journal.directory).load())
+                    # Before snapshot intent there is nothing to roll back; a
+                    # fresh attempt may complete. After intent, recover first.
+                    if recovered.data['swap'].get('knowledge'):
+                        self.assertEqual(recovered.run(), 1)
+                        self.assertEqual(platform.launches, ['old-app'])
+                        self.assertEqual(fixture.catalog.read_bytes(), original)
+                        platform.quit_app(None)
+                    self.assertEqual(recovered.run(), 0, recovered.data.get('error'))
+                    self.assertFalse(fixture.store.exists())
+                    self.assertFalse(pending.exists())
+                    self.assertTrue(fixture.profile.exists())
+                    self.assertTrue(list(runner.journal.directory.glob('state-snapshot-*')))
+                finally:
+                    fixture.doCleanups()
+
+    def test_killed_runner_mid_converter_retains_child_lease_until_safe_rollback(self):
+        import os
+        import time
+        import tron_mac_replace as replace
+        from tron_mac_replace_journal import Journal
+        from tron_rebuild_lock import RebuildLock, RebuildBusy
+        runner, platform, pending = self.replacement()
+        original = self.catalog.read_bytes()
+        injection = self.root / 'python-observer'
+        injection.mkdir()
+        (injection / 'sitecustomize.py').write_text("import os,sys,time\nfrom pathlib import Path\ndef trace(frame,event,arg):\n if event=='line' and frame.f_code.co_filename.endswith('/retire-knowledge.py') and Path(frame.f_code.co_filename).read_text().splitlines()[frame.f_lineno-1].strip()=='publish_profile(args.store, args.backup, profile)':\n  os.kill(int(os.environ['CUTOVER_PARENT_PID']),9); time.sleep(0.5);sys.settrace(None);return None\n return trace\nsys.settrace(trace)\n")
+        program = "import sys,os,runpy; from pathlib import Path; sys.path.insert(0,sys.argv[1]); m=runpy.run_path(sys.argv[1]+'/test-retire-knowledge.py'); f=m['Retirement']('test_plain_files_and_new_profile_preserve_every_committed_revision'); f.root=Path(sys.argv[2]); f.home=f.root/'tron'; r,p,_=f.replacement(resume=True); os.environ['CUTOVER_PARENT_PID']=str(os.getpid()); r.run()"
+        child = subprocess.run([sys.executable, '-c', program, str(SCRIPT.parent), str(self.root)], capture_output=True, text=True,
+            env=dict(os.environ, PYTHONPATH=str(injection)))
+        self.assertEqual(child.returncode, -9, child.stderr)
+        recovered = replace.Runner(platform, Journal(runner.journal.directory).load())
+        self.assertEqual(recovered.run(), 1)  # Orphan converter still owns its inherited lease.
+        self.assertEqual(platform.launches, [])
+        for _ in range(100):
+            try:
+                with RebuildLock(platform.maintenance / 'rebuild.lock'):
+                    break
+            except RebuildBusy:
+                time.sleep(0.05)
+        else:
+            self.fail('owned orphan converter did not release its inherited lease')
+        self.assertEqual(recovered.run(), 1)  # Restores, starts old, refuses a swap while it runs.
+        self.assertEqual(platform.launches, ['old-app'])
+        self.assertEqual(self.catalog.read_bytes(), original)
+        self.assertFalse(self.profile.exists())
+        platform.quit_app(None)
+        self.assertEqual(recovered.run(), 0, recovered.data.get('error'))
+        self.assertEqual(platform.launches, ['old-app', 'new'])
+
+    def test_replace_committed_crash_before_and_after_start_only_resumes_candidate(self):
+        import tron_mac_replace as replace
+        from tron_mac_replace_journal import Journal
+        program = "import sys,os,runpy; from pathlib import Path; sys.path.insert(0,sys.argv[1]); m=runpy.run_path(sys.argv[1]+'/test-retire-knowledge.py'); f=m['Retirement']('test_plain_files_and_new_profile_preserve_every_committed_revision'); f.root=Path(sys.argv[2]); f.home=f.root/'tron'; r,p,_=f.replacement(resume=True); prefix=sys.argv[3]\ndef trace(frame,event,arg):\n if event=='line' and frame.f_code.co_name=='step_start' and Path(frame.f_code.co_filename).read_text().splitlines()[frame.f_lineno-1].strip().startswith(prefix): os._exit(97)\n return trace\nsys.settrace(trace);r.run()"
+        for prefix in ("self.platform.launch_app(self.log('start'))", "return self.wait_healthy('start',"):
+            with self.subTest(boundary=prefix):
+                fixture = Retirement('test_plain_files_and_new_profile_preserve_every_committed_revision')
+                fixture.setUp()
+                try:
+                    runner, platform, pending = fixture.replacement()
+                    child = subprocess.run([sys.executable, '-c', program, str(SCRIPT.parent), str(fixture.root), prefix], capture_output=True, text=True)
+                    self.assertEqual(child.returncode, 97, child.stderr)
+                    recovered = replace.Runner(platform, Journal(runner.journal.directory).load())
+                    self.assertTrue(recovered.data['swap']['candidateStartRequested'])
+                    self.assertFalse(fixture.store.exists())
+                    self.assertTrue(fixture.profile.exists())
+                    self.assertEqual(recovered.run(), 0, recovered.data.get('error'))
+                    self.assertNotIn('old-app', platform.launches)
+                    self.assertEqual(platform.system_info()['sourceRevision'], 'new')
+                    self.assertFalse(pending.exists())
+                    self.assertEqual(len(list(runner.journal.directory.glob('knowledge-cutover-*'))), 1)
+                    self.assertEqual(len(list(runner.journal.directory.glob('state-snapshot-*'))), 1)
+                finally:
+                    fixture.doCleanups()
+
+    def test_poststart_health_failure_retains_converted_data_and_never_starts_old(self):
+        runner, platform, pending = self.replacement()
+        platform.fail_health = True
+        self.assertEqual(runner.run(), 1)
+        self.assertEqual(runner.data['state'], 'failed')
+        self.assertEqual(platform.launches, ['new'])
+        self.assertFalse(self.store.exists())
+        self.assertTrue(self.profile.exists())
+        self.assertTrue(pending.exists())
+        self.assertIn('conversion is committed', runner.data['error']['message'])
+        platform.fail_health = False
+        self.assertEqual(runner.run(), 0, runner.data.get('error'))
+        self.assertEqual(platform.launches, ['new', 'new'])
+        self.assertFalse(pending.exists())
 
     def test_plain_files_and_new_profile_preserve_every_committed_revision(self):
         result = self.run_command()

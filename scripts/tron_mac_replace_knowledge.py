@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import stat
 import sys
 
@@ -15,6 +16,7 @@ from tron_mac_replace_journal import write_json_atomic
 from tron_mac_replace_platform import Failure, run
 
 PENDING = 'knowledge-cutover-pending.json'
+CONTINUITY = ('workspace/state/episodic', 'gateway/home', 'agent/sessions')
 PATHS = ('workspace/state/knowledge', 'workspace/state/knowledge.retiring',
          'workspace/state/profile', 'workspace/state/profile.retirement-partial',
          'gateway/workspace-state/initialized.json', 'gateway/workspace-state/profile-initialized.json')
@@ -50,13 +52,63 @@ def approval(platform):
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o077 or info.st_size > 4096:
             raise Failure('Knowledge cutover approval is not a private bounded owner file')
         value = json.load(stream)
-    if set(value) != {'version', 'priorAppRevision', 'priorGatewayRevision', 'converterSHA256'} or value['version'] != 1:
+    if set(value) != {'version', 'priorAppRevision', 'priorGatewayRevision', 'converterSHA256', 'artifactDirectory', 'artifactManifestSHA256'} or value['version'] != 1:
         raise Failure('Knowledge cutover approval has an unsupported format')
     return value
 
 
 def required(platform):
     return any((platform.tron_home / rel).exists() or (platform.tron_home / rel).is_symlink() for rel in PATHS[:2])
+
+
+def verified_artifacts(permit):
+    artifacts = Path(permit['artifactDirectory'])
+    if not artifacts.is_absolute() or artifacts.resolve() != artifacts:
+        raise Failure('Knowledge cutover artifact directory is noncanonical; live data is unchanged')
+    manifest = artifacts / 'ARTIFACTS-SHA256.json'
+    if hashlib.sha256(manifest.read_bytes()).hexdigest() != permit['artifactManifestSHA256']:
+        raise Failure('Knowledge cutover artifact manifest changed; live data is unchanged')
+    hashes = json.loads(manifest.read_bytes())
+    if set(hashes) != {'CUTOVER.md', 'cutover.py', 'restore-data.py', 'retire-knowledge.py'}:
+        raise Failure('Knowledge cutover artifact manifest is incomplete; live data is unchanged')
+    for name, expected in hashes.items():
+        path = artifacts / name
+        if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise Failure(f'Knowledge cutover artifact SHA-256 mismatch: {name}; live data is unchanged')
+    return artifacts, hashes
+
+
+def preflight(platform, journal, converter, reserve):
+    """Read-only live inputs, before worker drain or Quit; offline recount follows."""
+    if not required(platform):
+        return
+    permit = approval(platform)
+    if permit is None:
+        raise Failure('Knowledge retirement needs its approved pending cutover; live data and running build are unchanged')
+    _, hashes = verified_artifacts(permit)
+    if hashes['retire-knowledge.py'] != permit['converterSHA256'] or hashlib.sha256(converter.read_bytes()).hexdigest() != permit['converterSHA256']:
+        raise Failure('Knowledge converter differs from approved artifact; live data is unchanged')
+    if json.loads((platform.bundled_gateway(platform.installed) / 'manifest.json').read_bytes())['sourceRevision'] != permit['priorAppRevision'] or json.loads((platform.active_payload() / 'manifest.json').read_bytes())['sourceRevision'] != permit['priorGatewayRevision']:
+        raise Failure('Prior app/Gateway changed since approval; live data is unchanged')
+    def size(root):
+        return sum(path.lstat().st_size for path in root.rglob('*') if path.is_file() and not path.is_symlink())
+    # Budget full logical snapshot bytes even on APFS, plus archive and worst-case
+    # ordinary export copies; the clone's space sharing is not a capacity promise.
+    needed = reserve + size(platform.tron_home) + 4 * size(platform.tron_home / PATHS[0])
+    free = shutil.disk_usage(platform.home).free
+    if free < needed:
+        raise Failure(f'Knowledge cutover needs {needed} free bytes for build/snapshot/archive/export; have {free}; live build and data are unchanged')
+    tool = runpy.run_path(str(converter))
+    db, _ = tool['database'](platform.tron_home / PATHS[0])
+    try:
+        db.execute('BEGIN')
+        if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+            raise Failure('Knowledge preflight catalog integrity failed; live data is unchanged')
+        counts = tool['count_snapshot'](db)
+    finally:
+        db.close()
+    write_json_atomic(journal.directory / 'knowledge-preflight.json', {'counts': counts, 'requiredBytes': needed, 'freeBytes': free,
+        'artifactManifestSHA256': permit['artifactManifestSHA256'], 'priorAppRevision': permit['priorAppRevision'], 'priorGatewayRevision': permit['priorGatewayRevision']})
 
 
 def offline(platform):
@@ -69,7 +121,7 @@ def offline(platform):
             raise Failure(f'Knowledge cutover requires {label} unloaded')
 
 
-def convert(platform, journal, converter):
+def convert(platform, journal, converter, pass_fds=()):
     if not required(platform):
         return
     permit = approval(platform)
@@ -95,6 +147,18 @@ def convert(platform, journal, converter):
         raise Failure('offline raw Knowledge snapshot differs from current state')
     operation = journal.directory / f'knowledge-cutover-{journal.data["attempt"]}'
     operation.mkdir(mode=0o700)
+    artifacts, hashes = verified_artifacts(permit)
+    tools = operation / 'recovery-tools'
+    tools.mkdir(mode=0o700)
+    for name, expected in {**hashes, 'ARTIFACTS-SHA256.json': permit['artifactManifestSHA256']}.items():
+        target = tools / name
+        shutil.copyfile(artifacts / name, target)
+        target.chmod(0o600)
+        if hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+            raise Failure('Prepared recovery artifact changed while preserving it; new runtime was not started')
+    if hashes['retire-knowledge.py'] != permit['converterSHA256']:
+        raise Failure('Preserved converter differs from approved bytes')
+    converter = tools / 'retire-knowledge.py'
     tool = runpy.run_path(str(converter))
     db, catalog = tool['database'](store)
     try:
@@ -112,6 +176,10 @@ def convert(platform, journal, converter):
     prior = {'app': inventory(platform.installed), 'channel': inventory(platform.stable_channel())}
     if prior['channel'] != inventory(snapshot / 'gateway/payloads/stable'):
         raise Failure('prior selected payload snapshot differs from the stopped original')
+    continuity = {rel: inventory(home / rel) for rel in CONTINUITY}
+    if continuity != {rel: inventory(snapshot / rel) for rel in CONTINUITY}:
+        raise Failure('Home memory/chats snapshot differs before conversion')
+    write_json_atomic(operation / 'CONTINUITY.json', continuity)
     write_json_atomic(operation / 'COUNTS.json', counts)
     write_json_atomic(operation / 'PRIOR.json', permit)
     write_json_atomic(operation / 'BEFORE.json', before)
@@ -129,11 +197,21 @@ def convert(platform, journal, converter):
     write_json_atomic(operation / 'ARGS.json', [str(arg) for arg in args])
     for extra in ([], ['--verify']):
         offline(platform)
-        run(args + extra, journal.step_log('swap-app'), timeout=1800)
+        run(args + extra, journal.step_log('swap-app'), timeout=1800, pass_fds=pass_fds)
     write_json_atomic(operation / 'CONVERTED.json', {rel: inventory(home / rel) for rel in PATHS})
     journal.data['swap']['knowledge']['convertedSHA256'] = hashlib.sha256((operation / 'CONVERTED.json').read_bytes()).hexdigest()
     journal.save()
     journal.note(f'Knowledge archived, exported and verified offline: {counts}; {operation}')
+    # Decisive gate: candidate read owners only, still before any server starts.
+    offline(platform)
+    platform.verify_cutover(Path(journal.data['artifact']['path']), home, exports, counts, operation / 'read-only-gate.log', journal.step_log('swap-app'), pass_fds=pass_fds)
+    offline(platform)
+    if evidence(journal.data['swap']['knowledge'], 'CONVERTED.json', 'convertedSHA256') != {rel: inventory(home / rel) for rel in PATHS}:
+        raise Failure('Candidate read-only gate changed protected state; new runtime was not started')
+    if continuity != {rel: inventory(home / rel) for rel in CONTINUITY}:
+        raise Failure('Home memory/chats/summary/chapter bytes changed during offline cutover')
+    journal.data['swap']['knowledge']['gatePassed'] = True
+    journal.save()
 
 
 def evidence(state, name, key):
@@ -154,11 +232,8 @@ def restore(platform, journal):
     if before != {rel: inventory(snapshot / rel) for rel in PATHS}:
         raise Failure('Knowledge rollback snapshot integrity failed; keeping offline')
     recovery = Path(state['operation']) / 'recovery'
-    # Never overwrite accepted new Profile work. A failed publication has not
-    # launched the candidate; after launch only the exact sealed projection is safe.
-    if journal.data['swap'].get('candidateStartRequested') and not recovery.exists():
-        if evidence(state, 'CONVERTED.json', 'convertedSHA256') != {rel: inventory(home / rel) for rel in PATHS}:
-            raise Failure('Profile changed after candidate start; preserved, keeping offline for recovery decision')
+    if journal.data['swap'].get('candidateStartRequested'):
+        raise Failure('Cutover committed at candidate start; automatic data restoration is forbidden')
     recovery.mkdir(mode=0o700, exist_ok=True)
     for rel in PATHS:
         current, original = home / rel, snapshot / rel
@@ -192,6 +267,19 @@ def verify_prior(platform, journal):
         prior = evidence(state, 'PRIOR-FILES.json', 'priorSHA256')
         if prior != {'app': inventory(platform.installed), 'channel': inventory(platform.stable_channel())}:
             raise Failure('restored prior app or selected payload differs; keeping offline')
+
+
+def post_start(platform, journal):
+    if not journal.data['swap'].get('knowledge'):
+        return
+    platform.rpc('home.profileList')
+    status = platform.rpc('home.status')
+    if status.get('homeId'):
+        platform.rpc('home.chapterList')
+        if status.get('memory', {}).get('configured'):
+            platform.rpc('home.memory.view', {'limit': 1})
+    platform.rpc('session.list', {'scope': 'user', 'limit': 1})
+    journal.note('Post-start Profile, Home and chat-catalog reads passed; conversion remains committed')
 
 
 def finish(platform, journal):

@@ -1736,7 +1736,7 @@ export class HomeOwner {
 
   private async writeLocked(record: HomeRecord): Promise<void> {
     this.assertAvailable();
-    if (!admitRecord(record)) throw new GatewayError("conflict", "The Home record is invalid or exceeds its chapter bounds");
+    if (!admitHomeRecord(record)) throw new GatewayError("conflict", "The Home record is invalid or exceeds its chapter bounds");
     const chaptersBefore = chapterIdentities(this.record);
     try {
       await durablePublishBoundedJson(this.recordPath, record, MAXIMUM_RECORD_BYTES);
@@ -1794,7 +1794,7 @@ export class HomeOwner {
       this.options.diagnostic?.({ outcome: "unavailable", reason: "unreadable" });
       return false;
     }
-    const admitted = admitRecord(loaded);
+    const admitted = admitHomeRecord(loaded);
     if (!admitted) {
       if (clearAvailability) this.record = undefined;
       this.unavailable = "The Home record has an unsupported shape or version";
@@ -1830,8 +1830,9 @@ function designation(record: HomeRecord): HomeDesignation {
 
 /** Admit one stored record, or undefined for anything this build cannot use.
  * Only the format version gates admission: a newer `policyRevision` is still a
- * record this build can read, preserve and re-enable. */
-function admitRecord(value: unknown): HomeRecord | undefined {
+ * record this build can read, preserve and re-enable. Shared by the canonical
+ * ledger owner and offline verification; neither path changes admission. */
+export function admitHomeRecord(value: unknown): HomeRecord | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const root = value as Record<string, unknown>;
   if (!hasOnlyKeys(root, ["version", "homeId", "chapters", "bindingRevision", "generation", "routeGeneration", "policyRevision", "enabled", "createdAt", "updatedAt", "memory"])
