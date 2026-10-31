@@ -27,7 +27,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `MacTerminalController`, `MacTerminalEnrollmentStore` | Mac Terminal enrollment and shells ([Terminal](../UI/Terminal/README.md)). |
 | `SettingsTrustCoordinator`, `ProjectLifecycleModels` | Settings resolve/change/history/approvals, project trust and the native lifecycle read/request contract. |
 | `ProviderAuthCoordinator` | Provider/model catalogs, auth operations and prompts, MCP sign-in. |
-| `PackageConfigurationCoordinator`, `CustomModelConfigurationCoordinator`, `ConfigurationAutosaveCoordinator` | Packages, custom models, autosaved configuration writes. |
+| `PackageConfigurationCoordinator`, `ConfigurationAutosaveCoordinator` | Packages and autosaved settings writes. |
 | `HomeStatusPresentationOwner`, `HomeSheetReadOwner`, `HomeMutationCoordinator` | Home status, Home sheet reads, Home commands. |
 | `AutomationCatalogCoordinator`, `AutomationRPCClient` | Automation summaries per Gateway. |
 | `KnowledgePresentationIdentity`, `KnowledgeDestinationIdentity` | Shared transport/read and accepted-result identities used by settings, uploads, auth and Profile; no corpus projection. |
@@ -42,7 +42,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 
 - **Connection and events** follow [Gateway connection and events](../../docs/events.md):
   lifecycle, reconnect schedule, receipts and session synchronization are specified there.
-- **Typed targets.** Settings, providers, packages and custom models use typed `.global`,
+- **Typed targets.** Settings, providers and packages use typed `.global`,
   `.project(cwd:)`, `.workspace(cwd:)` or `.session(id:)` targets. Global reads never inherit the
   selected session's project; a newer same-target read rejects an older completion.
 - **Settings.** Read only through `settings.resolve` and written only through `settings.change`

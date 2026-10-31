@@ -2,18 +2,12 @@ import Foundation
 import Observation
 import TronMobileCore
 
-struct ConfigurationEditValidationError: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
-}
-
 /// Configuration edits are commands, not presentation tasks. One profile-owned
 /// queue survives sheet dismissal; only its waiting debounce is cancellable.
 @MainActor @Observable
 final class ConfigurationAutosaveCoordinator {
     enum Key: Hashable {
         case settings(SettingsTarget, sessionID: String?)
-        case customModels(CustomModelTarget)
     }
 
     private struct Batch {
@@ -40,7 +34,6 @@ final class ConfigurationAutosaveCoordinator {
 
     func error(for key: Key) -> String? { messages[key] ?? capacityError }
     func canRetry(_ key: Key) -> Bool { failed[key] != nil }
-    func hasPending(_ key: Key) -> Bool { activeKey == key || pending.contains { $0.key == key } }
 
     /// Patches contain only this user event's changed fields. Merge consecutive
     /// edits, including reversions, without manufacturing writes from a reload.
@@ -143,7 +136,7 @@ final class ConfigurationAutosaveCoordinator {
                 }
                 // No automatic retry loop. A correction or explicit Retry may
                 // resubmit a rejected edit; uncertain receipts require Retry.
-                if !(error is ConfigurationEditValidationError) { didFail?(error) }
+                didFail?(error)
             }
             guard generation == admittedGeneration, writing == token else { return }
             writing = nil

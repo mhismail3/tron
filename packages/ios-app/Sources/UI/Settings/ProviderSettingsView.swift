@@ -25,17 +25,7 @@ struct ProvidersSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .center, spacing: 6, lazy: true, hidesLoneHeading: true) {
                 TronGlassCard(accent: .tronPrimary) {
-                    VStack(spacing: 0) {
-                        modelCatalogRow
-                        TronSettingsDivider()
-                        TronProgressiveSheetLink(accessibilityLabel: "Custom Models") {
-                            CustomModelsSettingsView()
-                        } label: {
-                            TronSettingsRow(icon: "slider.horizontal.3", title: "Custom Models",
-                                            subtitle: "Your own model definitions", subtitleColor: .tronTextSecondary)
-                        }
-                        .accessibilityIdentifier("settings-link-Custom Models")
-                    }
+                    modelCatalogRow
                 }
                 .padding(.bottom, TronSpacing.section)
                 if let catalogError { TronSettingsNotice(message: catalogError, accent: .tronError) }

@@ -205,7 +205,6 @@ final class AppModel {
     let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
-    private let customModelConfiguration: CustomModelConfigurationCoordinator
     let configurationAutosave = ConfigurationAutosaveCoordinator()
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
@@ -270,7 +269,6 @@ final class AppModel {
     var settingsInvalidationGeneration: Int { settingsTrust.settingsInvalidationGeneration }
     var providerInvalidationGeneration: Int { providerAuth.invalidationGeneration }
     var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
-    var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
     // Invalidates surface-owned device reads without blocking control-event intake.
@@ -569,11 +567,6 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
-        let customModelConfiguration = CustomModelConfigurationCoordinator(
-            client: client,
-            mutationExecutor: mutationExecutor,
-            uuidSource: uuidSource
-        )
         let sessionPresentation = SessionPresentationStore(
             client: client,
             performanceSignposts: appLogSignposts,
@@ -702,7 +695,6 @@ final class AppModel {
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
         self.packageConfiguration = packageConfiguration
-        self.customModelConfiguration = customModelConfiguration
         self.composerDrafts = composerDrafts
         self.extensionInteractionDrafts = extensionInteractionDrafts
         self.gatewayDiagnostics = gatewayDiagnostics
@@ -746,7 +738,6 @@ final class AppModel {
         sessionPresentation.delegate = self
         providerAuth.delegate = self
         packageConfiguration.delegate = self
-        customModelConfiguration.delegate = self
         installedApps.onFailure = { [weak self] error in self?.surface(error) }
         configurationAutosave.didFail = { [weak self] error in
             self?.presentConfigurationActionError(error)
@@ -1691,7 +1682,6 @@ extension AppModel {
         providerAuth.clearProfile()
         settingsTrust.clearProfile()
         packageConfiguration.clearProfile()
-        customModelConfiguration.clearProfile()
         configurationAutosave.clearProfile()
         cancelAllExtensionEditorSynchronization()
         composerDrafts.retireProfilePresentation()
@@ -4084,30 +4074,6 @@ extension AppModel {
         try requireLifecycle(admission)
     }
 
-    func customModels(for target: CustomModelTarget) -> JSONValue? {
-        customModelConfiguration.models(for: target)
-    }
-
-    @discardableResult
-    func loadCustomModels(target: CustomModelTarget) async -> Bool {
-        await customModelConfiguration.load(target: target)
-    }
-
-    func replaceCustomModels(
-        _ document: JSONValue,
-        target: CustomModelTarget
-    ) async throws {
-        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
-        try requireLifecycle(admission)
-        do {
-            try await customModelConfiguration.replace(document, target: target)
-        } catch {
-            guard admitsLifecycle(admission) else { throw CancellationError() }
-            throw error
-        }
-        try requireLifecycle(admission)
-    }
-
     nonisolated static func supportsSafeGatewayRestart(capabilities: [String]) -> Bool {
         capabilities.contains("restart-drain.v1") && capabilities.contains("restart-supervised.v1")
     }
@@ -4727,8 +4693,6 @@ extension AppModel {
             providerAuth.noteProvidersChanged()
         case "packages.changed":
             packageConfiguration.notePackagesChanged()
-        case "models.customChanged":
-            customModelConfiguration.noteCustomModelsChanged()
         case "models.catalogChanged":
             providerAuth.noteModelCatalogChanged()
         case "models.recentChanged":
@@ -5299,12 +5263,6 @@ extension AppModel: ProviderAuthCoordinatorDelegate {
 
 extension AppModel: PackageConfigurationCoordinatorDelegate {
     func packageConfigurationCoordinatorSurface(_ error: Error) {
-        surface(error)
-    }
-}
-
-extension AppModel: CustomModelConfigurationCoordinatorDelegate {
-    func customModelConfigurationCoordinatorSurface(_ error: Error) {
         surface(error)
     }
 }

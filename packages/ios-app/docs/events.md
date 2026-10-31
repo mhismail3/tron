@@ -135,7 +135,7 @@ transcript paging and session-keyed context/tree/resources/commands.
 - Home status is re-read (never carried) on a summary for Home's current or open chapter and on
   every `session.listChanged`.
 - `automation.changed`, `knowledge.changed`, `notification.inbox.changed`, `devices.changed`,
-  `providers.changed`, `models.catalogChanged`, settings, package, trust and custom-model hints
+  `providers.changed`, `models.catalogChanged`, settings, package and trust hints
   advance owner invalidation revisions. Successful reads never advance them, so a visible
   `.task(id:)` reads once per actual invalidation. Only visible owners reload, in their own scope.
 - `auth.event`, `auth.prompt` and `auth.completed` belong to the device identity, not the socket:

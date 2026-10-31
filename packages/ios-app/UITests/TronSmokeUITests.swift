@@ -415,6 +415,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
+        // Chapters is below the medium viewport; expand before tapping rather
+        // than relying on XCTest to activate a partly off-screen row.
+        expandSettingsSheet(app, title: "Manage Home")
         tapManageRow(app, "home-manage-chapters")
         XCTAssertTrue(app.buttons["home-chapter-2"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["home-chapter-1"].exists)
@@ -709,10 +712,13 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testCaptureGlobalAccountsAndProviderModelsInLightAndDark() {
         continueAfterFailure = false
-        for appearance in ["light", "dark"] {
+        for appearance in ["light", "dark", "light-xxxl", "dark-xxxl"] {
             let app = XCUIApplication()
             app.launchArguments = ["-tron-settings-renderer-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-            if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+            if appearance.hasPrefix("dark") { app.launchArguments.append("-settings-renderer-dark") }
+            if appearance.hasSuffix("xxxl") {
+                app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            }
             app.launch()
             defer { app.terminate() }
             let providers = app.buttons["settings-link-Model Providers"]
@@ -742,21 +748,15 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Refresh"].tap()
         XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 custom-write:0 credentials:0", timeout: 5),
                       "Refresh must dispatch only the owned global catalog command")
+        XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists, "Routine definitions use agent source configuration, not a second native editor")
         XCTAssertFalse(app.navigationBars.staticTexts["Custom Models"].exists, "Refresh must not navigate to the editor")
-        app.buttons["settings-link-Custom Models"].tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Custom Models"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Add Provider"].waitForExistence(timeout: 5), "The existing guided editor must be usable")
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:1 custom-write:0 credentials:0", timeout: 5))
-        keepScreenshot(named: "1308-custom-models-editor")
-        closeTopSheet(app)
-        XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
         app.buttons["Details for Fixture Provider"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Fixture Provider"].waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:1 custom-write:0 credentials:0", timeout: 5),
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 custom-write:0 credentials:0", timeout: 5),
                       "Provider setup navigation must neither refresh the catalog nor edit custom definitions/credentials")
         closeTopSheet(app)
         XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.buttons.matching(identifier: "settings-link-Custom Models").count, 1)
+        XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists)
     }
 
     @MainActor

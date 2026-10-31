@@ -13,7 +13,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 - Audit: `SettingsChangesView`, `SettingsChangeRow`; exact reviews use the shared
   `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`,
-  `CustomModelsSettingsView` with `CustomModelDraftTransformation`, `DefaultToolsSettingsSection`.
+  `DefaultToolsSettingsSection`.
 - Accounts: `ProviderSettingsView`, `ProviderUsageReadController`, `IntegrationsSettingsView`
   (`IntegrationSheetRoutes`), `MCPServersSettingsView`, `ConnectionSettingsView`,
   `PairedDeviceDetailView`, `MacReplacementSheet`.
@@ -115,6 +115,12 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   and final column geometry; Reduce Motion keeps the same static rectangles.
 - **Models and compaction.** Model names are the catalog's `name`; thinking choices come from the
   model's advertised levels; the default model comes from canonical settings, never catalog order.
+  Providers retains credentials, usage and catalog Refresh, not a separate custom-definition editor.
+  Agents edit Pi's canonical `<tronHome>/agent/models.json` through the existing file tools;
+  the Gateway keeps validation, redaction, outside-change history and model loading. A native
+  source editor, guided draft, JSON draft and autosave coordinator do not mirror that file.
+  Model-registry activation still needs a maintainer-initiated Gateway restart; file edits do
+  not promise hot reload.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
 - **Default Tools.** Global Tools' Always include switches edit `tools.active`. While
   `sources.extensions` keeps the built-in from loading at that scope (Pi's rule: a Project entry
