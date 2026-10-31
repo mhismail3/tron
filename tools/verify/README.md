@@ -223,46 +223,66 @@ verify has no other wait.
 
 ## Explicit Mac batches
 
-Home (the batch owner under [principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship))
-or Mohsin invokes `verify --batch` in a persistent, clean worktree on landed main history.
-Ensure a simulator-job slot is available (at most three across workers); the batch itself
-runs one lane at a time. No scheduled trigger exists yet. Prepare that worktree's pinned Gateway development dependencies;
-no application install, service restart, deployment or OTA command is part of a batch.
+Home (the [P2 batch owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship))
+or Mohsin invokes `verify --batch` in a persistent, clean worktree on fetched, landed
+main history. No scheduler, install, deployment, service restart, main push or automatic
+revert is part of this command. The Home caller owns delivery: every terminal run emits a
+JSON `batchResult`, exact head and report path; the caller must deliver that result to Home,
+including red and uncovered results. The recurring trigger is a separate owner.
 
-First invocation requires an explicit known-green `--base`; later invocations cannot
-override it. One repository-local record at `<git-common-dir>/verify/green.json` owns
-the previous green. A nonwaiting file lock refuses simultaneous batches. The command
-pins HEAD, records **all** commits in `base..HEAD` (including merged branches), then
-runs existing owners serially: all-lock verify, unsigned shipping-iOS compile, the UI
-runner's smoke set on those products, real-Gateway boundary and real-UI journeys, and
-fixture stop. Lanes absent from a repository are not invented. Mac/relay suites and the full
-default/nested Gateway suites are not lanes yet, so no batch is checkpoint-complete under
-[principles P1](../../docs/PRINCIPLES.md#p1-trunk-is-releasable-devices-run-checkpoints) until #2174 adds them. `--skip` is not accepted for batches.
+First use requires `--base <main-anchor>`. This is a range anchor, not an assertion that
+it was green: no green base exists until a complete green batch proves one. Subsequently
+`covered.json` owns the last green/qualified head and `green.json` the last strictly green
+head under `<git-common-dir>/verify/`; `--base` cannot override covered history. A nonwaiting
+`batch.lock` refuses overlapping batches. Same covered HEAD runs nothing; `--plan` is read-only.
 
-Each lane runs once per batch, not once per covered commit. The next batch reuses that
-worktree's incremental build products after the normal source-stamp checks. Same green
-HEAD runs nothing. Only complete success advances green. There is no prior green if
-initialization fails. Immutable run directories under `<git-common-dir>/verify/batches/`
-retain the exact range, commits/files, commands, wall times, logs and copied verify
-report; no task-worktree cleanup removes them. `--batch --plan` changes no state.
+The batch pins HEAD, retains all commits/files in its range, prepares worktree-local
+Gateway/relay pinned dependencies, then runs **every** required lane even after failures:
 
-Failure preserves completed lanes immediately and leaves green unchanged. In one
-disposable worktree, the failing lane is rerun at previous green and HEAD with local
-pinned dependencies, then bisected along main's first-parent integration commits only
-when the **same failure signature** reproduces. Other failures/setup errors are
-inconclusive; a failing baseline is pre-existing. A report never invents a culprit:
-it records proven integration/files or candidate commits. The worktree retains its
-incremental products between probes and cleans its own fixture/lane/products on exit.
-If an owner refuses cleanup or cleanup is interrupted, it preserves that worktree and
-journals its exact path and completed cleanup results in `attribution/progress.json`;
-resolve those owned resources before discarding it.
-A privacy-checked `scripts/tron work issue create` files the result; a refused or
-uncertain write is recorded before dispatch in `<git-common-dir>/verify/issue-writes/`,
-keyed by range/lane. Re-running that range retains the previous outcome, including an
-unfinished attempt; resolve uncertain GitHub state manually, never create blindly again.
-No unrelated worker waits,
-main is never reverted, and failed coverage is not silently skipped by changing base.
+- locks and declared consumers (`verify --all`, not the full Gateway suite);
+- the full default and nested Gateway Vitest suites, separately, through the isolated
+  Gateway runner, with retained JSON case evidence;
+- signed Mac integration build/tests (test execution has scratch HOME/TMPDIR);
+- relay Workers Vitest suite, with retained JSON case evidence;
+- unsigned shipping iOS compile; UI smoke `checkpoint` (build then run);
+- real-Gateway boundary and real-UI journeys, with application installation disabled.
 
+Missing owners/reports, zero/skipped Vitest evidence, deferred lanes or failed setup/cleanup
+are **uncovered**, never green. Otherwise verdicts are **green**, **qualified** (every failing
+case exactly matches an unexpired registry digest), or **red**. Qualified advances covered
+history, not green. Expired or changed digests do not waive failures. All results, per-lane
+wall times, range age and attribution host seconds are retained in immutable run directories
+under `verify/batches/`. No task-worktree cleanup removes those reports.
+
+iOS lanes use the existing host-slot owner (cap three), releasing between lanes. When all
+slots are occupied at admission the lane is deferred/uncovered, not queued or statically
+reserved. A race after admission is settled by the owning runner's host-slot lease; the
+batch does not bypass or replace it. The compile lane composes `ios-test-lock.py --host-slot`
+because its unsigned compile owner does not acquire a simulator slot itself.
+
+Attribution starts only after all coverage lanes finish. It probes one failing Vitest
+file plus anchored case filter, or an available XCTest class/method selector, at both range
+ends and then main's first-parent integration chain. No whole-suite diagnostic rerun is
+allowed. Owners without an exact selector yield uncovered/inconclusive attribution, not a
+guessed culprit. A non-reproducing head is retained as a flake observation; it still needs an
+unexpired registry entry before it can qualify. Setup errors and changed signatures remain
+inconclusive. A failing baseline is pre-existing.
+
+A proven culprit requires a landing-shaped range (two-parent landing merges), the same
+signature twice at the culprit, and a good observed first parent. The search takes at most
+approximately `ceil(log2(N)) + 3` case probes. Nonlanding ranges retain candidates only.
+Probe attempts are retained by commit/lane/signature in `verify/probes/`; range attribution
+memos in `verify/attributions/` prevent repeat searches. Culprit files come from
+`git diff <merge>^1 <merge>`. Proof prepares a **local** `revert/<sha>` branch with
+`git revert -m 1`; it never pushes any branch. Conflicts retain the worktree for resolution.
+
+Probe worktrees keep incremental products between revisions, then call their resource
+owners' cleanup. A refusal/interruption preserves the worktree and
+`attribution-*/progress.json`; resolve those exact resources before discarding it.
+Guarded issue writes are journaled **before** dispatch in `verify/issue-writes/`, keyed by
+lane plus normalized signature, not range. A successful issue creation is updated by
+comment on later ranges. Refused, uncertain or unfinished writes are retained for manual
+reconciliation rather than blindly repeated.
 ## Mutation sampling
 
 `scripts/tron mutate <packages/gateway/src file> [--count 30] [--seed 1465] [--timeout 300]` measures
@@ -287,7 +307,7 @@ known-kill probe proves its vitest runner activates mutants with the pinned vite
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-verify.py scripts/test-tron-verify-tiers.py` drives verify in
+`scripts/tron test tooling scripts/test-tron-verify.py scripts/test-tron-verify-tiers.py scripts/test-tron-verify-batch.py` drives verify in
 disposable repositories whose modules own real Python tests: selection, widening,
 the small-change paths with a known-bad case each, loud and zero-test failures,
 the uncommitted refusal and identical digests. A stand-in `scripts/tron-ios-test`

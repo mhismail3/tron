@@ -4,11 +4,13 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import signal
 import subprocess
 import tempfile
@@ -27,28 +29,45 @@ def save(path: Path, value: dict) -> None:
 
 def lanes(root: Path, base: str) -> list[dict]:
     """Compose existing owners, not a second test catalog."""
+    # Required lanes never disappear when a checkout/tool is missing.
     result = [{'name': 'full verify', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
-    if (root / 'packages/ios-app/project.yml').is_file():
-        result.extend([
-            {'name': 'shipping iOS compile', 'command': ['scripts/tron-ios-device', 'compile']},
-            {'name': 'iOS smoke', 'command': ['scripts/tron-ios-test', 'run']},
-        ])
-    if (root / 'scripts/ios-gateway-e2e-test').is_file():
-        result.extend([
-            {'name': 'real Gateway boundary', 'command': ['scripts/ios-gateway-e2e-test', 'all']},
-            {'name': 'real Gateway UI journeys', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui']},
-            {'name': 'fixture stop', 'command': ['scripts/ios-gateway-e2e-test', 'stop']},
-        ])
+    for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
+        result.append({'name': name, 'command': ['python3', 'tools/verify/gateway.py', *config],
+                       'vitest': True, 'requires': 'packages/gateway/package-lock.json'})
+    result.extend([
+        {'name': 'Mac integration', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
+         'requires': 'packages/mac-app/project.yml'},
+        {'name': 'relay', 'command': ['scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/push-relay', 'test', '--'],
+         'vitest': True, 'testRoot': 'packages/push-relay', 'requires': 'packages/push-relay/package-lock.json'},
+        {'name': 'shipping iOS compile', 'command': ['scripts/tron-ios-device', 'compile'],
+         'requires': 'packages/ios-app/project.yml', 'ios': True},
+        {'name': 'iOS smoke', 'command': ['scripts/tron-ios-test', 'checkpoint'],
+         'requires': 'scripts/tron-ios-test', 'ios': True},
+        {'name': 'real Gateway boundary', 'command': ['scripts/ios-gateway-e2e-test', 'all'],
+         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True},
+        {'name': 'real Gateway UI journeys', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui'],
+         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True},
+    ])
     return result
 
 
 def signature(message: str, failures: list[str], output: str, root: Path) -> dict | None:
     # A test identity alone cannot distinguish a code regression from setup failing
     # in that same case (for example missing staged products at the baseline).
-    diagnostics = re.findall(r'^(?:AssertionError:|Error:|error:|unowned:|overlap:).+$', output, re.M)
+    diagnostics = re.findall(r'^(?:AssertionError:|Error:|error:|failure:|unowned:|overlap:|.+:\d+: error:).+$', output, re.M)
     diagnostics = sorted(line.replace(str(root), '<worktree>') for line in diagnostics[:20])
     failures = sorted(line.replace(str(root), '<worktree>') for line in failures)
     return {'message': message, 'failedTests': failures, 'diagnostics': diagnostics} if diagnostics else None
+
+
+def host_slots_busy(root: Path) -> bool | None:
+    owner = root / 'scripts/ios-test-lock.py'
+    if not owner.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location('batch_ios_lock', owner)
+    locker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(locker)
+    return all(locker.read_slot_holders())
 
 
 def execute(root: Path, lane: dict, directory: Path) -> dict:
@@ -56,12 +75,38 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     log = directory / 'output.log'
     print(f"batch: {lane['name']} … live log: {log}", flush=True)
     start = time.monotonic()
+    if lane.get('requires') and not (root / lane['requires']).is_file():
+        return {**lane, 'exit': None, 'status': 'uncovered', 'reason': 'missing required owner', 'seconds': 0}
+    if lane.get('ios'):
+        busy = host_slots_busy(root)
+        if busy is None:
+            return {**lane, 'exit': None, 'status': 'uncovered', 'reason': 'missing host-slot owner', 'seconds': 0}
+        if busy:
+            return {**lane, 'exit': None, 'status': 'uncovered', 'reason': 'deferred: all host slots held', 'seconds': 0}
     command = lane['command']
-    command = command.replace(str(ROOT), str(root)) if isinstance(command, str) else [word.replace(str(ROOT), str(root)) for word in command]
+    deferred_ios = lane['name'] == 'full verify' and host_slots_busy(root) is True
+    if deferred_ios:
+        command = [*command, '--skip', 'ios']
+    if lane['name'] == 'Mac integration':
+        home, scratch = directory / 'home', directory / 'tmp'
+        home.mkdir(exist_ok=True, mode=0o700)
+        scratch.mkdir(exist_ok=True, mode=0o700)
+        command = command.replace('&& xcodebuild ', f'&& env HOME={shlex.quote(str(home))} TMPDIR={shlex.quote(str(scratch))} xcodebuild ')
+    if lane['name'] == 'shipping iOS compile':
+        # This compile owner has a device lease, not a simulator slot; compose the
+        # common host-slot owner rather than reserving capacity for the whole batch.
+        command = ['python3', 'scripts/ios-test-lock.py', '--host-slot', '--lock',
+                   str(directory / 'compile.lock'), '--', *command]
+    if lane.get('vitest'):
+        command = [*command, '--reporter=default', '--reporter=json', f'--outputFile.json={directory / "vitest.json"}']
+    command = command.replace(str(ROOT), str(root)) if isinstance(command, str) else [word if word.startswith('--outputFile.json=') else word.replace(str(ROOT), str(root)) for word in command]
     vitest = next((Path(word.split('=', 1)[1]) for word in command if word.startswith('--outputFile.json=')), None) if isinstance(command, list) else None
     if vitest:
         vitest.parent.mkdir(parents=True, exist_ok=True)
         vitest.unlink(missing_ok=True)
+    if lane['name'] == 'full verify':
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        (root / 'test-results/verify' / f'{sha}.json').unlink(missing_ok=True)
     with log.open('w') as output:
         process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
                                    stdout=output, stderr=subprocess.STDOUT,
@@ -76,13 +121,31 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
             raise
-    result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'log': str(log)}
+    result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'log': str(log), 'executedCommand': command}
+    if deferred_ios:
+        result.update(status='uncovered', reason='deferred: verifier iOS consumers; all host slots held')
     # Preserve the owning verifier's exact selection, failed tests and partial step logs.
     if lane['name'] == 'full verify':
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         source = root / 'test-results/verify' / f'{sha}.json'
-        if source.exists():
+        if not source.exists():
+            result.update(status='uncovered', reason='missing verifier report')
+        else:
             report = json.loads(source.read_text())
+            verdict = report.get('verdict')
+            result['verifierVerdict'] = verdict
+            result['expiredEntries'] = report.get('expiredEntries', [])
+            if report.get('commit') != sha or verdict not in ('passed', 'quarantined', 'expired', 'deferred', 'failed'):
+                result.update(status='uncovered', reason='incomplete or wrong-SHA verifier report')
+            elif verdict == 'expired' or report.get('expiredEntries'):
+                result['status'] = 'red'
+            elif verdict == 'quarantined' and not deferred_ios:
+                result['status'] = 'qualified'
+            if (verdict == 'passed' and not report.get('passingTests')):
+                result.update(status='uncovered', reason='empty verifier test evidence')
+            if (verdict == 'deferred' or report.get('skipped') or report.get('selection', {}).get('deferredTests')
+                    or any(step.get('status') == 'deferred' for step in report.get('steps', []))):
+                result.update(status='uncovered', reason='verifier deferred/skipped required work')
             save(directory / 'verify.json', report)
             logs = root / 'test-results/verify' / sha
             if logs.is_dir():
@@ -93,6 +156,28 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             failures = failed.get('failedTests', []) if failed else []
             detail = (root / failed['log']).read_text(errors='replace') if failed and failed.get('log') else ''
             result['signature'] = signature(report['message'], failures, detail, root)
+    elif lane.get('vitest'):
+        output = log.read_text(errors='replace')
+        # The owning parser normalizes only the repo prefix and rejects suite errors.
+        previous = verify.ROOT
+        verify.ROOT = root
+        try:
+            failed, complete = verify.gateway_failures(vitest, output)
+            _, case_complete = verify.case_outcomes(vitest)
+        finally:
+            verify.ROOT = previous
+        result['failures'] = failed
+        result['failureComplete'] = complete
+        if failed:
+            result['signature'] = {'failures': failed}
+        if vitest and vitest.exists():
+            data = json.loads(vitest.read_text())
+            result['passingTests'] = data.get('numPassedTests', 0)
+            if (not case_complete or not (data.get('numPassedTests', 0) + data.get('numFailedTests', 0))
+                    or data.get('numPendingTests') or data.get('numPendingTestSuites')):
+                result.update(status='uncovered', reason='empty or skipped cases')
+        else:
+            result.update(status='uncovered', reason='missing test report')
     elif lane.get('probe'):
         output = log.read_text(errors='replace')
         group = lane['name'].removeprefix('tests: ')
@@ -116,6 +201,24 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         if lane['name'].startswith('tests:') and code == 0 and count == 0:
             result['exit'] = 1  # a runner that executes nothing cannot prove a good bisect probe
         result['signature'] = signature(f"{lane['name']} failed", failures, output, root)
+    output = log.read_text(errors='replace')
+    if lane['name'] == 'Mac integration':
+        counts = re.findall(r'Executed (\d+) tests?', output)
+        if code == 0 and (not counts or int(counts[-1]) == 0 or re.search(r'\d+ tests? skipped', output)):
+            result.update(status='uncovered', reason='missing, empty or skipped XCTest evidence')
+        failures = re.findall(r"Test Case '-\[([^ .]+)\.([^ ]+) ([^]]+)\]' failed", output)
+        if failures:
+            result['xctestCases'] = ['/'.join(case) for case in failures]
+            result['signature'] = signature('XCTest failed', result['xctestCases'], output, root)
+    if lane['name'] == 'iOS smoke':
+        if code == 0 and verify.ios_count(output) == 0:
+            result.update(status='uncovered', reason='missing or empty XCTest summary')
+        failures = verify.ios_failures(output)
+        result['signature'] = signature(f"{lane['name']} failed", failures, output, root)
+        # The summary retains method identity; this owner accepts exact selectors.
+        if failures and re.fullmatch(r'\w+/\w+/\w+(?:\(\))?', failures[0].split(':', 1)[0]):
+            selector = failures[0].split(':', 1)[0]
+            result['probe'] = {'name': lane['name'], 'command': ['scripts/tron-ios-test', 'checkpoint', '--only-testing', selector], 'ios': True}
     if code != 0 and 'signature' not in result:
         output = log.read_text(errors='replace')
         result['signature'] = signature(f"{lane['name']} failed", verify.ios_failures(output), output, root)
@@ -123,9 +226,10 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     return result
 
 
-def stop_fixture(root: Path, directory: Path) -> None:
+def stop_fixture(root: Path, directory: Path) -> dict | None:
     if (root / 'scripts/ios-gateway-e2e-test').is_file():
-        execute(root, {'name': 'fixture stop', 'command': ['scripts/ios-gateway-e2e-test', 'stop']}, directory)
+        return execute(root, {'name': 'fixture stop', 'command': ['scripts/ios-gateway-e2e-test', 'stop']}, directory)
+    return None
 
 
 def prepare(root: Path, directory: Path) -> bool:
@@ -140,6 +244,11 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
     """Prove the baseline, then bisect main's integration commits, never a live worker tree."""
     commits = verify.git('rev-list', '--first-parent', '--reverse', f'{base}..{head}').splitlines()
     result = {'status': 'inconclusive', 'candidates': commits, 'probes': []}
+    # Never rerun a complete suite to diagnose one case, nor attribute setup errors.
+    if not failed.get('probe') or not failed.get('signature') or not commits:
+        return result
+    malformed = [sha for sha in commits if len(verify.git('rev-list', '--parents', '-n', '1', sha).split()) != 3]
+    result['nonLandingCommits'] = malformed
     directory.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix='tron-verify-bisect-')).resolve()
     root = temporary / 'repo'
@@ -147,8 +256,18 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
     try:
         # One probe worktree preserves Xcode incrementals across revisions. npm installs stay local.
         dependency_key = None
-        def probe(sha: str) -> str:
+        probe_state = Path(verify.git('rev-parse', '--path-format=absolute', '--git-common-dir').strip()) / 'verify/probes'
+        probe_state.mkdir(parents=True, exist_ok=True)
+        def probe(sha: str, repeat: bool = False) -> str:
             nonlocal dependency_key
+            key = hashlib.sha256(json.dumps([sha, failed['name'], failed['signature']], sort_keys=True).encode()).hexdigest()
+            cache = probe_state / f'{key}.json'
+            attempts = json.loads(cache.read_text())['attempts'] if cache.exists() else []
+            required = 2 if repeat else 1
+            if len(attempts) >= required:
+                observed = attempts[required - 1]
+                result['probes'].append({**observed, 'reused': True})
+                return observed['outcome']
             subprocess.run(['git', 'checkout', '--detach', sha], cwd=root, check=True, capture_output=True)
             attempt = directory / f'probe-{len(result["probes"]):02d}-{sha[:12]}'
             lock = root / 'packages/gateway/package-lock.json'
@@ -162,7 +281,7 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
                     return 'unknown'
                 dependency_key = key
             try:
-                lane = {**failed['probe'], 'probe': True} if failed.get('probe') else {k: failed[k] for k in ('name', 'command')}
+                lane = {**failed['probe'], 'probe': True}
                 outcome = execute(root, lane, attempt)
             finally:
                 stop_fixture(root, attempt / 'stop')
@@ -173,7 +292,10 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
             else:
                 # An exit alone is not proof that the same regression reproduced.
                 state = 'unknown'
-            result['probes'].append({'commit': sha, 'outcome': state, **outcome})
+            observed = {'commit': sha, 'outcome': state, **outcome}
+            result['probes'].append(observed)
+            if state != 'unknown':
+                save(cache, {'attempts': [*attempts, observed]})
             save(directory / 'progress.json', result)
             return state
         baseline = probe(base)
@@ -183,7 +305,10 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
         if baseline != 'good':
             return result
         # Reproduce head in the same isolated environment before attributing a host failure.
-        if probe(head) != 'bad':
+        head_state = probe(head)
+        if head_state != 'bad':
+            if head_state == 'good':
+                result['status'] = 'flake observed; registry entry required'
             return result
         low, high = -1, len(commits) - 1
         while high - low > 1:
@@ -196,8 +321,25 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
             else:
                 low = middle
         culprit = commits[high]
-        result.update(status='first failing main integration', commit=culprit,
-                      files=verify.git('diff-tree', '--root', '--no-commit-id', '--name-only', '-r', culprit).splitlines())
+        parent = verify.git('rev-parse', f'{culprit}^1').strip()
+        # low is the already-observed good parent; high is already-observed bad.
+        # One independent repeat proves the signature twice without suite reruns.
+        if malformed or parent != (commits[low] if low >= 0 else base) or probe(culprit, repeat=True) != 'bad':
+            return result
+        result.update(status='proven', commit=culprit, parent=parent,
+                      files=verify.git('diff', '--name-only', parent, culprit).splitlines())
+        branch = f'revert/{culprit}'
+        exists = verify.git('for-each-ref', f'refs/heads/{branch}').strip()
+        if exists:
+            result['revertBranch'] = branch
+            result['revertStatus'] = 'existing; not overwritten'
+        else:
+            subprocess.run(['git', 'checkout', '-b', branch, head], cwd=root, check=True, capture_output=True)
+            reverted = subprocess.run(['git', 'revert', '--no-edit', '-m', '1', culprit], cwd=root, capture_output=True, text=True)
+            result.update(revertBranch=branch, revertStatus='prepared locally' if reverted.returncode == 0 else 'conflict; retained')
+            if reverted.returncode:
+                result['revertError'] = reverted.stderr
+                result['preserveRevert'] = True
         return result
     finally:
         # Never erase a probe whose owning resource helper could not clean it.
@@ -215,7 +357,7 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
                     cleanup.append({'exit': 2, 'command': [script, 'clean'], 'error': str(error)})
                 finally:
                     save(directory / 'progress.json', result)
-        if any(item['exit'] for item in cleanup):
+        if result.get('preserveRevert') or any(item['exit'] for item in cleanup):
             result['retainedWorktree'] = str(root)
             print(f'batch: probe cleanup failed; preserved worktree {root}', flush=True)
         else:
@@ -228,16 +370,18 @@ def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
 def file_issue(report: dict, directory: Path, state: Path) -> dict:
     # The batch lock serializes this journal. Persist BEFORE dispatch: a killed or
     # uncertain GitHub write must not become a second create on an operator rerun.
-    key = hashlib.sha256(json.dumps([report['base'], report['head'], report['failed']['name']]).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([report['failed']['name'], report['failed'].get('signature')], sort_keys=True).encode()).hexdigest()
     journal = state / 'issue-writes' / f'{key}.json'
-    if journal.exists():
+    previous = json.loads(journal.read_text()) if journal.exists() else None
+    if previous and (not previous.get('number') or previous.get('status') != 'completed'):
         print(f'batch: retaining prior issue-write outcome: {journal}', flush=True)
-        return {**json.loads(journal.read_text()), 'reused': True}
+        return {**previous, 'reused': True}
     journal.parent.mkdir(parents=True, exist_ok=True)
     pending = {'status': 'attempting', 'exit': None, 'batch': str(directory), 'range': [report['base'], report['head']],
-               'lane': report['failed']['name']}
+               'lane': report['failed']['name'], 'number': previous.get('number') if previous else None}
     save(journal, pending)
     attribution = report['attribution']
+    directory.mkdir(parents=True, exist_ok=True)
     body = directory / 'issue.md'
     body.write_text('## Failed verification batch\n\n'
                     f"Range: `{report['base']}..{report['head']}`; {len(report['commits'])} covered commits.\n"
@@ -247,19 +391,72 @@ def file_issue(report: dict, directory: Path, state: Path) -> dict:
                     + '\nFiles: ' + ', '.join(f'`{p}`' for p in attribution.get('files', report['files']))
                     + '\n\nExact commands, outcomes, per-lane wall time and partial logs are retained in the repository-local '
                     f"Git common directory at `verify/batches/{directory.name}/report.json`. No test, golden, assertion or timeout changed. "
-                    'Main is not blocked or reverted; last-green coverage has not advanced.\n')
-    command = ['scripts/tron', 'work', 'issue', 'create', '--title',
-               f"Verification batch {report['head'][:12]}: {report['failed']['name']}",
-               '--body-file', str(body), '--kind', 'kind:bug', '--area', 'area:tooling']
+                    'Main is not blocked or reverted. Failed/qualified coverage never advances last-green.\n')
+    if attribution.get('revertBranch'):
+        with body.open('a') as stream:
+            stream.write(f"\nLocal revert branch: `{attribution['revertBranch']}` ({attribution['revertStatus']}); never pushed.\n")
+    command = (['scripts/tron', 'work', 'comment', str(previous['number']), '--body-file', str(body)] if previous else
+               ['scripts/tron', 'work', 'issue', 'create', '--title',
+                f"Verification: {report['failed']['name']} [{key[:12]}]",
+                '--body-file', str(body), '--kind', 'kind:bug', '--area', 'area:tooling'])
     outcome = execute(ROOT, {'name': 'file failure issue', 'command': command}, directory / 'issue')
-    outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved'}
+    output = Path(outcome['log']).read_text(errors='replace')
+    number = previous.get('number') if previous else None
+    match = re.search(r'(?:/issues/|created issue #)(\d+)', output)
+    if match:
+        number = int(match[1])
+    outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved', 'number': number}
     save(journal, outcome)
     return outcome
 
 
+def failure_cases(outcome: dict) -> list[dict]:
+    """One stable signature and one exact-case probe per failure, never a suite probe."""
+    cases = []
+    if outcome.get('vitest') and outcome.get('failureComplete'):
+        for identity, digest in outcome.get('failures', {}).items():
+            if identity in outcome.get('qualifiedFailures', {}):
+                continue
+            file, case = identity.split('::', 1)
+            command = outcome['command']
+            cases.append({**outcome, 'signature': {'failures': {identity: digest}},
+                          'probe': {'name': outcome['name'], 'vitest': True,
+                                    'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(case) + '$']}})
+    # Other owners may only be probed if the recorded invocation is already a case filter.
+    elif outcome.get('xctestCases') and outcome.get('signature'):
+        for case in outcome['xctestCases']:
+            # Build remains at each revision; execution selects one class/method.
+            cases.append({**outcome, 'signature': {**outcome['signature'], 'failedTests': [case]},
+                          'probe': {'name': outcome['name'], 'command': outcome['command'] + ' -only-testing:' + case}})
+    elif outcome.get('probe') and '--only-testing' in outcome['probe'].get('command', []):
+        cases.append(outcome)
+    return cases
+
+
+def memo_attribute(base: str, head: str, failed: dict, directory: Path, state: Path) -> dict:
+    key = hashlib.sha256(json.dumps([base, head, failed['name'], failed.get('signature')], sort_keys=True).encode()).hexdigest()
+    memo = state / 'attributions' / f'{key}.json'
+    if memo.exists():
+        return {**json.loads(memo.read_text()), 'reused': True}
+    memo.parent.mkdir(parents=True, exist_ok=True)
+    start = time.monotonic()
+    result = attribute(base, head, failed, directory)
+    result['hostSeconds'] = round(time.monotonic() - start, 3)
+    save(memo, result)
+    return result
+
+
+def batch_verdict(results: list[dict]) -> str:
+    if any(item.get('status') == 'uncovered' or item.get('exit') is None for item in results):
+        return 'uncovered'
+    if any(item.get('status') == 'red' or (item['exit'] and item.get('status') != 'qualified') for item in results):
+        return 'red'
+    return 'qualified' if any(item.get('status') == 'qualified' for item in results) else 'green'
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog='scripts/tron verify --batch')
-    parser.add_argument('--base', help='explicit last-known-green starting commit on first use only')
+    parser.add_argument('--base', help='explicit main starting anchor on first use; not green until this batch proves it')
     parser.add_argument('--plan', action='store_true')
     args = parser.parse_args(argv)
     state = Path(verify.git('rev-parse', '--path-format=absolute', '--git-common-dir').strip()) / 'verify'
@@ -268,14 +465,18 @@ def main(argv: list[str]) -> int:
             raise verify.VerifyError('batch needs a clean dedicated worktree')
         head = verify.git('rev-parse', 'HEAD').strip()
         green_path = state / 'green.json'
-        green = json.loads(green_path.read_text()) if green_path.exists() else None
+        covered_path = state / 'covered.json'
+        pointer = covered_path if covered_path.exists() else green_path
+        green = json.loads(pointer.read_text()) if pointer.exists() else None
         if green and args.base:
             raise verify.VerifyError('--base only initializes a missing last-green record; never skips failed coverage')
         if not green and not args.base:
             raise verify.VerifyError('no green batch: supply --base <known-green-commit> explicitly on first use')
         base = green['commit'] if green else verify.git('rev-parse', '--verify', f'{args.base}^{{commit}}').strip()
         # A batch covers landed main only; pin a snapshot, never fetch/merge another worker's checkout.
-        ref = 'origin/main' if verify.git('for-each-ref', 'refs/remotes/origin/main').strip() else 'main'
+        fetch_head = Path(verify.git('rev-parse', '--git-path', 'FETCH_HEAD').strip())
+        ref = ('FETCH_HEAD' if fetch_head.is_file() else
+               'origin/main' if verify.git('for-each-ref', 'refs/remotes/origin/main').strip() else 'main')
         ancestry = verify.git('rev-list', '--first-parent', ref).splitlines()
         if head not in ancestry or base not in ancestry[ancestry.index(head):]:
             raise verify.VerifyError('batch base and HEAD must be ordered commits on main first-parent history')
@@ -291,7 +492,7 @@ def main(argv: list[str]) -> int:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise verify.VerifyError('another explicit batch owns this repository; no queue or wait') from None
-            current = json.loads(green_path.read_text()) if green_path.exists() else None
+            current = json.loads(pointer.read_text()) if pointer.exists() else None
             if current != green:
                 raise verify.VerifyError('last-green changed while planning; rerun against its current coverage')
             if head == base and green:
@@ -299,37 +500,77 @@ def main(argv: list[str]) -> int:
                 return 0
             directory = state / 'batches' / f'{base[:12]}-{head[:12]}-{time.time_ns()}'
             directory.mkdir(parents=True)
-            report = {**plan, 'verdict': 'running', 'results': []}
+            timestamp = int(verify.git('show', '-s', '--format=%ct', base).strip())
+            report = {**plan, 'verdict': 'running', 'results': [], 'failures': [], 'setup': [],
+                      'rangeAgeSeconds': max(0, round(time.time() - timestamp)), 'attributionHostSeconds': 0,
+                      'nonLandingCommits': [sha for sha in verify.git('rev-list', '--first-parent', f'{base}..{head}').splitlines()
+                                            if len(verify.git('rev-list', '--parents', '-n', '1', sha).split()) != 3]}
             path = directory / 'report.json'
             save(path, report)
             try:
                 def source_unchanged():
                     if verify.git('rev-parse', 'HEAD').strip() != head or verify.git('status', '--porcelain', '--untracked-files=normal').strip():
                         raise verify.VerifyError('source changed during batch; no green coverage recorded')
+                for package in ('gateway', 'push-relay'):
+                    if (ROOT / f'packages/{package}/package-lock.json').is_file():
+                        try:
+                            setup = execute(ROOT, {'name': f'{package} dependencies', 'command': [
+                                'scripts/tron-node', 'exec', 'npm', '--prefix', f'packages/{package}', 'ci', '--include=dev']},
+                                directory / f'dependencies-{package}')
+                        except (OSError, subprocess.SubprocessError) as error:
+                            setup = {'exit': 2, 'error': str(error), 'name': f'{package} dependencies'}
+                        report['setup'].append(setup)
+                        save(path, report)
                 for index, lane in enumerate(plan['lanes']):
                     source_unchanged()
                     report['activeLane'] = lane['name']
                     save(path, report)
-                    outcome = execute(ROOT, lane, directory / f'lane-{index}')
+                    try:
+                        outcome = execute(ROOT, lane, directory / f'lane-{index}')
+                        if (outcome.get('vitest') and outcome.get('exit') and outcome.get('failureComplete')
+                                and outcome.get('status') != 'uncovered'):
+                            known = verify.known_failures()
+                            expired = {item['testId'] for item in verify.expired_failures(known)}
+                            qualified = {identity: digest for identity, digest in outcome['failures'].items()
+                                         if identity in known and identity not in expired
+                                         and digest == known[identity]['evidence']['failureDigest']}
+                            outcome['qualifiedFailures'] = qualified
+                            if qualified == outcome['failures']:
+                                outcome['status'] = 'qualified'
+                    except (OSError, ValueError, KeyError, verify.VerifyError, subprocess.SubprocessError) as error:
+                        outcome = {**lane, 'exit': None, 'status': 'uncovered', 'error': str(error), 'seconds': 0}
                     report['results'].append(outcome)
                     save(path, report)
                     source_unchanged()
-                    if outcome['exit']:
-                        report.update(verdict='failed', failed=outcome)
-                        save(path, report)
-                        report['attributionProgress'] = str(directory / 'attribution/progress.json')
-                        save(path, report)
-                        report['attribution'] = attribute(base, head, outcome, directory / 'attribution')
-                        save(path, report)
-                        report['issue'] = file_issue(report, directory, state)
-                        save(path, report)
-                        print(f'batch: FAILED; evidence {path}; last-green unchanged', flush=True)
-                        return 1
-                report['verdict'] = 'passed'
+                report['fixtureCleanup'] = stop_fixture(ROOT, directory / 'fixture-stop')
                 save(path, report)
-                save(green_path, {'commit': head, 'report': str(path)})
-                print(f'batch: GREEN; covered {len(commits)} commits; evidence {path}', flush=True)
-                return 0
+                # Finish coverage before spending any host time on attribution.
+                for index, outcome in enumerate(report['results']):
+                    if not outcome.get('exit') or outcome.get('status') == 'qualified':
+                        continue
+                    cases = failure_cases(outcome)
+                    if not cases:
+                        outcome.update(status='uncovered', reason='owner provided no exact-case attribution selector')
+                    failures = cases or [outcome]
+                    for case_index, failed in enumerate(failures):
+                        attribution_directory = directory / f'attribution-{index}-{case_index}'
+                        attribution = memo_attribute(base, head, failed, attribution_directory, state)
+                        report['attributionHostSeconds'] += attribution.get('hostSeconds', 0) if not attribution.get('reused') else 0
+                        item = {'failed': failed, 'attribution': attribution}
+                        item['issue'] = file_issue({**report, **item}, directory / f'failure-{index}-{case_index}', state)
+                        report['failures'].append(item)
+                        save(path, report)
+                source_unchanged()
+                report['verdict'] = ('uncovered' if (any(item['exit'] for item in report['setup'])
+                                                      or (report.get('fixtureCleanup') or {}).get('exit'))
+                                     else batch_verdict(report['results']))
+                save(path, report)
+                if report['verdict'] in ('green', 'qualified'):
+                    record = {'commit': head, 'report': str(path), 'verdict': report['verdict']}
+                    save(covered_path, record)
+                    if report['verdict'] == 'green':
+                        save(green_path, record)
+                return 0 if report['verdict'] in ('green', 'qualified') else 1
             except KeyboardInterrupt:
                 report['verdict'] = 'interrupted'
                 save(path, report)
@@ -348,8 +589,15 @@ def main(argv: list[str]) -> int:
                 print(f'batch: ERROR; partial evidence {path}; last-green unchanged', flush=True)
                 return 2
             finally:
-                if report['verdict'] != 'passed':
-                    stop_fixture(ROOT, directory / 'fixture-stop')
+                try:
+                    if 'fixtureCleanup' not in report:
+                        report['fixtureCleanup'] = stop_fixture(ROOT, directory / 'fixture-stop')
+                        save(path, report)
+                except (OSError, subprocess.SubprocessError) as error:
+                    report['cleanupError'] = str(error)
+                    save(path, report)
+                print(json.dumps({'batchResult': report['verdict'], 'head': head, 'report': str(path),
+                                  'delivery': 'Home caller must acknowledge this result'}), flush=True)
     except (verify.VerifyError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f'batch: {error}', flush=True)
         return 2
