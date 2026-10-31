@@ -334,9 +334,6 @@ export class DisplayArtifactStore {
         meter,
         createWriteStream(staging, { flags: "wx", mode: 0o600 }),
       );
-      const stagedHandle = await open(staging, "r+");
-      try { await syncDurably(stagedHandle); }
-      finally { await stagedHandle.close(); }
       const after = await opened.stat();
       const current = await lstat(source).catch(refuseUnavailableSource);
       if (!after.isFile() || current.isSymbolicLink() || !current.isFile()
@@ -410,6 +407,13 @@ export class DisplayArtifactStore {
         if (!info.isFile() || info.size !== input.size) throw new GatewayError("conflict", "Display object digest collision");
         await this.verify(input.digest, input.size, object, true);
       }
+      // Retained metadata proves this canonical inode was synchronized before
+      // publication. An unreferenced object (including a prior failed attempt)
+      // still needs synchronization; syncing discarded duplicate staging does not.
+      if (![...this.index.values()].some(metadata => metadata.digest === input.digest)) {
+        const handle = await open(object, "r");
+        try { await syncDurably(handle); } finally { await handle.close(); }
+      }
       await rm(input.source, { force: true });
       const id = this.uuid();
       if (!DISPLAY_ARTIFACT_ID_PATTERN.test(id) || this.index.has(id)) throw new GatewayError("busy", "Could not allocate a display artifact identity", true);
@@ -438,6 +442,27 @@ export class DisplayArtifactStore {
         await this.removeObjectIfUnreferenced(input.digest);
         throw error;
       }
+    });
+  }
+
+  /** Retain immutable bytes in a caller-owned staging path, without exporting
+   * the canonical object's path. The caller must synchronize its destination
+   * directory before acknowledgement. Cross-device callers must publish a copy. */
+  async linkArtifact(id: string, sessionID: string, expectedDigest: string, destination: string): Promise<boolean> {
+    this.validateID(id);
+    return this.serialize(async () => {
+      this.assertInitialized();
+      this.assertFullyValidated();
+      const metadata = this.index.get(id);
+      if (!metadata?.owners.includes(sessionID)) throw new GatewayError("not_found", "Display artifact is unavailable");
+      if (metadata.digest !== expectedDigest) throw new GatewayError("conflict", "Display artifact does not match the offered source");
+      await this.verify(metadata.digest, metadata.size, this.objectPath(metadata.digest));
+      try { await link(this.objectPath(metadata.digest), destination); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EXDEV") return false;
+        throw error;
+      }
+      return true;
     });
   }
 

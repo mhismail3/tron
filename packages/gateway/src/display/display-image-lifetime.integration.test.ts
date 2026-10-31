@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -9,6 +10,54 @@ import { createTestRegistry, displayOwnerOf, displayStoreOf } from "../../test-s
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { DisplayArtifactStore } from "./display-artifact-store.js";
+import { drainDurableWriteStats } from "../foundation/durable-json.js";
+
+it("durably publishes new display bytes once and reuses them for distinct retained artifacts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-display-dedup-"));
+  try {
+    const store = new DisplayArtifactStore(root);
+    await store.initialize();
+    const source = "// original snapshot\n";
+    await writeFile(join(root, "Snapshot.swift"), source);
+    // A valid but unreferenced inode models a prior interrupted publication.
+    const digest = createHash("sha256").update(source).digest("hex");
+    const object = join(root, "gateway/display-artifacts/objects", digest.slice(0, 2), digest.slice(2));
+    await mkdir(dirname(object), { recursive: true });
+    await writeFile(object, source, { mode: 0o400 });
+    const orphan = await stat(object);
+    drainDurableWriteStats();
+    const first = await store.ingest(root, "Snapshot.swift", "first-session");
+    expect(drainDurableWriteStats().count).toBe(3); // object bytes, metadata, metadata directory
+    const retained = await stat(join(root, "gateway/display-artifacts/artifacts", first.id, "content"));
+    expect([retained.dev, retained.ino]).toEqual([orphan.dev, orphan.ino]); // actual existing-object path
+    const second = await store.ingest(root, "Snapshot.swift", "second-session");
+    expect(drainDurableWriteStats().count).toBe(2); // metadata and directory; staged duplicate is discarded
+    expect(second.id).not.toBe(first.id);
+    await rm(join(root, "Snapshot.swift"));
+    const reopened = new DisplayArtifactStore(root);
+    await reopened.initialize();
+    for (const [artifact, session] of [[first, "first-session"], [second, "second-session"]] as const) {
+      const lease = await reopened.acquire(artifact.id, session);
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
+        expect(Buffer.concat(chunks).toString()).toBe("// original snapshot\n");
+      } finally { await lease.release(); }
+    }
+    const destination = join(root, "Retained.swift");
+    await expect(reopened.linkArtifact(second.id, "other-session", digest, destination)).rejects.toMatchObject({ code: "not_found" });
+    await expect(reopened.linkArtifact(second.id, "second-session", "0".repeat(64), destination)).rejects.toMatchObject({ code: "conflict" });
+    await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await reopened.linkArtifact(second.id, "second-session", digest, destination)).toBe(true);
+    const linked = await stat(destination);
+    expect([linked.dev, linked.ino]).toEqual([orphan.dev, orphan.ino]);
+    await expect(reopened.linkArtifact(second.id, "second-session", digest, destination)).rejects.toMatchObject({ code: "EEXIST" });
+    await reopened.revoke(first.id, "first-session");
+    await reopened.revoke(second.id, "second-session");
+    expect(await readFile(destination, "utf8")).toBe(source);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 it("retains only authorized sibling Markdown images through source removal, cold reopen and session deletion", async () => {
   const fixture = await displayedPhotoFixture();
