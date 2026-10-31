@@ -76,7 +76,7 @@ const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRe
 };
 
 /**
- * Content and placement use the existing Changes owner. Not now is a Knowledge
+ * Content and placement use the existing Changes owner. Not now is a Profile
  * control decision with that owner's ordinary command receipt, not a note edit.
  * The tool owns no parallel note, decision or receipt store.
  */
@@ -95,7 +95,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       if (refusal) return refused(request.action, refusal);
       if (request.action === "read") {
         const owner = knowledge();
-        if (!owner) return answer({ status: "unavailable", action: "read" }, "Knowledge is unavailable; no profile content was selected.");
+        if (!owner) return answer({ status: "unavailable", action: "read" }, "Profile is unavailable; no profile content was selected.");
         if (request.id !== undefined) {
           signal?.throwIfAborted();
           const record = await owner.read(request.id, request.revisionId);
@@ -140,7 +140,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         return answer(details, JSON.stringify(details));
       }
       const changes = access();
-      if (!changes) return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
+      if (!changes) return answer({ status: "unavailable", action: request.action }, "Profile is unavailable on this Gateway, so the profile cannot change.");
       const citation = triggeringMessage(context);
       if (!citation) return refused(request.action, "no maintainer message in this chat to cite as evidence");
       // Edits Home may not make alone wait for the maintainer's tap on the exact card.
@@ -186,7 +186,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         if (result.status === "declined") return declined();
         [saved] = result.saved as [HomeProfileSaved];
       } catch (error) {
-        if (error instanceof GatewayError && error.code === "unsupported") return answer({ status: "unavailable", action: request.action }, "Knowledge is unavailable on this Gateway, so the profile cannot change.");
+        if (error instanceof GatewayError && error.code === "unsupported") return answer({ status: "unavailable", action: request.action }, "Profile is unavailable on this Gateway, so the profile cannot change.");
         if (error instanceof GatewayError && (error.code === "conflict" || error.code === "invalid_request")) return refused(request.action, error.message);
         throw error;
       }

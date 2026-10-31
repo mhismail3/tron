@@ -394,7 +394,7 @@ export function collapseRepeatedRequests(requests: readonly Omit<ProviderRequest
  */
 const SHARED_TOOL_SCHEMAS = new Set([
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
-  "web_search", "session_search", "session_read", "knowledge", "read_file", "settings", "projects",
+  "web_search", "session_search", "session_read", "settings", "projects",
   "read", "bash", "edit", "write", "jev", "swift_app", "computer", "checkin", "report",
 ]);
 const TOOL_SCHEMA_PATH = /(?:^|\.)(?:toolsAdded|availableTools)\[\]\.(?:parameters(?=[:.\[])|description:)/u;

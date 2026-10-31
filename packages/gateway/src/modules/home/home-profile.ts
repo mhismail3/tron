@@ -15,10 +15,10 @@ import type { ProfileMutationResult, ProfileSortingState } from "./profile-store
 
 /*
  * Tron Home's learned profile (#731): the maintainer's durable preferences,
- * standing decisions, delegation defaults and facts, kept as personal Knowledge
+ * standing decisions, delegation defaults and facts, kept as personal Profile
  * notes. Home writes them through the `profile` tool. Activations carry a metadata
  * index; explicit reads carry exact content/provenance, never Gateway relevance
- * choices or mandatory worker copying. Knowledge stays the only record authority.
+ * choices or mandatory worker copying. Profile stays the only record authority.
  *
  * Membership is the `home-profile` tag alone, never provenance: provenance changes
  * when the maintainer edits a note natively. A profile item's kind is its one
@@ -68,7 +68,7 @@ export interface HomeProfileRead {
   diagnostics: Array<{ id: string; revisionId: string; issues: Array<"kind" | "partition"> }>;
 }
 
-/** Every profile note in the personal scope, classified. A pure read through Knowledge's
+/** Every profile note in the personal scope, classified. A pure read through Profile's
  * list owner: it never admits a model call. Superseded status is derived, not stored: a
  * profile note is superseded when another profile note's current revision names it in a
  * `supersedes` relation. A superseding note that is itself retired still supersedes. */
@@ -89,7 +89,7 @@ export async function readHomeProfile(knowledge: ProfileStore): Promise<HomeProf
 }
 
 /** Also classifies the already-admitted bounded partition snapshot; never do an
- * unbounded second head load ahead of Knowledge's resource admission. */
+ * unbounded second head load ahead of Profile's resource admission. */
 function classifyProfile(notes: ProfileNote[]): HomeProfileRead {
   const supersededBy = new Map<string, string>();
   for (const note of notes) {
@@ -151,12 +151,12 @@ function kindTag(kind: HomeProfileKind): string {
 
 export async function homeProfileSection(knowledge: () => ProfileStore | undefined, activation: "user" | "wake"): Promise<{ text: string; notes: number }> {
   const owner = knowledge();
-  if (!owner) return { text: unavailableSection("Knowledge is not available on this Gateway"), notes: 0 };
+  if (!owner) return { text: unavailableSection("Profile is not available on this Gateway"), notes: 0 };
   try {
     const read = await readHomeProfileIndex(owner);
     return { text: profileIndex(read, 0, activation), notes: read.items.filter((item) => item.status === "active").length };
   } catch (error) {
-    return { text: unavailableSection(`reading Knowledge failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`), notes: 0 };
+    return { text: unavailableSection(`reading Profile failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`), notes: 0 };
   }
 }
 
@@ -168,7 +168,7 @@ function unavailableSection(reason: string): string {
 //
 // Content changes from Home and the maintainer run through HomeProfileItems inside
 // SettingsChangePath.auditSubject. Label-only groups preflight and freeze the same
-// subject's original snapshots in Knowledge's backup, then publish only committed
+// subject's original snapshots in Profile's backup, then publish only committed
 // facts through publishSubjectAudit. Both use the existing Changes/Undo surface.
 // The actor decides
 // only what the note says about confirmation: Home's changes stay inferred until the
@@ -328,9 +328,9 @@ function staleConflict(error: unknown, current: HomeProfileItem | undefined): un
 }
 
 /**
- * The profile's applier: the Knowledge note writes behind every profile change and
+ * The profile's applier: the Profile note writes behind every profile change and
  * undo. It holds no state: each call reads the profile through `readHomeProfile`, writes
- * notes through the Knowledge owner with its revision fence, and reads back what it wrote.
+ * notes through the Profile owner with its revision fence, and reads back what it wrote.
  */
 /** `approved` only ever comes from the maintainer's accepted native card. */
 export interface ProfileChangeContext extends SubjectContext { author: HomeProfileAuthor; approved?: true; confirm?: ConfirmChange }
@@ -348,10 +348,10 @@ export class HomeProfileItems {
   }
 
   /** Domain effects stay here. Content uses the engine's stripe; partition effects
-   * use Knowledge's atomic revision fences and the engine's group publisher. */
+   * use Profile's atomic revision fences and the engine's group publisher. */
   async change(changes: ProfileChangePath, requests: readonly HomeProfileRequest[], input: ProfileChangeContext): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })> {
     const { confirm, ...context } = input;
-    if (!this.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    if (!this.available()) throw new GatewayError("unsupported", "Profile is not available on this Gateway");
     if (requests.some(op => op.action === "reorganize" && op.assignments.length > 8)) throw new GatewayError("invalid_request", "Sort at most 8 profile notes per batch");
     if (context.author.kind === "home" && !context.approved) {
       const read = await this.read();
@@ -462,7 +462,7 @@ export class HomeProfileItems {
 
   /** Group/value fencing, restoration and projection all remain under the Home stripe. */
   async undo(changes: ProfileChangePath, entry: ChangeEntry, context: Omit<ChangeContext, "undoOf">): Promise<ProfileChangeResult> {
-    if (!this.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    if (!this.available()) throw new GatewayError("unsupported", "Profile is not available on this Gateway");
     if (context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer undoes a profile change");
     const group = entry.group ? await changes.record.group(entry.group.id, entry.group.size) : [entry];
     if (group.every(member => labelOnlyWrite(member.before, member.after))) {
@@ -514,7 +514,7 @@ export class HomeProfileItems {
 
   private owner(): ProfileStore {
     const owner = this.knowledge();
-    if (!owner) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    if (!owner) throw new GatewayError("unsupported", "Profile is not available on this Gateway");
     return owner;
   }
 
@@ -522,7 +522,7 @@ export class HomeProfileItems {
     return readHomeProfile(this.owner());
   }
 
-  /** One change. `commandId` keys Knowledge's idempotency receipts for its writes. */
+  /** One change. `commandId` keys Profile's idempotency receipts for its writes. */
   async apply(op: HomeProfileOp, author: HomeProfileAuthor, commandId: string): Promise<{ saved: HomeProfileSaved; writes: HomeProfileWrite[] }> {
     const refusal = validateProfileOp(op, author.kind);
     if (refusal) throw new GatewayError("invalid_request", refusal);
