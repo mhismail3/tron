@@ -16,12 +16,38 @@ import { GatewayService, type GatewayServiceDependencies } from "../../transport
 import { GatewayServer } from "../../transport/server.js";
 import { PROTOCOL_VERSION } from "../../version.js";
 import { ConnectionOwner } from "../connection-owner.js";
-import type { ConnectionOwnerSnapshot, ConnectionPolicy } from "../../modules/integrations/contract.js";
+import type { ConnectionOwnerSnapshot, ConnectionPolicy, IntegrationDefinition } from "../../modules/integrations/contract.js";
+
+// Explicit historical definitions qualify the surviving generic account owner;
+// production must not advertise these retired vendor workflows.
+const HISTORICAL_TEST_DEFINITIONS: readonly IntegrationDefinition[] = [
+  {
+    schemaVersion: 1,
+    id: "knowledge.raindrop",
+    implementation: "knowledge-connector",
+    displayName: "Raindrop",
+    setupMethods: ["token"],
+    capabilities: [
+      { id: "read", displayName: "Read bookmarks", effects: ["read"], supported: true },
+      { id: "intake", displayName: "Capture bookmarks", effects: ["read", "disclosure"], supported: true },
+      { id: "move", displayName: "Move bookmarks", effects: ["write"], supported: true },
+      { id: "assess", displayName: "Assess sources", effects: ["paid"], supported: true },
+    ],
+  },
+  {
+    schemaVersion: 1,
+    id: "knowledge.x",
+    implementation: "knowledge-connector",
+    displayName: "X",
+    setupMethods: ["oauth"],
+    capabilities: [{ id: "read", displayName: "Read bookmarks", effects: ["read"], supported: true }],
+  },
+];
 
 // Real loopback admission, command receipts and durable connection ownership.
 // Nothing contacts a provider or resolves a credential: setup carries only a
 // synthetic reference; the real auth owner stays idle and the model is offline.
-async function start(root: string) {
+async function start(root: string, historicalDefinitions = false) {
   const tronHome = join(root, "tron");
   const agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
@@ -34,7 +60,7 @@ async function start(root: string) {
   });
   const receipts = new CommandReceiptStore(tronHome);
   const devices = new DeviceStore(tronHome, "connections-lock");
-  const connections = new ConnectionOwner(tronHome);
+  const connections = new ConnectionOwner(tronHome, historicalDefinitions ? HISTORICAL_TEST_DEFINITIONS : undefined);
   const auth = new AuthBroker(modelRuntime, () => {});
   const uploads = new UploadStore(tronHome, 1_048_576);
   let server: GatewayServer | undefined;
@@ -97,7 +123,7 @@ it("keeps setup, policy fences, redaction and receipts across a loopback Gateway
   const credentialRef = "connector:raindrop:lock-only-reference";
   const instanceId = "lock-raindrop";
   try {
-    gateway = await start(root);
+    gateway = await start(root, true);
     const statePath = join(gateway.tronHome, "state", "integrations", "connections.json");
     expect((await gateway.snapshot()).instances).toEqual([]);
     await expect(stat(join(gateway.tronHome, "state", "integrations"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -154,7 +180,7 @@ it("keeps setup, policy fences, redaction and receipts across a loopback Gateway
     trace.push(...gateway.exchanges);
     await gateway.close();
     gateway = undefined;
-    gateway = await start(root);
+    gateway = await start(root, true);
     expect(await gateway.snapshot()).toEqual(beforeRestart);
     expect(await readFile(statePath, "utf8")).toBe(bytesBeforeRestart);
     // start pairs a new device: its fresh transport receipt reaches the owner's
@@ -175,3 +201,29 @@ it("keeps setup, policy fences, redaction and receipts across a loopback Gateway
     }
   }
 }, 30_000);
+
+it("does not advertise retired vendor RPC consumers or alter their stored credential references on projection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-retired-connections-"));
+  let gateway: Awaited<ReturnType<typeof start>> | undefined;
+  try {
+    const home = join(root, "tron");
+    await mkdir(home, { mode: 0o700 });
+    const original = new ConnectionOwner(home, HISTORICAL_TEST_DEFINITIONS);
+    const begun = await original.execute({ kind: "setup.begin", commandId: "retired-begin", instanceId: "retired-source", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+    await original.execute({ kind: "setup.complete", commandId: "retired-complete", instanceId: "retired-source", operationId: begun.operationId, providerAccountId: "fixture-account", credentialRef: "connector:raindrop:preserved-only-reference", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+    const state = join(home, "state/integrations/connections.json");
+    const before = await readFile(state, "utf8");
+    gateway = await start(root);
+    const snapshot = await gateway.snapshot();
+    expect(snapshot.definitions).toEqual([]);
+    expect(snapshot.capabilities).toEqual([]);
+    expect(snapshot.instances).toHaveLength(1);
+    expect(JSON.stringify(snapshot)).not.toContain("connector:raindrop:preserved-only-reference");
+    for (const method of ["knowledge.x.oauth.begin", "knowledge.x.oauth.complete", "knowledge.x.credits"]) {
+      expect((await gateway.request(method)).ok).toBe(false);
+    }
+    expect(await readFile(state, "utf8")).toBe(before);
+  } finally {
+    await gateway?.close(); await rm(root, { recursive: true, force: true });
+  }
+}, 60_000);

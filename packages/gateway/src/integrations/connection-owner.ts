@@ -37,30 +37,6 @@ const MAX_RECEIPTS = 256;
 const STATE_MAX_BYTES = 4 * 1_048_576;
 const CONNECTION_STATE_RELATIVE_PATH = ["state", "integrations", "connections.json"] as const;
 
-const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
-  {
-    schemaVersion: 1,
-    id: "knowledge.raindrop",
-    implementation: "knowledge-connector",
-    displayName: "Raindrop",
-    setupMethods: ["token"],
-    capabilities: [
-      { id: "read", displayName: "Read bookmarks", effects: ["read"], supported: true },
-      { id: "intake", displayName: "Capture bookmarks", effects: ["read", "disclosure"], supported: true },
-      { id: "move", displayName: "Move bookmarks", effects: ["write"], supported: true },
-      { id: "assess", displayName: "Assess sources", effects: ["paid"], supported: true },
-    ],
-  },
-  {
-    schemaVersion: 1,
-    id: "knowledge.x",
-    implementation: "knowledge-connector",
-    displayName: "X",
-    setupMethods: ["oauth"],
-    capabilities: [{ id: "read", displayName: "Read bookmarks", effects: ["read"], supported: true }],
-  },
-];
-
 function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
 function conflict(message: string): GatewayError { return new GatewayError("conflict", message); }
 function unsupported(message: string): GatewayError { return new GatewayError("unsupported", message); }
@@ -135,7 +111,7 @@ export class ConnectionOwner implements ConnectionAccess {
   private readonly definitions: IntegrationDefinition[];
   constructor(
     private readonly tronHome: string,
-    definitions: readonly IntegrationDefinition[] = BUILTIN_INTEGRATION_DEFINITIONS,
+    definitions: readonly IntegrationDefinition[] = [],
     private readonly onLegacyJevRetired: (instanceIds: readonly string[]) => void = () => {},
   ) {
     this.definitions = definitions.map(definition => { validateIntegrationDefinition(definition); return copy(definition); });

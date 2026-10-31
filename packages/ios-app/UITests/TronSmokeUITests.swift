@@ -2978,7 +2978,7 @@ final class TronSmokeUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-navigation-fixture"]
-        for title in ["Connected Services", "MCP Servers"] {
+        for title in ["MCP Servers"] {
             app.launch()
             let destination = app.buttons[title]
             XCTAssertTrue(destination.waitForExistence(timeout: 5))

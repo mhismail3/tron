@@ -3,55 +3,27 @@ import SwiftUI
 @testable import TronMobileCore
 import Observation
 
-@MainActor @Observable
-final class HostedIntegrationPresentationTrace {
-    private(set) var events: [String] = []
-    var summary: String { events.joined(separator: "|") }
-    func record(_ event: String) { events.append(event) }
-}
-
-private struct HostedIntegrationPresentationTraceKey: EnvironmentKey {
-    static let defaultValue: HostedIntegrationPresentationTrace? = nil
-}
-
-extension EnvironmentValues {
-    var hostedIntegrationPresentationTrace: HostedIntegrationPresentationTrace? {
-        get { self[HostedIntegrationPresentationTraceKey.self] }
-        set { self[HostedIntegrationPresentationTraceKey.self] = newValue }
-    }
-}
-
-/// Hosted Connected Services/MCP journey backed only by a scripted in-app Gateway.
+/// Hosted MCP, provider layout and connection recovery journeys; no vendor API.
 struct HostedIntegrationsFixtureView: View {
     @Environment(\.scenePhase) private var scenePhase
     private let profile = GatewayProfile(id: "integration-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-integrations")
+    private let replacementProfile = GatewayProfile(id: "replacement-integration-fixture", label: "Replacement Mac", host: "replacement.example.test", port: 9847, machineId: "fixture-integrations-replacement")
     @State private var model: AppModel
+    @State private var gateway: HostedIntegrationsGateway
+    @State private var replacementGateway: HostedIntegrationsGateway
     @State private var ready = false
     @State private var error: String?
-    @State private var gateway: HostedIntegrationsGateway
-    @State private var oauthCounters = "begins:0 completes:0 queries:0 mismatches:0 policyUpdates:0 policyBudget=1000 setupBegins:0 setupCompletes:0 setupBudget=0"
     @State private var mcpOriginalCounters = "add:0 token:0 retargets:0 released:0"
     @State private var mcpReplacementCounters = "add:0 token:0 retargets:0 released:0"
     @State private var hasReplacedMCPAuthority = false
-    @State private var replacementGateway: HostedIntegrationsGateway
-    private let mcpScenario: String?
-    private let parentOAuthScenario: String?
-    private let ollamaDetailScenario: Bool
-    private let replacementProfile = GatewayProfile(id: "replacement-integration-fixture", label: "Replacement Mac", host: "replacement.example.test", port: 9847, machineId: "fixture-integrations-replacement")
-    private let dark: Bool
-    private let recoveryScenario: String?
-    @State private var presentationTrace = HostedIntegrationPresentationTrace()
-    @State private var productionXLogs = ""
     @State private var showingOllamaDetails = false
-    @State private var integrationRoutes = IntegrationSheetRoutes()
+    private let scenario: String
+    private let dark: Bool
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "default"
-        recoveryScenario = scenario.hasPrefix("connection-") ? scenario : nil
-        mcpScenario = scenario.hasPrefix("mcp-") ? scenario : nil
-        parentOAuthScenario = scenario.hasPrefix("parent-oauth-") ? scenario : nil
-        ollamaDetailScenario = scenario == "ollama-detail"
+        let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "mcp-held-add"
+        self.scenario = scenario
         dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
         _gateway = State(initialValue: gateway)
@@ -65,49 +37,20 @@ struct HostedIntegrationsFixtureView: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-token")
-        if scenario == "mcp-replace-mac" || scenario == "mcp-auth-replaced-authority" || scenario == "parent-oauth-replace" { try! profiles.save(replacementProfile, token: "replacement-fixture-token", selecting: false) }
-        let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "hosted-integrations-app-log-\(UUID().uuidString).jsonl"))
+        if scenario == "mcp-replace-mac" || scenario == "mcp-auth-replaced-authority" { try! profiles.save(replacementProfile, token: "replacement-fixture-token", selecting: false) }
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "hosted-integrations-fixture")),
-            appLog: appLog))
-    }
-
-    private var fixtureDiagnostics: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(oauthCounters).accessibilityIdentifier("fixture.oauth-counters")
-            Text(presentationTrace.summary).accessibilityIdentifier("fixture.integration-presentation-trace")
-            Text("destination=\(model.knowledgeDestinationIdentity.profileID ?? "none"):\(model.knowledgeDestinationIdentity.lifecycleGeneration)")
-                .accessibilityIdentifier("fixture.destination")
-            Text(productionXLogs).accessibilityIdentifier("fixture.production-x-logs")
-        }
-        .font(.system(size: 1))
-        .opacity(0.01)
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .contain)
+            appLog: AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "hosted-integrations-app-log-\(UUID().uuidString).jsonl"))))
     }
 
     var body: some View {
         Group {
-            if recoveryScenario == "connection-secondary" {
+            if scenario == "connection-secondary" {
                 HostedSecondaryRecoveryFixture()
-            } else if let recoveryScenario {
-                HostedConnectionRetryFixture(scenario: recoveryScenario)
+            } else if scenario.hasPrefix("connection-") {
+                HostedConnectionRetryFixture(scenario: scenario)
             } else if ready {
-                if parentOAuthScenario == "parent-oauth-chat-reconnect" {
-                    NavigationStack { ChatView(sessionID: "integration-fixture-chat") }
-                        .environment(model)
-                        .environment(\.hostedIntegrationPresentationTrace, presentationTrace)
-                        .tronPresentation()
-                        .tronSettingsLayout()
-                        .overlay { fixtureDiagnostics }
-                } else if parentOAuthScenario != nil {
-                    SessionShellView()
-                        .environment(model)
-                        .environment(\.hostedIntegrationPresentationTrace, presentationTrace)
-                        .tronPresentation()
-                        .tronSettingsLayout()
-                        .overlay { fixtureDiagnostics }
-                } else if ollamaDetailScenario {
+                if scenario == "ollama-detail" {
                     NavigationStack {
                         Button("Details for Ollama") { showingOllamaDetails = true }
                             .tronManagedSheet(isPresented: $showingOllamaDetails, identity: "fixture.ollama-detail") {
@@ -116,8 +59,7 @@ struct HostedIntegrationsFixtureView: View {
                                         id: "ollama", name: "Ollama", configured: true,
                                         usageSupported: false, localOnly: true, authSource: nil,
                                         credentialType: nil, authMethods: [], modelCount: 1
-                                    ),
-                                    target: .global
+                                    ), target: .global
                                 )
                                 .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
                             }
@@ -130,27 +72,19 @@ struct HostedIntegrationsFixtureView: View {
                 } else {
                     NavigationStack {
                         VStack {
-                            if mcpScenario != nil {
-                                MCPServersSettingsView(sessionID: mcpScenario?.hasPrefix("mcp-auth-") == true ? "fixture-auth-session" : nil)
-                                Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
-                                Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
-                                Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")
-                            } else { IntegrationsSettingsView(routes: integrationRoutes) }
-                            Text(oauthCounters).font(.caption2).lineLimit(2).frame(height: 32)
-                                .accessibilityIdentifier("fixture.oauth-counters")
+                            MCPServersSettingsView(sessionID: scenario.hasPrefix("mcp-auth-") ? "fixture-auth-session" : nil)
+                            Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
+                            Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
+                            Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")
                         }
                     }
                     .environment(model)
-                    .environment(\.hostedIntegrationPresentationTrace, presentationTrace)
                     .tronPresentation()
                     .tronSettingsLayout()
                     .tronSettingsVisualTheme(accent: .tronCyan)
                 }
-            } else if let error {
-                Text(error)
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            } else if let error { Text(error) }
+            else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .preferredColorScheme(dark ? .dark : .light)
         .onChange(of: scenePhase) { _, phase in
@@ -158,49 +92,21 @@ struct HostedIntegrationsFixtureView: View {
             case .background:
                 model.enteredBackground()
                 Task {
-                    if ((mcpScenario == "mcp-replace-mac" || mcpScenario == "mcp-auth-replaced-authority") && !hasReplacedMCPAuthority)
-                        || (parentOAuthScenario == "parent-oauth-replace" && !hasReplacedMCPAuthority) {
+                    if (scenario == "mcp-replace-mac" || scenario == "mcp-auth-replaced-authority") && !hasReplacedMCPAuthority {
                         hasReplacedMCPAuthority = true
                         await model.switchGateway(replacementProfile)
                     }
                     await gateway.releaseMCPReply()
-                    if parentOAuthScenario != "parent-oauth-pending-reconnect"
-                        && parentOAuthScenario != "parent-oauth-receipt-return" {
-                        await gateway.releaseOAuthReply()
-                    }
                 }
             case .inactive: model.becameInactive()
             case .active: model.becameActive()
             @unknown default: break
             }
         }
+        .task { for await value in gateway.mcpCounterUpdates() { mcpOriginalCounters = value } }
+        .task { for await value in replacementGateway.mcpCounterUpdates() { mcpReplacementCounters = value } }
         .task {
-            // Diagnostics reach the AppLog actor asynchronously and the last one (for
-            // example xsetup.observer.published) can land after every visible state
-            // change, so follow the log itself rather than re-reading on UI changes.
-            while !Task.isCancelled {
-                let records = await model.appLog.snapshot().filter { $0.event.hasPrefix("xsetup.") }
-                let projected = records.map { record in
-                    "\(record.event) outcome=\(record.outcome ?? "-") generation=\(record.lifecycleGeneration.map(String.init) ?? "-") connection=\(record.connectionID.map(String.init) ?? "-") \(record.message)"
-                }.joined(separator: "|")
-                if projected != productionXLogs { productionXLogs = projected }
-                try? await Task.sleep(for: .milliseconds(200))
-            }
-        }
-        .task {
-            guard recoveryScenario == nil else { return }
-            for await value in gateway.counterUpdates() { oauthCounters = value }
-        }
-        .task {
-            guard mcpScenario != nil else { return }
-            for await value in gateway.mcpCounterUpdates() { mcpOriginalCounters = value }
-        }
-        .task {
-            guard mcpScenario != nil else { return }
-            for await value in replacementGateway.mcpCounterUpdates() { mcpReplacementCounters = value }
-        }
-        .task {
-            guard recoveryScenario == nil else { return }
+            guard !scenario.hasPrefix("connection-") else { return }
             do { try await model.connectHostedGateway(profile: profile, token: "fixture-token"); ready = true }
             catch { self.error = error.localizedDescription }
         }
@@ -211,6 +117,7 @@ actor HostedIntegrationsGateway {
     private let scenario: String
     private var sockets: [HostedIntegrationsSocket] = []
     private var receipts: [String: JSONValue] = [:]
+    private var commands: [String: String] = [:]
     private var authStarts = 0
     private var authResumes = 0
     private var authAnswers = 0
@@ -241,59 +148,6 @@ actor HostedIntegrationsGateway {
         mcpContinuations.forEach { $0.yield(value) }
     }
     func releaseMCPReply() { mcpReply?.resume(); mcpReply = nil }
-    private var oauthBegins = 0
-    private var oauthBeginCommandIDs: Set<String> = []
-    private var receiptReturns = 0
-    private var oauthReplyReleases = 0
-    private var oauthCompletes = 0
-    private var oauthCompleteMode = "none"
-    private var receiptQueries = 0
-    private var queryMismatches = 0
-    private var commands: [String: String] = [:]
-    private var receiptErrors: [String: JSONValue] = [:]
-    private var counterContinuations: [AsyncStream<String>.Continuation] = []
-    nonisolated func counterUpdates() -> AsyncStream<String> {
-        AsyncStream { continuation in Task { await self.addCounterContinuation(continuation) } }
-    }
-    private func addCounterContinuation(_ value: AsyncStream<String>.Continuation) {
-        counterContinuations.append(value); publishCounters()
-    }
-    private var connectionsListCount = 0
-    private var connectionStateRevision = 1
-    private var lastCatalogRevision = 0
-    private var lastPendingSetupCount = 0
-    private var lastCatalogInstanceCount = 0
-    private var policyUpdates = 0
-    private var setupBegins = 0
-    private var setupCompletes = 0
-    private var lastPolicyBudget = 1_000
-    private var lastPolicyEnabled = true
-    private var lastSetupBudget = 0
-    private var setupInstanceID = ""
-    private var setupDefinitionID = ""
-    private var oauthInstanceID = ""
-    private let oauthOperationID = "fixture-oauth-operation"
-    private var oauthBeginAccepted = false
-    private var oauthSetupCompleted = false
-    private var oauthClientIDProvided = false
-    private var oauthRedirectURIProvided = false
-    private var oauthPolicyEnabled = false
-    private var oauthPaidAccessApproved = false
-    private var oauthPaidBudgetCents = 0
-    private var oauthRecurringApproved = false
-    private var oauthReply: CheckedContinuation<Void, Never>?
-    private var oauthReplyReleaseScheduled = false
-    private func publishCounters() {
-        let value = "begins:\(oauthBegins) uniqueBeginCommands:\(oauthBeginCommandIDs.count) completes:\(oauthCompletes) completeMode=\(oauthCompleteMode) queries:\(receiptQueries) receiptReturns:\(receiptReturns) replyReleases:\(oauthReplyReleases) mismatches:\(queryMismatches) catalog:lists=\(connectionsListCount) revision=\(lastCatalogRevision) pending=\(lastPendingSetupCount) instances=\(lastCatalogInstanceCount) client=\(oauthClientIDProvided) redirect=\(oauthRedirectURIProvided) policy:enabled=\(oauthPolicyEnabled) paid=\(oauthPaidAccessApproved) budget=\(oauthPaidBudgetCents) recurring=\(oauthRecurringApproved) policyUpdates:\(policyUpdates) policyBudget=\(lastPolicyBudget) policyEnabled=\(lastPolicyEnabled) setupBegins:\(setupBegins) setupCompletes:\(setupCompletes) setupBudget=\(lastSetupBudget)"
-        counterContinuations.forEach { $0.yield(value) }
-    }
-    func releaseOAuthReply() {
-        guard let reply = oauthReply else { return }
-        oauthReply = nil
-        oauthReplyReleases += 1
-        publishCounters()
-        reply.resume()
-    }
     init(scenario: String) { self.scenario = scenario }
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
 
@@ -373,190 +227,11 @@ actor HostedIntegrationsGateway {
             publishMCPCounters()
             return (.object(["stored": .bool(true)]), nil)
         }
-        if method == "connections.list" {
-            connectionsListCount += 1
-            let value = snapshot()
-            publishCounters()
-            // Keep the accepted request in flight until this same-authority
-            // reconnect has actually read its production-shaped pending projection.
-            if scenario == "parent-oauth-pending-reconnect", oauthReply != nil, !oauthReplyReleaseScheduled {
-                oauthReplyReleaseScheduled = true
-                Task {
-                    try? await Task.sleep(for: .milliseconds(500))
-                    self.releaseOAuthReply()
-                }
-            }
-            return (value, nil)
-        }
-        if method == "connections.policy.update" {
-            policyUpdates += 1
-            let policy = params["policy"] ?? .object([:])
-            lastPolicyBudget = paidBudget(policy)
-            if case .object(let fields) = policy, case .bool(let enabled)? = fields["enabled"] { lastPolicyEnabled = enabled }
-            publishCounters()
-            var fields = instance(params["instanceId"]?.stringValue ?? "x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna").objectValue ?? [:]
-            fields["policy"] = policy
-            fields["setupRevision"] = .number(2)
-            return (.object(fields), nil)
-        }
-        if method == "connections.setup.begin" {
-            setupBegins += 1
-            setupInstanceID = params["instanceId"]?.stringValue ?? "fixture-setup"
-            setupDefinitionID = params["definitionId"]?.stringValue ?? "knowledge.raindrop"
-            publishCounters()
-            return (.object(["operationId": .string("fixture-setup-operation"), "instanceId": .string(setupInstanceID),
-                "definitionId": .string(setupDefinitionID), "method": params["method"] ?? .string("token"), "status": .string("pending")]), nil)
-        }
-        if method == "connections.setup.complete" {
-            setupCompletes += 1
-            let policy = params["policy"] ?? .object([:])
-            lastSetupBudget = paidBudget(policy)
-            publishCounters()
-            var fields = instance(setupInstanceID, setupDefinitionID, "knowledge-connector", params["providerAccountId"]?.stringValue ?? "fixture-account", "ready", "Fixture account").objectValue ?? [:]
-            fields["policy"] = policy
-            return (.object(fields), nil)
-        }
         if method == "command.status", let command = params["commandId"]?.stringValue {
-            receiptQueries += 1
-            if commands[command] != params["method"]?.stringValue { queryMismatches += 1 }
-            publishCounters()
-            if let error = receiptErrors[command] { return (nil, error) }
-            if let value = receipts[command] {
-                receiptReturns += 1
-                publishCounters()
-                return (.object(["status": .string("completed"), "result": value]), nil)
-            }
+            if let value = receipts[command] { return (.object(["status": .string("completed"), "result": value]), nil) }
             return (.object(["status": .string("missing")]), nil)
         }
-        if method == "knowledge.x.oauth.begin", let command = params["commandId"]?.stringValue {
-            oauthBegins += 1
-            guard oauthBeginCommandIDs.insert(command).inserted else {
-                publishCounters()
-                return (nil, .object(["code": .string("duplicate"), "message": .string("OAuth begin command replayed"), "retryable": .bool(false)]))
-            }
-            commands[command] = method
-            guard oauthBegins == 1 else {
-                publishCounters()
-                return (nil, .object(["code": .string("duplicate"), "message": .string("OAuth begin replayed"), "retryable": .bool(false)]))
-            }
-            if oauthBegins == 1 {
-                oauthBeginAccepted = true
-                connectionStateRevision += 1
-                oauthInstanceID = params["instanceId"]?.stringValue ?? "fixture"
-                oauthClientIDProvided = !(params["clientId"]?.stringValue ?? "").isEmpty
-                oauthRedirectURIProvided = !(params["redirectUri"]?.stringValue ?? "").isEmpty
-                let policy = params["policy"]?.objectValue ?? [:]
-                if case .bool(let enabled)? = policy["enabled"] { oauthPolicyEnabled = enabled }
-                if case .bool(let approved)? = policy["paidAccessApproved"] { oauthPaidAccessApproved = approved }
-                if case .number(let budget)? = policy["paidBudgetCents"] { oauthPaidBudgetCents = Int(budget) }
-                if case .bool(let approved)? = policy["recurringApproved"] { oauthRecurringApproved = approved }
-            }
-            let result: JSONValue = .object(["operationId": .string(oauthOperationID),
-                "instanceId": params["instanceId"] ?? .string("fixture"),
-                "authorizationUrl": .string("https://twitter.com/i/oauth2/authorize?state=fixture"),
-                "state": .string("fixture")])
-            if scenario != "oauth-missing" { receipts[command] = result }
-            publishCounters()
-            if scenario == "oauth-delayed" || scenario == "oauth-missing" || scenario == "parent-oauth-pending-reconnect"
-                || scenario == "parent-oauth-receipt-return" {
-                await withCheckedContinuation { oauthReply = $0 }
-            }
-            return (result, nil)
-        }
-        if method == "knowledge.x.oauth.complete", let command = params["commandId"]?.stringValue {
-            oauthCompletes += 1; commands[command] = method
-            let callbackURL = params["callbackUrl"]?.stringValue
-            let code = params["code"]?.stringValue
-            let state = params["state"]?.stringValue
-            oauthCompleteMode = callbackURL != nil ? ((code == nil && state == nil) ? "callback" : "mixed") : ((code != nil && state != nil) ? "code" : "invalid")
-            publishCounters()
-            if oauthCompleteMode == "mixed" || oauthCompleteMode == "invalid" {
-                return (nil, .object(["code": .string("invalid_request"), "message": .string("Provide either the full X OAuth redirect URL or its code and state"), "retryable": .bool(false)]))
-            }
-            if scenario == "oauth-expired" {
-                let error: JSONValue = .object(["code": .string("conflict"), "message": .string("X OAuth setup expired; start authorization again"), "retryable": .bool(false)])
-                receiptErrors[command] = error
-                await withCheckedContinuation { oauthReply = $0 }
-                return (nil, error)
-            }
-            let value = instance(oauthInstanceID, "knowledge.x", "knowledge-connector", "fixture-x-account", "ready", "Connected test X")
-            receipts[command] = value
-            if !oauthSetupCompleted && scenario != "oauth-expired" {
-                oauthSetupCompleted = true
-                connectionStateRevision += 1
-            }
-            if scenario == "oauth-complete-delayed" || scenario == "parent-oauth-complete-delayed" { await withCheckedContinuation { oauthReply = $0 } }
-            return (value, nil)
-        }
-        if method == "knowledge.x.credits" {
-            try? await Task.sleep(for: .milliseconds(5_000))
-            if scenario == "credits-fail" {
-                return (nil, .object(["code": .string("unavailable"), "message": .string("Fixture credit failure"), "retryable": .bool(true)]))
-            }
-            return (.object(["freeBalance": .number(0), "prepaidBalance": .number(4.2), "totalBalance": .number(4.2)]), nil)
-        }
         return (nil, .object(["code": .string("unsupported"), "message": .string("Not used by this fixture"), "retryable": .bool(false)]))
-    }
-
-    private func paidBudget(_ policy: JSONValue) -> Int {
-        guard case .object(let values) = policy, case .number(let budget)? = values["paidBudgetCents"] else { return 0 }
-        return Int(budget)
-    }
-
-    private func snapshot() -> JSONValue {
-        let definitions: [JSONValue] = [definition("knowledge.raindrop", "Raindrop", [capability("read", "Read bookmarks")]),
-                                        definition("knowledge.x", "X", [capability("read", "Read bookmarks")])]
-        var instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("63441068"), "role": .string("research")])]),
-                                      instance("raindrop-2", "knowledge.raindrop", "knowledge-connector", "raindrop-second", "setup-required", nil),
-                                      instance("x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna")]
-        if oauthSetupCompleted {
-            instances.append(instance(oauthInstanceID, "knowledge.x", "knowledge-connector", "fixture-x-account", "ready", "Connected test X"))
-        }
-        let capabilities = instances.compactMap { item -> JSONValue? in
-            guard let id = item.objectValue?["id"]?.stringValue, let definitionId = item.objectValue?["definitionId"]?.stringValue else { return nil }
-            let health = item.objectValue?["health"]?.stringValue
-            return .object(["id": .string("read"), "availability": .string(health == "setup-required" ? "requires-setup" : "available"),
-                            "effects": .array([.string("read")]), "definitionId": .string(definitionId), "connectionId": .string(id),
-                            "provenance": .object(["owner": .string("connection"), "definitionId": .string(definitionId), "connectionId": .string(id)])])
-        }
-        let setupInstances = oauthSetupCompleted
-            ? instances.filter { $0.objectValue?["id"]?.stringValue != oauthInstanceID }
-            : instances
-        var operations: [JSONValue] = setupInstances.map { item in
-            .object(["operationId": .string("setup-\(item.objectValue?["id"]?.stringValue ?? "")"),
-                     "instanceId": item.objectValue?["id"] ?? .string(""), "definitionId": item.objectValue?["definitionId"] ?? .string(""),
-                     "method": .string(item.objectValue?["definitionId"]?.stringValue == "knowledge.x" ? "oauth" : "token"),
-                     "status": .string("completed"), "createdAt": .string("2026-09-30T00:00:00Z"), "updatedAt": .string("2026-09-30T00:00:00Z")])
-        }
-        if oauthBeginAccepted {
-            operations.append(.object(["operationId": .string(oauthOperationID), "instanceId": .string(oauthInstanceID),
-                "definitionId": .string("knowledge.x"), "method": .string("oauth"),
-                "status": .string(oauthSetupCompleted ? "completed" : "pending"),
-                "createdAt": .string("2026-09-30T00:00:00Z"), "updatedAt": .string("2026-09-30T00:00:00Z")]))
-        }
-        lastCatalogRevision = connectionStateRevision
-        lastPendingSetupCount = oauthBeginAccepted && !oauthSetupCompleted ? 1 : 0
-        lastCatalogInstanceCount = instances.count
-        return .object(["definitions": .array(definitions), "instances": .array(instances), "setupOperations": .array(operations),
-                        "capabilities": .array(capabilities), "stateRevision": .number(Double(connectionStateRevision))])
-    }
-
-    private func definition(_ id: String, _ name: String, _ capabilities: [JSONValue]) -> JSONValue {
-        .object(["schemaVersion": .number(1), "id": .string(id), "implementation": .string("knowledge-connector"), "displayName": .string(name),
-                 "setupMethods": .array([.string(id == "knowledge.x" ? "oauth" : "token")]),
-                 "capabilities": .array(capabilities)])
-    }
-    private func capability(_ id: String, _ name: String) -> JSONValue {
-        .object(["id": .string(id), "displayName": .string(name), "effects": .array([.string("read")]), "supported": .bool(true)])
-    }
-    private func instance(_ id: String, _ definition: String, _ implementation: String, _ account: String, _ health: String, _ displayName: String?, collections: [JSONValue]? = nil) -> JSONValue {
-        var fields: [String: JSONValue] = ["id": .string(id), "definitionId": .string(definition), "implementation": .string(implementation),
-            "providerAccountId": .string(account), "credentialConfigured": .bool(true), "credentialAvailability": .string("available"),
-            "providerIdentity": .string("admitted"), "policy": .object(["enabled": .bool(true), "allowWrites": .bool(false), "paidAccessApproved": .bool(true), "paidBudgetCents": .number(1000), "recurringApproved": .bool(false)]),
-            "health": .string(health), "createdAt": .string("2026-09-30T00:00:00Z"), "updatedAt": .string("2026-09-30T00:00:00Z"), "setupRevision": .number(1)]
-        if let displayName { fields["providerDisplayName"] = .string(displayName) }
-        if let collections { fields["raindropCollections"] = .array(collections) }
-        return .object(fields)
     }
 }
 

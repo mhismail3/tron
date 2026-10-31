@@ -10,13 +10,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    #if HOSTED_TEST
-    @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
-    #endif
     @PresentationState private var showsNotifications = false
-    /// Connected Services sheet routes live here, above its presented content,
-    /// which SwiftUI can rebuild while the sheet stays up (#932).
-    @PresentationState private var integrationRoutes = IntegrationSheetRoutes()
     @PresentationState private var hasRefreshedNotificationBadge = false
 
     init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
@@ -45,11 +39,6 @@ struct SettingsView: View {
                         TronSettingsDivider()
                         settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
                             ProvidersSettingsView(sessionID: nil)
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Connected Services", summary: "Service accounts and Knowledge settings", icon: "link",
-                                     onDismiss: { integrationRoutes.reset() }) {
-                            IntegrationsSettingsView(routes: integrationRoutes, onOpenSession: onImported)
                         }
                     }
                     SettingsGroupCard(.tools) {
@@ -157,10 +146,6 @@ struct SettingsView: View {
         }
         .tronPresentation()
         .tronSettingsLayout()
-        #if HOSTED_TEST
-        .onAppear { hostedTrace?.record("settings.root.appear") }
-        .onDisappear { hostedTrace?.record("settings.root.disappear") }
-        #endif
     }
 
     private func settingsLink<Destination: View>(

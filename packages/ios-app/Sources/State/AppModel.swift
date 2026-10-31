@@ -238,7 +238,6 @@ final class AppModel {
     /// Owns idempotent Home designation receipts independently of dashboard reads.
     let homeMutations: HomeMutationCoordinator
     /// Read-side projections and owner-routed connection-instance mutations.
-    let integrations: IntegrationsRPCClient
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
     private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
     /// Gateway-owned archived-session counts, one per profile whose count is
@@ -660,13 +659,6 @@ final class AppModel {
         })
         let installedApps = InstalledSwiftApps.gateway(client: client, lifecycle: lifecycle, mutations: mutationExecutor)
         let workspaceInspection = WorkspaceInspectionService(client: client)
-        let integrations = IntegrationsRPCClient(
-            request: { method, params in
-                try await client.requestValue(method, params)
-            },
-            mutationExecutor: mutationExecutor,
-            uuidSource: uuidSource
-        )
         let chatMedia = ChatMediaLoader(
             fetch: chatMediaFetch ?? { identity in
                 let value = try await client.blob(
@@ -698,7 +690,6 @@ final class AppModel {
         self.noticeCenter = noticeCenter
         self.dashboardConnections = dashboardConnections
         self.automationCatalog = automationCatalog
-        self.integrations = integrations
         self.homeMutations = homeMutations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
