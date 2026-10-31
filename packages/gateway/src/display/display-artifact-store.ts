@@ -611,15 +611,32 @@ export class DisplayArtifactStore {
     await this.serialize(async () => {
       // A queued grant must commit before orphan membership is captured.
       const liveSessionIDs = await resolveLiveSessionIDs?.();
-      for (const [id, metadata] of [...this.index]) {
-        const owners = metadata.owners.filter((owner) => owner !== removingSessionID
-          && (liveSessionIDs === undefined || liveSessionIDs.has(owner)));
-        if (owners.length !== metadata.owners.length) {
-          const next = { ...metadata, owners };
-          await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
-          this.index.set(id, next);
+      let removedDirectories = false;
+      try {
+        for (const [id, metadata] of [...this.index]) {
+          const owners = metadata.owners.filter((owner) => owner !== removingSessionID
+            && (liveSessionIDs === undefined || liveSessionIDs.has(owner)));
+          const removing = owners.length === 0 && (this.activeReaderCounts.get(id) ?? 0) === 0;
+          if (owners.length !== metadata.owners.length) {
+            const next = { ...metadata, owners };
+            // Retained readers/owners need durable revocation metadata. With no
+            // reader or owner left, durably delete the directory instead of
+            // synchronizing an empty-owner document immediately before erasing it.
+            if (!removing) await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
+            this.index.set(id, next);
+          }
+          // Close read admission above before yielding to unlink. The mutation
+          // lane also excludes grants/ingests until this deletion cut is durable.
+          if (removing) removedDirectories = true;
+          await this.removeUnowned(id);
         }
-        await this.removeUnowned(id);
+      } finally {
+        // Synchronize once for the entire cut, including removals completed
+        // before a later operational error; never acknowledge volatile deletion.
+        if (removedDirectories) {
+          const directory = await open(this.artifactDirectory, "r");
+          try { await syncDurably(directory); } finally { await directory.close(); }
+        }
       }
     });
   }

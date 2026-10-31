@@ -97,6 +97,9 @@ The 199-offer capacity journey joins RuntimeSlot state changes and bounds real
 metadata synchronization work to 812 operations (four per offer plus fixed turn/store
 initialization); host elapsed time is not its oracle. It still checks all 200 offers,
 canonical deletion, byte reclamation, live/installed retention and capacity reuse.
+Faux output uses microtask delivery rather than token-pacing timers. Teardown joins
+this journey's body even after the runner reports a timeout, before disposing its
+registry or removing storage; the deadline does not cancel accepted maintenance.
 Artifacts: `test-results/apps-install/report.json` includes the observed sync count.
 Fixture kill cuts release the workspace lease first; they do not prove whole-Gateway
 ungraceful crash or power-loss recovery.

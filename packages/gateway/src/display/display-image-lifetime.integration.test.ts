@@ -59,6 +59,52 @@ it("durably publishes new display bytes once and reuses them for distinct retain
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+it("durably removes unowned artifact directories in one maintenance cut without republishing deleted metadata", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-display-retirement-"));
+  try {
+    const store = new DisplayArtifactStore(root);
+    await store.initialize();
+    await writeFile(join(root, "Snapshot.swift"), "// retained bytes\n");
+    const retired = [];
+    for (let index = 0; index < 8; index += 1) retired.push(await store.ingest(root, "Snapshot.swift", "deleted-session"));
+    const reading = await store.ingest(root, "Snapshot.swift", "deleted-session");
+    const shared = await store.ingest(root, "Snapshot.swift", "deleted-session");
+    await store.grant(shared.id, "live-session", "deleted-session");
+    const live = await store.ingest(root, "Snapshot.swift", "live-session");
+    const lease = await store.acquire(reading.id, "deleted-session");
+    try {
+      drainDurableWriteStats();
+      await store.maintain(async () => new Set(["live-session"]));
+      // Two retained metadata publications (reader + surviving owner), then
+      // one directory sync for the whole removed set, not two per deleted file.
+      expect(drainDurableWriteStats().count).toBe(5);
+      for (const artifact of retired) {
+        await expect(stat(join(root, "gateway/display-artifacts/artifacts", artifact.id))).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(store.acquire(artifact.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
+      }
+      await expect(store.acquire(reading.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
+      expect(await readFile(join(root, "gateway/display-artifacts/artifacts", reading.id, "content"), "utf8")).toBe("// retained bytes\n");
+      const chunks: Buffer[] = [];
+      for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks).toString()).toBe("// retained bytes\n");
+    } finally { await lease.release(); }
+    await expect(stat(join(root, "gateway/display-artifacts/artifacts", reading.id))).rejects.toMatchObject({ code: "ENOENT" });
+    const reopened = new DisplayArtifactStore(root);
+    await reopened.initialize();
+    for (const artifact of [...retired, reading, shared]) {
+      await expect(reopened.acquire(artifact.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
+    }
+    for (const artifact of [shared, live]) {
+      const retained = await reopened.acquire(artifact.id, "live-session");
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of retained.stream) chunks.push(Buffer.from(chunk));
+        expect(Buffer.concat(chunks).toString()).toBe("// retained bytes\n");
+      } finally { await retained.release(); }
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 it("retains only authorized sibling Markdown images through source removal, cold reopen and session deletion", async () => {
   const fixture = await displayedPhotoFixture();
   let registry = fixture.registry;
