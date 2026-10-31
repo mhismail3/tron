@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 from tron_mac_replace_platform import run
-from tron_profile_cutover import run_controller
+from tron_profile_cutover import run_controller, verify_gateway_source
 from tron_rebuild_lock import RebuildLock, RebuildBusy
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +20,31 @@ class ProfileCutoverCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn('--rollback', result.stdout)
         self.assertIn('--apply', result.stdout)
+
+    def test_source_guard_landed_tree_and_reader_refusal(self):
+        # The exact landed tree originally refused solely because profile.md changed.
+        verify_gateway_source()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', root, *args], text=True)
+            def commit():
+                git('add', '.')
+                git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture')
+            git('init', '-q')
+            home = root / 'packages/gateway/src/modules/home'
+            home.mkdir(parents=True)
+            reader = home / 'profile-store.ts'
+            reader.write_text('export const reader = 1;\n')
+            commit()
+            source = git('rev-parse', 'HEAD').strip()
+            (home / 'profile.md').write_text('Owning cutover documentation.\n')
+            commit()
+            verify_gateway_source(root, source)
+            reader.write_text('export const reader = 2;\n')
+            commit()
+            with self.assertRaises(subprocess.CalledProcessError):
+                verify_gateway_source(root, source)
 
     def test_controller_process_and_real_log_path_contract(self):
         class FixtureLifecycle:
