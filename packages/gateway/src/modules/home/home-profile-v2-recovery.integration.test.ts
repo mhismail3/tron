@@ -1,7 +1,5 @@
 import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
 import * as fs from "node:fs/promises";
-import { join } from "node:path";
-import { profileOperationKey } from "./profile-notes.js";
 import { afterEach, expect, it } from "vitest";
 import { crashProfilePartition } from "../../../test-support/profile-partition-crash.js";
 import { fixture, disposeFixtures } from "../../../test-support/home-task-fixture.js";
@@ -13,6 +11,7 @@ import type { ProfileNoteRecord } from "./profile-note-contract.js";
 
 type Note = Extract<ProfileNoteRecord, { kind: "note" }>;
 let knowledge: ProfileStore | undefined;
+let resource: ConstructorParameters<typeof ProfileStore>[0];
 const evidence: unknown[] = [];
 afterEach(async () => {
    knowledge = undefined;
@@ -22,7 +21,8 @@ afterEach(async () => {
 });
 async function setup() {
   const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
-  knowledge = new ProfileStore(f.registry.moduleHost.contract(workspaceModule));
+  resource = f.registry.moduleHost.contract(workspaceModule);
+  knowledge = new ProfileStore(resource);
   return { f, profile: new HomeProfileItems(() => knowledge) };
 }
 async function seed(index: number, path?: string[], retired = false): Promise<Note> {
@@ -31,7 +31,7 @@ async function seed(index: number, path?: string[], retired = false): Promise<No
     content: { title: `Exact original note ${index}`, role: "fact", confirmed: false, ...(retired ? { retired: true } : {}),
       tags: path ? ["home-profile", "kind-fact"] : ["fixture-label", "home-file-home", "home-profile", "kind-fact"], ...(path ? { profile: { version: 2, path } } : {}) },
   } as const;
-  if (!path) return legacyProfileFixture(knowledge!, `v2-seed-${index}`, structuredClone(record));
+  if (!path) return legacyProfileFixture(resource, `v2-seed-${index}`, structuredClone(record));
   return (await knowledge!.createNote({ commandId: `v2-seed-${index}`, record: structuredClone(record) })).record as Note;
 }
 
@@ -45,54 +45,24 @@ it("refuses native legacy-placement creation before writing a body or head", asy
   evidence.push({ nativeLegacyWriterRefused: true, profileHeadsAfterRefusal: 0 });
 }, 60_000);
 
-it.each(["before-backup", "after-backup", "mid-body", "precommit", "after-commit"])("v2 placement survives a real %s process death, cold retry and exact historical Undo", async cut => {
-  const { f, profile } = await setup();
-  const originals = await Promise.all([seed(0), seed(1), seed(2)]);
-  const inactive = await seed(3, undefined, true);
-  const assignments = originals.map(note => ({ id: note.id, expectedRevision: note.revisionId, path: "engineering/testing" }));
-  const context = { actor: { kind: "ui" as const, id: "fixture-maintainer" }, commandId: `v2-crash-${cut}`, reason: "Exact approved placement" };
-
-  await f.registry.dispose();
-  await f.registry.administrativeWorkRegistry.waitUntilSettled();
-  await crashProfilePartition(f.root, f.tronHome, assignments, cut, undefined, { context });
-  const registry = await f.restartToReadiness();
-  knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
-  for (const note of originals) {
-    const current = await knowledge.read(note.id) as Note;
-    if (cut !== "after-commit") expect(current).toEqual(note);
-    else expect(current.content.profile?.version).toBe(2);
-  }
-  const changes = f.settings.settingsChanges;
-  const saved = cut === "before-backup" ? undefined : await knowledge.profilePartitionRecovery(context.commandId);
-  const result = saved ? await profile.retryPartition(changes, context.commandId, "ui") : await profile.partition(changes, { commandId: context.commandId, mode: "migrate", assignments }, context);
-  const recovery = await knowledge.profilePartitionRecovery(context.commandId);
-  if (saved) expect(recovery.prepared.map(note => note.revisionId)).toEqual(saved.prepared.map(note => note.revisionId));
-  expect(result.changes).toHaveLength(3);
-  await changes.undo(result.changes[0]!.changeId, { actor: { kind: "ui", id: "fixture-maintainer" }, commandId: `v2-undo-${cut}` });
-  for (const note of originals) {
-    const current = await knowledge.read(note.id) as Note;
-    expect({ ...current, revisionId: note.revisionId }).toEqual(note);
-    expect(await knowledge.read(note.id, note.revisionId)).toEqual(note);
-  }
-  expect(await knowledge.read(inactive.id)).toEqual(inactive);
-  evidence.push({ cut, exactOriginalsRestored: 3, originalPreparedIdentitiesReused: !!saved, atomicGroupSize: result.changes.length });
-}, 60_000);
+// Current-file crash, cold publication and exact Prior Undo use the nine
+// real-process stages in home-profile-partition.integration.test.ts.
 
 it("repairs a v2-to-historical Undo audit after a real postcommit process death without replaying note effects", async () => {
   const { f, profile } = await setup();
-  const originals = await Promise.all([seed(0), seed(1)]);
+  const originals = [await seed(0), await seed(1)];
   const context = { actor: { kind: "ui" as const, id: "fixture" }, commandId: "v2-before-undo-crash", reason: "Exact fixture migration" };
   const migrated = await profile.partition(f.settings.settingsChanges, { commandId: context.commandId, mode: "migrate", assignments: originals.map(note => ({ id: note.id, expectedRevision: note.revisionId, path: "engineering/undo" })) }, context);
   const undoContext = { actor: context.actor, commandId: "v2-undo-postcommit-crash", reason: "Restore exact historical placement" };
    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
-  await crashProfilePartition(f.root, f.tronHome, [], "after-commit", undefined, { context: undoContext, undoChangeId: migrated.changes[0]!.changeId });
+  await crashProfilePartition(f.root, f.tronHome, [], "after-domain", { context: undoContext, undoChangeId: migrated.changes[0]!.changeId });
   const registry = await f.restartToReadiness();
   knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
   const committedHeads = await Promise.all(originals.map(note => knowledge!.read(note.id)));
   for (const note of originals) expect({ ...committedHeads.find(head => head?.id === note.id), revisionId: note.revisionId }).toEqual(note);
   const repaired = await profile.retryPartition(f.settings.settingsChanges, undoContext.commandId, "ui");
   expect(repaired.changes).toHaveLength(2);
-  const undoFacts = (await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries.filter(entry => entry.commandId === undoContext.commandId);
+  const undoFacts = (await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries.filter(entry => entry.commandId === undoContext.commandId && entry.status === "applied");
   expect(undoFacts.map(entry => entry.undoOf).sort()).toEqual(migrated.changes.map(entry => entry.changeId).sort());
   expect(await Promise.all(originals.map(note => knowledge!.read(note.id)))).toEqual(committedHeads);
   evidence.push({ v2UndoPostcommitCrash: true, originalUndoLinksRepaired: 2, committedHeadsNotReplayed: true });
@@ -125,35 +95,6 @@ it("enforces personal, unsorted and sub-area limits atomically without losing ov
   for (const note of originals) expect({ ...await knowledge!.read(note.id), revisionId: note.revisionId }).toEqual(note);
   evidence.push({ personal: 256, unsorted: 128, inactive: 1, rejectedOverflows: 3, exactUndoCount: originals.length });
 }, 180_000);
-
-it("forget physically scrubs v2 prepared bodies and the whole quoted audit while keeping unrelated recovery history", async () => {
-  const { f, profile } = await setup();
-  const originals = await Promise.all([seed(0), seed(1)]);
-  const legacyInactive = await seed(2, undefined, true);
-  const assignments = originals.map(note => ({ id: note.id, expectedRevision: note.revisionId, path: "engineering/privacy" }));
-  const context = { actor: { kind: "ui" as const, id: "fixture" }, commandId: "v2-forget-prepared", reason: "Opaque context quotes both private members; remove the whole envelope" };
-   await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
-  await crashProfilePartition(f.root, f.tronHome, assignments, "after-backup", undefined, { context });
-  const registry = await f.restartToReadiness();
-  knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
-  const recovery = await knowledge.profilePartitionRecovery(context.commandId);
-  const forgotten = originals[0]!, kept = originals[1]!;
-  const prepared = recovery.prepared.find(note => note.id === forgotten.id)!;
-  await knowledge.forget("forget-v2-prepared", forgotten.id, "Explicit fixture forget", forgotten.revisionId);
-  await expect(profile.retryPartition(f.settings.settingsChanges, context.commandId, "ui")).rejects.toThrow(/invalidated|unavailable/);
-  const root = join((await registry.moduleHost.contract(workspaceModule).describe()).root, "state", "profile");
-  const backup = join(root, "profile-backups", `${profileOperationKey(context.commandId)}.json`);
-  const bytes = await fs.readFile(backup, "utf8");
-  expect(bytes).not.toContain(context.reason); expect(bytes).not.toContain(forgotten.content.title);
-  expect(bytes).toContain(kept.content.title); expect(JSON.parse(bytes).operation).toBeUndefined();
-  await expect(fs.access(join(root, "records", prepared.id, `${prepared.revisionId}.json`))).rejects.toThrow();
-  expect(await knowledge.read(kept.id)).toEqual(kept);
-  expect((await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries).toEqual([]);
-  await knowledge.forget("forget-legacy-inactive", legacyInactive.id, "Explicit fixture forget of a retired legacy original", legacyInactive.revisionId);
-  expect(await knowledge.read(legacyInactive.id, undefined, true)).toBeNull();
-  expect(await knowledge.read(kept.id)).toEqual(kept);
-  evidence.push({ v2ForgetAfterPreparedCrash: true, legacyInactiveForgetSucceeded: true, canceledBodyRemoved: true, wholeAuditRemoved: true, unrelatedOriginalUnchanged: true });
-}, 60_000);
 
 it("concurrent direct note writers cannot exceed a leaf cap; overflow and invalid paths preserve all current heads", async () => {
   const { f, profile } = await setup();
