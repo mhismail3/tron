@@ -68,7 +68,7 @@ Commands:
                                     --plan includes dirty paths and exact commands.
                                     Live logs and partial test-results/verify/<sha>.json;
                                     no empty test passes, queue or landing gate.
-  verify --batch [--base <green-sha>] [--plan]
+  verify --batch [--base <green-sha> | --repeat] [--plan]
                                     Explicit serial Mac batch on landed main; first use
                                     needs --base, then local last-green owns coverage.
                                     Records commits; reproduces/bisects failures and
