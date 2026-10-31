@@ -334,9 +334,6 @@ export class DisplayArtifactStore {
         meter,
         createWriteStream(staging, { flags: "wx", mode: 0o600 }),
       );
-      const stagedHandle = await open(staging, "r+");
-      try { await syncDurably(stagedHandle); }
-      finally { await stagedHandle.close(); }
       const after = await opened.stat();
       const current = await lstat(source).catch(refuseUnavailableSource);
       if (!after.isFile() || current.isSymbolicLink() || !current.isFile()
@@ -409,6 +406,13 @@ export class DisplayArtifactStore {
         const info = await stat(object);
         if (!info.isFile() || info.size !== input.size) throw new GatewayError("conflict", "Display object digest collision");
         await this.verify(input.digest, input.size, object, true);
+      }
+      // Retained metadata proves this canonical inode was synchronized before
+      // publication. An unreferenced object (including a prior failed attempt)
+      // still needs synchronization; syncing discarded duplicate staging does not.
+      if (![...this.index.values()].some(metadata => metadata.digest === input.digest)) {
+        const handle = await open(object, "r");
+        try { await syncDurably(handle); } finally { await handle.close(); }
       }
       await rm(input.source, { force: true });
       const id = this.uuid();
