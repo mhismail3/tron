@@ -2229,7 +2229,7 @@
       },
       {
         "name": "profile",
-        "schema": "sha256:51177d28bd5a2848232962f9f5362928ce70f2e88cac7103ce148034321e1d5b"
+        "schema": "sha256:7c4018de5cf487ab1901eaaa535635bf1f987db88f41ff7c21f09916932dae01"
       },
       {
         "name": "web_search",
@@ -3503,7 +3503,7 @@
                     "description": "read an explicit file or the metadata index; learn, refine, supersede or retire an item."
                   },
                   "assignments": {
-                    "description": "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and history stay unchanged.",
+                    "description": "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and correction claims stay unchanged.",
                     "items": {
                       "additionalProperties": false,
                       "properties": {
@@ -3614,7 +3614,7 @@
                     "type": "string"
                   },
                   "revisionId": {
-                    "description": "read: the exact immutable revision from a Profile content reference.",
+                    "description": "read: the current head revision or an exact wrong-claim revision linked by a current Correction. Other historical revisions are unavailable.",
                     "maxLength": 80,
                     "minLength": 16,
                     "type": "string"
