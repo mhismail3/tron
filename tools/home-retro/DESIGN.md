@@ -126,7 +126,20 @@ Proposed slice-2 brief discipline:
   retired guidance or infer a ruling from the summarizer's paraphrase.
 
 This requires a brief/prompt change and dedicated tests, **not included in slice 1**.
-It addresses observed application drift without claiming a reproduced memory-loss bug.
+It addresses standing-decision application drift. The separate follow-up in FINDINGS
+establishes a lost task-completion attribution, not a deleted standing decision.
+
+## Maintainer-owed closure: separate proposed slice
+
+Archive summaries are not a current obligation owner. Reuse canonical Home history for
+one typed request/completion/reopen ledger with exact maintainer-source references;
+no new database, audit worker, Profile todo list or keyword-derived status. Separate
+reported-done from independently verified: missing proof must not resurrect the same
+human action. Existing task/approval owners retain their lifecycle; closing an SSH
+prerequisite never authorizes key revocation. Home lists only current open items.
+This is design only, not a prompt-only patch. Proof must cross compaction/chapter/restart,
+exclude closed items despite old pending summaries, and reject worker/trigger-origin
+confirmation or effect grants. The private addendum details the bounded owner contract.
 
 ## Regression proof and delivery
 
