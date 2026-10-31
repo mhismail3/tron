@@ -53,12 +53,13 @@ async function settledWorker(f: Awaited<ReturnType<typeof fixture>>) {
   await waitFor(() => !home.isBusy, "Home settled after diff worker");
   return "diff-worker";
 }
-async function nativeChange(changes: ChangeRequest[] = [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/zsh" }], worker = true, reason = "Choose the exact shell") {
+async function nativeChange(changes: ChangeRequest[] | ((f: Awaited<ReturnType<typeof fixture>>) => Promise<ChangeRequest[]>) = [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/zsh" }], worker = true, reason = "Choose the exact shell") {
   const f = await fixture();
+  const requested = typeof changes === "function" ? await changes(f) : changes;
   await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
   const taskId = worker ? await settledWorker(f) : undefined;
   f.faux.setResponses([
-    fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason, changes, ...(taskId ? { taskId } : {}) }, { id: "native-change" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason, changes: requested, ...(taskId ? { taskId } : {}) }, { id: "native-change" })], { stopReason: "toolUse" }),
     fauxAssistantMessage("Finished"),
   ]);
   const home = await f.registry.acquire(f.home.sessionId);
@@ -83,6 +84,45 @@ async function saveCase(name: string, evidence: unknown) {
 }
 
 describe("typed changes and exact native acceptance", () => {
+  it("installs a configured local package through the shared native card and exposes it to the next Pi request", async () => {
+    let source = "";
+    const f = await nativeChange(async fixture => {
+      source = join(fixture.root, "package");
+      await mkdir(source);
+      await writeFile(join(source, "package.json"), JSON.stringify({ name: "fixture-package", version: "1.0.0", pi: { extensions: ["extension.ts"] } }));
+      await writeFile(join(source, "extension.ts"), `export default pi => pi.registerTool({
+        name: "fixture_package_probe", label: "Package probe", description: "Proves package admission",
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ content: [{ type: "text", text: "installed package executed" }] })
+      });`);
+      return [
+        { key: "sources.packages", layer: "global", op: "set", value: [source] },
+        { key: "sources.npmCommand", layer: "global", op: "set", value: ["npm", "--offline"] },
+      ];
+    }, true, "Install the package with the selected npm command");
+    const path = join(f.agentDir, "settings.json");
+    const before = JSON.parse(await readFile(path, "utf8"));
+    expect(before).not.toHaveProperty("packages");
+    expect(before).not.toHaveProperty("npmCommand");
+    const unopened = await f.registry.create(f.cwd);
+    expect(unopened.runtime.session.getAllTools().map(tool => tool.name)).not.toContain("fixture_package_probe");
+    expect(f.interaction.method).toBe("change");
+    await f.answer(true);
+    await f.prompting;
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ packages: [source], npmCommand: ["npm", "--offline"] });
+    const installed = await f.registry.create(f.cwd);
+    expect(installed.runtime.session.settingsManager.getNpmCommand()).toEqual(["npm", "--offline"]);
+    expect(installed.runtime.session.getActiveToolNames()).toContain("fixture_package_probe");
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("fixture_package_probe", {}, { id: "package-probe" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Package executed"),
+    ]);
+    await installed.prompt("Execute the installed package probe");
+    const result = installed.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "package-probe");
+    expect(result).toMatchObject({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "installed package executed" }] } });
+    await saveCase("package-install-source", { source, before, review: f.interaction, result });
+  });
+
   it("refuses a small input when the full Home catalog leaves no native response headroom", async () => {
     const f = await fixture(false, false, 8000);
     await setHomeMemoryModels(f.registry, [f.model]);
