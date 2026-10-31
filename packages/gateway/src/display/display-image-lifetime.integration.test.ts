@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -103,6 +103,65 @@ it("durably removes unowned artifact directories in one maintenance cut without 
       } finally { await retained.release(); }
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("synchronizes maintenance deletion when the last reader releases during metadata publication", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-display-release-cut-"));
+  const leases: Awaited<ReturnType<DisplayArtifactStore["acquire"]>>[] = [];
+  let resumeSync = () => {};
+  let maintenance: Promise<void> | undefined;
+  let releasing: Promise<void> | undefined;
+  let restoreSync = () => {};
+  try {
+    const store = new DisplayArtifactStore(root);
+    await store.initialize();
+    await writeFile(join(root, "Snapshot.swift"), "// shared bytes\n");
+    const deleted = await store.ingest(root, "Snapshot.swift", "deleted-session");
+    const live = await store.ingest(root, "Snapshot.swift", "live-session");
+    const reader = await store.acquire(deleted.id, "deleted-session");
+    leases.push(reader);
+    for (let index = 0; index < 3; index += 1) leases.push(await store.acquire(live.id, "live-session"));
+    const handle = await open(join(root, "Snapshot.swift"), "r");
+    const prototype = Object.getPrototypeOf(handle) as typeof handle;
+    await handle.close();
+    const realSync = prototype.sync;
+    let reachedSync = () => {};
+    const syncing = new Promise<void>(resolve => { reachedSync = resolve; });
+    const resume = new Promise<void>(resolve => { resumeSync = resolve; });
+    let held = false;
+    // Gate the real syscall, not store logic: maintenance already observed the
+    // reader and is publishing empty-owner metadata before the release wins.
+    const sync = vi.spyOn(prototype, "sync").mockImplementation(async function (this: typeof handle) {
+      if (!held) { held = true; reachedSync(); await resume; }
+      await realSync.call(this);
+    });
+    restoreSync = () => sync.mockRestore();
+    drainDurableWriteStats();
+    maintenance = store.maintain(async () => new Set(["live-session"]));
+    await syncing;
+    releasing = reader.release();
+    // Public reader-cap admission proves release decremented its reservation;
+    // release itself cannot finish until it joins maintenance's mutation lane.
+    leases.push(await waitFor(async () => {
+      try { return await store.acquire(live.id, "live-session"); }
+      catch (error) { if ((error as { code?: string }).code === "busy") return undefined; throw error; }
+    }, "last reader released before the maintenance publication resumes"));
+    resumeSync();
+    await maintenance;
+    await releasing;
+    expect(drainDurableWriteStats().count).toBe(3); // metadata + its directory + deletion parent
+    await expect(stat(join(root, "gateway/display-artifacts/artifacts", deleted.id))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.acquire(deleted.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
+    const reopened = new DisplayArtifactStore(root);
+    await reopened.initialize();
+    await expect(reopened.acquire(deleted.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
+  } finally {
+    resumeSync();
+    await Promise.allSettled([maintenance, releasing].filter((value): value is Promise<void> => value !== undefined));
+    restoreSync();
+    await Promise.all(leases.map(lease => lease.release()));
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it("retains only authorized sibling Markdown images through source removal, cold reopen and session deletion", async () => {

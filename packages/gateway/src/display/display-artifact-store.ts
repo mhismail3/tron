@@ -625,9 +625,10 @@ export class DisplayArtifactStore {
             if (!removing) await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
             this.index.set(id, next);
           }
-          // Close read admission above before yielding to unlink. The mutation
-          // lane also excludes grants/ingests until this deletion cut is durable.
-          if (removing) removedDirectories = true;
+          // A last reader can release while the metadata sync above yields.
+          // Decide whether this call deletes at the same synchronous cut as
+          // removeUnowned, not from the earlier publication decision.
+          if (owners.length === 0 && (this.activeReaderCounts.get(id) ?? 0) === 0) removedDirectories = true;
           await this.removeUnowned(id);
         }
       } finally {
