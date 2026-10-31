@@ -102,7 +102,7 @@ def main():
                     sys.executable, "-c", build_code, ROOT, platform.home, revision, result / "build.log"], "build-driver.log")
                 app = platform.built_app(revision)
                 if status == 0:
-                    status = run(source, [source / "packages/mac-app/scripts/test-signed-pi-payload-smoke.sh", app], "build.log")
+                    status = run(source, [source / "packages/mac-app/scripts/verify-signed-pi-payload.sh", app], "build.log")
                 report["build"] = "PASS" if status == 0 else "FAIL"
             except KeyboardInterrupt:
                 report["build"] = "INTERRUPTED"

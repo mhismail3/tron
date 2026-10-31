@@ -81,7 +81,7 @@ admission, Boolean refusal and owner-only writer round trips), and `MacQuitGatew
 the signed bundled Gateway in a disposable launchd job with the shipped `KeepAlive` and
 `ExitTimeOut` (clean exit, a held model request past 20 s, caller cancellation, stall recovery
 without relaunch, missing or stale receipts, retry, restart-75). Then run
-`packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on the built app.
+`packages/mac-app/scripts/verify-signed-pi-payload.sh` on the built app.
 
 The lock probe deliberately splits each newline-framed marker across writes; its reader
 waits for the complete line within the existing deadline, never treating pipe chunks as records.

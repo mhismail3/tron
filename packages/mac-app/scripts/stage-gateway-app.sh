@@ -6,16 +6,30 @@ set -euo pipefail
 GATEWAY_DIR="$1"
 APP_DIR="$2"
 REPO_ROOT="$(cd "$GATEWAY_DIR/../.." && pwd)"
-mkdir -p "$APP_DIR/scripts"
-cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
-cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
-cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
-cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
+# The caller may time out this shell and immediately remove its staging tree.
+# Keep every writer in Bash's owned job table; interruption must join it first.
+stop_stage() {
+  local status="$1" child
+  trap - EXIT HUP INT TERM
+  for child in $(jobs -pr); do kill -TERM "$child" 2>/dev/null || :; done
+  wait || :
+  exit "$status"
+}
+trap 'stop_stage "$?"' EXIT
+trap 'stop_stage 129' HUP
+trap 'stop_stage 130' INT
+trap 'stop_stage 143' TERM
+stage_child() { "$@" <&0 & wait "$!"; }
+stage_child mkdir -p "$APP_DIR/scripts"
+stage_child cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
+stage_child cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
+stage_child cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
+stage_child cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm ci installs the Tron-patched pi-coding-agent from its declared tarball,
 # so the declaration and tarball are staged before installation. third_party/ is not
 # artifacts/, which source updates rewrite to the pi-subagents pin set.
-cp "$GATEWAY_DIR/pi-coding-agent-patch.json" "$APP_DIR/"
-python3 - "$GATEWAY_DIR" "$APP_DIR" <<'PY'
+stage_child cp "$GATEWAY_DIR/pi-coding-agent-patch.json" "$APP_DIR/"
+stage_child python3 - "$GATEWAY_DIR" "$APP_DIR" <<'PY'
 import json, pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 relative = pathlib.PurePosixPath(json.loads((target / 'pi-coding-agent-patch.json').read_text())['artifact']['path'])
@@ -26,9 +40,9 @@ shutil.copyfile(source / relative, target / relative)
 PY
 # Pin metadata and both immutable selections share the fingerprinted app tree.
 # No provider is installed into a runtime home during packaging.
-cp "$GATEWAY_DIR/pi-subagents-pin.json" "$APP_DIR/"
-cp "$GATEWAY_DIR/scripts/check-pi-subagents.mjs" "$GATEWAY_DIR/scripts/install-pi-subagents.mjs" "$APP_DIR/scripts/"
-python3 - "$GATEWAY_DIR" "$APP_DIR" <<'PY'
+stage_child cp "$GATEWAY_DIR/pi-subagents-pin.json" "$APP_DIR/"
+stage_child cp "$GATEWAY_DIR/scripts/check-pi-subagents.mjs" "$GATEWAY_DIR/scripts/install-pi-subagents.mjs" "$APP_DIR/scripts/"
+stage_child python3 - "$GATEWAY_DIR" "$APP_DIR" <<'PY'
 import json, pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 pin = json.loads((target / 'pi-subagents-pin.json').read_text())
@@ -43,4 +57,4 @@ for selection in (pin, pin.get('previous')):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / relative, destination)
 PY
-node "$APP_DIR/scripts/check-pi-subagents.mjs"
+stage_child node "$APP_DIR/scripts/check-pi-subagents.mjs"

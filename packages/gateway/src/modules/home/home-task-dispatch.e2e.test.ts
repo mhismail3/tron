@@ -9,7 +9,7 @@ import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } f
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
 import { type HomeTaskDispatcher, successorTaskId, HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js";
 import { HomeMemoryRefusal } from "./home-request-policy.js";
@@ -1973,12 +1973,24 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: `failed-worker-retirement-${failure}`, sessionId: seed.sessionId, retried: retried.taskId });
   });
 
-  it.each(["after-dispose", "during-dispose"] as const)("does not let an ambient artifact read publish or persist at %s", async cut => {
+});
+
+describe("Home task production dispatch", () => {
+  const retirement: { f?: Awaited<ReturnType<typeof fixture>>; slot?: Awaited<ReturnType<RuntimeRegistry["create"]>> } = {};
+  // Managed-package activation and canonical seeding are preparation, not part
+  // of either controlled retirement race's normal 15-second behavior guard.
+  beforeEach(async () => {
     const f = await fixture(false, false, undefined, true);
+    retirement.f = f;
     const slot = await f.registry.create(f.cwd);
+    retirement.slot = slot;
     f.faux.setResponses([fauxAssistantMessage("canonical session persisted")]);
     await slot.prompt("establish the canonical session file");
     await waitFor(() => !slot.isBusy, "canonical seed settles before the retirement race");
+  }, 60_000);
+
+  it.each(["after-dispose", "during-dispose"] as const)("does not let an ambient artifact read publish or persist at %s", async cut => {
+    const f = retirement.f!, slot = retirement.slot!;
     const runId = "retired-ambient-run";
     const toolCallId = "retired-ambient-call";
     const asyncDir = join(delegatedArtifactRoot(f.tronHome), "async-subagent-runs", runId);
@@ -1988,24 +2000,26 @@ describe("Home task production dispatch", () => {
       content: [{ type: "text", text: "launched" }], details: { runId, asyncDir, mode: "single", state: "running" },
       isError: false, timestamp: Date.now() });
     const owner = slot.ownedTurns;
-    let entered = false;
+    let observeRead!: () => void;
+    const readEntered = new Promise<void>(resolve => { observeRead = resolve; });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const read = owner.artifacts.readExtensionStatusArtifactWithReplacementRetry.bind(owner.artifacts);
     const held = vi.spyOn(owner.artifacts, "readExtensionStatusArtifactWithReplacementRetry").mockImplementation(async (...args) => {
       const value = await read(...args); // Read the real admitted file BEFORE holding its delivery.
-      entered = true;
+      observeRead();
       await gate;
       return value;
     });
     let refresh: Promise<unknown> | undefined;
     let disposal: Promise<void> | undefined;
-    let shutdownEntered = false;
+    let observeShutdown!: () => void;
+    const shutdownEntered = new Promise<void>(resolve => { observeShutdown = resolve; });
     let releaseShutdown!: () => void;
     const shutdownGate = new Promise<void>(resolve => { releaseShutdown = resolve; });
     const actualDispose = slot.runtime.dispose.bind(slot.runtime);
     const shutdown = cut === "during-dispose" ? vi.spyOn(slot.runtime, "dispose").mockImplementation(async () => {
-      shutdownEntered = true;
+      observeShutdown();
       await shutdownGate;
       await actualDispose();
     }) : undefined;
@@ -2017,10 +2031,10 @@ describe("Home task production dispatch", () => {
         runId, cwd: f.cwd, sessionId: slot.id, state: cut === "during-dispose" ? "running" : "completed", startedAt: now - 1_000,
         lastUpdate: now, ...(cut === "after-dispose" ? { endedAt: now } : {}) }));
       refresh = owner.discoverExtensionArtifact(asyncDir);
-      await waitFor(() => entered, "actual ambient artifact read held before delivery");
+      await awaitsWithin(readEntered, "actual ambient artifact read held before delivery");
       disposal = slot.dispose();
       if (cut === "during-dispose") {
-        await waitFor(() => shutdownEntered, "real native disposal is awaiting physical SDK cleanup");
+        await awaitsWithin(shutdownEntered, "real native disposal is awaiting physical SDK cleanup");
         expect(slot.isDisposed).toBe(false);
       } else await disposal;
       const canonicalAtRetirement = await readFile(slot.sessionFile!, "utf8");
@@ -2045,6 +2059,9 @@ describe("Home task production dispatch", () => {
     }
   });
 
+});
+
+describe("Home task production dispatch", () => {
   it("records unknown rather than final when tracked detached work outlives an explicit report", async () => {
     const f = await fixture();
     let release!: () => void;
