@@ -43,11 +43,11 @@ let parkedSpans = 0;
  * process's event loop. A parked request (`offLoop`) does not count, because a
  * receipt-backed mutation holds its receipt for its whole operation and spends
  * that time away from the loop — `session.bash` runs a shell command with no
- * timeout, `session.compact` waits minutes on a model, `packages.install` and
- * the `knowledge.*` calls wait the same way. Pausing background work for such a
- * request stops the loop's background work for as long as it runs and protects
- * nothing, because the loop is idle; the loop's own delay p99 is what covers the
- * loop work a parked request still does. */
+ * timeout, `session.compact` waits minutes on a model, and `packages.install`
+ * waits the same way. Pausing background work for such a request stops the
+ * loop's background work for as long as it runs and protects nothing, because
+ * the loop is idle; the loop's own delay p99 is what covers the loop work a
+ * parked request still does. */
 export function requestsCompetingForLoop(): boolean {
   return activeSpans - parkedSpans > 0;
 }
