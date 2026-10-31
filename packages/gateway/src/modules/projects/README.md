@@ -136,10 +136,12 @@ scripts/tron test gateway src/modules/projects/project-lifecycle.e2e.test.ts
 
 The real Gateway/Registry/Pi/faux-model journey retains a regenerable transcript in
 `packages/gateway/test-results/project-lifecycle/report.json`. All projects are temporary;
-GitHub success is a spawned fixture executable, never a live repository. The
-installed `gh` also runs with empty auth configuration/token environment under
-macOS Seatbelt's network deny; this proves unauthenticated refusal/retained state,
-not real remote creation. The real-CLI case requires installed `gh` and `sandbox-exec`.
+GitHub success and authentication refusal use spawned fixture executables at the
+external CLI port, never a live GitHub repository or host credentials. The refusal
+journey runs with real Git but no `gh` on PATH and proves exit 4 leaves a real local
+repository without remotes or trust. The success journey proves exact CLI arguments
+and remote publication. These test Gateway handling, not the installed GitHub CLI's
+authentication implementation; neither requires `gh`, Keychain or Seatbelt.
 Native cases invoke the real Gateway module route, receipts and exact native decisions:
 create → trust → rename → untrust → archive, deny/replay, actual move eligibility,
 unsupported folders, authenticated actor provenance and disconnect ownership.
