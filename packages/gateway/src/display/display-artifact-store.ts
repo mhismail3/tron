@@ -445,6 +445,27 @@ export class DisplayArtifactStore {
     });
   }
 
+  /** Retain immutable bytes in a caller-owned staging path, without exporting
+   * the canonical object's path. The caller must synchronize its destination
+   * directory before acknowledgement. Cross-device callers must publish a copy. */
+  async linkArtifact(id: string, sessionID: string, expectedDigest: string, destination: string): Promise<boolean> {
+    this.validateID(id);
+    return this.serialize(async () => {
+      this.assertInitialized();
+      this.assertFullyValidated();
+      const metadata = this.index.get(id);
+      if (!metadata?.owners.includes(sessionID)) throw new GatewayError("not_found", "Display artifact is unavailable");
+      if (metadata.digest !== expectedDigest) throw new GatewayError("conflict", "Display artifact does not match the offered source");
+      await this.verify(metadata.digest, metadata.size, this.objectPath(metadata.digest));
+      try { await link(this.objectPath(metadata.digest), destination); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EXDEV") return false;
+        throw error;
+      }
+      return true;
+    });
+  }
+
   async grant(id: string, sessionID: string, sourceSessionID: string): Promise<void> {
     this.validateID(id);
     if (!validIdentity(sessionID) || !validIdentity(sourceSessionID)) {

@@ -45,6 +45,17 @@ it("durably publishes new display bytes once and reuses them for distinct retain
         expect(Buffer.concat(chunks).toString()).toBe("// original snapshot\n");
       } finally { await lease.release(); }
     }
+    const destination = join(root, "Retained.swift");
+    await expect(reopened.linkArtifact(second.id, "other-session", digest, destination)).rejects.toMatchObject({ code: "not_found" });
+    await expect(reopened.linkArtifact(second.id, "second-session", "0".repeat(64), destination)).rejects.toMatchObject({ code: "conflict" });
+    await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await reopened.linkArtifact(second.id, "second-session", digest, destination)).toBe(true);
+    const linked = await stat(destination);
+    expect([linked.dev, linked.ino]).toEqual([orphan.dev, orphan.ino]);
+    await expect(reopened.linkArtifact(second.id, "second-session", digest, destination)).rejects.toMatchObject({ code: "EEXIST" });
+    await reopened.revoke(first.id, "first-session");
+    await reopened.revoke(second.id, "second-session");
+    expect(await readFile(destination, "utf8")).toBe(source);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

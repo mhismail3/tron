@@ -376,14 +376,21 @@ export class SwiftAppStore {
         if (await count() >= 200) throw new GatewayError("conflict", "At most 200 app offers may be retained; discard an unused offer first");
         await ensureOwnerDirectory(directory);
       }
-      // Readers share this mutex and require both documents. Publish independent
-      // files together, but join both durable writes even on failure before the
-      // mutation releases ownership; a late write must not race a successor.
-      const publications = await Promise.allSettled([
-        durableAtomicWriteText(join(directory, "App.swift"), input.source),
-        durableAtomicWriteJson(join(directory, "offer.json"), offer),
-      ]);
-      for (const publication of publications) if (publication.status === "rejected") throw publication.reason;
+      const temporary = join(directory, `App.swift.${randomUUID()}.tmp`);
+      let temporaryExists = false;
+      try {
+        temporaryExists = await this.display().artifacts.linkArtifact(offer.reference.artifactId, offer.reference.sessionId, offer.sourceSha256, temporary);
+        if (temporaryExists) {
+          await rename(temporary, join(directory, "App.swift"));
+          temporaryExists = false;
+        } else await durableAtomicWriteText(join(directory, "App.swift"), input.source);
+        // Linked bytes are already durable. This metadata publication syncs the
+        // shared directory after the source link/rename, before acknowledgement.
+        // On another filesystem the existing copy path still syncs its own bytes.
+        await durableAtomicWriteJson(join(directory, "offer.json"), offer);
+      } finally {
+        if (temporaryExists) await rm(temporary, { force: true });
+      }
       return { offer };
     });
   }
