@@ -215,7 +215,7 @@ export interface HomeProfileValue {
 }
 
 export interface HomeProfileWrite { id: string; before: HomeProfileValue | null; after: HomeProfileValue | null }
-export type ProfileChangePath = Pick<SettingsChangePath, "record" | "auditSubject" | "publishSubjectAudit" | "validateSubjectAudit">;
+export type ProfileChangePath = Pick<SettingsChangePath, "record" | "auditSubject" | "publishSubjectAudit" | "validateSubjectAudit" | "prepareSubjectAudit" | "readPreparedSubjectAudit">;
 interface PartitionEnvelope {
   version: 1;
   replayAt: string;
@@ -411,47 +411,60 @@ export class HomeProfileItems {
     });
   }
 
-  /** Freeze the ORIGINAL audit before effects, then publish only proven committed
-   * identities. The existing backup owns recovery; no domain replay runs on open. */
+  /** One body-free file receipt owns the accepted command; shared Changes owns
+   * its original before/after facts. Opening either owner never replays effects. */
   async partition(changes: ProfileChangePath, request: ProfilePartitionRequest, context: SubjectContext, undoOf?: ReadonlyMap<string, string>): Promise<ProfileChangeResult> {
     if (request.commandId !== context.commandId || !["home", "ui"].includes(context.actor.kind)) throw new GatewayError("invalid_request", "Profile partition needs its original Home or maintainer command");
+    const recovery = await this.owner().profilePartitionRecovery(request.commandId).catch(error => {
+      if (error instanceof GatewayError && error.code === "not_found") return undefined;
+      throw error;
+    });
+    const pending = recovery && !recovery.committed ? recovery : undefined;
+    if (pending?.context.actor.kind === "ui" && context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer resumes an uncommitted Undo");
+    const originalContext = pending?.context ?? context;
+    const links = pending && Object.keys(pending.undoOf).length ? new Map(Object.entries(pending.undoOf)) : undoOf;
     const result = await this.owner().partitionProfile(request, {
-      restoring: undoOf !== undefined,
+      restoring: links !== undefined,
       create: (originals, prepared, visibleProfile) => {
         const read = classifyProfile(visibleProfile);
-        if (!undoOf && !context.reason?.trim()) throw new GatewayError("invalid_request", "Profile organization requires a reason");
-        return { version: 1, replayAt: new Date().toISOString(), context: { commandId: context.commandId, actor: context.actor,
-        ...(context.reason !== undefined ? { reason: context.reason } : {}) },
-        writes: originals.flatMap((record, index) => {
-          const next = prepared[index]!;
-          if (record.revisionId === next.revisionId) return [];
-          const item = read.items.find(item => item.id === record.id);
-          if (!item) throw new GatewayError("conflict", "Unclassified profile kind needs an explicit eligibility decision");
-          const value = (record: ProfileNote) => profileValue({ ...item, revisionId: record.revisionId, record });
-          return [{ id: record.id, before: value(record), after: value(next), direction: "widen", ...(undoOf?.has(record.id) ? { undoOf: undoOf.get(record.id) } : {}) }];
-        }) };
+        if (!links && !originalContext.reason?.trim()) throw new GatewayError("invalid_request", "Profile organization requires a reason");
+        return { version: 1, replayAt: pending?.replayAt ?? new Date().toISOString(), context: { commandId: originalContext.commandId, actor: originalContext.actor,
+          ...(originalContext.reason !== undefined ? { reason: originalContext.reason } : {}) },
+          writes: originals.flatMap((record, index) => {
+            const next = prepared[index]!;
+            if (record.revisionId === next.revisionId) return [];
+            const item = read.items.find(item => item.id === record.id);
+            if (!item) throw new GatewayError("conflict", "Unclassified profile kind needs an explicit eligibility decision");
+            const value = (record: ProfileNote) => profileValue({ ...item, revisionId: record.revisionId, record });
+            return [{ id: record.id, before: value(record), after: value(next), direction: "widen" as const, ...(links?.has(record.id) ? { undoOf: links.get(record.id)! } : {}) }];
+          }) };
       },
       validate: (raw, originals, prepared) => { validatePartitionEnvelope(changes, raw, request.commandId, originals, prepared); },
+      prepare: envelope => changes.prepareSubjectAudit(envelope.writes, envelope.context, envelope.replayAt),
     });
-    if (!result.backup) return { status: "applied", changes: [], saved: [], items: [] };
+    if (!result.audit) return { status: "applied", changes: [], saved: [], items: [] };
     return this.retryPartition(changes, request.commandId, context.actor.kind);
   }
 
-  /** An explicit retry either resumes the backed-up precommit domain intent or
-   * repairs ONLY its audit, even after a later canonical edit. */
+  /** Explicit retry resumes a current-file intent or publishes only its original
+   * committed facts. Later edits cannot replace those shared Changes facts. */
   async retryPartition(changes: ProfileChangePath, commandId: string, actor: SubjectContext["actor"]["kind"]): Promise<ProfileChangeResult> {
     const recovery = await this.owner().profilePartitionRecovery(commandId);
-    const envelope = validatePartitionEnvelope(changes, recovery.envelope, commandId, recovery.originals, recovery.prepared);
     if (!recovery.committed) {
-      if (envelope.context.actor.kind === "ui" && actor !== "ui") throw new GatewayError("invalid_request", "Only the maintainer resumes an uncommitted Undo");
-      await this.owner().partitionProfile(recovery.request, {
-        restoring: envelope.writes.every(write => write.undoOf !== undefined),
-        create: () => { throw new GatewayError("conflict", "The original profile backup is missing"); },
-        validate: (raw, originals, prepared) => { validatePartitionEnvelope(changes, raw, commandId, originals, prepared); },
-      });
-      return this.retryPartition(changes, commandId, actor);
+      if (recovery.context.actor.kind === "ui" && actor !== "ui") throw new GatewayError("invalid_request", "Only the maintainer resumes an uncommitted Undo");
+      return this.partition(changes, recovery.request, recovery.context, Object.keys(recovery.undoOf).length ? new Map(Object.entries(recovery.undoOf)) : undefined);
     }
-    const audit = await changes.publishSubjectAudit(envelope.writes, envelope.context, envelope.replayAt);
+    const envelope = await changes.readPreparedSubjectAudit(recovery.reference);
+    if (envelope.context.commandId !== commandId || envelope.writes.length !== recovery.result.changes.length
+      || envelope.writes.some((write, index) => {
+        const proof = recovery.result.changes[index]!;
+        return write.id !== proof.id || !labelOnlyWrite(write.before, write.after)
+          || (write.before as HomeProfileValue)?.revisionId !== proof.beforeRevision || (write.after as HomeProfileValue)?.revisionId !== proof.revisionId;
+      })) throw new GatewayError("conflict", "Shared Profile audit differs from its committed command proof");
+    changes.validateSubjectAudit(envelope.writes, envelope.context, envelope.replayAt);
+    const audit = await changes.publishSubjectAudit(envelope.writes, envelope.context, envelope.replayAt,
+      publish => this.owner().withProfileAuditProof(commandId, recovery.reference, publish));
+    await this.owner().settleProfileAudit(commandId);
     const read = await this.read();
     return { ...audit, status: "applied", saved: [], items: read.items.filter(item => envelope.writes.some(write => write.id === item.id)).map(profileListItem) };
   }
@@ -466,11 +479,11 @@ export class HomeProfileItems {
       // A retry after a committed domain/failed audit must not apply Undo twice.
       try {
         const recovery = await this.owner().profilePartitionRecovery(commandId);
-        const envelope = validatePartitionEnvelope(changes, recovery.envelope, commandId, recovery.originals, recovery.prepared);
-        if (!envelope.writes.some(write => write.undoOf === entry.changeId)) throw new GatewayError("conflict", "Command ID belongs to a different profile Undo");
+        const undoLinks = recovery.committed ? (await changes.readPreparedSubjectAudit(recovery.reference)).writes.map(write => write.undoOf) : Object.values(recovery.undoOf);
+        if (!undoLinks.includes(entry.changeId)) throw new GatewayError("conflict", "Command ID belongs to a different profile Undo");
         return this.retryPartition(changes, commandId, "ui");
       } catch (error) {
-        if (!(error instanceof GatewayError && error.message === "No backed-up profile operation with this command ID")) throw error;
+        if (!(error instanceof GatewayError && error.code === "not_found")) throw error;
       }
       const current = await this.values(group.map(member => member.qualifiers?.note ?? ""));
       for (const member of group) if (member.status !== "applied" || JSON.stringify(current.get(member.qualifiers?.note ?? "") ?? null) !== JSON.stringify(member.after ?? null)) {

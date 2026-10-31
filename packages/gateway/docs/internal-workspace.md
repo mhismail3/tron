@@ -7,12 +7,13 @@ inferred from pairing identity, browser preferences, or the current project.
 
 ## Ownership and layout
 
-- `files/`: ordinary, deliberately retained documents. Existing filesystem tools
-  may read/write these using the resolved absolute root. Subdirectories are lazy.
-- `state/<owner>/`: reserved for a real capability's managed data. Personal notes
-  belong to `ProfileStore` under `state/profile/`; its catalog, immutable revisions,
-  suppression and recovery evidence must be accessed through that owner, not
-  arbitrary edits. Research exports are ordinary files, not managed state.
+- `files/`: deliberately retained documents; subdirectories are lazy. Ordinary
+  documents use existing filesystem tools and the resolved absolute root. The
+  canonical `Profile.json` is the exception: only `ProfileStore` publishes its
+  current hierarchy, exact Correction anchors and body-free controls. Use Profile
+  actions, not arbitrary edits; archives are never runtime read inputs.
+- `state/<owner>/`: reserved for a real capability's managed data. Research
+  exports are ordinary files, not managed state.
   Other namespaces have no
   generic state API. Use the capability's owning interface when one exists.
   Installed Swift apps are owned by `SwiftAppStore` under `state/apps/`

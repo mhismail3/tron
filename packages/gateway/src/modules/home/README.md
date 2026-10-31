@@ -194,16 +194,17 @@ changes keep its store, cursors and spend.
   typed result projection. Content changes use `SettingsChangePath.auditSubject`, retaining
   the Home stripe through effects, grouped audit, awaited observer and projection; partial
   failures restore before ungrouped failure audit and rethrow the original value.
-  Explicit placement-only migration/reorganization freezes the original audit in Profile's
-  backup before effects, then uses the kernel's atomic subject publisher after proving
-  committed identities. Retry repairs only a committed audit or explicitly resumes its
+  Explicit placement-only migration/reorganization records a body-free file intent and
+  prepares the original facts in shared Changes before effects, then publishes applied
+  facts only after proving the atomic current-file commit. Retry repairs only a committed audit or explicitly resumes its
   precommit intent; existing Changes Undo restores exact labels without rewriting content.
   `## Learned profile` carries bounded seven-area/count/revision metadata and diagnostic
   references, never note text. Home explicitly reads v2 paths or Prior organization and
   chooses relevance and worker-brief content; unavailable Profile says so. Placement
   never weaken confirmed standing authority. See [profile contract](profile.md).
-  Storage is current-format-only under `workspace/state/profile`; immutable note
-  revisions, receipt replay and crash-safe placement backups remain Profile-owned.
+  Storage is one hierarchical `workspace/files/Profile.json`, current heads and exact
+  linked Correction anchors only. Shared Changes alone owns audit/Undo; unavailable
+  historical revisions refuse. Legacy namespaces require explicit offline cutover.
   Oversized references use `profile` exact revision reads and bounded `nextOffset`
   continuations; they never silently truncate or resolve through a retired tool.
 

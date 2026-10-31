@@ -32,10 +32,10 @@ setting and is not an approval queue.
   raw-document merging through Pi's public storage seam. Ignored repository fields
   stay with their canonical document and survive SDK writes.
 
-Home keeps Knowledge content, provenance, revision checks, restoration and durable
+Home keeps Profile content, provenance, revision checks, restoration and durable
 profile publication. `auditSubject` holds validation, grouped successful audit and
 awaited observer/projection under the Home stripe; failed diffs remain ungrouped.
-No Knowledge DTO or profile inverse is invented by the settings kernel.
+No Profile DTO or domain inverse is invented by the settings kernel.
 
 ## Contract
 
@@ -82,10 +82,14 @@ outcome: canonical command receipts retain the replay fence rather than admittin
 effect again. An unindexed identity-addressed Profile group is not adopted by generic
 recovery: only its domain owner can prove commit and publish it through `appendOnce`.
 
-Home calls `validateSubjectAudit` before its own effects and freezes the original
-ordered writes/context/timestamp in its existing domain envelope. After proving its
-domain committed, `publishSubjectAudit` publishes or recovers only that audit. Command
-ID is the operation identity; changed replay inputs and duplicate write IDs refuse.
+Home calls `validateSubjectAudit` before accepting its body-free domain intent.
+`prepareSubjectAudit` durably appends original ordered writes/context/time as a
+started group, distinct from applied identities; `readPreparedSubjectAudit` verifies
+its stored digest and reconstructs those facts. Preparation never takes the Home
+stripe. After domain commit, `publishSubjectAudit` takes that stripe and lets the
+domain hold its current proof lock only across the journal append, not observers.
+This orders Forget invalidation without lock reversal or domain replay. Command ID
+is the identity; changed inputs and duplicate write IDs refuse.
 The record publishes one identity-addressed closed group through one durable index
 cut, bounded to 1 MiB. Retry proves file/directory/index durability. This interface
 creates no backup, migration journal, domain recovery engine or second settings store.
