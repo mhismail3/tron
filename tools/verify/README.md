@@ -13,8 +13,7 @@ scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also u
 scripts/tron verify --module <id>               # scoped baseline: owner tests + transitive consumer locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
 scripts/tron verify --batch --base <green-sha>   # initialize coverage in a dedicated clean main worktree
-scripts/tron verify --batch [--plan]            # next pinned batch since the local last green
-scripts/tron verify --batch --repeat            # explicitly rerun every lane at the covered HEAD
+scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the covered HEAD
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 ```
