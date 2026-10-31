@@ -45,7 +45,8 @@ This document contains only engineering-process excerpts, not personal profile c
   child sessions; no inclusive/child double counting. Task records store tokens only.
 - 124 settled-record wakes were acknowledged at observation. That does **not** prove
   timely action, user receipt, or absence of an earlier delivery defect. No missed-wake
-  or lossy-summary incident was causally reproduced in this investigation.
+  incident was reproduced. The follow-up below found a specific completion-loss witness;
+  it does not prove which exact summary view reached each later Home invocation.
 
 ## Case chains
 
@@ -129,3 +130,17 @@ Resolve reversible objective questions at the next check-in; escalate only genui
 subjective or irreversible/authority calls. Reuse workers and existing primitives.
 Keep parked scope/consumer decisions distinct from red-test ownership. Never treat
 ACK, final, absent metrics, or a quiet sample as success/zero/causal repair.
+
+## Follow-up: stale maintainer-owed items
+
+Oct 27–31 through 09:50Z: AdMob user completion `2af2b103` (Oct 29 08:31Z)
+was acknowledged as done in `504d9ffd`, then definitely re-listed in `ac4dea0f`
+and `add01257`: **one stale item, two post-closure re-lists** among six completed
+in-scope action clusters; one composite AdMob/App Store reminder is ambiguous.
+Persisted node `11018+2` revision 34147 preserves “steps done unseen”; parent
+`11016+4` revision 34157, citing children [34062,34147], keeps only “unconfirmed.”
+This is an observed loss of completion attribution, not independent external verification.
+SSH normal-file removal, iPhone trust/connection, and service-key revocation are distinct;
+no stale post-completion connection request was established. Neither item reappears
+between the renewed 09:38 completion report and capture. Private exact node/canonical
+proof and broader item ledger remain in the evidence packet. See the design's closure owner.
