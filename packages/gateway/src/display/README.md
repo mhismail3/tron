@@ -62,7 +62,14 @@ reader. Bounds: item/type bytes, logical bytes and count, concurrent ingestion a
 readers, owner fan-out, a 1 GiB filesystem floor. A read also needs the ID on the
 exact active branch. Downloads: one inclusive byte range (416 when unsatisfiable),
 stable ETag, `nosniff`, never in WebSocket snapshots. Missing or corrupt objects stay
-explicit unavailable displays with text fallback.
+explicit unavailable displays with text fallback. Ingestion synchronizes canonical
+object bytes before their first retained metadata publication, including an unreferenced
+object left by an interrupted attempt. A retained object is reused without synchronizing
+the discarded duplicate staging inode; each new artifact still durably publishes metadata.
+Trusted store callers can retain a granted, digest-matched inode in their own staging
+path without learning the canonical path. The caller syncs its destination directory;
+EXDEV leaves no link and requires the caller's durable copy publication. Ownership
+revocation unlinks Display's names, not another store's independently retained bytes.
 
 **Browser live view** (`browser-live-view.v1`). `agent_browser` stays the only
 automation owner. Its `get cdp-url` result carries an opaque `browser_live` source that

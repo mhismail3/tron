@@ -3,7 +3,7 @@ import { execFile, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { createTestRegistry, displayOwnerOf } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
+import { drainDurableWriteStats } from "../../foundation/durable-json.js";
 import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -126,7 +127,12 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     const offersRoot = join(f.root, "tron/workspace/state/apps/.offers");
     for (const directory of await readdir(offersRoot)) {
       const offer = JSON.parse(await readFile(join(offersRoot, directory, "offer.json"), "utf8"));
-      if (offer.appId === "invalid-source") await writeFile(join(offersRoot, directory, "App.swift"), "changed source");
+      if (offer.appId === "invalid-source") {
+        // Replace this offer's link; never mutate the shared immutable display inode.
+        const replacement = join(offersRoot, directory, "changed-source.tmp");
+        await writeFile(replacement, "changed source");
+        await rename(replacement, join(offersRoot, directory, "App.swift"));
+      }
       if (offer.appId === "invalid-metadata") await writeFile(join(offersRoot, directory, "offer.json"), "malformed metadata");
     }
     expect(await rpc(f, "apps.pending")).toEqual({ offers: [pendingReview.offer] });
@@ -135,6 +141,19 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     expect(await rpc(f, "apps.pending")).toEqual({ offers: [] });
     expect((await rpc(f, "apps.list")).apps.map((app: { id: string }) => app.id)).toEqual(["builds", "installed"]);
     results.push("pending read: valid offer only; installed, deleted-session, missing-artifact and invalid-source offers excluded; explicit install moves to installed");
+  });
+  it("retains the durable displayed source inode in an offer without republishing its bytes", async () => {
+    const f = await fixture();
+    await tool(f, offerArgs());
+    const reference = f.displayReference!;
+    const root = join(f.root, "tron/workspace/state/apps/.offers");
+    const [directory] = await readdir(root);
+    const path = join(root, directory!, "App.swift");
+    const offered = await stat(path);
+    const displayed = await stat(join(f.root, "tron/gateway/display-artifacts/artifacts", reference.artifactId, "content"));
+    expect([offered.dev, offered.ino]).toEqual([displayed.dev, displayed.ino]);
+    await displayOwnerOf(f.registry).artifacts.revoke(reference.artifactId, reference.sessionId);
+    expect(await readFile(path, "utf8")).toBe(source);
   });
   it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", async () => {
     const f = await fixture();
@@ -145,16 +164,32 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     const producer = await f.registry.create(join(f.root, "project"));
     const model = f.faux.getModel(); await producer.setModel(model.provider, model.id);
     let context: TranscriptContext | undefined;
+    let durableSyncs: number | undefined;
+    const offersResponse = fauxAssistantMessage(Array.from({ length: 199 }, (_, index) =>
+      fauxToolCall("swift_app", offerArgs(), { id: `retained-offer-${index}` })), { stopReason: "toolUse" });
     f.faux.setResponses([
-      fauxAssistantMessage(Array.from({ length: 199 }, (_, index) =>
-        fauxToolCall("swift_app", offerArgs(), { id: `retained-offer-${index}` })), { stopReason: "toolUse" }),
-      (value: TranscriptContext) => { context = value; return fauxAssistantMessage("Done"); },
+      () => { drainDurableWriteStats(); return offersResponse; },
+      (value: TranscriptContext) => {
+        durableSyncs = drainDurableWriteStats().count;
+        context = value;
+        return fauxAssistantMessage("Done");
+      },
     ]);
     await producer.prompt("prepare the requested app offers");
-    await waitFor(() => context && !producer.isBusy ? true : undefined, "the capacity-bound offer turn");
+    // Join the actual owner, not a scheduling deadline. The normal Vitest hang
+    // guard remains; elapsed host I/O time is not the capacity/work oracle.
+    while (!context || producer.isBusy) await producer.waitForStateChange();
+    expect(context).toBeDefined();
     const offered = (context!.messages as unknown as Array<Record<string, any>>)
       .filter(row => row.role === "toolResult" && row.toolName === "swift_app");
     expect(offered).toHaveLength(199);
+    // The two metadata publishers need four syncs per offer. Allow 16 fixed
+    // turn/store syncs (803 observed in this window: seven above 4 * 199), a
+    // nine-sync margin that cannot hide even one redundant sync per offer.
+    // The lower bound proves the real counter is active. No resource sampler
+    // drains this isolated fixture's counter between the two faux steps.
+    expect(durableSyncs).toBeGreaterThanOrEqual(4 * 199);
+    expect(durableSyncs).toBeLessThanOrEqual(4 * 199 + 16);
     for (const result of offered) expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
     const offersRoot = join(f.root, "tron/workspace/state/apps/.offers");
     const before = await readdir(offersRoot);
@@ -174,7 +209,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     await tool(f, offerArgs());
     expect(await rpc(f, "apps.review", f.displayReference!)).toMatchObject({ offer: { appId: "builds" } });
     expect(await readdir(offersRoot)).toHaveLength(2);
-    results.push("200 real offers: deleted producer source/config reclaimed, capacity reused, live offer and installed source preserved");
+    results.push(`200 real offers: deleted producer source/config reclaimed, capacity reused, live offer and installed source preserved; ${durableSyncs} durable syncs in the 199-offer phase (budget 812)`);
   });
   it("binds each offer's config to its exact canonical session/artifact, not shared source bytes", async () => {
     const f = await fixture(); await tool(f, offerArgs());

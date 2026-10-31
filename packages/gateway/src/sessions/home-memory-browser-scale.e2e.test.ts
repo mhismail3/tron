@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { homeMemoryChange } from "../../test-support/session-settings-change.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -122,73 +122,85 @@ function appendHistory(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, ch
 }
 
 describe("Home memory browser at scale", () => {
-  it("RPC marks exact live-view membership and the individual-message boundary across pages and source changes", async () => {
+  const membership: { root?: string; g?: Gateway; faux?: ReturnType<typeof fauxProvider>; slot?: Awaited<ReturnType<RuntimeRegistry["acquire"]>> } = {};
+  // Building 362 canonical messages and their real derived forest is fixture
+  // preparation, not a browser-latency oracle. Keep the behavior test at 15s.
+  beforeAll(async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-home-resolution-"));
+    membership.root = root;
     const agentDir = join(root, "agent");
     await mkdir(agentDir, { recursive: true });
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL.id }));
     const faux = fauxProvider({ provider: PROVIDER, models: [{ id: MODEL.id }], tokensPerSecond: 0 });
+    membership.faux = faux;
     const memoryFaux = fauxProvider({ provider: MEMORY_MODEL.provider, models: [{ id: MEMORY_MODEL.id, reasoning: false }] });
     const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     runtime.registerNativeProvider(memoryFaux.provider);
     await runtime.refresh({ allowNetwork: false });
     const g = await openGateway(root, runtime);
-    try {
-      await g.registry.initialize();
-      await g.service.invoke(client, "home.designate", { commandId: "resolution-designate", model: MODEL });
-      await g.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "resolution-memory", model: MEMORY_MODEL }));
-      const slot = await g.registry.acquire((await status(g)).sessionId!);
-      faux.setResponses([fauxAssistantMessage("Opening reply")]);
-      await slot.prompt("Opening input");
-      await waitFor(() => !slot.isBusy || undefined, "resolution opening settled");
-      await g.service.invoke(client, "home.pauseMemory", { commandId: "resolution-pause" });
-      for (let index = 0; index < 360; index += 1) {
-        slot.sessionManager.appendMessage({ role: "user", content: `Decision ${index}: ${"bounded historical detail ".repeat(18)}`, timestamp: Date.now() });
-      }
-      await g.service.invoke(client, "home.resumeMemory", { commandId: "resolution-build" });
-      await waitFor(async () => {
-        const memory = (await status(g)).memory.episodic;
-        return memory && memory.messages === 362 && memory.pump.busy === 0 && memory.view.unbuilt === 0 ? memory : undefined;
-      }, "resolution tree built");
-      await g.service.invoke(client, "home.pauseMemory", { commandId: "resolution-freeze" });
-      const current = (await status(g)).memory.episodic!;
-      const pages = [await view(g, { limit: 13 })];
-      for (let cursor = pages[0]!.nextCursor; cursor;) {
-        const page = await view(g, { limit: 13, cursor });
-        pages.push(page); cursor = page.nextCursor;
-      }
-      const lines = pages.flatMap(page => page.lines);
-      expect(pages.length).toBeGreaterThan(1);
-      expect(lines.map(line => [line.start, line.span])).toEqual([...current.view.parts].reverse().map(part => [part.start, part.messages]));
-      expect(lines.every(line => line.inCurrentView === true)).toBe(true);
-      const summary = lines.find(line => line.span > 1)!;
-      expect(summary).toBeDefined();
-      const tail = lines.slice(0, lines.findIndex(line => line.span > 1));
-      expect(tail.length).toBeGreaterThan(0);
-      expect(lines.filter(line => line.startsIndividualMessages).map(line => line.start)).toEqual([tail.at(-1)!.start]);
-      const zoom = await view(g, { part: { start: summary.start, span: summary.span } });
-      expect(zoom.lines.map(line => [line.start, line.span])).toEqual([
-        [summary.start, summary.span / 2], [summary.start + summary.span / 2, summary.span / 2],
-      ]);
-      expect(zoom.lines.every(line => line.inCurrentView === false && line.startsIndividualMessages === false)).toBe(true);
-      const callsBeforeRead = faux.state.callCount;
-      slot.sessionManager.appendMessage({ role: "user", content: "A new message after the frozen view", timestamp: Date.now() });
-      await expect(view(g, { limit: 13, cursor: pages[0]!.nextCursor })).rejects.toMatchObject({
-        code: "conflict", details: { reason: "home-memory-revision-changed" },
-      });
-      const fresh = await view(g, { limit: 13 });
-      expect(fresh.revision).not.toBe(pages[0]!.revision);
-      expect(fresh.totalMessages).toBe(363);
-      expect(fresh.lines[0]).toMatchObject({ start: 362, span: 1, inCurrentView: true });
-      expect(faux.state.callCount).toBe(callsBeforeRead);
-      report.resolution = { pages: pages.length, lines, zoom: zoom.lines, fresh: fresh.lines, messages: fresh.totalMessages };
-    } finally {
-      await closeGateway(g);
-      await rm(root, { recursive: true, force: true });
+    membership.g = g;
+    await g.registry.initialize();
+    await g.service.invoke(client, "home.designate", { commandId: "resolution-designate", model: MODEL });
+    await g.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "resolution-memory", model: MEMORY_MODEL }));
+    const slot = await g.registry.acquire((await status(g)).sessionId!);
+    membership.slot = slot;
+    faux.setResponses([fauxAssistantMessage("Opening reply")]);
+    await slot.prompt("Opening input");
+    await waitFor(() => !slot.isBusy || undefined, "resolution opening settled");
+    await g.service.invoke(client, "home.pauseMemory", { commandId: "resolution-pause" });
+    for (let index = 0; index < 360; index += 1) {
+      slot.sessionManager.appendMessage({ role: "user", content: `Decision ${index}: ${"bounded historical detail ".repeat(18)}`, timestamp: Date.now() });
     }
+    await g.service.invoke(client, "home.resumeMemory", { commandId: "resolution-build" });
+    await waitFor(async () => {
+      const memory = (await status(g)).memory.episodic;
+      return memory && memory.messages === 362 && memory.pump.busy === 0 && memory.view.unbuilt === 0 ? memory : undefined;
+    }, "resolution tree built", { boundMs: 45_000 });
+    await g.service.invoke(client, "home.pauseMemory", { commandId: "resolution-freeze" });
+  }, 60_000);
+  afterAll(async () => {
+    try { if (membership.g) await closeGateway(membership.g); }
+    finally { if (membership.root) await rm(membership.root, { recursive: true, force: true }); }
   });
 
+  it("RPC marks exact live-view membership and the individual-message boundary across pages and source changes", async () => {
+    const g = membership.g!, slot = membership.slot!, faux = membership.faux!;
+    const current = (await status(g)).memory.episodic!;
+    const pages = [await view(g, { limit: 13 })];
+    for (let cursor = pages[0]!.nextCursor; cursor;) {
+      const page = await view(g, { limit: 13, cursor });
+      pages.push(page); cursor = page.nextCursor;
+    }
+    const lines = pages.flatMap(page => page.lines);
+    expect(pages.length).toBeGreaterThan(1);
+    expect(lines.map(line => [line.start, line.span])).toEqual([...current.view.parts].reverse().map(part => [part.start, part.messages]));
+    expect(lines.every(line => line.inCurrentView === true)).toBe(true);
+    const summary = lines.find(line => line.span > 1)!;
+    expect(summary).toBeDefined();
+    const tail = lines.slice(0, lines.findIndex(line => line.span > 1));
+    expect(tail.length).toBeGreaterThan(0);
+    expect(lines.filter(line => line.startsIndividualMessages).map(line => line.start)).toEqual([tail.at(-1)!.start]);
+    const zoom = await view(g, { part: { start: summary.start, span: summary.span } });
+    expect(zoom.lines.map(line => [line.start, line.span])).toEqual([
+      [summary.start, summary.span / 2], [summary.start + summary.span / 2, summary.span / 2],
+    ]);
+    expect(zoom.lines.every(line => line.inCurrentView === false && line.startsIndividualMessages === false)).toBe(true);
+    const callsBeforeRead = faux.state.callCount;
+    slot.sessionManager.appendMessage({ role: "user", content: "A new message after the frozen view", timestamp: Date.now() });
+    await expect(view(g, { limit: 13, cursor: pages[0]!.nextCursor })).rejects.toMatchObject({
+      code: "conflict", details: { reason: "home-memory-revision-changed" },
+    });
+    const fresh = await view(g, { limit: 13 });
+    expect(fresh.revision).not.toBe(pages[0]!.revision);
+    expect(fresh.totalMessages).toBe(363);
+    expect(fresh.lines[0]).toMatchObject({ start: 362, span: 1, inCurrentView: true });
+    expect(faux.state.callCount).toBe(callsBeforeRead);
+    report.resolution = { pages: pages.length, lines, zoom: zoom.lines, fresh: fresh.lines, messages: fresh.totalMessages };
+  });
+});
+
+describe("Home memory browser at scale", () => {
   it("answers first page, paging, chapter scope, zoom and evidence well under the read deadline", { timeout: 600_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-home-scale-"));
     const agentDir = join(root, "agent");

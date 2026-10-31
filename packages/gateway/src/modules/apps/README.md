@@ -27,6 +27,11 @@ it does not publish, execute source, network or create a second index.
 - `offer` creates an exact source/configuration display; it never installs.
   Review/install require its producing session/artifact grant, not caller SHA
   authority. Identical bytes in another display do not inherit an offer.
+  Offers retain the granted immutable display inode without republishing its bytes;
+  the source link precedes metadata publication, whose directory sync makes both
+  entries durable before acknowledgement. Cross-filesystem offers keep the durable
+  copy path. Readers validate both documents under the existing mutex; incomplete
+  offers are never installable, and retained source survives artifact unlinking.
 - Reviewed install/update uses existing transport mutation receipts and fences
   the reviewed head/instance. Accepted uncertain commands never replay on reconnect.
 - V1 remains readable through the named reader. Only explicit opted-in update
@@ -88,7 +93,11 @@ The feed probe compiles once per file in bounded asynchronous suite preparation,
 with a private compiler cache removed at suite teardown. Each native invocation
 still starts a fresh interpreter process; compilation is not part of either
 15-second feed journey's behavior deadline. No built artifact survives the run.
-Artifacts: `test-results/apps-install/report.json`.
+The 199-offer capacity journey joins RuntimeSlot state changes and bounds real
+metadata synchronization work to 812 operations (four per offer plus fixed turn/store
+initialization); host elapsed time is not its oracle. It still checks all 200 offers,
+canonical deletion, byte reclamation, live/installed retention and capacity reuse.
+Artifacts: `test-results/apps-install/report.json` includes the observed sync count.
 Fixture kill cuts release the workspace lease first; they do not prove whole-Gateway
 ungraceful crash or power-loss recovery.
 
