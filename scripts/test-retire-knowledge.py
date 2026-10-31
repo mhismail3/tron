@@ -97,6 +97,185 @@ class Retirement(unittest.TestCase):
         result = subprocess.run([sys.executable, '-c', wrapper, *self.command()[1:]], capture_output=True, text=True)
         self.assertEqual(result.returncode, 97, result.stderr)
 
+    def replacement(self, resume=False):
+        """Real filesystem/clone/converter and child-process boundary; no host app or job."""
+        import tron_mac_replace as replace
+        from tron_mac_replace_platform import MacPlatform
+        from tron_mac_replace_journal import Journal
+
+        fixture = self
+
+        class CopyPlatform(MacPlatform):
+            start_timeout = 3
+
+            def __init__(self):
+                super().__init__(fixture.root / 'account')
+                self.installed = fixture.root / 'Tron.app'
+                self.process = None
+                self.launches = []
+                self.fail_start = False
+
+            @property
+            def tron_home(self):
+                return fixture.home
+
+            def app_running(self):
+                return self.process is not None and self.process.poll() is None
+
+            def offline_blocker(self):
+                return 'fixture process still running' if self.app_running() else None
+
+            def launchd_state(self, label):
+                return 'absent'  # This fixture owns child processes, not host jobs.
+
+            def quit_app(self, log):
+                if self.process is not None:
+                    if self.app_running():
+                        self.process.terminate()
+                    self.process.wait(timeout=5)
+                    self.process.stdout.close()
+                    self.process.stderr.close()
+                    self.process = None
+
+            def launch_app(self, log):
+                revision = json.loads((self.bundled_gateway(self.installed) / 'manifest.json').read_text())['sourceRevision']
+                self.launches.append(revision)
+                program = ('import json,sys,time; from pathlib import Path; '
+                           'home=Path(sys.argv[1]); revision=sys.argv[2]; '
+                           'assert revision=="old-app" or not (home/"workspace/state/knowledge").exists(), "unconverted data"; '
+                           'print(json.dumps({"sourceRevision": "old-runtime" if revision=="old-app" else revision,"protocolVersion":1}),flush=True); time.sleep(60)')
+                if self.fail_start and revision == 'new':
+                    program = 'raise SystemExit(42)'
+                self.process = subprocess.Popen([sys.executable, '-u', '-c', program, str(self.tron_home), revision], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                line = self.process.stdout.readline()
+                if not line:
+                    self.quit_app(None)
+                    raise replace.Failure('fixture candidate process failed before readiness')
+                self.info = json.loads(line)
+
+            def system_info(self):
+                if not self.app_running():
+                    raise replace.RpcError('unreachable', 'fixture process stopped')
+                return self.info
+
+            def mutation(self, *args, **kwargs):
+                return {}
+
+        platform = CopyPlatform()
+        self.addCleanup(lambda: platform.quit_app(None))
+        if resume:
+            journal = Journal(platform.store / 'copy-operation').load()
+            return replace.Runner(platform, journal), platform, platform.maintenance / 'knowledge-cutover-pending.json'
+        for root, revision in ((platform.bundled_gateway(platform.installed), 'old-app'), (platform.stable_channel() / 'versions/old', 'old-runtime')):
+            root.mkdir(mode=0o700, parents=True)
+            self.write(root / 'manifest.json', json.dumps({'sourceRevision': revision}).encode())
+        self.write(platform.stable_channel() / 'current.json', b'{"version":"old"}')
+        candidate = self.root / 'candidate.app'
+        platform.bundled_gateway(candidate).mkdir(parents=True)
+        self.write(platform.bundled_gateway(candidate) / 'manifest.json', b'{"sourceRevision":"new"}')
+        platform.maintenance.mkdir(mode=0o700, parents=True)
+        pending = platform.maintenance / 'knowledge-cutover-pending.json'
+        self.write(pending, json.dumps({'version': 1, 'priorAppRevision': 'old-app', 'priorGatewayRevision': 'old-runtime', 'converterSHA256': hashlib.sha256(SCRIPT.read_bytes()).hexdigest()}).encode())
+        journal = Journal.create(platform.store / 'copy-operation', 'copy-operation', 'full', 'copy hook test', {'root': str(REPO), 'revision': 'new', 'fromRevision': 'old-runtime'})
+        journal.data['artifact'] = {'path': str(candidate), 'cdhash': 'fixture'}
+        # Exercise the complete production hook, start and exception/recovery loop.
+        # Build/drain are covered by mac-replace's separate actual-Gateway E2E.
+        journal.data['steps'] = [step for step in journal.data['steps'] if step['name'] in ('swap-app', 'start')]
+        journal.save()
+        return replace.Runner(platform, journal), platform, pending
+
+    def test_replace_converts_only_offline_before_candidate_start(self):
+        runner, platform, pending = self.replacement()
+        platform.launch_app(None)
+        self.assertEqual(runner.run(), 1)
+        self.assertTrue(self.store.exists())
+        self.assertEqual(platform.launches, ['old-app'])
+        platform.quit_app(None)
+        self.assertEqual(runner.run(), 0, runner.data.get('error'))
+        self.assertEqual(platform.launches, ['old-app', 'new'])
+        self.assertFalse(self.store.exists())
+        self.assertTrue(self.profile.exists())
+        self.assertFalse(pending.exists())
+        self.assertEqual(json.loads(self.marker.read_text()), {'version': 1})
+
+    def test_replace_privacy_refusal_restores_data_and_never_starts_candidate(self):
+        runner, platform, pending = self.replacement()
+        with sqlite3.connect(self.catalog) as db:
+            db.execute('INSERT INTO entries VALUES(?,?,?)', ('scopeExclusions', json.dumps('private'), json.dumps({'excluded': True})))
+        original = {str(path.relative_to(self.store)): path.read_bytes() for path in self.store.rglob('*') if path.is_file()}
+        marker = self.marker.read_bytes()
+        self.assertEqual(runner.run(), 1)
+        self.assertEqual(runner.data['state'], 'rolled-back', runner.data.get('error'))
+        self.assertEqual(platform.launches, ['old-app'])
+        self.assertTrue(pending.exists())
+        self.assertEqual(original, {str(path.relative_to(self.store)): path.read_bytes() for path in self.store.rglob('*') if path.is_file()})
+        self.assertEqual(self.marker.read_bytes(), marker)
+        self.assertFalse(self.profile.exists())
+        self.assertEqual(json.loads((platform.stable_channel() / 'current.json').read_text()), {'version': 'old'})
+
+    def test_replace_copy_failure_after_conversion_restores_exact_prior_namespaces(self):
+        runner, platform, pending = self.replacement()
+        original = {str(path.relative_to(self.store)): path.read_bytes() for path in self.store.rglob('*') if path.is_file()}
+        marker = self.marker.read_bytes()
+        # An invalid artifact is an actual failed ditto input, after conversion.
+        shutil.rmtree(pathlib.Path(runner.data['artifact']['path']))
+        self.assertEqual(runner.run(), 1)
+        self.assertEqual(runner.data['state'], 'rolled-back', runner.data.get('error'))
+        self.assertEqual(platform.launches, ['old-app'])
+        self.assertTrue(pending.exists())
+        self.assertEqual(original, {str(path.relative_to(self.store)): path.read_bytes() for path in self.store.rglob('*') if path.is_file()})
+        self.assertEqual(self.marker.read_bytes(), marker)
+        self.assertFalse(self.profile.exists())
+        self.assertFalse(self.marker.with_name('profile-initialized.json').exists())
+        self.assertTrue(list(runner.journal.directory.glob('knowledge-cutover-*/archive/BACKUP.json')))
+
+    def test_replace_candidate_start_failure_restores_old_app_payload_and_data(self):
+        runner, platform, pending = self.replacement()
+        original = self.catalog.read_bytes()
+        platform.fail_start = True
+        self.assertEqual(runner.run(), 1)
+        self.assertEqual(runner.data['state'], 'rolled-back', runner.data.get('error'))
+        self.assertEqual(platform.launches, ['new', 'old-app'])
+        self.assertEqual(self.catalog.read_bytes(), original)
+        self.assertTrue(pending.exists())
+        self.assertFalse(self.profile.exists())
+        self.assertTrue(list(runner.journal.directory.glob('knowledge-cutover-*/archive/BACKUP.json')))
+
+    def test_replace_process_crash_after_conversion_recovers_before_any_candidate_start(self):
+        import tron_mac_replace as replace
+        from tron_mac_replace_journal import Journal
+        runner, platform, pending = self.replacement()
+        original = self.catalog.read_bytes()
+        # exec a fresh interpreter: macOS system frameworks are not fork-safe.
+        program = "import sys,os,runpy; from pathlib import Path; sys.path.insert(0,sys.argv[1]); m=runpy.run_path(sys.argv[1]+'/test-retire-knowledge.py'); f=m['Retirement']('test_plain_files_and_new_profile_preserve_every_committed_revision'); f.root=Path(sys.argv[2]); f.home=f.root/'tron'; r,p,_=f.replacement(resume=True); r.journal.begin_attempt({'pid':os.getpid()}); r.step_swap_app(); os._exit(97)"
+        child = subprocess.run([sys.executable, '-c', program, str(SCRIPT.parent), str(self.root)], capture_output=True, text=True)
+        self.assertEqual(child.returncode, 97, child.stderr)
+        recovered = replace.Runner(platform, Journal(runner.journal.directory).load())
+        # run() must recover the interrupted transaction before attempting steps;
+        # the fixture deliberately has no stop step for the newly restored app.
+        self.assertEqual(recovered.run(), 1)
+        self.assertEqual(platform.launches, ['old-app'])
+        self.assertEqual(self.catalog.read_bytes(), original)
+        self.assertTrue(pending.exists())
+        self.assertFalse(self.profile.exists())
+
+    def test_replace_without_knowledge_is_noop_without_pending_approval(self):
+        runner, platform, pending = self.replacement()
+        shutil.rmtree(self.store)
+        pending.unlink()
+        self.assertEqual(runner.run(), 0, runner.data.get('error'))
+        self.assertEqual(platform.launches, ['new'])
+        self.assertFalse(list(runner.journal.directory.glob('knowledge-cutover-*')))
+
+    def test_replace_missing_approval_never_starts_candidate(self):
+        runner, platform, pending = self.replacement()
+        pending.unlink()
+        before = self.catalog.read_bytes()
+        self.assertEqual(runner.run(), 1)
+        self.assertEqual(platform.launches, ['old-app'])
+        self.assertEqual(self.catalog.read_bytes(), before)
+        self.assertFalse(self.profile.exists())
+
     def test_plain_files_and_new_profile_preserve_every_committed_revision(self):
         result = self.run_command()
         self.assertTrue(json.loads(result.stdout)['knowledgeNamespaceAbsent'])

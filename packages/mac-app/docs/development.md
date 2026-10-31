@@ -210,7 +210,8 @@ scripts/tron mac replace --status --follow
 
 - **Path and revision.** Fetched `origin/main`. Quick (the Gateway's source update) when the
   payload lock, dependency manifest and protocol match and `packages/mac-app` is unchanged;
-  otherwise a full signed Release build and swap.
+  otherwise a full signed Release build and swap. A remaining Knowledge namespace always
+  requires the full offline path.
 - **Runner.** Its own launchd job (`com.tron.mac.replace.<id>`) on a private script copy:
   preflight → build → verify signature → stop workers → stop Gateway → swap → start → verify →
   finish. RPC goes to the listener the `com.tron.server` PID holds on 9847 with the
@@ -227,6 +228,22 @@ scripts/tron mac replace --status --follow
 - **Swap** clones `~/.tron` (`state-snapshot`), moves the Stable payload channel and old app into
   the operation directory and installs the verified build. A failure after the swap restores and
   verifies the previous app and payloads; the snapshot is never restored over newer data.
+  For a maintainer-approved Knowledge retirement, the swap first runs the pinned
+  `retire-knowledge.py` and its read-only `--verify` while still offline, after the raw snapshot
+  and before retiring either prior artifact. A private owner-only
+  `~/.tron-maintenance/knowledge-cutover-pending.json` explicitly approves version `1`,
+  `priorAppRevision`, `priorGatewayRevision` and `converterSHA256` (the prior identities,
+  not the candidate). Missing approval, changed prior identities, active Debug/Preview jobs,
+  privacy refusals or verification failures prevent candidate start. Absence of Knowledge is
+  a no-op. The bounded journal links hash-fenced counts/inventories and the independently
+  verified archive/export under `knowledge-cutover-<attempt>`; exports are ordinary workspace
+  files named `knowledge-export-<operation>-<attempt>`. On failure or interrupted execution,
+  the same rollback first restores only the Knowledge/Profile namespaces and initialization
+  markers from the verified raw snapshot, preserving displaced bytes, then verifies the prior
+  app and external payload inventories before relaunching. Any Profile change after candidate
+  start refuses data rollback and leaves the runtime offline for a recovery decision; it never
+  overwrites newly accepted Profile work. Success removes the pending approval. Archives,
+  exports, the raw snapshot and prior artifacts remain local recovery checkpoints.
 - **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac
   verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`
   (current and previous kept); git and builds run with Homebrew's bin on `PATH` for git-lfs.

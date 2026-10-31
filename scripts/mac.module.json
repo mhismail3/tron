@@ -11,6 +11,7 @@
     "tron_mac_reinstall.py",
     "tron_mac_replace.py",
     "tron_mac_replace_journal.py",
+    "tron_mac_replace_knowledge.py",
     "tron_mac_replace_platform.py",
     "tron_mac_replace_rpc.py",
     "validate-native-host.py",
