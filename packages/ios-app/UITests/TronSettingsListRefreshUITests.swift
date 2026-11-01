@@ -51,6 +51,42 @@ final class TronSettingsListRefreshUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Remove alpha"].exists)
     }
 
+    /// A saved list must not reopen on its superseded value while the canonical
+    /// read that reflects the Save is still in flight.
+    @MainActor
+    func testSavedListReopensOnlyOnItsAcceptedValue() throws {
+        continueAfterFailure = false
+        let gate = FileManager.default.temporaryDirectory.appendingPathComponent("tron-list-saved-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: gate, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: gate) }
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-list-refresh-fixture", "-refresh-gate", gate.path]
+        app.launch()
+        defer { app.terminate() }
+        let row = app.buttons["Paths"]
+        XCTAssertTrue(row.waitForExistence(timeout: 30), app.debugDescription)
+        row.tap()
+        XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Remove alpha"].tap()
+        let field = app.textFields["Value"]
+        field.tap()
+        field.typeText("saved-value")
+        app.buttons["Add"].tap()
+        XCTAssertTrue(app.buttons["Remove saved-value"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForFile(gate.appendingPathComponent("admitted")), "The Save must be accepted and its canonical read admitted")
+        XCTAssertFalse(app.buttons["Remove saved-value"].exists, "Save dismisses the editor")
+        XCTAssertFalse(row.isEnabled, "The row must not reopen before its canonical value reflects the Save: \(app.debugDescription)")
+        row.tap()
+        XCTAssertFalse(app.buttons["Remove alpha"].exists, "Reopening must never seed the superseded value: \(app.debugDescription)")
+        try Data().write(to: gate.appendingPathComponent("release"))
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: row)],
+                                     timeout: 15) == .completed, app.debugDescription)
+        row.tap()
+        XCTAssertTrue(app.buttons["Remove saved-value"].waitForExistence(timeout: 15), "Reopening seeds the accepted value: \(app.debugDescription)")
+        XCTAssertFalse(app.buttons["Remove alpha"].exists)
+    }
+
     private func waitForFile(_ url: URL) -> Bool {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             FileManager.default.fileExists(atPath: url.path)
