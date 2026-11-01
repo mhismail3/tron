@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { GatewayError } from "../errors.js";
+import { asUncertainOutcome, GatewayError } from "../errors.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { BlobStore, type BlobByteRange, type BlobLease } from "../sessions/blob-store.js";
 import { GatewayServer } from "./server.js";
@@ -92,7 +92,7 @@ function download(
 }
 
 describe("Gateway blob HTTP leases", () => {
-  it.each(["untyped", "internal", "domain"] as const)("projects acquisition failures safely and retains local diagnostics (%s)", async kind => {
+  it.each(["untyped", "internal", "uncertain", "domain"] as const)("projects acquisition failures safely and retains local diagnostics (%s)", async kind => {
     const root = await mkdtemp(join(tmpdir(), "tron-http-errors-"));
     roots.push(root);
     const missing = join(root, "private-missing-blob");
@@ -104,6 +104,7 @@ describe("Gateway blob HTTP leases", () => {
           failure: (error as Error).message, rollbackFailure: "details-only-rollback-marker",
           apiKey: "fixture-only-secret", padding: "界".repeat(1_000),
         });
+        if (kind === "uncertain") throw asUncertainOutcome(error, "Blob acquisition could not be confirmed");
         if (kind === "domain") throw new GatewayError("not_found", "Blob unavailable", false, { reason: "missing" });
         throw error;
       }
@@ -115,13 +116,20 @@ describe("Gateway blob HTTP leases", () => {
       expect(response.status).toBe(404);
       expect(body.error).toEqual({ code: "not_found", message: "Blob unavailable", retryable: false, details: { reason: "missing" } });
     } else {
-      expect(response.status).toBe(500);
-      expect(body.error).toEqual({ code: "internal", message: "Unexpected gateway failure", retryable: kind === "internal" });
+      expect(response.status).toBe(kind === "uncertain" ? 409 : 500);
+      expect(body.error).toEqual(kind === "uncertain"
+        ? { code: "conflict", message: "Blob acquisition could not be confirmed", retryable: false, details: { outcomeUnknown: true } }
+        : { code: "internal", message: "Unexpected gateway failure", retryable: kind === "internal" });
       expect(response.body.toString("utf8")).not.toContain(missing);
       const diagnostic = (await readFile(diagnosticPath, "utf8")).trim().split("\n").map(line => JSON.parse(line))
         .find(record => record.event === "http.error");
-      expect(diagnostic).toMatchObject({ level: "error", code: "internal" });
-      if (kind === "internal") {
+      expect(diagnostic).toMatchObject({ level: "error", code: kind === "uncertain" ? "conflict" : "internal" });
+      if (kind === "uncertain") {
+        expect(diagnostic.error.message).toBe("Blob acquisition could not be confirmed");
+        expect(diagnostic.error.cause).toMatchObject({ code: "ENOENT" });
+        expect(diagnostic.error.cause.message).toContain(missing);
+        expect(diagnostic.error.cause.stack).toContain("ENOENT");
+      } else if (kind === "internal") {
         expect(diagnostic.error.message).toBe("Blob acquisition failed");
         expect(diagnostic.error.stack).toContain("GatewayError: Blob acquisition failed");
         expect(diagnostic.error.details).toContain(missing);

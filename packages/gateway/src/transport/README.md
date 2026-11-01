@@ -46,7 +46,11 @@ streams and rotation: [observability](../../docs/observability.md); records: Sig
 **Public errors.** HTTP and RPC faults use `publicError`: untyped exceptions and
 `GatewayError("internal")` project only code `internal`, fixed text `Unexpected gateway
 failure` and the existing retry hint. Internal `details` never cross that boundary.
-Other typed refusals retain their owned message/details. The original fault stays in
+Other typed refusals retain their owned message/details. An untyped backend fault
+wrapped as an uncertain outcome keeps only the owner's safe message and existing
+non-retryable `conflict`/`outcomeUnknown` fence; the original value is its diagnostic
+`cause`, never appended to client copy. Caused faults log at error level even when
+the public classification is a conflict. The original fault stays in
 Gateway-local diagnostics (`rpc.error` or `http.error`), bounded and redacted by the
 logger. Typed internal details become diagnostic text (1,000 UTF-8 bytes, at most
 64 traversed values); credential fields are redacted, cyclic/oversized values get
@@ -119,8 +123,8 @@ heartbeat-refreshed memory reading with its age.
 | `http.upload.phase` | info | An authenticated `/v1/uploads` request with a valid `X-Tron-Request-ID` reached the route (`step=received`) or was staged (`step=staged`); elapsed time, staged bytes; never host, filename, MIME type, token or body |
 | `http.upload` | info when the response finished; warning on failure | One terminal record per upload: `requestID`, `outcome` (`response-finished`, `failure`), failure category, `durationMs`, staged or observed bytes; finishing is not proof the phone received it |
 | `http.upload-cleanup` | warning | Discarding an abandoned upload failed other than by conflict or not-found; owned bytes remain |
-| `http.error` | error | An HTTP handler fault before headers were sent: `code=internal` and the original bounded/redacted `error`; client text/details are fixed-safe. Inspect this record for the local cause, not the client message |
-| `rpc.error` | warning for a `GatewayError` other than `internal`; error, with `error`, for a fault or `internal` | An RPC handler threw: `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `code`, `outcome`, `reason`, `operationId`, `ageMs` |
+| `http.error` | error | An unexpected HTTP handler fault before headers were sent: public `code` and the original bounded/redacted `error`/`cause`; client fault text is fixed-safe. Inspect this record for the local cause, not the client message |
+| `rpc.error` | warning for a cause-free `GatewayError` other than `internal`; error, with `error`, for an unexpected/caused fault or `internal` | An RPC handler threw: `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `code`, `outcome`, `reason`, `operationId`, `ageMs` |
 | `rpc.received` | info | An admitted `system.logs.export` reached its handler (`outcome=admitted`); joins the phone's `logs.export.requested` to `rpc.completed` |
 | `rpc.completed` | debug for a success under `SLOW_RPC_WARNING_MS` (1,000 ms), or `SLOW_PROMPT_WARNING_MS` (250 ms) for a prompt; warning at or above it, on failure or on `connectionClosed` | Every RPC end: correlation, `outcome`, `durationMs`, `stages` (`util/request-span.ts`, most expensive first, ≤ 1,024 bytes) and `unaccountedMs`. Prompt spans name lane waits, inventory admission, receipt persistence and response write; `settings.resolve` names its store awaits as finite `settings.*` stages |
 | `receipt.completed-persist-failed` | warning | The detached completed-receipt write after an accepted `session.prompt` response failed (`gateway-service.ts`); the pending receipt stays the replay fence |
