@@ -12,6 +12,7 @@
     "sessions/catalog-jsonl.ts",
     "sessions/catalog-metadata-index.ts",
     "sessions/catalog-metadata-index.lock.integration.test.ts",
+    "sessions/catalog-metadata-shards.integration.test.ts",
     "sessions/locks/catalog-metadata-index-paths.golden.json",
     "sessions/session-settings.ts",
     "sessions/fork-boundary.ts",

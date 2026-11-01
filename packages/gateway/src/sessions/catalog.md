@@ -31,14 +31,29 @@ Owner: `gateway/session-catalog` (`session-catalog.ts`, `catalog-jsonl.ts`,
   batches that yield to the background scheduler. The watcher's debounce bounds delay
   after a hint, not OS delivery.
 - Bounds: 50,001 directory entries, 25,001 directories / 8 MiB of paths, 25,000
-  sessions / 8 MiB metadata; overflow fails retryably. Headers are read 512 bytes
+  sessions; overflow fails retryably. Headers are read 512 bytes
   first, ≤ 64 KiB each within a 64 MiB aggregate, 16 files per batch. Names and
   previews are capped at 1,024 UTF-8 bytes. Raw lines are bounded to 64 MiB before
   decoding; an oversized row stays unproven (`catalog-index.failure step=line-limit`).
-- `gateway/catalog-metadata-v2.json` is the owner's debounced acceleration only
+- `gateway/catalog-metadata-v3/` is the owner's debounced acceleration only
   (identity, classification, file identity, size/mtime/EOF, tail hash; never text),
-  root-bound, written 0600 with fsync; any mismatch discards it. Index version 3
-  rebuilds counts on demand; `messageCount` excludes Pi `system` deltas.
+  root-bound, 0600. Rows hash by root-relative path into 64 `shard-XX.json` files
+  (each ≤ 8 MiB, warned once per process past 2 MiB; ~160 KiB each at 6,500
+  sessions) and ≤ 25,000 rows (warned past 20,000). A save writes changed shards
+  (temporary file, fsync, rename, directory fsync), then commits `manifest.json`
+  naming each shard's SHA-256, then removes shards that became empty. Only a
+  manifest whose shards all read back with their digests and that refused nothing
+  is a startup cut; otherwise every readable shard's rows are re-verified reuse
+  candidates and the rest rebuild, so a crash or one corrupt shard never loses the
+  others. A shard over its bound keeps its last file, is listed `refused`, and
+  reports `catalog-index.failure`. Rows leave only when their canonical file leaves
+  the cut; an unprovable file keeps its row. Index version 3 rebuilds counts on
+  demand; `messageCount` excludes Pi `system` deltas.
+- Migration: while `gateway/catalog-metadata-v2.json` (the former single
+  document) exists, a read migrates it to shards and deletes it only after the
+  read-back equals it; a failure keeps it and serves its rows. Rollback to a
+  build without shards finds no v2 and rebuilds once from canonical files (the
+  v3 directory is ignored and may be deleted).
 - A file the owner cannot prove keeps its old row and refuses retryably
   (`catalog_not_ready`). User-scoped reads filter by each row's delegated flag and
   duplicates are quarantined, so a child write cannot fail a dashboard list. A read

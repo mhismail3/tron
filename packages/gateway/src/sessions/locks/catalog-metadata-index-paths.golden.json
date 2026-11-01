@@ -157,9 +157,21 @@
       "step": "save one row",
       "result": true,
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -198,9 +210,21 @@
         }
       ],
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -224,9 +248,21 @@
       "step": "load for another catalog root",
       "result": "<void>",
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -255,9 +291,21 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -278,7 +326,7 @@
       }
     },
     {
-      "step": "a save over the byte bound is not written",
+      "step": "a shard over its byte bound is not written and the manifest records the refusal",
       "result": {
         "value": false,
         "failures": [
@@ -286,9 +334,56 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [],
+          "refused": [
+            "13"
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1 n:n>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "the next accepted save publishes a complete cut again",
+      "result": true,
+      "files": {
+        "gateway/catalog-metadata-v3/manifest.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -310,11 +405,23 @@
     },
     {
       "step": "a save into a state directory that is a file is refused",
-      "refused": "ENOTDIR: not a directory, mkdir '<tmp>/home/blocked/gateway'",
+      "refused": "ENOTDIR: not a directory, mkdir '<tmp>/home/blocked/gateway/catalog-metadata-v3'",
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -351,9 +458,21 @@
         "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -391,9 +510,21 @@
         "name": "Named"
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -420,9 +551,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -449,9 +592,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -478,9 +633,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -507,9 +674,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -536,9 +715,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -565,9 +756,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -594,9 +797,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -623,9 +838,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -652,9 +879,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -685,7 +924,7 @@
           "createdAt": "2026-01-01T00:00:00.000Z",
           "updatedAt": "2026-01-01T00:00:00.000Z",
           "messageCount": 1,
-          "fileIdentity": "<fileIdentity#2 n:n>",
+          "fileIdentity": "<fileIdentity#3 n:n>",
           "size": 260,
           "mtimeMs": 1767225613000,
           "eofOffset": 260,
@@ -694,9 +933,21 @@
         "failures": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -727,7 +978,7 @@
           "createdAt": "2026-01-01T00:00:00.000Z",
           "updatedAt": "2026-01-01T00:20:00.000Z",
           "messageCount": 8,
-          "fileIdentity": "<fileIdentity#3 n:n>",
+          "fileIdentity": "<fileIdentity#4 n:n>",
           "size": 850,
           "mtimeMs": 1767225615000,
           "eofOffset": 850,
@@ -742,7 +993,7 @@
           "createdAt": "2026-01-01T00:00:00.000Z",
           "updatedAt": "2026-01-01T00:20:00.000Z",
           "messageCount": 8,
-          "fileIdentity": "<fileIdentity#3 n:n>",
+          "fileIdentity": "<fileIdentity#4 n:n>",
           "size": 886,
           "mtimeMs": 1767225616000,
           "eofOffset": 886,
@@ -750,9 +1001,21 @@
         }
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -786,9 +1049,21 @@
         null
       ],
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -817,9 +1092,21 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#2>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -866,7 +1153,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#4 n:n>",
+              "fileIdentity": "<fileIdentity#5 n:n>",
               "size": 183,
               "mtimeMs": 1767225619000,
               "eofOffset": 183,
@@ -887,9 +1174,25 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            },
+            {
+              "shard": "26",
+              "digest": "<digest#7>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -904,7 +1207,14 @@
               "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
-            },
+            }
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-26.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "26",
+          "rows": [
             {
               "id": "s2",
               "path": "<tmp>/home/sessions/two.jsonl",
@@ -913,7 +1223,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "fileIdentity": "<fileIdentity#8 n:n>",
               "size": 184,
               "mtimeMs": 1767225617000,
               "eofOffset": 184,
@@ -936,7 +1246,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:02:00.000Z",
               "messageCount": 8,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "fileIdentity": "<fileIdentity#8 n:n>",
               "size": 278,
               "mtimeMs": 1767225621000,
               "eofOffset": 278,
@@ -948,9 +1258,25 @@
         "rebuilt": []
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            },
+            {
+              "shard": "26",
+              "digest": "<digest#7>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -965,7 +1291,14 @@
               "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
-            },
+            }
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-26.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "26",
+          "rows": [
             {
               "id": "s2",
               "path": "<tmp>/home/sessions/two.jsonl",
@@ -974,7 +1307,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "fileIdentity": "<fileIdentity#8 n:n>",
               "size": 184,
               "mtimeMs": 1767225617000,
               "eofOffset": 184,
@@ -997,7 +1330,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "fileIdentity": "<fileIdentity#8 n:n>",
               "size": 186,
               "mtimeMs": 1767225622000,
               "eofOffset": 186,
@@ -1011,9 +1344,25 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            },
+            {
+              "shard": "26",
+              "digest": "<digest#7>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -1028,7 +1377,14 @@
               "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
-            },
+            }
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-26.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "26",
+          "rows": [
             {
               "id": "s2",
               "path": "<tmp>/home/sessions/two.jsonl",
@@ -1037,7 +1393,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 7,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "fileIdentity": "<fileIdentity#8 n:n>",
               "size": 184,
               "mtimeMs": 1767225617000,
               "eofOffset": 184,
@@ -1067,9 +1423,25 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            },
+            {
+              "shard": "32",
+              "digest": "<digest#9>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -1084,7 +1456,14 @@
               "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
-            },
+            }
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-32.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "32",
+          "rows": [
             {
               "id": "s6",
               "path": "<tmp>/home/sessions/locked.jsonl",
@@ -1093,7 +1472,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#6 n:n>",
+              "fileIdentity": "<fileIdentity#10 n:n>",
               "size": 184,
               "mtimeMs": 1767225623000,
               "eofOffset": 184,
@@ -1120,9 +1499,25 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            },
+            {
+              "shard": "32",
+              "digest": "<digest#9>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -1137,7 +1532,14 @@
               "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
-            },
+            }
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-32.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "32",
+          "rows": [
             {
               "id": "s6",
               "path": "<tmp>/home/sessions/locked.jsonl",
@@ -1146,7 +1548,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#6 n:n>",
+              "fileIdentity": "<fileIdentity#10 n:n>",
               "size": 184,
               "mtimeMs": 1767225623000,
               "eofOffset": 184,
@@ -1168,9 +1570,25 @@
         "asked": 2
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            },
+            {
+              "shard": "32",
+              "digest": "<digest#9>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -1185,7 +1603,14 @@
               "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
-            },
+            }
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-32.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "32",
+          "rows": [
             {
               "id": "s6",
               "path": "<tmp>/home/sessions/locked.jsonl",
@@ -1194,7 +1619,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#6 n:n>",
+              "fileIdentity": "<fileIdentity#10 n:n>",
               "size": 184,
               "mtimeMs": 1767225623000,
               "eofOffset": 184,
@@ -1221,9 +1646,25 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            },
+            {
+              "shard": "32",
+              "digest": "<digest#9>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",
@@ -1238,7 +1679,14 @@
               "mtimeMs": 1767225620000,
               "eofOffset": 183,
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
-            },
+            }
+          ]
+        },
+        "gateway/catalog-metadata-v3/shard-32.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "32",
+          "rows": [
             {
               "id": "s6",
               "path": "<tmp>/home/sessions/locked.jsonl",
@@ -1247,7 +1695,7 @@
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
               "messageCount": 1,
-              "fileIdentity": "<fileIdentity#6 n:n>",
+              "fileIdentity": "<fileIdentity#10 n:n>",
               "size": 184,
               "mtimeMs": 1767225623000,
               "eofOffset": 184,
@@ -1260,287 +1708,328 @@
     {
       "step": "admit a hand-written document",
       "result": {
-        "loaded": 1
+        "loaded": 1,
+        "legacyKept": false
       },
       "files": {}
     },
     {
       "step": "ignore a document of another version",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a document for another root",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a document with an overlong root",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a document whose rows are not a list",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a document that is a list",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a document that is null",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a document that is not JSON",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "admit a row automation origin",
       "result": {
-        "loaded": 1
+        "loaded": 1,
+        "legacyKept": false
       },
       "files": {}
     },
     {
       "step": "admit a row with a parent and a name",
       "result": {
-        "loaded": 1
+        "loaded": 1,
+        "legacyKept": false
       },
       "files": {}
     },
     {
       "step": "ignore a null row",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a list row",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong id",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a relative path",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row outside the root",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row at a sibling of the root",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row that is not a transcript",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong working directory",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong parent",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a parent and an automation origin",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with another origin kind",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a malformed automation id",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a list origin",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong name",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a multibyte name over the byte bound",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong first message",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a multibyte first message over the byte bound",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an unreadable creation time",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong creation time",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an unreadable update time",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong update time",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong file identity",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a negative message count",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a fractional message count",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a negative size",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with a fractional size",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an infinite modification time",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row whose offset is not its size",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "ignore a row with an overlong tail hash",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
     {
       "step": "admit a zero-length row at the bounds",
       "result": {
-        "loaded": 1
+        "loaded": 1,
+        "legacyKept": false
       },
       "files": {}
     },
     {
       "step": "ignore a document over the byte bound",
       "result": {
-        "loaded": "ignored"
+        "loaded": "ignored",
+        "legacyKept": true
       },
       "files": {}
     },
@@ -1570,9 +2059,21 @@
         ]
       },
       "files": {
-        "gateway/catalog-metadata-v2.json": {
+        "gateway/catalog-metadata-v3/manifest.json": {
           "version": 3,
           "root": "<tmp>/home/sessions",
+          "shards": [
+            {
+              "shard": "13",
+              "digest": "<digest#6>"
+            }
+          ],
+          "refused": []
+        },
+        "gateway/catalog-metadata-v3/shard-13.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "shard": "13",
           "rows": [
             {
               "id": "s1",

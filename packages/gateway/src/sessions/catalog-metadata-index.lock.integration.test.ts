@@ -6,15 +6,17 @@ import { CatalogMetadataIndex, catalogActivityTimestamp, type CatalogMetadataInd
 
 /**
  * `gateway/session-catalog` mutation-path lock for the cold-catalog metadata index
- * `gateway/catalog-metadata-v2.json` (plan §6.5 V4, §6.6; test-support/store-path-lock.ts):
- * rows stamped from a summary, saves and their bounds, appends, reconcile with its
- * stop and unproven candidates, document and row admission, and disposal. File times
+ * `gateway/catalog-metadata-v3/` and the superseded `gateway/catalog-metadata-v2.json` it
+ * migrates (plan §6.5 V4, §6.6; test-support/store-path-lock.ts): rows stamped from a
+ * summary, sharded saves and their bounds, appends, reconcile with its stop and
+ * unproven candidates, legacy document and row admission, and disposal. File times
  * are set explicitly and device/inode identities are aliased, so the golden is the
- * index's own arithmetic over real files.
+ * index's own arithmetic over real files. Shard digests hash bytes that carry the
+ * temporary root, so they are aliased too.
  */
 it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admission and dispose", async () => {
   const log = await storePathLock({ module: "gateway/session-catalog", name: "catalog-metadata-index-paths", testFileUrl: import.meta.url,
-    owned: "gateway/catalog-metadata-v2.json", aliases: ["fileIdentity"] });
+    owned: "gateway", aliases: ["fileIdentity"], digests: ["digest"] });
   const failures: string[] = [];
   const gateway = join(log.home, "gateway");
   const root = join(log.home, "sessions");
@@ -62,8 +64,10 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   await log.step("load the saved rows", () => index.load(root), "result");
   await log.step("load for another catalog root", () => index.load(join(log.home, "elsewhere")));
   await log.step("a save over the entry bound is not written", () => reported(() => index.save(root, Array.from({ length: 25_001 }, () => row))));
-  await log.step("a save over the byte bound is not written", () => reported(() => index.save(root,
+  // Every copy of one row lands in one shard, so this is one shard over its byte ceiling.
+  await log.step("a shard over its byte bound is not written and the manifest records the refusal", () => reported(() => index.save(root,
     Array.from({ length: 2_100 }, () => ({ ...row, cwd: "c".repeat(4_096) })))));
+  await log.step("the next accepted save publishes a complete cut again", () => index.save(root, [row]), "result");
   await log.step("a save into a state directory that is a file is refused", async () => {
     await writeFile(join(log.home, "blocked"), "");
     return new CatalogMetadataIndex(join(log.home, "blocked", "gateway")).save(root, [row]);
@@ -195,11 +199,19 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   // The index binds a document to the catalog root's canonical path (the temporary root may be a symbolic link).
   const canonical = await realpath(root);
   const document = (rows: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ version: 3, root: canonical, rows, ...extra });
-  // A hand-written document is removed again after its load, so the golden pins each verdict, not the input bytes.
+  // A hand-written legacy document is the migration input. Its store is removed
+  // again after its load, so the golden pins each verdict (an admitted document
+  // is migrated and removed; an ignored one stays), not the input bytes.
   const loadWritten = async (content: string) => {
-    await writeFile(join(gateway, "catalog-metadata-v2.json"), content);
-    try { const rows = await index.load(root); return { loaded: rows === undefined ? "ignored" : rows.length }; }
-    finally { await rm(join(gateway, "catalog-metadata-v2.json")); }
+    await rm(index.directory, { recursive: true, force: true });
+    await writeFile(index.legacyPath, content);
+    try {
+      const rows = await index.load(root);
+      return { loaded: rows === undefined ? "ignored" : rows.length, legacyKept: await lstat(index.legacyPath).then(() => true, () => false) };
+    } finally {
+      await rm(index.legacyPath, { force: true });
+      await rm(index.directory, { recursive: true, force: true });
+    }
   };
   const forged = async (label: string, content: string, expected: "admitted" | "ignored") =>
     log.step(`${expected === "admitted" ? "admit" : "ignore"} ${label}`, () => loadWritten(content));
@@ -248,9 +260,9 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   await forged("a document over the byte bound", document([valid], { padding: "p".repeat(8 * 1_024 * 1_024) }), "ignored");
   await log.step("ignore a document that is a symbolic link", async () => {
     await writeFile(join(log.home, "linked.json"), document([valid]));
-    await symlink(join(log.home, "linked.json"), join(gateway, "catalog-metadata-v2.json"));
+    await symlink(join(log.home, "linked.json"), index.legacyPath);
     try { return { loaded: (await index.load(root)) === undefined ? "ignored" : "loaded" }; }
-    finally { await rm(join(gateway, "catalog-metadata-v2.json")); }
+    finally { await rm(index.legacyPath); }
   });
 
   await log.step("dispose", () => index.dispose(), "result");

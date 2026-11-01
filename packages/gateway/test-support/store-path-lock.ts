@@ -40,16 +40,19 @@ export async function storePathLock(options: {
   owned: string;
   /** Keys whose string values the host assigns; each distinct value becomes `<key#n shape>` in first-seen order. */
   aliases?: readonly string[];
+  /** Keys whose values are digests over host-assigned bytes: aliased like `aliases`, without a shape. */
+  digests?: readonly string[];
 }): Promise<StorePathLog> {
   const root = await mkdtemp(join(tmpdir(), `tron-store-path-${options.name}-`));
   const home = join(root, "home");
   const normalization: TraceNormalization = { roots: [root, await realpath(root)] };
   const named = new Map<string, string>();
   const keys = new Set(options.aliases ?? []);
+  const digests = new Set(options.digests ?? []);
   const normalize = (value: unknown): TraceValue => JSON.parse(JSON.stringify(normalizeStoreValue(value, normalization), (key, item: unknown) => {
-    if (!keys.has(key) || typeof item !== "string") return item;
+    if ((!keys.has(key) && !digests.has(key)) || typeof item !== "string") return item;
     // The alias keeps the value's shape (digits as `n`), so a changed representation still differs.
-    if (!named.has(item)) named.set(item, `<${key}#${named.size + 1} ${item.replace(/[0-9]+/gu, "n")}>`);
+    if (!named.has(item)) named.set(item, digests.has(key) ? `<${key}#${named.size + 1}>` : `<${key}#${named.size + 1} ${item.replace(/[0-9]+/gu, "n")}>`);
     return named.get(item);
   })) as TraceValue;
   vi.useFakeTimers({ toFake: ["Date"] });

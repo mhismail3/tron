@@ -77,6 +77,7 @@ import { projectTranscriptPage, type TranscriptPage } from "../projection/projec
 import {
   CatalogMetadataIndex,
   type CatalogMetadataIndexFailure,
+  type CatalogMetadataIndexPressure,
   type CatalogMetadataIndexSummary,
 } from "../../sessions/catalog-metadata-index.js";
 import { branchFromParsedSession, validateSearchBranch, type SessionSearchForkBoundary } from "../../sessions/session-branch.js";
@@ -671,6 +672,9 @@ export class RuntimeRegistry implements SessionOperations {
       /** Handled catalog-index write failures. The index write is fire-and-forget
        * outside any request span, so its owner records them. */
       catalogIndexFailure?: CatalogMetadataIndexFailure;
+      /** A catalog-index save that passed a warning threshold, well before its
+       * refusal bound. */
+      catalogIndexPressure?: (pressure: CatalogMetadataIndexPressure) => void;
       /** One catalog reconcile, with the files it covered and the rows it
        * changed. An incomplete or failed pass is reported instead of silent. */
       catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
@@ -721,7 +725,7 @@ export class RuntimeRegistry implements SessionOperations {
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
     this.archive = new SessionArchiveStore(options.tronHome);
-    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure);
+    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure, options.catalogIndexPressure);
     this.sessionCatalog = new SessionCatalog({
       catalogRoot: () => this.catalogDirectory(),
       index: this.catalogMetadataIndex,

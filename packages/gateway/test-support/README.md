@@ -18,6 +18,10 @@ can kill and reopen it to prove interrupted actions are not replayed. Its lifecy
 mode holds a real pending-read return to prove concurrent start and disposal join
 one accepted recovery through the existing work owner.
 
+`catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
+`catalog-metadata-fixture.ts` alternately until its parent kills it, so a
+SIGKILL lands at an arbitrary point of a sharded catalog save.
+
 `apps-crash-child.ts` and its preload hold Apps receipt/publication cuts in a real
 Registry process. The fixture releases its workspace lease before the parent kills
 it; this proves Apps recovery at those cuts, not whole-Gateway ungraceful crash,

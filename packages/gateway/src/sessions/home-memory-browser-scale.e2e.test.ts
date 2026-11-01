@@ -384,7 +384,7 @@ describe("Home memory browser at scale", () => {
       const beforeColdCatalog = await view(g, { limit: 30 });
       markStage("close for a restart without the catalog document");
       await closeGateway(g);
-      await rm(join(root, "tron", "gateway", "catalog-metadata-v2.json"));
+      await rm(join(root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true });
       g = await openGateway(root, runtime);
       await g.registry.initialize();
       const cutBeforeRead = (g.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
