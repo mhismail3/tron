@@ -62,8 +62,10 @@ export function asUncertainOutcome(error: unknown, message: string): GatewayErro
       : { outcomeUnknown: true, ...(error.details === undefined ? {} : { reported: error.details }) };
     return new GatewayError(error.code, error.message, false, details);
   }
-  const cause = error instanceof Error ? error.message : String(error);
-  return new GatewayError("conflict", `${message} (${cause})`, false, { outcomeUnknown: true });
+  const failure = new GatewayError("conflict", message, false, { outcomeUnknown: true });
+  // Uncertainty is public; the backend fault that caused it is diagnostic-only.
+  failure.cause = error;
+  return failure;
 }
 
 export function publicError(error: unknown): {

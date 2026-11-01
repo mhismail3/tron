@@ -56,8 +56,8 @@ function diagnosticRequestID(value: string): string {
 
 // A caller mistake or expected backpressure is handled (warning); only an
 // unexpected fault or an internal error means someone should look (error).
-function rpcFailureLevel(error: unknown): "warning" | "error" {
-  return error instanceof GatewayError && error.code !== "internal" ? "warning" : "error";
+function transportFailureLevel(error: unknown): "warning" | "error" {
+  return error instanceof GatewayError && error.code !== "internal" && !Object.hasOwn(error, "cause") ? "warning" : "error";
 }
 
 /** Per-RPC completions under this bound are debug detail; slower ones warn. */
@@ -1368,7 +1368,7 @@ export class GatewayServer {
       return;
     }
     const failure = publicError(error);
-    if (failure.code === "internal") {
+    if (transportFailureLevel(error) === "error") {
       this.options.logger.log("error", "HTTP request failed", {
         event: "http.error", source: "transport", code: failure.code, error,
       });
@@ -2383,7 +2383,7 @@ export class GatewayServer {
       }
     } catch (error) {
       if (!requestController.signal.aborted) {
-        const level = rpcFailureLevel(error);
+        const level = transportFailureLevel(error);
         this.options.logger.log(level, `RPC ${frame.method} for client ${connection.id} failed`, {
           event: "rpc.error", source: "transport", method: frame.method, requestID: diagnosticID,
           connectionId: connection.id, ...rpcCorrelation,
@@ -2516,7 +2516,7 @@ export class GatewayServer {
       if (inFlightRpc.shedReason !== undefined) {
         runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
       } else if (!inFlightRpc.controller.signal.aborted) {
-        const level = rpcFailureLevel(error);
+        const level = transportFailureLevel(error);
         this.options.logger.log(level, `RPC ${frame.method as string} for client ${connection.id} failed`, {
           event: "rpc.error", source: "transport", method: frame.method as string, requestID: diagnosticRequestID(requestId),
           connectionId: connection.id, ...rpcCorrelation,
