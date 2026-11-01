@@ -81,7 +81,11 @@ automation owner. Its `get cdp-url` result carries an opaque `browser_live` sour
 finalized SDK package provenance of the configured
 `git:github.com/fitchmultz/pi-agent-browser-native` source (not a code-hash
 attestation), qualified with wrapper 0.4.1 at `d6cde09af8d7757bbfba5a4ffaf83381bb392683` and engine 0.33.2;
-updates need requalification. Per-action routing needs the provider's
+updates need requalification. `browser-fork-receipts.integration.test.ts` exercises
+explicit `open` then `get cdp-url` through the pinned fork with both controlled CLI
+envelopes and the real engine (including a viewed frame), parent resealing, cold
+reload and cancellation while a nested host tool is pending. Raw nested lifecycle
+metadata alone is not authority; `open` is not required to promote it. Per-action routing needs the provider's
 `agent-browser.browser-binding.v1` (`cdpUrl`, `session`, `owned`, `state:
 active|closed`), promoted only from native envelopes. The adapter seals the descriptor
 to the tool call and session with an ephemeral key; copies grant nothing. One exact
