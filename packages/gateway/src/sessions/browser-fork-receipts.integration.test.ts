@@ -21,11 +21,22 @@ const browserCleanups: Array<() => void> = [];
 const oldPath = process.env.PATH;
 
 afterEach(async () => {
-  await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
-  for (const cleanup of browserCleanups.splice(0)) cleanup();
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-  if (oldPath === undefined) delete process.env.PATH;
-  else process.env.PATH = oldPath;
+  const failures: unknown[] = [];
+  try {
+    for (const registry of registries.splice(0)) {
+      try { await registry.dispose(); } catch (error) { failures.push(error); }
+    }
+    for (const cleanup of browserCleanups.splice(0)) {
+      try { cleanup(); } catch (error) { failures.push(error); }
+    }
+    for (const root of roots.splice(0)) {
+      try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    }
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+  if (failures.length) throw new AggregateError(failures, "Browser receipt fixture cleanup failed");
 });
 
 function toolResult(slot: Awaited<ReturnType<RuntimeRegistry["create"]>>, toolCallId: string): any {
@@ -92,9 +103,15 @@ if (args.includes("https://forged.invalid/") || ${JSON.stringify(mode)} === "env
         });
         if (flags.includes("--session")) identities.set(JSON.stringify(flags), { flags, socketDir });
       }
-      for (const { flags, socketDir } of identities.values()) execFileSync(nativeExecutable, [...flags, "close"], {
-        timeout: 15_000, stdio: "pipe", env: { ...process.env, AGENT_BROWSER_SOCKET_DIR: socketDir },
-      });
+      const failures: unknown[] = [];
+      for (const { flags, socketDir } of identities.values()) {
+        try {
+          execFileSync(nativeExecutable, [...flags, "close"], {
+            timeout: 15_000, stdio: "pipe", env: { ...process.env, AGENT_BROWSER_SOCKET_DIR: socketDir },
+          });
+        } catch (error) { failures.push(error); }
+      }
+      if (failures.length) throw new AggregateError(failures, "Owned browser sessions failed to close");
     });
     const fakePath = join(fakeBin, "agent-browser");
     await writeFile(fakePath, fakeExecutable, { mode: 0o755 });
