@@ -945,22 +945,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "929-codemode-ask-user-answered")
     }
 
-    /// #1073: returning to the app and reconnecting to the Gateway never closes,
-    /// re-presents or resets a presented sheet. On iOS 26.4 and later SwiftUI
-    /// rebuilds the content of sheets above the chat route when the app returns
-    /// from another app, so any state a sheet's content kept for itself (a
-    /// terminal's emulator and connection, a typed draft, a nested sheet's
-    /// presentation) was lost while the sheet looked as if it stayed open.
-    /// Failure modes, each observed from the real interface:
-    ///
-    /// 1. The session terminal (Manage Session) reconnects from empty: its
-    ///    phase passes through "Connecting terminal…" or its rendered output
-    ///    is cleared and redrawn after the app returns or the socket reconnects.
-    /// 2. Mac Terminal (Settings, over the chat route) reloads: it shows
-    ///    "Checking your Mac…" again or its content changes.
-    /// 3. A typed draft in a sheet nested in a Settings sheet (MCP Servers ›
-    ///    Add Server) is lost, or that sheet closes.
-    /// 4. The chat's unsent composer draft does not survive all of it.
+    /// Foreground and Gateway reconnect keep presented sheets and their drafts.
+    /// Mac Terminal's setup panel must not reload; a nested MCP form must retain
+    /// its input and presentation, and the chat composer must retain its draft.
+    /// Real SSH shell/output continuity belongs to TronMacTerminalUITests;
+    /// a new tmux attachment intentionally repaints a fresh emulator.
     @MainActor
     func testForegroundAndReconnectKeepSheetsAndTheirContent() throws {
         continueAfterFailure = true
@@ -979,45 +968,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         composer.typeText(draft)
         XCTAssertEqual(composer.value as? String, draft)
 
-        // 1. The session terminal over Manage Session.
-        let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(ring.waitForExistence(timeout: 60), app.debugDescription)
-        ring.tap()
-        // Terminal is a row above the exports at the sheet's end (#1655).
-        let terminalButton = app.buttons["manage-session-terminal"]
-        XCTAssertTrue(waitForEnabled(terminalButton, timeout: 60), app.debugDescription)
-        for _ in 0..<8 where !terminalButton.isHittable { app.swipeUp() }
-        terminalButton.tap()
-        let terminalTitle = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
-        XCTAssertTrue(waitForValue(terminalTitle, "Connected", timeout: 60), "the session terminal never connected: \(app.debugDescription)")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
-        XCTAssertTrue(app.buttons["Control modifier"].waitForExistence(timeout: 10), app.debugDescription)
-        app.typeText("clear; for i in 1 2 3 4 5 6; do echo SCROLLBACK_1073_LINE_$i; done\n")
-        Thread.sleep(forTimeInterval: 2)
-        let connectingTerminal = app.staticTexts["Connecting terminal…"]
-        let terminalBefore = terminalBody(app)
-        keepScreenshot(app, name: "1073-session-terminal-before")
-
-        returnFromAnotherApp(app)
-        assertStays(app, presented: terminalTitle, never: connectingTerminal, "the session terminal after returning to the app")
-        XCTAssertTrue(waitForValue(terminalTitle, "Connected", timeout: 60), app.debugDescription)
-        Thread.sleep(forTimeInterval: 1)
-        keepScreenshot(app, name: "1073-session-terminal-after-return")
-        let returnedChange = changedPixelFraction(terminalBefore, terminalBody(app))
-        XCTAssertLessThan(returnedChange, 0.02, "returning to the app redrew the session terminal (\(returnedChange) of it changed)")
-
-        try forceReconnect(fixture)
-        assertStays(app, presented: terminalTitle, never: connectingTerminal, "the session terminal after reconnecting")
-        XCTAssertTrue(waitForValue(terminalTitle, "Connected", timeout: 60), app.debugDescription)
-        Thread.sleep(forTimeInterval: 1)
-        keepScreenshot(app, name: "1073-session-terminal-after-reconnect")
-        let reconnectedChange = changedPixelFraction(terminalBefore, terminalBody(app))
-        XCTAssertLessThan(reconnectedChange, 0.02, "reconnecting cleared or redrew the session terminal (\(reconnectedChange) of it changed)")
-        dismissTopSheet(app) // Terminal
-        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 10), "closing the terminal lost Manage Session: \(app.debugDescription)")
-        dismissTopSheet(app) // Manage Session
-
-        // 2. Mac Terminal over the chat's Settings.
+        // 1. Mac Terminal's setup panel over the chat's Settings.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
@@ -1026,6 +977,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             return XCTFail("no Mac Terminal row: \(app.debugDescription)")
         }
         macTerminal.tap()
+        let terminalTitle = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
         XCTAssertTrue(terminalTitle.waitForExistence(timeout: 30), app.debugDescription)
         let checking = app.staticTexts["Checking your Mac…"]
         XCTAssertTrue(waitForAbsence(checking, timeout: 60), app.debugDescription)
@@ -1040,7 +992,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         dismissTopSheet(app) // Mac Terminal
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 10), "closing Mac Terminal lost Settings: \(app.debugDescription)")
 
-        // 3. A draft in a sheet nested in a Settings sheet.
+        // 2. A draft in a sheet nested in a Settings sheet.
         guard let mcp = hittableElement(app, identifier: "settings-link-MCP Servers", timeout: 30) else {
             return XCTFail("no MCP Servers row: \(app.debugDescription)")
         }
@@ -1067,7 +1019,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         dismissTopSheet(app) // MCP Servers
         dismissTopSheet(app) // Settings
 
-        // 4. The chat itself.
+        // 3. The chat itself.
         XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertEqual(composer.value as? String, draft, "the unsent composer draft was lost")
     }
@@ -1111,25 +1063,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(reloads, 0, "\(what) reloaded (\(reloads) samples showed its loading state)", file: file, line: line)
     }
 
-    @MainActor
-    private func waitForValue(_ element: XCUIElement, _ value: String, timeout: TimeInterval) -> Bool {
-        let matches = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: element)
-        return XCTWaiter().wait(for: [matches], timeout: timeout) == .completed
-    }
-
     /// Every static text inside an element, in order: what the reader sees.
     @MainActor
     private func visibleText(_ element: XCUIElement) -> String {
         element.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: "|")
-    }
-
-    /// The terminal's rendered rows below the sheet chrome, above the keyboard.
-    @MainActor
-    private func terminalBody(_ app: XCUIApplication) -> CGImage? {
-        let screenshot = app.screenshot().image
-        let scale = screenshot.scale
-        return screenshot.cgImage?.cropping(to: CGRect(x: 16 * scale, y: 130 * scale,
-                                                       width: 340 * scale, height: 160 * scale))
     }
 
     /// Settings surfaces serve the schema's keys (docs/settings-model.md 7.7). For
