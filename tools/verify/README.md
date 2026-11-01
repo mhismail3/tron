@@ -78,19 +78,16 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 ### Known failures
 
 `tools/verify/known-failures.json` is validated on every selection, including plans.
-Entries require exact `<repository-relative-test-path>::<full-case-name>`, failing
-`evidence.command`, full ancestor `evidence.commit`, SHA-256 `evidence.failureDigest`,
-owner `issue` and ISO `expires`. Gateway matching hashes the full failure-message
-array (JSON, `ensure_ascii=False`), replacing only the checkout root with `<repo>`;
-a changed failure in the same case refuses. Reproductions must be current-main with raw logs/JSON.
+Entries require exact `<repository-relative-test-path>::<full-case-name>`, failing `evidence.command`,
+full ancestor `evidence.commit`, SHA-256 `evidence.failureDigest`, owner `issue` and ISO `expires`.
+Gateway matching hashes the full failure-message array (JSON, `ensure_ascii=False`), replacing only
+the checkout root with `<repo>`; changed failures refuse. Reproductions require current-main and raw logs/JSON.
 Expiry is 00:00 UTC, strictly after the reproduction commit's UTC date and at most seven days later.
-Renew once by retaining the original and appending `renewedFrom` equal to its commit:
-the new descendant reproduction must be dated on/after original expiry, with a newly
-reproduced digest (possibly unchanged) and the same seven-day expiry bound. Reachable
-registry history prevents deletion from resetting the budget; a second renewal refuses.
-Mac cases under `packages/mac-app/Tests/Integration/` retain branch observations with
-original commit, exact xcresult failure-text-array digest and issue, never executable
-waivers. Restored ancestry never makes branch evidence main evidence.
+Renew once: retain the original and append `renewedFrom` equal to its commit. The new descendant
+reproduction must be dated on/after original expiry with a newly reproduced digest (possibly unchanged)
+and the same seven-day bound. Reachable history prevents deletion resetting the budget; second renewals refuse.
+Mac cases under `packages/mac-app/Tests/Integration/` retain branch observations with original commit,
+exact xcresult failure-text-array digest and issue, never waivers. Restored ancestry is not main evidence.
 
 Real-UI entries under `packages/ios-app/UITests/RealGateway/` additionally require
 `failureSites` (`Filename.swift:line`) and exact `target/class/method`. Their digest
@@ -98,13 +95,12 @@ is raw provenance: only identity plus an allowed site qualifies. Incomplete evid
 unexpected errors and expiry refuse. `run-ui` collects every selected original outcome;
 the batch retains each outcome and the complete raw XCTest/AX log, including quarantines.
 
-Tests execute unchanged. Exact unexpired Gateway case AND digest matches allow exit 0
-with verdict `quarantined` (qualified, never green); failures, passing counts, logs,
-expiry and issue stay visible. Exact expired matches yield `expired` (exit 0 pre-land),
-retaining `expiredReds`, never qualified. All selections list unrelated `expiredEntries`:
-authorship remains allowed; checkpoint proposals block. `--all` reports any expiry as
-`expired`. Unknown/changed signatures, suite/runtime errors, missing reports and malformed
-registry data exit 1. Health retains expired/deferred verdicts and unwaived expired reds.
+Tests execute unchanged. Exact unexpired Gateway case AND digest matches allow exit 0 with verdict
+`quarantined` (qualified, never green); failures, passing counts, logs, expiry and issue stay visible.
+Exact expired matches yield `expired` (exit 0 pre-land), retaining `expiredReds`, never qualified.
+All selections list unrelated `expiredEntries`: authorship stays allowed, checkpoints block; `--all`
+reports any expiry as `expired`. Unknown/changed signatures, suite/runtime errors, missing reports and
+malformed registry data exit 1. Health retains expired/deferred verdicts and unwaived expired reds.
 Selections have `checkpointEligible: false`; only complete batches establish eligibility.
 A maintainer-requested install despite expiry must name the expired red. No wildcard/file waiver, retries or alternate runner.
 
