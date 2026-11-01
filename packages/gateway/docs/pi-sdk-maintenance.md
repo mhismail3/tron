@@ -76,6 +76,13 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   → candidate → previous probe before publishing immutable artifacts and renaming the pin
   (current kept as previous). `.pi-subagents-update-staging` is the exclusive lease; an
   interrupted update leaves it for the operator. It never edits the fork, homes or manifests.
+- **Workflow sandbox:** the pinned fork constructs workflow APIs, promises, results and errors
+  in a code-generation-disabled runtime realm, serializes host responses as JSON, and locks
+  stack formatters and worker constructors. Both upstream realm isolation (`125ba5d7`) and
+  stack-hook hardening (`90b66cd8`), plus constructor/error-boundary hardening (`1f9e47b9`),
+  are required; an Error-hook-only backport is insufficient. The fork's
+  `test/unit/workflow-sandbox-security.test.ts` exercises the live worker boundary; validate
+  the archived closure's worker bytes and run those oracles when updating a security pin.
 - **Home task gate:** every pin change also re-reviews the fork's launch/control contract
   and updates the reviewed version in `src/kernel/delegation/task-worker-extension.ts`.
   An unreviewed version is refused before launch. Validate actual Home-task launch/resume
