@@ -1,6 +1,6 @@
 import XCTest
 
-/// Production card and admin navigation on a simulator, over hosted socket data.
+/// Production approval card on a simulator, over hosted socket data.
 /// Gateway native-change E2Es own effect authorization, expiry and Undo.
 @MainActor
 final class TronD4ReviewUITests: XCTestCase {
@@ -8,10 +8,6 @@ final class TronD4ReviewUITests: XCTestCase {
     func testSharedCardDark() { card(mode: "dark", large: false) }
     func testSharedCardLightXXXL() { card(mode: "light", large: true) }
     func testSharedCardDarkXXXL() { card(mode: "dark", large: true) }
-    func testAdminLight() { admin(mode: "light", large: false) }
-    func testAdminDark() { admin(mode: "dark", large: false) }
-    func testAdminLightXXXL() { admin(mode: "light", large: true) }
-    func testAdminDarkXXXL() { admin(mode: "dark", large: true) }
 
     private func arguments(mode: String, large: Bool) -> [String] {
         ["-themeColor", "burgundy", "-appearanceMode", mode,
@@ -42,27 +38,6 @@ final class TronD4ReviewUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", expected)).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
             XCTAssertTrue(app.staticTexts["Mutation count: 1"].exists, "Exactly one response, not proof of a Gateway effect")
         }
-    }
-
-    private func admin(mode: String, large: Bool) {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
-            + arguments(mode: mode, large: large)
-            + (mode == "dark" ? ["-settings-renderer-dark"] : [])
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
-        app.buttons["Open Settings"].tap()
-        expand(app, title: "Global Settings")
-        let agent = app.buttons["settings-link-Agent Behavior"]
-        for _ in 0..<8 where !agent.isHittable { app.swipeUp() }
-        XCTAssertTrue(agent.isHittable, app.debugDescription)
-        keep(app, "admin-\(mode)\(large ? "-xxxl" : "")")
-        agent.tap()
-        expand(app, title: "Agent Behavior")
-        XCTAssertTrue(app.staticTexts["Model"].firstMatch.exists, app.debugDescription)
-        keep(app, "agent-\(mode)\(large ? "-xxxl" : "")")
     }
 
     private func expand(_ app: XCUIApplication, title: String) {

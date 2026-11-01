@@ -187,8 +187,8 @@ typed owner once with the review's digest through the receipt executor; Cancel a
 dismissal send nothing. Generic forms never authorize effects. The card shows Gateway text
 only and keeps exact values behind its disclosure. Global Changes remains the audit/Undo
 surface; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
-native change title use `tronPrimary`, not the generic question's amber accent. The same token
-owns Agent & Tools and its inherited admin-sheet chrome; semantic statuses keep their colors.
+native change title use `tronPrimary`, not the generic question's amber accent. Agent & Tools
+and its inherited admin-sheet chrome keep their fixed Emerald identity; semantic statuses keep their colors.
 
 ## Shared lists and readers
 
