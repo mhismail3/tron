@@ -21,6 +21,7 @@
     "scripts/update-pi-sdk.mjs",
     "scripts/update-pi-subagents.integration.test.mjs",
     "scripts/update-pi-subagents.mjs",
+    "src/sessions/model-runtime-config-lifetime.integration.test.ts",
     "src/sessions/pi-persisted-state-corpus.integration.test.ts",
     "src/sessions/sdk-behavior-trace.integration.test.ts",
     "test-fixtures/pi-sdk/**",
