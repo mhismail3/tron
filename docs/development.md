@@ -265,8 +265,8 @@ Run affected checks and registry validation before landing with the merge proced
 [Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)).
 Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
 owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tools/verify/test-oracles.md)
-owns fail-before/pass-after, justified test edits with independent ACCEPT, and exact
-owner/signature/expiry quarantine. No maintainer test-text approval or retry-to-green.
+owns fail-before/pass-after and justified test edits with independent ACCEPT. Reds need
+root fixes or causal reverts, not exemptions; no maintainer test-text approval or retry-to-green.
 
 At most 3 simulator-heavy jobs run at once on this Mac, across all worktrees and workers. The
 iOS test runner (`scripts/tron-ios-test` build/run, so `verify` too), the profiler, the Gateway

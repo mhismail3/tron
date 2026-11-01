@@ -31,15 +31,15 @@ ACCEPTs the final change. Never auto-bless unexplained reds or normalize away th
 protected distinction. Subjective design goes to the maintainer with inline visuals;
 Home owns objective gates. A still image does not prove interaction.
 
-## Quarantine is visible, temporary evidence
+## Reds stay red
 
-Use only [verify's existing registry](README.md#known-failures): an exact case,
-reproduced base commit and command, full normalized failure digest, owner issue
-and expiry. Keep failures in full runs and retain logs/counts. A different signature,
-expired entry, missing report or runtime error is not waived. Quarantine is not a
-product fix or an unqualified pass; never silently renew it. Assign new main reds
-within one hour, otherwise fix/revert or quarantine with reproduced evidence.
+[Principles P2/P3](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)
+require root fixes or causal reverts: no quarantines, waivers, known-failure exemptions,
+qualified greens or base-match excuses. Preserve the first failure, exact SHA, command
+and raw logs/counts. A passing retry is nondeterminism evidence, not resolution.
+Missing required coverage is not green. Diagnose an unattributed red before choosing
+any revert target; never guess. Existing registry mechanics grant no exemption.
 
 Run affected checks before landing; broad post-land coverage belongs to the
 [batch owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship), not duplicated per-worker suites. Report counts, skips,
-quarantines and untested boundaries honestly. See [test-confidence procedures](../../.agents/skills/tron-test-confidence/SKILL.md).
+failures and untested boundaries honestly. See [test-confidence procedures](../../.agents/skills/tron-test-confidence/SKILL.md).
