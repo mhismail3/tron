@@ -13,11 +13,12 @@ extension RealGatewayPairAndChatUITests {
         let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("lifecycle-approved")
         let destination = source.deletingLastPathComponent().appendingPathComponent("lifecycle-renamed")
         try lifecycleCreate(app, name: source.lastPathComponent)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git/HEAD").path))
-        XCTAssertEqual(try String(contentsOf: source.appendingPathComponent(".git/HEAD"), encoding: .utf8), "ref: refs/heads/main\n")
-        XCTAssertEqual(try lifecycleTrust(fixture, path: source.path), false, "Creation must stay untrusted before the decision")
+        // The review alone has no effects: only the exact tap creates and trusts.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path), "The review alone must not create the project")
+        XCTAssertNil(try lifecycleTrust(fixture, path: source.path), "The review alone must not record trust")
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == true })
+        XCTAssertEqual(try String(contentsOf: source.appendingPathComponent(".git/HEAD"), encoding: .utf8), "ref: refs/heads/main\n")
         lifecycleClose(app)
         lifecycleBackToList(app)
         lifecycleTap(app, source.lastPathComponent)
@@ -58,8 +59,9 @@ extension RealGatewayPairAndChatUITests {
         func row(_ name: String) -> XCUIElement {
             app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + ", ")).firstMatch
         }
+        // A cancelled Create has no effects (Denial journey); approve a real source.
         try lifecycleCreate(app, name: source.lastPathComponent)
-        lifecycleDecide(app, approve: false)
+        lifecycleDecide(app, approve: true)
         lifecycleClose(app)
         lifecycleBackToList(app)
         XCTAssertTrue(row(source.lastPathComponent).waitForExistence(timeout: 15), "The list selector must find the live source before testing its removal: \(app.debugDescription)")
@@ -99,11 +101,23 @@ extension RealGatewayPairAndChatUITests {
         let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("lifecycle-denied")
         try lifecycleCreate(app, name: source.lastPathComponent)
         lifecycleDecide(app, approve: false)
-        XCTAssertEqual(try lifecycleTrust(fixture, path: source.path), false)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git/HEAD").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path), "A cancelled Create must leave no repository")
+        XCTAssertNil(try lifecycleTrust(fixture, path: source.path), "A cancelled Create must record no trust")
+        lifecycleClose(app)
+        lifecycleBackToList(app)
+        // A real repository, explicitly untrusted through its own exact tap,
+        // must survive a denied rename with no move and no new authority.
+        try lifecycleCreate(app, name: source.lastPathComponent)
+        lifecycleDecide(app, approve: true)
+        XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == true })
         lifecycleClose(app)
         lifecycleBackToList(app)
         lifecycleTap(app, source.lastPathComponent)
+        lifecycleTap(app, "project-lifecycle-untrust")
+        lifecycleDecide(app, approve: true)
+        XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == false })
+        lifecycleClose(app)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git/HEAD").path))
         lifecycleTap(app, "Rename Project")
         lifecycleName(app, "must-not-exist")
         lifecycleTap(app, "Request Rename")
@@ -195,8 +209,10 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.buttons.matching(identifier: "Add Project").allElementsBoundByIndex.contains(where: { $0.isHittable }), app.debugDescription)
     }
 
+    /// The canonical Project trust store; an absent file holds no decision.
     private func lifecycleTrust(_ fixture: RealGatewayUIFixture, path: String) throws -> Bool? {
         let store = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
+        guard FileManager.default.fileExists(atPath: store.path) else { return nil }
         return (try JSONSerialization.jsonObject(with: Data(contentsOf: store)) as? [String: Bool])?[path]
     }
 }
