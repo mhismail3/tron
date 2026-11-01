@@ -93,7 +93,14 @@ The validator checks reachable registry history, so deleting entries after a fix
 not reset a case's renewal budget. A second renewal is refused; fix or revert instead.
 Gateway waivers require fresh current-main reproductions and raw logs/JSON. Swift cases under `packages/mac-app/Tests/Integration/` may instead record explicit branch observations with original commit, exact xcresult failure-text-array digest and owner issue; they never enter the waiver map or waive Mac failures. Restoring ancestry never makes branch evidence main evidence.
 
-Tests execute unchanged. Exact, unexpired case AND digest matches allow exit 0
+Real-UI entries under `packages/ios-app/UITests/RealGateway/` additionally require
+`failureSites` (`Filename.swift:line`) and an exact `target/class/method` case name.
+Their digest is raw reproduction provenance, not matching: only that identity and an
+allowed assertion site qualify. Incomplete evidence, unexpected errors and expiry refuse.
+`run-ui` collects every selected journey's original outcome; the batch retains each
+outcome and the complete raw XCTest/AX log, including every quarantined failure.
+
+Tests execute unchanged. Exact, unexpired Gateway case AND digest matches allow exit 0
 with verdict `quarantined` (qualified, never green); `failedTests`, passing counts,
 logs and each expiry/issue remain visible. Exact expired matches instead yield
 `expired` (exit 0 pre-land), retaining `expiredReds`, not waiving them as qualified.

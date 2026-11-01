@@ -18,5 +18,12 @@
     },
     "issue": 2186,
     "expires": "2026-11-07"
+  },
+  {
+    "testId": "packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift::TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL",
+    "failureSites": ["RealGatewayBuildsAppsUITests.swift:171", "RealGatewayBuildsAppsUITests.swift:278"],
+    "evidence": {"command": "TRON_IOS_E2E_NO_INSTALL=1 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL", "commit": "4e4d1a76c1e4cac5a92787d28a515034dd419039", "failureDigest": "a745d0baa3ee2b1285da27bf65169913a682002b715455f57a901bdbc10e7571"},
+    "issue": 2191,
+    "expires": "2026-11-07"
   }
 ]

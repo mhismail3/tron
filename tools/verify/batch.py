@@ -202,6 +202,20 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             result['exit'] = 1  # a runner that executes nothing cannot prove a good bisect probe
         result['signature'] = signature(f"{lane['name']} failed", failures, output, root)
     output = log.read_text(errors='replace')
+    if lane['name'] == 'real Gateway UI journeys':
+        result['uiCases'] = [{'selector': method, 'exit': int(status), 'evidence': evidence} for method, status, evidence in
+            re.findall(r'Real-UI journey (\w+/\w+/\w+) completed .*\(status (\d+)\); evidence: ([^\n]+)', output)]
+        failed = [case for case in result['uiCases'] if case['exit']]
+        previous = verify.ROOT
+        verify.ROOT = root
+        try:
+            matched = [verify.real_ui_quarantine(Path(case['evidence']) / 'test.log') for case in failed]
+        finally:
+            verify.ROOT = previous
+        result['qualifiedFailures'] = [{**match, 'rawLog': str(log)} for case, match in zip(failed, matched)
+            if match and match['testId'].split('::')[1] == case['selector']]
+        if code == 65 and failed and len(result['qualifiedFailures']) == len(failed) and re.search(r'Real-UI journeys completed .*\(status 65\)', output):
+            result['status'] = 'qualified'
     if lane['name'] == 'Mac integration':
         counts = re.findall(r'Executed (\d+) tests?|Test run with (\d+) tests?', output)
         counts = [int(xctest or swift_testing) for xctest, swift_testing in counts]
