@@ -358,7 +358,7 @@ describe("typed settings at real runtime boundaries", () => {
     expect(failed).toEqual([["home", "session"]]);
   });
 
-  it.each(["warm", "cold"] as const)("carries Session choices from a %s predecessor into Home's next chapter without copying messages", async temperature => {
+  it.each(["warm", "cold"] as const)("resolves Home's recipe with a %s predecessor, carrying only admission ceilings and the explicit chapter window", async temperature => {
     const f = await fixture({ reasoning: true, ...(temperature === "cold" ? { maximumLiveRuntimes: 1 } : {}) });
     const first = await f.designateHome();
     for (const [key, value] of [["model.thinking[role=chat]", "high"], ["run.retry.maxRetries", 7], ["context.images.block", true]] as const) {
@@ -394,7 +394,10 @@ describe("typed settings at real runtime boundaries", () => {
     await f.service.invoke(phone(), "home.prompt", { commandId: commandId(), text: "The second chapter starts here." });
     const next = await f.registry.acquire(successor);
     await waitFor(() => requests.length > 0 && !next.isBusy, "successor response");
-    expect(next.settingsSessionLayer()).toEqual(choices);
+    expect(next.settingsSessionLayer()).toEqual({ model: choices.model, thinking: choices.thinking,
+      tools: choices.tools, contextWindow: choices.contextWindow, fixed: {}, settings: {}, requestPins: choices.requestPins });
+    expect(next.runtime.session.settingsManager.getRetrySettings().maxRetries).toBe(7);
+    expect(next.runtime.session.settingsManager.getBlockImages()).toBe(true);
     // Home intentionally summarizes earlier chapters in its request view. It
     // must not copy their canonical messages or entry identities into this file.
     const nextEntries = next.canonicalSessionEntries();
@@ -404,8 +407,8 @@ describe("typed settings at real runtime boundaries", () => {
     expect(f.homeDiagnostics).toContainEqual({ outcome: "chapter-recovery", reason: temperature === "cold" ? "settings-from-cold" : "settings-from-live" });
     expect(next.snapshot().thinkingLevel).toBe("high");
     expect(next.snapshot().contextWindowPolicy?.effective).toBe(64_000);
-    expect(next.settingsSessionLayer()).toEqual(choices);
-    transcript.push({ case: `Home chapter settings carry-forward (${temperature})`, steps: [{ before: choices, after: next.settingsSessionLayer(), messagesCarried: false }] });
+    expect(next.runtime.session.model?.id).toBe(choices.model!.id);
+    transcript.push({ case: `Home recipe and chapter window (${temperature})`, steps: [{ before: choices, after: next.settingsSessionLayer(), messagesCarried: false }] });
   });
 
   it("image resizing is fixed at start until the audited current-default reset", async () => {

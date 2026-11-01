@@ -80,6 +80,9 @@ operations: RunOperations<unknown>,
     const prepared = preparePromptInput(operations, session, text, images, queueDisplay, ownership);
     text = prepared.text;
     const { composedResources, isExactExtensionCommand } = prepared;
+    // Only direct input grants maintainer authority. Every producer-owned
+    // activation (including scheduler and extension input) is a wake for Home.
+    const homeDelivery = ownership ? "wake" : "user";
     if (!session.isStreaming) {
       await session.settingsManager.flush();
       await operations.applyLiveRunSettings(session);
@@ -191,21 +194,21 @@ operations: RunOperations<unknown>,
         // Publish before entering Pi preflight. Automatic compaction can begin
         // inside that call before the RPC receives its admission result.
         operations.publishSnapshot();
-        operations.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt, ownership?.kind === "homeWake" ? "wake" : "user");
+        operations.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt, homeDelivery);
         operations.operationWasHomeWake = ownership?.kind === "homeWake";
         if (operations.homeRequestPolicy) {
           // Inbox admission runs on this session's lane: every later prompt waits
           // for it. A slow one is the first thing to name when Home stops answering (#906).
           const inboxAdmissionStarted = performance.now();
           try {
-          homeWakeTrigger = await operations.dependencies.modules.policy("inputAdmission")?.().admit(operations.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", message => deliverPromptInput(operations, session, message,
+          homeWakeTrigger = await operations.dependencies.modules.policy("inputAdmission")?.().admit(operations.id, operationId, homeDelivery, message => deliverPromptInput(operations, session, message,
             async () => { await operations.dependencies.modules.policy("inputAdmission")?.().committed?.(operations.id, operationId); })
           , () => operations.dependencies.modules.policy("inputAdmission")!().envelope({
             session, policy: operations.homeRequestPolicy!, text, images, signal: ownership?.signal,
             sessionFile: () => operations.sessionFile, entries: () => operations.canonicalEntryCount,
           }));
           } finally {
-            operations.dependencies.modules.policy("inputAdmission")?.().finished(inboxAdmissionStarted, ownership?.kind === "homeWake" ? "wake" : "user");
+            operations.dependencies.modules.policy("inputAdmission")?.().finished(inboxAdmissionStarted, homeDelivery);
           }
         }
       }

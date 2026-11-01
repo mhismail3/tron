@@ -6,7 +6,7 @@ import { SessionManager } from "../../kernel/pi/coding-agent.js";
 import type { TrustService } from "../../kernel/resources/trust-service.js";
 import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 import { branchFromSessionEntries } from "../../sessions/session-branch.js";
-import { appendChatSettingsSnapshot } from "../../sessions/session-settings.js";
+import { SESSION_SETTINGS_ENTRY, readSessionRequestPins } from "../../sessions/session-settings.js";
 import { appendContextWindowSnapshot } from "../../providers/context-window-policy.js";
 import type { LineageRuntimePort } from "../../kernel/host/session-lineage.js";
 import type { HomeDiagnostic } from "./home-diagnostic.js";
@@ -109,10 +109,11 @@ export class HomeChapterMaterializer {
           manager = SessionManager.create(cwd.cwd, sessionDirectory);
           const createdPath = manager.newSession({ id: sessionId });
           if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
-          // These metadata-only appends stage in Pi. Validate and stage the
-          // inherited policy before committing the new path to the Home ledger.
+          // Carry authorization ceilings and the explicit chapter window, not
+          // derived tool/model/thinking/run choices owned by Home's live recipe.
           if (previousBranch) {
-            appendChatSettingsSnapshot(previousBranch, manager);
+            const requestPins = readSessionRequestPins(previousBranch);
+            if (Object.keys(requestPins).length) manager.appendCustomEntry(SESSION_SETTINGS_ENTRY, { settings: {}, requestPins });
             appendContextWindowSnapshot(previousBranch, manager);
           }
           await this.owner.recordReservedChapterPath(sessionId, attemptId, createdPath);
