@@ -644,6 +644,9 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
 
 
 def main(argv: list[str]) -> int:
+    if "--fail-before" in argv:
+        import fail_before
+        return fail_before.main(argv)
     if "--batch" in argv:
         import batch
         return batch.main([word for word in argv if word != "--batch"])

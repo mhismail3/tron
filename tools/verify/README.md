@@ -18,6 +18,24 @@ scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock o
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 ```
 
+## Sandboxed fail-before report experiment
+
+`verify --fail-before 'packages/gateway/src/file.test.ts::full case name'
+--base <commit> --candidate <commit> --before-report <json> --after-report <json>`
+compares retained `tron.verify.v1` case observations without running tests or
+changing source. Both exact identities must have complete evidence at their
+respective commits; a failed-before/passed-after transition is an observation,
+**not causal proof**. Missing evidence, pass-on-both and a red candidate are
+reported explicitly. All evidence verdicts exit zero: this is not a shipping gate.
+Only Gateway case identities are supported; Python and iOS evidence are refused.
+
+Reports are agent-writable and lack source/test-overlay provenance and failure
+classes. A timeout can therefore look like a useful regression, and renamed cases
+cannot be paired. This experiment cannot certify an assertion-level root fix or
+re-execute a historical claim. Keep the original raw logs; do not synthesize a
+verify envelope around them to manufacture missing provenance. Focused schema/CLI
+controls: `python3 scripts/test-tron-verify-fail-before.py`.
+
 ## Worktree dependencies
 
 Worktree creation does not install dependencies. Before running a selection that
