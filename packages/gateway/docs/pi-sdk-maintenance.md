@@ -39,7 +39,11 @@ Until a release ships them, `pi-coding-agent` is a Tron-built tarball at the fam
 carrying: the `projectDir` option ([project root](../src/machine/README.md#project-root)),
 dequeuing a delivered image-only steer or follow-up, normalizing queued images for the active
 model, an idle `session.systemPrompt` that keeps transcript-provided extension sections, and a
-run start that `preflightResult("started")` can revoke.
+run start that `preflightResult("started")` can revoke, and FIFO `ModelRuntime`
+config reads. A newer awaited refresh cannot overtake an older registration-triggered
+config read and let that continuation start storage work after readiness. Each call
+still loads current config and retains its own provider selection/error; this is not
+a general downstream credential/model-store drain API.
 
 `pi-coding-agent-patch.json` owns it: upstream tag and commit, the published tarball's
 integrity, the backported proposal commit, patch SHA-256, bundled `pi-ai` model data,
@@ -52,6 +56,12 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
 `packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its script, drop it from
 `packages/mac-app/scripts/stage-gateway-app.sh` and `BUILD_INPUT_FILES` in
 `scripts/gateway-install-inputs.mjs`, then `npm install` and `update:pi-sdk`.
+
+## Signals
+
+| Signal | One-step diagnosis / surviving oracle |
+| --- | --- |
+| `ENOTEMPTY` removing a fixture's `agent` directory, or SDK files reappearing after removal | Run `scripts/tron test gateway src/sessions/model-runtime-config-lifetime.integration.test.ts`. Its real filesystem gate distinguishes an older detached config read from the later awaited Gateway readiness, then checks actual registry disposal/root removal. Other downstream lock lifetimes still require their own writer trace. |
 
 ## Tron-owned `pi-subagents` build
 
