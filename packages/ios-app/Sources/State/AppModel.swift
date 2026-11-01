@@ -1479,10 +1479,8 @@ extension AppModel {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         await appLog.recordCausal(
             name: "app.started", outcome: "success",
-            details: "appVersion=\(appVersion) build=\(build) os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
+            details: "appVersion=\(appVersion) build=\(build) os=\(ProcessInfo.processInfo.operatingSystemVersionString) launchScene=\(scenePhase.rawValue) scene=\(recordedSceneTransition.rawValue) sceneTransitionObserved=\(hasRecordedSceneTransition) catalogReadsAllowed=\(sceneAllowsCatalogRefresh) pushNavigationReady=\(pushNavigationActivationReady)"
         )
-        sceneAllowsCatalogRefresh = scenePhase.isActive
-        pushNavigationActivationReady = scenePhase.isActive
         await lifecycle.start()
         didStart = true
         if sceneAllowsCatalogRefresh {
@@ -1549,6 +1547,10 @@ extension AppModel {
     private func seedLaunchScenePhase(_ phase: AppScenePhase) {
         guard !hasRecordedSceneTransition else { return }
         recordedSceneTransition = phase
+        // Scene callbacks also own admission. Seed it before startup suspends,
+        // and never overwrite a transition that already won the launch seed.
+        sceneAllowsCatalogRefresh = phase.isActive
+        pushNavigationActivationReady = phase.isActive
     }
 
     private func recordSceneTransition(to transition: AppScenePhase, flush: Bool = false) {

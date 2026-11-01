@@ -42,6 +42,10 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 
 - **Connection and events** follow [Gateway connection and events](../../docs/events.md):
   lifecycle, reconnect schedule, receipts and session synchronization are specified there.
+- **Scene admission.** The launch phase seeds both catalog-read and push-navigation admission
+  before startup suspends, only while no scene transition has been observed. An active,
+  inactive or background callback keeps authority across startup awaits; the launch's older
+  phase cannot restore or revoke that callback's admission.
 - **Typed targets.** Settings, providers and packages use typed `.global`,
   `.project(cwd:)`, `.workspace(cwd:)` or `.session(id:)` targets. Global reads never inherit the
   selected session's project; a newer same-target read rejects an older completion.
@@ -124,7 +128,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `gateway.catalog` | info, or warning/error as the call site marks it | Catalog admission and terminal decisions with generations, failure, page, revision and retry budget |
 | `model.catalog.rejected` | error | A model page refused: page, schema path and finite reason, never values |
 | iOS client ring | memory | 200 in-memory records (including typed decode failures) merged into Logs as `iOS client` |
-| `app.started` | info | Once per launch: app version, build and OS in `details`; `lifecycleGeneration` |
+| `app.started` | info | Once per launch: version, build, OS, sampled `launchScene`, recorded `scene`, `sceneTransitionObserved`, `catalogReadsAllowed` and `pushNavigationReady`. Compare with `scene.active` and catalog admission to diagnose startup versus a failed list RPC. |
 | `scene.resign-active` | info | The scene resigned active from a foreground phase and the buffer flushed: `sceneAt`, `from` |
 | `scene.foreground` | info | The scene left the background (a resume's inactive phase): `sceneAt`, `from=background` |
 | `scene.background` | info | The scene entered the background and the buffer flushed; recovery parks here |
@@ -154,11 +158,13 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversReconnectingDetails
 scripts/ios-gateway-e2e-test all
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
+scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight
 ```
 
 The first set drives the selected lifecycle and dashboard pool with a byte transport and an
 accelerated clock. The real-UI journey keeps the mounted chat, draft and keyboard through a proxy
-blackhole and a held replacement open. Gateway catalog bounds are owned by
+blackhole and a held replacement open. The Builds journey creates real sessions, then resolves
+its original canonical session row from the dashboard and revisits its installed app. Gateway catalog bounds are owned by
 `runtime-registry.integration.test.ts`.
 
 ## Not here
