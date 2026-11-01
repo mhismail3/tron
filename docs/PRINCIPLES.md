@@ -44,9 +44,11 @@ safe to ship.** Tests protect feature work, never become a queue that blocks it.
   parallel load within the host's simulator slots and leases, not only on a quiet Mac.
 - Treat a flake as a possible product race until root cause distinguishes product from
   harness. Never conceal it with retries, larger timeouts, skips or weaker assertions.
-- Determinism is proved by a ledger in which **every known failure has a reproduction,
-  root cause and fail-before/pass-after fix**, followed by **10 consecutive full runs on
-  one SHA, under parallel load, all green**. Keep every attempt; do not select the best ten.
+- Determinism is proved by a closed ledger in which **every known failure has a
+  reproduction, root cause and fail-before/pass-after fix**. Each formerly failing or
+  flaky test must then pass **20 consecutive times under normal concurrent load**,
+  followed by **one full raw-green run (Gateway, nested and iOS UI) on a single commit**.
+  Keep every attempt; a red stays red, not a retry-selected pass.
 
 ## P4 Coverage follows behavior and grows with it
 
@@ -95,7 +97,8 @@ approval. The code-revert gate is not authority to reverse live data or a produc
 
 #2173 proceeds in this order:
 
-1. Root-cause determinism, remove whole flake classes and prove the ledger plus ten runs.
+1. Close the root-cause ledger, prove twenty consecutive passes per former red/flake
+   under normal concurrent load, then one full raw-green run on a single commit.
 2. Audit E2E fidelity, fill the core-journey map and replace rendering-based oracles.
 3. Establish the fast pre-merge check and async full E2E gate with causal auto-revert.
 4. Finish only bug-causing dual-owner paths.
