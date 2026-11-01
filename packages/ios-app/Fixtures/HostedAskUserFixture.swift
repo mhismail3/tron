@@ -119,6 +119,7 @@ struct HostedAskUserFixtureView: View {
         .environment(model)
         .environment(\.tronPresentationActivityCoordinator, presentationActivity)
         .tronPresentation()
+        .preferredColorScheme(AppearanceSettings.shared.mode.colorScheme)
         .task {
             do {
                 try await model.connectHostedGateway(profile: fixture.profile, token: fixture.token)

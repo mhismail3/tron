@@ -81,7 +81,7 @@ struct ExtensionInteractionSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text(interaction.method == .change ? "Review change" : "Question")
                         .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                        .foregroundStyle(Color.tronAmber)
+                        .foregroundStyle(interaction.method == .change ? Color.tronPrimary : Color.tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if interaction.method != .change {
