@@ -96,9 +96,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(app.debugDescription)")
         send.tap()
 
-        // Assert sent content, not an AX role: message rows are interactive
-        // copy controls, while the response below remains selectable text.
-        let sent = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")).firstMatch
+        // The overflow preview is a reader button, not StaticText. Require the
+        // whole accepted prompt so a generated navigation title cannot satisfy
+        // retention; the response below remains selectable text.
+        let sent = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", prompt)).firstMatch
         XCTAssertTrue(sent.waitForExistence(timeout: 60), "the sent prompt is not in the transcript: \(app.debugDescription)")
 
         // The fixture streams a few tokens a second, so the reply is read while
@@ -370,8 +371,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             "the app never returned to the foreground: \(app.state.rawValue)"
         )
         XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")).firstMatch
-                .waitForExistence(timeout: 90),
+            sent.waitForExistence(timeout: 90),
             "the prompt left the transcript across background/foreground: \(app.debugDescription)"
         )
         XCTAssertTrue(
