@@ -14,6 +14,8 @@ import { currentHomeTask, homeTaskLineages, homeTaskNeedsAttention } from "./hom
 
 const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
+/** Publications `taskWritesSince` can name: far more than one Home activation's writes. */
+const WRITE_JOURNAL = 1_024;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u;
 const OUTCOMES = ["progress", "needs-input", "final", "limited", "interrupted", "unknown"] as const;
 const FAILURE_CAUSES = ["provider-usage-limit", "provider-error"] as const;
@@ -120,6 +122,18 @@ export class HomeTaskStore {
    * only writer, so an unchanged count proves no record changed (#922). */
   private writes = 0;
   get writeCount(): number { return this.writes; }
+  /** The task each of the latest publications named (null for authorization),
+   * oldest first; the newest is publication `writes`. Bounded: an older count has
+   * no answer, so its reader takes a full pass. */
+  private readonly journal: Array<string | null> = [];
+
+  /** Task IDs this process published, or attempted to, after write count `since`,
+   * or undefined when the journal no longer reaches back that far. */
+  taskWritesSince(since: number): string[] | undefined {
+    const first = this.writes - this.journal.length;
+    if (!Number.isSafeInteger(since) || since < first || since > this.writes) return undefined;
+    return this.journal.slice(since - first).filter((taskId): taskId is string => taskId !== null);
+  }
 
   constructor(private readonly tronHome: string, private readonly workspace: TronWorkspace, private readonly options: Options = {}) {
     this.home = join(tronHome, "gateway", "home");
@@ -330,8 +344,10 @@ export class HomeTaskStore {
   }
 
   private async publish(path: string, document: unknown, maximumBytes: number): Promise<void> {
-    // Counted before the attempt: a failed or uncertain write still ends a quiet proof.
+    // Counted and named before the attempt: a failed or uncertain write still ends a quiet proof.
     this.writes += 1;
+    this.journal.push(path === this.authorizationPath ? null : (document as HomeTaskRecord).taskId);
+    if (this.journal.length > WRITE_JOURNAL) this.journal.shift();
     if (Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`) > maximumBytes) throw new HomeTaskStoreError("invalid-record");
     try { await durableAtomicWriteJson(path, document, 0o600, this.options.fileSystem); }
     catch (error) {

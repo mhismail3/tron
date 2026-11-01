@@ -185,8 +185,10 @@ The terminal task and its wake event share one fsynced record. Events move `pend
 
 - A user activation admits pending results as context; a Gateway-started wake admits them as
   its trigger. Each is a `tron.home-task-result.v1` message with a `tron.context-delivery.v4`
-  receipt; ordinary chats never drain the inbox. A quiet pass proves the inbox quiet until the
-  next write (`home.inbox.admission-slow` names slow ones).
+  receipt; ordinary chats never drain the inbox. After the first full pass, an inbox pass reads
+  only the tasks the last pass found actionable and those the store's bounded write journal
+  names since, so a worker check-in costs one record, not the history; a journal that no
+  longer reaches back takes a full pass (`home.inbox.admission-slow` names slow ones).
 - `HomeOwner`'s single-flight scheduler wakes when a result settles while Home is eligible,
   after recovery, after `home.resumeMemory` and when an activation goes idle; receipts use
   source `homeWake`, no user row. The text opens with title, outcome, subagent counts and

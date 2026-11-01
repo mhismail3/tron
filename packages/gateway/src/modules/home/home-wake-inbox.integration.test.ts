@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import fc from "fast-check";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { freezeHomeLedgerWriter } from "../../../test-support/home-ledger-crash-frozen-owner.js";
 import { EPISODIC_DEFAULTS } from "../../episodic/episodic-contract.js";
@@ -186,4 +187,117 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     await f.owner.settle({ ...f.route, routeGeneration: 2 }, "activation");
     expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");
   });
+});
+
+// #1995: a pass after the first reads only the tasks its predecessor found
+// actionable and those written since. A fresh owner (no proof, one full pass) is
+// the oracle: whatever writes ran between passes, both see the same results.
+describe("Wake inbox quiet proof", () => {
+  async function inbox() {
+    const root = await mkdtemp(join(tmpdir(), "tron-wake-proof-")); roots.push(root);
+    const home = join(root, "tron");
+    await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
+    const workspace = new TronWorkspace(home); workspaces.push(workspace); await workspace.initialize();
+    const store = new HomeTaskStore(home, workspace); await store.initialize();
+    const { WakeInboxOwner } = await import("./home-wake-inbox.js");
+    const authority = await store.authorization.load();
+    await store.authorization.save({ ...authority, scopes: [{ id: "scope", kind: "all-trusted-projects", active: true, restoreEpoch: "epoch", createdAt: 1 }] });
+    const options = { notify: async () => "queued", pushSession: () => "chapter", wakeAvailable: async () => false, wake: () => {},
+      result: async () => ({ task: undefined, text: "", subagents: { started: 0, stoppedAtEnd: 0 } }), evidence: async () => [] };
+    const owner = () => new WakeInboxOwner(store, options);
+    const record = (taskId: string): HomeTaskRecord => ({ version: 1, taskId, revision: 1, homeId: "home", generation: 1, routeGeneration: 1,
+      intent: { text: taskId }, intentDigest: taskIntentDigest(taskId), target: root, grantRef: null, scopeRef: null, lifecycle: "pending",
+      sessionId: null, operationId: null, stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null } as HomeTaskRecord);
+    const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 0, minute)).toISOString();
+    const checkin = (taskId: string, id: string, attention: "none" | "requested") => ({ id, taskId, sessionId: `session-${taskId}`, operationId: `operation-${taskId}`,
+      at: at(id.length), attention, step: "Step", done: "Done", next: "Next", ...(attention === "requested" ? { needsAttention: true, blocker: "Blocked" } : {}) });
+    const pending = async (reader: InstanceType<typeof WakeInboxOwner>) => (await reader.pendingTasks("home")).map(task => task.wake!.eventId);
+    // Each command is one store publication that an owner would make.
+    const commands = {
+      create: async (taskId: string) => { if (!await store.read(taskId)) await store.put(record(taskId), null); },
+      activate: async (taskId: string) => {
+        const current = await store.read(taskId);
+        if (current?.lifecycle === "pending") await store.put({ ...current, revision: current.revision + 1, lifecycle: "active", scopeRef: "scope", sessionId: `session-${taskId}`, operationId: `operation-${taskId}` }, current.revision);
+      },
+      checkin: async (taskId: string) => {
+        const current = await store.read(taskId);
+        if (current?.lifecycle === "active") await store.update(taskId, task => ({ ...task, checkins: [...task.checkins ?? [], checkin(taskId, `c${task.revision}`, "none")].slice(-5) }));
+      },
+      attention: async (taskId: string) => {
+        const current = await store.read(taskId);
+        if (current?.lifecycle !== "active" || current.attention) return;
+        const accepted = checkin(taskId, `a${current.revision}`, "requested");
+        await store.update(taskId, task => ({ ...task, lastAttentionAt: accepted.at, attention: { checkin: accepted, wake: owner().attentionEvent(task, accepted as never) } }));
+      },
+      settle: async (taskId: string) => {
+        const current = await store.read(taskId);
+        if (!current || current.lifecycle === "terminal") return;
+        const terminal = { ...current, revision: current.revision + 1, lifecycle: "terminal", terminalEvidence: { outcome: "unknown", sessionId: null, entryIds: [], reason: "no-report" } } as HomeTaskRecord;
+        await store.put({ ...terminal, wake: owner().event(terminal) }, current.revision);
+      },
+      wake: async (taskId: string, state: "blocked" | "pending" | "acknowledged" | "outcome-unknown", attention: boolean) => {
+        const current = await store.read(taskId);
+        const before = attention ? current?.attention?.wake : current?.wake;
+        if (!before || before.state === "acknowledged") return;
+        const delivery = { sessionId: "chapter", operationId: "activation", generation: 1, routeGeneration: before.routeGeneration, messageDigest: "0".repeat(64) };
+        await store.updateWake(taskId, wake => ({ ...wake, state, push: state === "outcome-unknown" ? "decided" : wake.push,
+          delivery: ["blocked", "pending"].includes(state) ? null : delivery, acknowledgedAt: state === "acknowledged" ? at(59) : null }), before.eventId);
+      },
+    };
+    return { store, owner, pending, commands };
+  }
+
+  it("yields exactly the results a full pass yields after any sequence of task writes", async () => {
+    const ids = ["t0", "t1", "t2", "t3"];
+    const id = fc.constantFrom(...ids);
+    const command = fc.oneof(
+      fc.record({ kind: fc.constantFrom("create", "activate", "checkin", "attention", "settle"), taskId: id }),
+      fc.record({ kind: fc.constant("wake"), taskId: id, state: fc.constantFrom("blocked", "pending", "acknowledged", "outcome-unknown"), attention: fc.boolean() }),
+      fc.record({ kind: fc.constant("compare") }));
+    let compared = 0;
+    await fc.assert(fc.asyncProperty(fc.array(command, { minLength: 4, maxLength: 24 }), async trace => {
+      const f = await inbox();
+      const incremental = f.owner();
+      for (const step of [...trace, { kind: "compare" } as const]) {
+        if (step.kind === "compare") { expect(await f.pending(incremental)).toEqual(await f.pending(f.owner())); compared++; }
+        else if (step.kind === "wake") await f.commands.wake(step.taskId, step.state, step.attention);
+        else await f.commands[step.kind](step.taskId);
+      }
+    }), { numRuns: 25, seed: 1995 });
+    expect(compared).toBeGreaterThan(25);
+  }, 120_000);
+
+  it("never misses a result settled while a pass is reading", async () => {
+    const f = await inbox();
+    for (const taskId of ["early", "late"]) await f.commands.create(taskId);
+    await f.commands.settle("early");
+    const reader = f.owner();
+    expect(await f.pending(reader)).toHaveLength(1);
+    await f.commands.wake("early", "acknowledged", false);
+    // A result settles after this pass began and after its own records were read.
+    const read = f.store.read.bind(f.store);
+    let settled = false;
+    vi.spyOn(f.store, "read").mockImplementation(async taskId => {
+      const task = await read(taskId);
+      if (!settled) { settled = true; await f.commands.settle("late"); }
+      return task;
+    });
+    expect(await f.pending(reader)).toEqual([]);
+    vi.restoreAllMocks();
+    expect(await f.pending(reader)).toEqual(await f.pending(f.owner()));
+    expect(await f.pending(reader)).toHaveLength(1);
+  });
+
+  it("takes a full pass once the store's journal no longer names every write since the last one", async () => {
+    const f = await inbox();
+    for (const taskId of ["busy", "result"]) await f.commands.create(taskId);
+    await f.commands.activate("busy");
+    const reader = f.owner();
+    expect(await f.pending(reader)).toEqual([]);
+    await f.commands.settle("result");
+    for (let i = 0; i < 1_030; i++) await f.store.update("busy", task => ({ ...task, queuedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, i + 1)).toISOString() }));
+    expect(f.store.taskWritesSince(f.store.writeCount - 1_030)).toBeUndefined();
+    expect(await f.pending(reader)).toEqual(await f.pending(f.owner()));
+    expect(await f.pending(reader)).toHaveLength(1);
+  }, 120_000);
 });
