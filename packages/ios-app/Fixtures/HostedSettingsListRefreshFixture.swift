@@ -68,13 +68,15 @@ struct HostedSettingsListRefreshFixture: View {
 private actor SettingsListRefreshSocket: GatewaySocketConnection {
     private let gate: URL
     private var held = false
+    /// What a held read publishes on release; nil keeps the accepted values.
+    private var replacement: [String]?
     private var values = ["alpha"]
     private var hello = true
     private var closed = false
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
     init(gate: URL) { self.gate = gate }
-    func arm() { held = true }
+    func arm() { held = true; replacement = ["canonical-latest"] }
     func resume() async {}
     func ping() async throws {}
 
@@ -92,9 +94,20 @@ private actor SettingsListRefreshSocket: GatewaySocketConnection {
                     try await Task.sleep(for: .milliseconds(50))
                     if closed { throw CancellationError() }
                 }
-                values = ["canonical-latest"]
+                if let replacement { values = replacement }
             }
             result = resolution()
+        case "settings.change":
+            // An accepted (non-dry-run) list Save becomes canonical, and the
+            // renderer's following canonical read is held at the gate.
+            let params = frame["params"]?.objectValue
+            if params?["dryRun"]?.boolValue != true,
+               let saved = params?["changes"]?.arrayValue?.first?.objectValue?["value"]?.arrayValue?.compactMap(\.stringValue) {
+                values = saved
+                held = true
+                replacement = nil
+            }
+            result = .object([:])
         case "session.list": result = .object(["sessions": .array([]), "nextCursor": .null])
         default: result = .object([:])
         }
