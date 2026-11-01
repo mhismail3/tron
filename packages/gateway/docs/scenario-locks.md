@@ -77,7 +77,9 @@ again only once the previous turn's terminal work has left the drain's blockers 
 `home-contention-restart` restarts by disposing the first Gateway (its registry aborts
 the worker's turn, as a `restartNow` shutdown does; not a crash) and starting another
 over the same root; it records the task still non-terminal at that boundary, and blinds
-the refused write's `internal` message (the raw file-system error `publicError` forwards).
+the refused write's `internal` message in the scenario trace. Separate unblinded
+assertions require fixed client-safe text and the original filesystem error in the
+Gateway-local diagnostic; the trace does not weaken that error boundary.
 The `gateway/run` locks of #1554 bound each scenario at 60 s, as the Home lock does: they run many steps, and a loaded host stretches each. The lifecycle lock runs with harness option `lifecycleRequests` (the real terminal
 owner; `gateway-main`'s exit requests and the restart's auth cancellation are recorded,
 and the lock runs the drain itself). It blinds the answers' `restarting`/`stopping`,

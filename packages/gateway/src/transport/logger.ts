@@ -1,7 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
-import { redact } from "../util/credential-redaction.js";
+import { redact, redactCredentialField } from "../util/credential-redaction.js";
+import { GatewayError } from "../errors.js";
 import type { HomeHardBoundary } from "../modules/home/home-diagnostic.js";
 import type { CommandReceiptRouteCategory } from "../protocol/types.js";
 
@@ -18,6 +19,8 @@ export interface LogError {
   code?: string;
   message: string;
   stack?: string;
+  /** Bounded diagnostic text, never the public error's structured details. */
+  details?: string;
   cause?: LogError;
 }
 
@@ -217,6 +220,8 @@ const MAX_MESSAGE_BYTES = 2_000;
  * walk. */
 const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
+/** Internal details name a small set of failure reasons, never an arbitrary payload. */
+const MAX_ERROR_DETAIL_NODES = 64;
 const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
 /** A record names a handful of counters; more would make the field a payload. */
@@ -272,14 +277,29 @@ function shortenedPaths(value: string): string {
   return redact(withPayload.replaceAll(homedir(), "~"));
 }
 
+function internalErrorDetails(value: unknown): string {
+  try {
+    let nodes = 0;
+    const details = JSON.stringify(value, (key, value: unknown) => {
+      if (++nodes > MAX_ERROR_DETAIL_NODES) throw new RangeError("Internal diagnostic detail limit");
+      const safe = redactCredentialField(key, value);
+      return typeof safe === "string" ? boundedBytes(shortenedPaths(safe), MAX_ERROR_MESSAGE_BYTES) : safe;
+    });
+    return details === undefined ? "[Unserializable internal details]" : boundedBytes(shortenedPaths(details), MAX_ERROR_MESSAGE_BYTES);
+  } catch {
+    return "[Unserializable or oversized internal details]";
+  }
+}
+
 /** Bounded, redacted error shape. One level of `cause` keeps the root reason
- * of a wrapped error while bounding the record. */
+ * of a wrapped error; typed internal details stay diagnostic-only text. */
 export function describeError(error: unknown, includeCause = true): LogError {
   if (!(error instanceof Error)) {
     return { name: "NonError", message: boundedBytes(shortenedPaths(String(error)), MAX_ERROR_MESSAGE_BYTES) };
   }
   return {
     ...boundedErrorFields(error.name, (error as NodeJS.ErrnoException).code, error.message, error.stack, shortenedPaths),
+    ...(error instanceof GatewayError && error.code === "internal" && error.details !== undefined ? { details: internalErrorDetails(error.details) } : {}),
     ...(includeCause && error.cause !== undefined ? { cause: describeError(error.cause, false) } : {}),
   };
 }
@@ -302,7 +322,11 @@ function boundedError(value: unknown): LogError | undefined {
   if (typeof raw.name !== "string" || typeof raw.message !== "string") return undefined;
   const error = boundedErrorFields(raw.name, raw.code, raw.message, raw.stack, redact);
   const cause = raw.cause ? boundedError({ ...raw.cause, cause: undefined }) : undefined;
-  return cause ? { ...error, cause } : error;
+  return {
+    ...error,
+    ...(typeof raw.details === "string" ? { details: boundedBytes(redact(raw.details), MAX_ERROR_MESSAGE_BYTES) } : {}),
+    ...(cause ? { cause } : {}),
+  };
 }
 
 /** Normalizes call-site metadata or a persisted line into one bounded shape. */

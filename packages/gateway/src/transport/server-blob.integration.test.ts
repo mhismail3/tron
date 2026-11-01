@@ -10,6 +10,7 @@ import { GatewayError } from "../errors.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { BlobStore, type BlobByteRange, type BlobLease } from "../sessions/blob-store.js";
 import { GatewayServer } from "./server.js";
+import { GatewayLogger } from "./logger.js";
 
 const roots: string[] = [];
 const servers: GatewayServer[] = [];
@@ -22,6 +23,7 @@ function makeServer(
   acquireBlob: (id: string, range?: BlobByteRange) => Promise<BlobLease>,
   port = 0,
   acquireUpload: (id: string) => Promise<unknown> = async () => { throw new GatewayError("not_found", "missing"); },
+  logger?: GatewayLogger,
 ): GatewayServer {
   return new GatewayServer({
     host: "127.0.0.1",
@@ -33,12 +35,12 @@ function makeServer(
     display: { acquireArtifact: async () => { throw new GatewayError("not_found", "missing"); } },
     auth: {} as never,
     service: {} as never,
-    logger: { log: () => {} } as never,
+    logger: logger ?? { log: () => {} } as never,
   });
 }
 
-async function server(acquireBlob: (id: string, range?: BlobByteRange) => Promise<BlobLease>): Promise<number> {
-  const gateway = makeServer(acquireBlob);
+async function server(acquireBlob: (id: string, range?: BlobByteRange) => Promise<BlobLease>, logger?: GatewayLogger): Promise<number> {
+  const gateway = makeServer(acquireBlob, 0, undefined, logger);
   servers.push(gateway);
   await gateway.listen();
   const address = (gateway as unknown as { server: { address(): AddressInfo | null } }).server.address();
@@ -90,6 +92,69 @@ function download(
 }
 
 describe("Gateway blob HTTP leases", () => {
+  it.each(["untyped", "internal", "domain"] as const)("projects acquisition failures safely and retains local diagnostics (%s)", async kind => {
+    const root = await mkdtemp(join(tmpdir(), "tron-http-errors-"));
+    roots.push(root);
+    const missing = join(root, "private-missing-blob");
+    const diagnosticPath = join(root, "gateway.jsonl");
+    const port = await server(async () => {
+      try { await readFile(missing); }
+      catch (error) {
+        if (kind === "internal") throw new GatewayError("internal", "Blob acquisition failed", true, {
+          failure: (error as Error).message, rollbackFailure: "details-only-rollback-marker",
+          apiKey: "fixture-only-secret", padding: "界".repeat(1_000),
+        });
+        if (kind === "domain") throw new GatewayError("not_found", "Blob unavailable", false, { reason: "missing" });
+        throw error;
+      }
+      throw new Error("Expected the fixture's missing file read to fail");
+    }, new GatewayLogger(diagnosticPath));
+    const response = await download(port, "fixture");
+    const body = JSON.parse(response.body.toString("utf8"));
+    if (kind === "domain") {
+      expect(response.status).toBe(404);
+      expect(body.error).toEqual({ code: "not_found", message: "Blob unavailable", retryable: false, details: { reason: "missing" } });
+    } else {
+      expect(response.status).toBe(500);
+      expect(body.error).toEqual({ code: "internal", message: "Unexpected gateway failure", retryable: kind === "internal" });
+      expect(response.body.toString("utf8")).not.toContain(missing);
+      const diagnostic = (await readFile(diagnosticPath, "utf8")).trim().split("\n").map(line => JSON.parse(line))
+        .find(record => record.event === "http.error");
+      expect(diagnostic).toMatchObject({ level: "error", code: "internal" });
+      if (kind === "internal") {
+        expect(diagnostic.error.message).toBe("Blob acquisition failed");
+        expect(diagnostic.error.stack).toContain("GatewayError: Blob acquisition failed");
+        expect(diagnostic.error.details).toContain(missing);
+        expect(diagnostic.error.details).toContain("ENOENT");
+        expect(diagnostic.error.details).toContain("details-only-rollback-marker");
+        expect(diagnostic.error.details).toContain("[REDACTED]");
+        expect(diagnostic.error.details).not.toContain("fixture-only-secret");
+        expect(Buffer.byteLength(diagnostic.error.details, "utf8")).toBeLessThanOrEqual(1_000);
+        expect(diagnostic.error.details).not.toContain("\uFFFD");
+        expect(response.body.toString("utf8")).not.toContain("details-only-rollback-marker");
+        const restored = new GatewayLogger(diagnosticPath).recent().find(record => record.event === "http.error");
+        expect(restored?.error?.details).toBe(diagnostic.error.details);
+      } else {
+        expect(diagnostic.error.message).toContain(missing);
+        expect(diagnostic.error.stack).toContain("ENOENT");
+      }
+    }
+  });
+
+  it.each(["cycle", "wide"] as const)("bounds internal detail diagnostics without losing the HTTP failure (%s)", async kind => {
+    const root = await mkdtemp(join(tmpdir(), "tron-http-error-bounds-"));
+    roots.push(root);
+    const diagnosticPath = join(root, "gateway.jsonl");
+    const details: Record<string, unknown> = {};
+    details.failure = kind === "cycle" ? details : Array.from({ length: 65 }, () => "reason");
+    const port = await server(async () => { throw new GatewayError("internal", "Blob acquisition failed", false, details); }, new GatewayLogger(diagnosticPath));
+    const response = await download(port, "fixture");
+    expect(response.status).toBe(500);
+    expect(JSON.parse(response.body.toString("utf8")).error).toEqual({ code: "internal", message: "Unexpected gateway failure", retryable: false });
+    const diagnostic = new GatewayLogger(diagnosticPath).recent().find(record => record.event === "http.error");
+    expect(diagnostic?.error?.details).toBe("[Unserializable or oversized internal details]");
+  });
+
   it("runs destructive transient initialization only after the HTTP port is bound", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-blob-bind-"));
     roots.push(home);

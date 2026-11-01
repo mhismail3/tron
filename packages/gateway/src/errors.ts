@@ -72,7 +72,7 @@ export function publicError(error: unknown): {
   retryable: boolean;
   details?: unknown;
 } {
-  if (error instanceof GatewayError) {
+  if (error instanceof GatewayError && error.code !== "internal") {
     return {
       code: error.code,
       message: error.message,
@@ -80,8 +80,9 @@ export function publicError(error: unknown): {
       ...(error.details === undefined ? {} : { details: error.details }),
     };
   }
-  const message = error instanceof Error ? error.message : "Unexpected gateway failure";
-  return { code: "internal", message, retryable: false };
+  // Internal details belong to local diagnostics, including typed faults whose
+  // details may carry nested filesystem errors. Preserve only the retry hint.
+  return { code: "internal", message: "Unexpected gateway failure", retryable: error instanceof GatewayError && error.retryable };
 }
 
 type EpisodicErrorKind =
