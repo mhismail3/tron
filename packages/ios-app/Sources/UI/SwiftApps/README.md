@@ -25,6 +25,11 @@ sheet and the node views that turn interpreter values into SwiftUI.
 - Apps pending rows use the shared primary-theme list standard. They open the
   existing source/access review; listing or opening never installs. The retained
   Apps state owner coordinates explicit installation, not the sheet task.
+- Source/access review has Info and Install/Update controls, not Done; it dismisses
+  by dragging its own navigation bar. Hosted journeys retain the failed-command
+  refusal before dismissing review and checking installed source/data removal.
+  Same-offer reinstallation opens the original producing session by its exact
+  offer reference after the dashboard admits that row, before any scrolling.
 
 ## Entry points
 
