@@ -35,6 +35,9 @@ const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
  * the counts move slowly and the pass runs every 750 ms, so an undeduplicated
  * record would repeat 80 times a minute. */
 const EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS = 60 * 60 * 1_000;
+/** The attributed, not yet accepted runs each live slot has stat'd every pass,
+ * the same bound as its exact owned bindings. */
+const MAX_ATTRIBUTED_RETRIES_PER_SLOT = 64;
 /** The backstop for every change the root watcher cannot see (an event the
  * platform coalesced or dropped): every listed directory's status.json is
  * stat'd again this often. Active artifacts and new directories never wait for
@@ -422,18 +425,24 @@ export class ExtensionArtifactDiscovery {
     // Routing can offer only a run a live slot attributes. Until that slot has
     // accepted the current artifact (it is pending, transient or rejected), the
     // directory is stat'd every pass, so a rewrite reaches the slot on the next
-    // pass without waiting for the watcher. An accepted run is current; if it
-    // comes back to life, its live binding is refreshed by the exact lane.
-    // Unattributed directories can only be rejected: watcher and sweep suffice.
+    // pass without waiting for the watcher. Attribution includes every run in a
+    // slot's canonical history, so each slot retries only its newest
+    // `MAX_ATTRIBUTED_RETRIES_PER_SLOT` such runs; older ones, accepted runs and
+    // unattributed directories rely on the watcher and the sweep.
     for (const [slotId, known] of attributed) {
       const routed = this.ambientArtifactRoutes.get(slotId);
+      const owed: Array<{ name: string; timestamp: number }> = [];
       for (const reference of known) {
         const name = dirname(reference) === state.root ? basename(reference) : reference;
         if (!state.names.has(name)) continue;
+        const fact = state.facts.get(name);
         const record = routed?.get(join(state.root, name));
-        if (record?.accepted && record.identity === state.facts.get(name)?.identity) continue;
-        state.changed.add(name);
+        if (record?.accepted && record.identity === fact?.identity) continue;
+        // An artifact with no decision yet is the newest work there is.
+        owed.push({ name, timestamp: fact?.timestamp ?? Number.MAX_SAFE_INTEGER });
       }
+      owed.sort((left, right) => right.timestamp - left.timestamp || left.name.localeCompare(right.name));
+      for (const { name } of owed.slice(0, MAX_ATTRIBUTED_RETRIES_PER_SLOT)) state.changed.add(name);
     }
     for (const [name, since] of state.fresh) {
       if (state.facts.has(name) || now - since >= EXTENSION_DISCOVERY_NEW_ENTRY_MS) state.fresh.delete(name);

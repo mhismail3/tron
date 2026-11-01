@@ -257,6 +257,30 @@ describe("ambient extension artifact discovery change detection", () => {
     expect(offers).toEqual([join(runsRoot, "run-foreign"), join(runsRoot, "run-foreign")]);
   });
 
+  it("bounds the every-pass retry of rejected attributed runs to each slot's newest 64", async () => {
+    // A long session attributes every run in its history; permanently rejected
+    // ones must not bring back a per-pass stat of the whole history.
+    const { delegatedRoot, runsRoot } = await artifactTree("rejected-history");
+    const base = Date.now() - 600_000;
+    const names = Array.from({ length: 300 }, (_unused, index) => runName(index));
+    for (let start = 0; start < names.length; start += 100) {
+      await Promise.all(names.slice(start, start + 100).map((name, offset) => writeStatus(runsRoot, name, "complete", base + (start + offset) * 1_000)));
+    }
+    const backend = silentWatcher();
+    const { slots, offers } = recordingSlot(new Set(names), "rejected");
+    const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot, watchArtifactRoot: backend.watchArtifactRoot });
+    await passesUntil(owner, () => new Set(offers).size === names.length, "every run offered once", 4);
+    // Root stat plus one status.json stat per retried run, and nothing more.
+    const steady = await countFilesystemRequests(() => owner.runPass());
+    expect(steady).toBeGreaterThanOrEqual(64);
+    expect(steady).toBeLessThanOrEqual(64 + 4);
+    // The newest rejected run is still retried on the next pass.
+    offers.length = 0;
+    await writeStatus(runsRoot, names.at(-1)!, "running", Date.now());
+    await owner.runPass();
+    expect(offers).toEqual([join(runsRoot, names.at(-1)!)]);
+  });
+
   it("falls back to a full sweep when the watcher fails or cannot start", async () => {
     const { delegatedRoot, runsRoot } = await artifactTree("fallback");
     const names = await terminalRuns(runsRoot, 40, Date.now() - 60_000);
