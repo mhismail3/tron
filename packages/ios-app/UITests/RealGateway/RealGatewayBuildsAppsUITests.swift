@@ -210,10 +210,8 @@ extension RealGatewayPairAndChatUITests {
             // replace fresh consent with Open after this instance was removed.
             buildsClose(app)
             let original = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "session-row-", ":\(originalSessionID)")).firstMatch
-            for _ in 0..<4 {
-                if original.exists { break }
-                app.collectionViews.firstMatch.swipeDown()
-            }
+            // Let the exact row be admitted after Apps dismisses before
+            // scrolling. An immediate absence is not dashboard readiness.
             buildsReveal(app, original); original.tap()
             XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription); card.tap()
             XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
