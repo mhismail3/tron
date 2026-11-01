@@ -1558,6 +1558,12 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
         simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
     else:
         simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
+    # A lane's first qualifying keyboard otherwise presents the slide-to-type
+    # introduction, whose looping animation keeps XCTest waiting for idle (60 s
+    # per action) in whichever journey meets it first. Owned simulator state is
+    # a test input: mark it shown on every provision, including older lanes.
+    simctl("spawn", marker["udid"], "defaults", "write", "com.apple.keyboard.preferences",
+           "DidShowContinuousPathIntroduction", "-bool", "YES")
     document = inventory()
     device = validate_marker(document, marker, runtime, device_type, dev_udid)
     return {**marker, "state": device.get("state"), "udid_sha256": hashlib.sha256(marker["udid"].encode()).hexdigest()}

@@ -570,6 +570,9 @@ if command in ('boot', 'shutdown', 'delete'):
             else: devices.remove(device)
     if not found: print('missing device', file=sys.stderr); raise SystemExit(2)
     path.write_text(json.dumps(doc)); raise SystemExit(0)
+if command == 'spawn':
+    with path.with_name('spawn.log').open('a') as log: log.write(' '.join(args) + '\\n')
+    raise SystemExit(0)
 if command == 'bootstatus':
     raise SystemExit(0)
 print('unexpected simctl arguments: ' + repr(args), file=sys.stderr)
@@ -779,6 +782,10 @@ class SimulatorFixture(SimulatorHarness, unittest.TestCase):
         devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
         self.assertEqual({device["udid"] for device in devices}, {UDID_A, owned_udid})
         self.assertEqual(next(device for device in devices if device["udid"] == owned_udid)["state"], "Booted")
+        # The owned lane, never the unrelated device, is marked past the
+        # slide-to-type introduction that would stall XCTest idle waits.
+        self.assertEqual((self.root / "spawn.log").read_text().splitlines(), [
+            f"spawn {owned_udid} defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool YES"])
 
         delete = self.invoke("delete")
         self.assertEqual(delete.returncode, 0, delete.stderr)
@@ -968,7 +975,7 @@ if args[:1] == ['simctl'] and args[1:2] in (['boot'], ['shutdown'], ['delete']):
                 if command == 'delete': devices.remove(device)
                 else: device['state'] = 'Booted' if command == 'boot' else 'Shutdown'
     inventory_path.write_text(json.dumps(doc)); raise SystemExit(0)
-if args[:2] == ['simctl', 'bootstatus']:
+if args[:2] in (['simctl', 'bootstatus'], ['simctl', 'spawn']):
     raise SystemExit(0)
 if args[:2] == ['xcresulttool', 'get']:
     if os.environ.get('FAKE_SUMMARY_MODE') == 'extract-failure': raise SystemExit(9)
@@ -2241,7 +2248,7 @@ if command == 'create':
         'isAvailable': True, 'deviceTypeIdentifier': device_type,
     })
     inventory_path.write_text(json.dumps(document)); print(created); raise SystemExit(0)
-if command == 'bootstatus':
+if command in ('bootstatus', 'spawn'):
     raise SystemExit(0)
 if command == 'terminate':
     raise SystemExit(0)
@@ -5788,7 +5795,7 @@ if arguments[:2] == ["simctl", "get_app_container"]:
     print(os.environ["FAKE_INSTALLED_APP"]); raise SystemExit(0)
 if arguments[:2] == ["simctl", "launch"] or arguments[:4] == ["devicectl", "device", "process", "launch"]:
     gate(); raise SystemExit(0)
-if arguments[:2] in (["simctl", "boot"], ["simctl", "bootstatus"], ["simctl", "terminate"], ["simctl", "install"]):
+if arguments[:2] in (["simctl", "boot"], ["simctl", "bootstatus"], ["simctl", "spawn"], ["simctl", "terminate"], ["simctl", "install"]):
     raise SystemExit(0)
 if arguments[:3] == ["devicectl", "device", "install"]:
     raise SystemExit(0)

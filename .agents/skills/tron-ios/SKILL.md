@@ -150,6 +150,9 @@ reclaim simulators yourself.
   and releases), so a stopped test is not left running under a released
   simulator. A lane a live
   process leases is never disturbed, by the tooling or by an agent.
+- Provisioning marks the lane's slide-to-type keyboard introduction shown
+  (`DidShowContinuousPathIntroduction`); otherwise its looping animation stalls
+  XCTest's idle wait 60 s per action in whichever journey first shows a keyboard.
 - Every command that provisions a lane's simulator first sweeps: orphaned owned
   lanes (booted with no live lease) are shut down, and lanes unused for 7 days
   or whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows
