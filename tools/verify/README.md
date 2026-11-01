@@ -80,8 +80,8 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 **Implementation description, not exemption policy.**
 [Principles P2/P3/P9](../../docs/PRINCIPLES.md) forbid quarantines, waivers,
 known-failure exemptions and qualified greens. Existing runner labels/exit codes below
-do not establish green or authorize adding/renewing entries. The live registry entry
-remains tracked by #2196. Runner/gate reconciliation belongs to #2176/#2194, not a second path.
+do not establish green or authorize adding/renewing entries. The registry has no live
+entries. Runner/gate reconciliation belongs to #2176/#2194, not a second path.
 
 The runner validates `tools/verify/known-failures.json` on every selection, including plans.
 Its schema requires exact case, reproduction command/ancestor commit, full failure digest,

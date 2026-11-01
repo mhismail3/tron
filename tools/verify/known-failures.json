@@ -1,12 +1,1 @@
-[
-  {
-    "testId": "packages/gateway/src/admin/settings-three-layer.e2e.test.ts::approved three-layer settings at real Gateway boundaries refuses an invalid Project model reference instead of inheriting Global: {\"defaultModel\":\"faux-1\"}",
-    "evidence": {
-      "command": "python3 tools/verify/gateway.py --reporter=json --outputFile=test-results/approvals-log-undo/base/gateway.json",
-      "commit": "472f33d70555dc3738bd52bd242e1829c799ee71",
-      "failureDigest": "68041eaa5ff1478dfc46be6ddf754bdda9b5a0cc9ecb28cb8e39c5701133ecee"
-    },
-    "issue": 2130,
-    "expires": "2026-11-05"
-  }
-]
+[]
