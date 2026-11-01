@@ -90,6 +90,69 @@ stops automatic repair. Never sample until the desired answer appears.
   remains a bug, not an exemption. Resume only with a new explained recipe; retain
   the failed recipe and new evidence, never silently reclassify the original run.
 
+## Structured failure, provenance and repeat evidence
+
+Harvest failure classes, correlated provenance and repeat accounting from the
+external-ideas shortlist (tester-army/e2e); **reject that runner/dependency**,
+model assertions, replay/self-heal, probabilistic selection and flaky-as-success.
+Keep native XCUITest/real Gateway and the existing deterministic selectors. The
+following are proposed report fields in existing verification owners, not a new
+runtime store, telemetry backend or claim that these fields already exist.
+
+Every raw red, including setup/cleanup/incomplete coverage, carries a typed
+`failureClass`: `product_regression | test_defect | environment | infra | unknown`.
+Default `unknown`. Also record `ruleId`, referenced structured observations, their
+artifact digests and causal-control references. The owner computes the class from
+validated runner/process/xcresult facts and control outcomes, never agent prose,
+LLM judgement, log-keyword matching or exit code alone:
+
+| Class | Required distinguishing evidence | Automatic source repair |
+|---|---|---|
+| `product_regression` | Valid behavioral oracle, source transition and inverse controls above, observed production effect/crash causally tied to it | Only with full proof + ACCEPT |
+| `test_defect` | Same source controls; traced fixture/oracle violates established intended contract, with surviving faithful oracle explicitly reviewed | Only with full proof + ACCEPT |
+| `environment` | Recorded external resource/toolchain/service condition and controlled intervention independent of candidate source | Refused; diagnose/root-fix |
+| `infra` | Structured runner/lease/report/owned-process lifecycle failure; no proved source transition | Refused; diagnose/root-fix |
+| `unknown` | Missing, contradictory or insufficient evidence for any rule above | Refused; investigate |
+
+An assertion is an observation, not automatically a product regression; an app
+crash, timeout or killed child is not automatically infrastructure. Record who
+initiated a fault injection and its process receipt. Conflicting observations
+resolve to `unknown`, not a precedence guess. A later causal proof may supersede
+an initial infra/unknown diagnosis with a source class; retain both evidence-linked
+classification events. Class never substitutes for causal proof or makes a red
+green. Rule validation checks referenced control bindings; a reviewed contract
+explanation supplements those facts, never overrides a failing/missing control.
+
+Bind a machine-readable provenance chain in the existing report:
+`landing {commit, firstParent, tree} -> verify {runId, head, recipeDigest, reportDigest}
+-> worker {taskId, sessionRef}`. Separate the **landing author task** from the
+**verification executor task**; coalesced runs list all covered landing commits,
+not a fabricated one-to-one relationship. Read Git history and existing canonical
+task/worker receipts; a commit trailer is only a join hint until corroborated.
+Each edge includes its evidence reference or explicit `unavailable` and reason.
+Do not infer worker identity from author name, timestamps or branch names, copy
+session content into reports, or build a second session database. Historical
+missing worker identity does not negate proven source causality: the revert still
+names exact culprit/parent, original red run, repair run, ACCEPT and available task
+IDs, marking the missing edge unavailable rather than inventing it. Missing exact
+landing/run/control bindings, unlike a missing author task, forbids publication.
+
+For #2196, expose a directly readable, derived `repeatTallies` array in existing
+verify evidence: `{testId, recipeDigest, sourceIdentity, loadEvidenceRefs,
+attemptRefs, executed, passed, failed, incomplete, consecutivePasses, eligible}`.
+`attemptRefs` point to unique ordered original runner receipts (run/attempt IDs,
+SHA, full test selector, raw outcome/counts, toolchain/runtime and actual workload).
+Derive counters from those receipts, never worker-supplied totals or mutable tally
+increments. Count a pass only for exactly executed required case coverage, joined
+cleanup and recorded normal concurrent load. Failure, skip, zero execution,
+interruption, missing receipt/load proof or changed recipe/dependency identity
+breaks the streak; duplicates never increment it. Retain the broken prefix and
+all failure classes. Invalidate carried evidence when source/dependencies change
+unless an explicit reviewed unchanged-input proof binds it. Twenty consecutive
+eligible passes is the per-test component, never full-green or ledger closure.
+A tally is a disposable report projection, not another qualification authority;
+#2196 reads it and retains root-cause/qualification decisions in its existing ledger.
+
 ## Bisect the landed change, not the nearest author commit
 
 Enumerate `G..H` on main's first-parent chain. A fast-forward single-parent commit
@@ -187,6 +250,24 @@ prior per-test evidence only with explicit unchanged dependency/recipe proof;
 the final full green always names its single exact commit. A targeted repair pass,
 revert push or historical green anchor does not meet that bar or permit promotion.
 
+## Open maintainer decisions: release-loop conflicts
+
+The external release-loop proposal is input, not authority. Two policy conflicts
+remain **open maintainer decisions**, not resolved by this design:
+- Automatic internal TestFlight upload versus AGENTS.md safety 1–2 and P1: current
+  rules prohibit automated production/device release. Whether any exact tap-gated
+  or standing internal-upload exception is desired must be decided explicitly;
+  until then only authorized artifact/evidence preparation and notification apply.
+- A fix-forward-on-red worker loop versus P2's causal revert-first, root-fix-before-
+  reland contract: whether to change that contract is the maintainer's decision.
+  Until then retain revert-first for proved reversible source causes; unresolved
+  attribution never authorizes a guessed revert or a fix-forward policy exception.
+
+No release diagram, research report or source class grants installs, promotions,
+live-data reversal, production control or permission to clear an unresolved red.
+#2176 still owns trigger choice; reuse of Home wake is an option, not a second
+scheduler or a settled cadence decision. No new release loop is implemented here.
+
 ## Minimal first implementation
 
 Start hardware-free in the existing `batch.py` attribution owner and
@@ -210,6 +291,13 @@ Fail-before/pass-after tests invoke shipped CLI/owner logic and real Git process
   selector, setup failure, skipped/zero coverage or bad parent -> unresolved/no push;
 - conflict, reviewer BLOCK/wrong tree, migration/security boundary or missing
   authority -> no push and preserved work; immutable first evidence survives;
+- seeded structured assertion/crash, injected runner/lease failure and ambiguous
+  observations derive the required class/evidence references; contradictory or
+  prose-only claims stay unknown. Both source classes need the same causal gate;
+- provenance joins real Git landing/report/task receipts; missing worker edges
+  explicitly unavailable, missing causal edges refuse; coalesced runs stay truthful;
+- ordered per-test receipts yield exactly 20 only after 20 eligible normal-load
+  passes; red/incomplete/load gap breaks streak, duplicates cannot inflate it;
 - targeted green never advances full-green/qualification; notifications failing
   cannot duplicate publication. Use a controlled reviewer boundary, and a real
   independent ACCEPT for the implementation/test edits themselves.
