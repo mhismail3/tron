@@ -60,15 +60,15 @@ struct ChangeReviewCard: View {
             if approve != nil || cancel != nil || undo != nil {
                 HStack {
                     if let cancel {
-                        Button("Cancel", action: cancel).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronAmber))
+                        Button("Cancel", action: cancel).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronPrimary))
                             .accessibilityIdentifier("change-review-cancel")
                     }
                     Spacer(minLength: 8)
-                    if let undo { Button("Undo", action: undo).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronAmber)) }
+                    if let undo { Button("Undo", action: undo).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronPrimary)) }
                     if let approve {
                         Button(action: approve) {
                             if submitting { ProgressView() } else { Text("Approve") }
-                        }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronAmber))
+                        }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronPrimary))
                             .accessibilityIdentifier("change-review-approve")
                     }
                 }.disabled(submitting)
@@ -76,7 +76,7 @@ struct ChangeReviewCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.08)
+        .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.08)
         // A containing element keeps each action's own identifier.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("change-review-card")

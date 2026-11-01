@@ -182,7 +182,7 @@ enum SettingsGroupKind {
 
     @MainActor var accent: Color {
         switch self {
-        case .tools: ThemeColor.emerald.ink
+        case .tools: .tronPrimary
         case .accounts: .tronIndigo
         case .more, .iphone: .tronPrimary
         case .diagnostics: .tronSteel
