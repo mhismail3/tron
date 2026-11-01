@@ -4383,6 +4383,10 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         foreign = self.e2e("run-ui", "--only-testing", "TronMobileUITests/TronSmokeUITests/testSomething", environment=self.environment)
         self.assertEqual(foreign.returncode, 1, foreign.stdout + foreign.stderr)
         self.assertIn("is not a real-UI journey this command owns", foreign.stderr)
+        retired_owner = f"{class_owner}/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
+        retired = self.e2e("run-ui", "--only-testing", retired_owner, environment=self.environment)
+        self.assertEqual(retired.returncode, 1, retired.stdout + retired.stderr)
+        self.assertIn(f"{retired_owner} is not a real-UI journey this command owns", retired.stderr)
         refused = self.e2e("run", "--only-testing", self.owned_ui_journeys()[0], environment=self.environment)
         self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
         self.assertIn("is not a boundary method this command owns", refused.stderr)

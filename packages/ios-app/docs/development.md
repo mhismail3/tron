@@ -166,7 +166,8 @@ scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGateway
 `--only-testing` selects exact owned methods, repeats in requested order and survives
 lease re-execution. Boundary `run`/`all`/`iterate` own the two default methods;
 `run-lan` owns only its LAN method, while `run-ui` owns its UI journeys. No selector
-means each command keeps its existing default sequence; foreign, class and suite selectors refuse.
+means each command keeps its existing default sequence; foreign, class, suite and
+removed native vendor-setup selectors refuse before any build, fixture or lease.
 
 `run-ui` pairs the production scene against a fresh fixture per journey, leaving
 `results/<utc>-ui.*`. The invitation journey requires the full accepted prompt
