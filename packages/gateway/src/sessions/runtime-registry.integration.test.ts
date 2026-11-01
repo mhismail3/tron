@@ -151,7 +151,7 @@ async function discoverExtensionArtifactsUntil(
   settled: () => boolean = () => true,
   passLimit = DISCOVERY_PASS_LIMIT,
 ): Promise<number> {
-  const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
+  const state = registry as unknown as { artifactDiscoveryInFlight: Promise<void> | undefined };
   let passes = 0;
   await waitFor(async () => {
     // A pass that is already in flight returns without discovering anything; let
@@ -5263,8 +5263,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(stopped).toEqual([{ entries: 1_025, statusReads: 1_024, work: 0, dropped: 0 }]);
     expect(routed.mock.calls).toEqual([]);
 
-    // The unchanged root repeats the same stop, and a repeat inside its episode
-    // is not recorded again.
+    // The unchanged root has no changed work left, so a later pass does not stop
+    // and records nothing.
     await discoverExtensionArtifactsUntil(fixture.registry);
     expect(stopped).toHaveLength(1);
 
@@ -5286,10 +5286,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       details: { runId: late.runId, asyncDir: late.asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
     });
     // The run must be offered by the first pass this call runs. Everything the
-    // pass needs is already derived: the root was walked above, so every
-    // unchanged artifact fact is cached by identity and the walk reaches the end
-    // of the root without spending the `MAX_EXTENSION_DISCOVERY_WORK` read
-    // budget; the per-root routing budget (`rootBudget`, the remaining work split
+    // pass needs is already derived: the root was swept above, so every
+    // unchanged artifact fact is cached by identity and the pass spends none of
+    // the `MAX_EXTENSION_DISCOVERY_WORK` read budget; the per-root routing budget (`rootBudget`, the remaining work split
     // across the roots and live slots — 512 at most for one root and two slots)
     // is an upper bound, and candidates no live slot can attribute are filtered
     // out before that slice, so the late run is the only candidate left to

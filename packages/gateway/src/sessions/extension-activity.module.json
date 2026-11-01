@@ -3,6 +3,7 @@
   "owns": [
     "extension-activity-recency.ts",
     "extension-activity.module.json",
-    "extension-artifact-discovery.ts"
+    "extension-artifact-discovery.ts",
+    "extension-artifact-discovery.integration.test.ts"
   ]
 }
