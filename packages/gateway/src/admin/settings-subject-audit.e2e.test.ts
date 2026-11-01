@@ -43,15 +43,16 @@ it("publishes one original Home audit group through file/parent faults, cold ret
     if (fault === "file" && value.ino === fileInode && value.dev === parent.dev) throw new Error("Owned audit file sync fault");
     await sync(handle);
   });
-  await expect(changes.publishSubjectAudit(writes, context, replayAt)).rejects.toThrow("Owned audit directory sync fault");
+  // The owner message is generic; the actual sync fault is the retained diagnostic cause.
+  await expect(changes.publishSubjectAudit(writes, context, replayAt)).rejects.toMatchObject({ code: "conflict", message: "Committed Profile audit could not be published", details: { outcomeUnknown: true }, cause: { message: "Owned audit directory sync fault" } });
   expect((await changes.history({ key: "home.profile.item" })).entries).toEqual([]);
   const [name] = (await fs.readdir(changes.record.path)).filter(name => name.startsWith("once-") && name.endsWith(".jsonl"));
   expect(name).toBeDefined(); fileInode = (await fs.stat(join(changes.record.path, name!))).ino;
   fault = "file";
-  await expect(changes.publishSubjectAudit(writes, context, replayAt)).rejects.toThrow("Owned audit file sync fault");
+  await expect(changes.publishSubjectAudit(writes, context, replayAt)).rejects.toMatchObject({ code: "conflict", message: "Committed Profile audit could not be published", details: { outcomeUnknown: true }, cause: { message: "Owned audit file sync fault" } });
   expect((await changes.history({ key: "home.profile.item" })).entries).toEqual([]);
   fault = "directory";
-  await expect(changes.publishSubjectAudit(writes, context, replayAt)).rejects.toThrow("Owned audit directory sync fault");
+  await expect(changes.publishSubjectAudit(writes, context, replayAt)).rejects.toMatchObject({ code: "conflict", message: "Committed Profile audit could not be published", details: { outcomeUnknown: true }, cause: { message: "Owned audit directory sync fault" } });
   expect((await changes.history({ key: "home.profile.item" })).entries).toEqual([]);
   fault = undefined;
   const published = await changes.publishSubjectAudit(writes, context, replayAt);

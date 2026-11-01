@@ -143,7 +143,10 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     let failure: unknown;
     try {
       failure = await f.service.invoke(f.client, "settings.change", command).then(() => undefined, error => error);
-      expect(failure).toMatchObject({ message: expect.stringContaining(history) });
+      // The owner message is client-safe; the actual filesystem refusal stays the diagnostic cause.
+      expect(failure).toMatchObject({ message: "Settings applied but history publication failed", cause: { code: "EACCES" } });
+      expect((failure as Error & { cause: Error }).cause.message).toContain(history);
+      expect((failure as Error).message).not.toContain(history);
       expect(JSON.parse(await readFile(settingsPath, "utf8")).retry.maxRetries).toBe(3);
     } finally {
       await chmod(history, 0o700);

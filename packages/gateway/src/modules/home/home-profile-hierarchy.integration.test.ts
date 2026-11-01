@@ -167,7 +167,7 @@ it.each(["migrate", "reorganize"] as const)("maintainer profileChange %s repairs
   });
   const originalCommand = command(`native-${action}`);
   await expect(f.service.invoke(maintainer, "home.profileChange", { commandId: originalCommand, reason: "Exact native placement",
-    changes: [{ action, assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }] }] })).rejects.toThrow("Owned native profile audit fault");
+    changes: [{ action, assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "engineering/release" }] }] })).rejects.toMatchObject({ code: "conflict", message: "Committed Profile audit could not be published", details: { outcomeUnknown: true }, cause: { message: "Owned native profile audit fault" } });
   fault.mockRestore(); preparation.mockRestore();
   expect((await history(f)).map(entry => entry.status)).toEqual(["started"]);
   const committed = await f.store.read(original.id) as typeof original;
