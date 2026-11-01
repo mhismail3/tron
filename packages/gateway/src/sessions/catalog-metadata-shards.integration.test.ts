@@ -361,6 +361,20 @@ describe("catalog metadata store (#2164)", () => {
     expect(new Set(modes)).toEqual(new Set([0o600]));
   });
 
+  it("never lets a migration that read the v2 document publish it over a newer save", async () => {
+    const { root, gateway, index } = await storeFixture("migrate-race");
+    const legacyRows = realisticCatalogRows(root, 300, 1);
+    const newer = realisticCatalogRows(root, 300, 2);
+    await mkdir(gateway, { recursive: true });
+    await writeFile(join(gateway, "catalog-metadata-v2.json"), JSON.stringify({ version: 3, root, rows: legacyRows }), { mode: 0o600 });
+    // The load reads the v2 document before it can take the write mutex; the
+    // save queued at the same time takes it first.
+    const [, saved] = await Promise.all([index.load(root), index.save(root, newer)]);
+    expect(saved).toBe(true);
+    expect(sortedCatalogRows(await new CatalogMetadataIndex(gateway).load(root))).toEqual(sortedCatalogRows(newer));
+    expect(await lstat(join(gateway, "catalog-metadata-v2.json")).then(() => true, () => false)).toBe(false);
+  });
+
   it("keeps the v2 document and serves its rows when the shards cannot be written, then migrates on a later load", async () => {
     const { root, gateway, index, failures } = await storeFixture("migrate-blocked");
     const legacyRows = realisticCatalogRows(root, 300);

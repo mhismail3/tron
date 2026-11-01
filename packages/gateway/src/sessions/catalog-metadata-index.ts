@@ -551,11 +551,15 @@ export class CatalogMetadataIndex {
    * back, and the legacy document is removed only when the read-back cut equals
    * it. Until then the legacy document stays, so a failed or interrupted
    * migration repeats on the next read, and its rows still serve this one. */
-  private async migrate(root: string, legacy: CatalogMetadataIndexRow[]): Promise<CatalogMetadataStoreRead> {
+  private async migrate(root: string, observed: CatalogMetadataIndexRow[]): Promise<CatalogMetadataStoreRead> {
     const started = Date.now();
     return this.writeMutex.run(async () => {
+      if (this.closed) return { complete: true, rows: observed, readable: true };
+      // Re-read under the mutex: a save that committed since the document was
+      // first read has removed it, and its newer cut must not be overwritten.
+      const legacy = await this.readLegacy(root);
+      if (!legacy) return this.readShards(root);
       const served = { complete: true, rows: legacy, readable: true };
-      if (this.closed) return served;
       // A refused or failed write has already reported itself.
       const written = await this.writeStore(root, legacy, "migrate").catch(() => false);
       if (!written) return served;
@@ -684,6 +688,10 @@ export class CatalogMetadataIndex {
         this.pressure("rows", { rows: rows.length, limit: CATALOG_METADATA_INDEX_MAX_ENTRIES });
       }
       await durableAtomicWriteText(join(this.directory, MANIFEST_NAME), JSON.stringify(manifest));
+      // A committed save is newer than any v2 document still present, so the
+      // document is removed here; a later migration would otherwise publish
+      // its older rows over this cut.
+      if (stage === "save") await durableRemove(this.legacyPath);
       // Pruned only after the manifest commit: a shard that became empty. A
       // refused shard keeps its last accepted file.
       for (const name of existing) {

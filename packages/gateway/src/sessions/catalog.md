@@ -51,7 +51,8 @@ Owner: `gateway/session-catalog` (`session-catalog.ts`, `catalog-jsonl.ts`,
   demand; `messageCount` excludes Pi `system` deltas.
 - Migration: while `gateway/catalog-metadata-v2.json` (the former single
   document) exists, a read migrates it to shards and deletes it only after the
-  read-back equals it; a failure keeps it and serves its rows. Rollback to a
+  read-back equals it; a failure keeps it and serves its rows. Any committed
+  save removes it too, so a migration never overwrites a newer cut. Rollback to a
   build without shards finds no v2 and rebuilds once from canonical files (the
   v3 directory is ignored and may be deleted).
 - A file the owner cannot prove keeps its old row and refuses retryably
