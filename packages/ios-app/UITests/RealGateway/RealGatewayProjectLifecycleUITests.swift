@@ -36,7 +36,7 @@ extension RealGatewayPairAndChatUITests {
         lifecycleTap(app, "project-lifecycle-untrust")
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: destination.path)) == false })
-        lifecycleClose(app)
+        // Approve retires the review and returns to the requesting details page.
         lifecycleTap(app, "project-lifecycle-archive")
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
         lifecycleDecide(app, approve: true)
@@ -116,7 +116,6 @@ extension RealGatewayPairAndChatUITests {
         lifecycleTap(app, "project-lifecycle-untrust")
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == false })
-        lifecycleClose(app)
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git/HEAD").path))
         lifecycleTap(app, "Rename Project")
         lifecycleName(app, "must-not-exist")
