@@ -43,10 +43,8 @@ extension RealGatewayPairAndChatUITests {
         settings.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home Settings"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(app.buttons["settings-link-Agent Behavior"].exists, "Global consolidation must not replace Home's routes")
-        let models = app.buttons["settings-section-model-open"]
-        revealBelowNavigationBar(app, models)
-        models.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 30), app.debugDescription)
+        // Home Settings embeds its former Models section in place (Settings README).
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Home has no first-level Models drill-in")
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
         revealBelowNavigationBar(app, row)
         let edit = row.buttons.matching(NSPredicate(format: "label == 'Worker models' AND NOT identifier ENDSWITH '-reset'")).firstMatch
@@ -162,10 +160,20 @@ extension RealGatewayPairAndChatUITests {
                 reset.tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == nil }, "Reset must remove, not copy, the inherited value")
             }
+            // The default policy belongs to the shared Trusted Projects owner, not a
+            // duplicate generic row in Agent Behavior.
+            XCTAssertFalse(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].exists,
+                           "Agent Behavior must not duplicate the Trusted Projects policy row")
+            let projects = app.buttons["Trusted Projects"]
+            revealBelowNavigationBar(app, projects)
+            XCTAssertTrue(projects.waitForExistence(timeout: 15), app.debugDescription)
+            projects.tap()
+            XCTAssertTrue(app.navigationBars.staticTexts["Trusted Projects"].waitForExistence(timeout: 30), app.debugDescription)
             let trust = app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"]
             revealBelowNavigationBar(app, trust)
             XCTAssertTrue(trust.exists, app.debugDescription)
             keepScreenshot(app, name: "2010-agent-settings-trust-\(appearance)")
+            dismissAgentSheet(app, title: "Trusted Projects")
             for _ in 0..<5 { app.swipeUp() }
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
             dismissAgentSheet(app, title: "Agent Behavior")
