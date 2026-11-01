@@ -107,7 +107,7 @@ interface AmbientArtifactFact {
 
 /** Everything discovery knows about one artifact root. Only directories that
  * may have changed are stat'd: `changed` holds watcher-reported, newly listed,
- * active and retried names; `sweep` holds the rest of the current full sweep.
+ * active, live-slot-attributed and retried names; `sweep` holds the rest of the current full sweep.
  * Both are ordered and drained across passes within the per-pass budgets. */
 interface AmbientArtifactRoot {
   readonly root: string;
@@ -148,7 +148,7 @@ export class ExtensionArtifactDiscovery {
    * outcomes are recorded, so an offer that failed temporarily is offered again
    * on the next pass; a run the slot still holds an exact binding for is
    * refreshed by the exact-binding lane every pass. */
-  private readonly ambientArtifactRoutes = new Map<string, Map<string, string>>();
+  private readonly ambientArtifactRoutes = new Map<string, Map<string, { identity: string; accepted: boolean }>>();
   private readonly watchRoot: (request: ExtensionArtifactRootWatchRequest) => ExtensionArtifactRootWatchHandle;
   private readonly fullSweepMs: number;
 
@@ -260,6 +260,10 @@ export class ExtensionArtifactDiscovery {
       this.roots.delete(root);
     }
     const rootList = [...roots.keys()];
+    const attributed = new Map<string, ReadonlySet<string>>();
+    for (const slot of slots) {
+      attributed.set(slot.id, slot.ownedTurns.extensionAmbientArtifactAttribution());
+    }
     // `walkStopped` means changed work was left for the next pass and
     // `routedOut` ends this pass's routing at the work budget.
     let walkStopped = false;
@@ -278,14 +282,10 @@ export class ExtensionArtifactDiscovery {
         };
         this.roots.set(root, state);
       }
-      if (await this.refreshRoot(state, roots.get(root)!, counts)) walkStopped = true;
+      if (await this.refreshRoot(state, roots.get(root)!, attributed, counts)) walkStopped = true;
       if (this.closed) return undefined;
     }
 
-    const attributed = new Map<string, ReadonlySet<string>>();
-    for (const slot of slots) {
-      attributed.set(slot.id, slot.ownedTurns.extensionAmbientArtifactAttribution());
-    }
     for (let rootIndex = 0; rootIndex < rootList.length; rootIndex += 1) {
       if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) break;
       const state = this.roots.get(rootList[rootIndex]!);
@@ -310,7 +310,7 @@ export class ExtensionArtifactDiscovery {
         for (const slot of slots) {
           const known = attributed.get(slot.id);
           if (!known || (!known.has(runId) && !known.has(fact.asyncDir))) continue;
-          if (this.ambientArtifactRoutes.get(slot.id)?.get(fact.asyncDir) === fact.identity) continue;
+          if (this.ambientArtifactRoutes.get(slot.id)?.get(fact.asyncDir)?.identity === fact.identity) continue;
           owed.push(slot);
         }
         if (owed.length === 0) continue;
@@ -343,7 +343,7 @@ export class ExtensionArtifactDiscovery {
             routed = new Map();
             this.ambientArtifactRoutes.set(slot.id, routed);
           }
-          routed.set(candidate.asyncDir, candidate.identity);
+          routed.set(candidate.asyncDir, { identity: candidate.identity, accepted: outcome === "accepted" });
         }
         if (routedOut) break;
       }
@@ -360,6 +360,7 @@ export class ExtensionArtifactDiscovery {
   private async refreshRoot(
     state: AmbientArtifactRoot,
     metadata: { dev: number; ino: number; mtimeMs: number; ctimeMs: number },
+    attributed: ReadonlyMap<string, ReadonlySet<string>>,
     counts: ExtensionArtifactDiscoveryCounts,
   ): Promise<boolean> {
     const now = Date.now();
@@ -418,6 +419,22 @@ export class ExtensionArtifactDiscovery {
       }
     }
     for (const [name, fact] of state.facts) if (fact.active) state.changed.add(name);
+    // Routing can offer only a run a live slot attributes. Until that slot has
+    // accepted the current artifact (it is pending, transient or rejected), the
+    // directory is stat'd every pass, so a rewrite reaches the slot on the next
+    // pass without waiting for the watcher. An accepted run is current; if it
+    // comes back to life, its live binding is refreshed by the exact lane.
+    // Unattributed directories can only be rejected: watcher and sweep suffice.
+    for (const [slotId, known] of attributed) {
+      const routed = this.ambientArtifactRoutes.get(slotId);
+      for (const reference of known) {
+        const name = dirname(reference) === state.root ? basename(reference) : reference;
+        if (!state.names.has(name)) continue;
+        const record = routed?.get(join(state.root, name));
+        if (record?.accepted && record.identity === state.facts.get(name)?.identity) continue;
+        state.changed.add(name);
+      }
+    }
     for (const [name, since] of state.fresh) {
       if (state.facts.has(name) || now - since >= EXTENSION_DISCOVERY_NEW_ENTRY_MS) state.fresh.delete(name);
       else state.changed.add(name);

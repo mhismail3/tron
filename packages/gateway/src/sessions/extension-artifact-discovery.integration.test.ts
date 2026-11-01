@@ -59,7 +59,7 @@ async function terminalRuns(runsRoot: string, count: number, lastUpdate: number)
   return names;
 }
 
-function recordingSlot(attributed: Set<string>) {
+function recordingSlot(attributed: Set<string>, outcome: ExtensionArtifactDiscoveryOutcome = "accepted") {
   const offers: string[] = [];
   const slot = {
     id: "slot-1",
@@ -68,7 +68,7 @@ function recordingSlot(attributed: Set<string>) {
       ownedExtensionArtifactDirectories: () => [],
       discoverExtensionArtifact: async (asyncDir: string): Promise<ExtensionArtifactDiscoveryOutcome> => {
         offers.push(asyncDir);
-        return "accepted";
+        return outcome;
       },
       extensionAmbientArtifactAttribution: () => attributed,
     },
@@ -234,6 +234,27 @@ describe("ambient extension artifact discovery change detection", () => {
     await writeStatus(runsRoot, "run-live", "complete", Date.now());
     await owner.runPass();
     expect(offers).toEqual([join(runsRoot, "run-live"), join(runsRoot, "run-live")]);
+  });
+
+  it("re-reads an attributed artifact its slot rejected on every pass without a watcher event", async () => {
+    // A recovered slot rejects a foreign producer's terminal header; the owning
+    // producer then rewrites the file. The slot must see the rewrite on the next
+    // pass, as when every directory was stat'd every pass.
+    const { delegatedRoot, runsRoot } = await artifactTree("rejected");
+    await terminalRuns(runsRoot, 20, Date.now() - 60_000);
+    await writeStatus(runsRoot, "run-foreign", "complete", Date.now() - 5_000);
+    const backend = silentWatcher();
+    const { slots, offers } = recordingSlot(new Set(["run-foreign"]), "rejected");
+    const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot, watchArtifactRoot: backend.watchArtifactRoot });
+    await owner.runPass();
+    expect(offers).toEqual([join(runsRoot, "run-foreign")]);
+    // The same bytes are not offered again...
+    await owner.runPass();
+    expect(offers).toHaveLength(1);
+    // ...but a rewrite is, on the very next pass.
+    await writeStatus(runsRoot, "run-foreign", "running", Date.now());
+    await owner.runPass();
+    expect(offers).toEqual([join(runsRoot, "run-foreign"), join(runsRoot, "run-foreign")]);
   });
 
   it("falls back to a full sweep when the watcher fails or cannot start", async () => {
