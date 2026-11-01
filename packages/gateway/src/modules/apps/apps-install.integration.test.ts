@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestRegistry, displayOwnerOf } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -179,11 +179,21 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     await displayOwnerOf(f.registry).artifacts.revoke(reference.artifactId, reference.sessionId);
     expect(await readFile(path, "utf8")).toBe(source);
   });
-  it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", () => {
-    retainedOffersJourney = reclaimOffers();
-    return retainedOffersJourney;
+  describe("retained offer capacity", () => {
+    let prepared: Awaited<ReturnType<typeof prepareOffers>>;
+    // Filling the real store requires 199 separately acknowledged durable offers;
+    // it is preparation for the reclamation boundary, not a 199-offer latency SLA.
+    // Keep setup bounded and joined even when its hook reports failure.
+    beforeEach(() => {
+      retainedOffersJourney = prepareOffers().then(value => { prepared = value; });
+      return retainedOffersJourney;
+    }, 60_000);
+    it("reclaims deleted-session offer bytes and capacity while preserving live offers and installed apps", () => {
+      retainedOffersJourney = reclaimOffers(prepared);
+      return retainedOffersJourney;
+    });
   });
-  async function reclaimOffers() {
+  async function prepareOffers() {
     const f = await fixture();
     await tool(f, { ...offerArgs(), appId: "kept-app", name: "Kept app" });
     const keptReference = { ...f.displayReference! };
@@ -207,6 +217,9 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     // Join the actual owner, not a scheduling deadline. The normal Vitest hang
     // guard remains; elapsed host I/O time is not the capacity/work oracle.
     while (!context || producer.isBusy) await producer.waitForStateChange();
+    return { f, producer, keptReference, keptReview, context, durableSyncs };
+  }
+  async function reclaimOffers({ f, producer, keptReference, keptReview, context, durableSyncs }: Awaited<ReturnType<typeof prepareOffers>>) {
     expect(context).toBeDefined();
     const offered = (context!.messages as unknown as Array<Record<string, any>>)
       .filter(row => row.role === "toolResult" && row.toolName === "swift_app");
