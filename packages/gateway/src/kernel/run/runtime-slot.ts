@@ -1504,11 +1504,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         ] } : {}),
       });
       if (startsNewChat) this.newSettingsSessions.add(created.session);
-      // The transcript owns a chat's tool loadout. Pi's createAgentSession always
-      // passes its configured defaults, which skips AgentSession's own transcript
-      // restore, so a resumed, forked or reloaded chat would silently fall back
-      // to the defaults and the next prompt would persist that (#327). Apply the
-      // declared loadout here; a session without one keeps the defaults.
+      // The transcript owns a chat's tool loadout. Pi restores it but may also
+      // activate new extension tools; reapply the declared selection rather than
+      // persisting those defaults into a resumed/forked/reloaded chat (#327).
+      // The SDK retains requested pending names until MCP registration (#2181);
+      // its public setter cannot restore an unknown name after losing that intent.
       const toolChoice = readSessionToolChoice(sessionManager.getBranch());
       if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);
       else if (profile.launchDefaults === "settings-home-recipe") {

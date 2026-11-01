@@ -3,12 +3,12 @@
   "package": "@earendil-works/pi-coding-agent",
   "version": "1.4.0",
   "artifact": {
-    "path": "third_party/pi-coding-agent/pi-coding-agent-1.4.0-tron.1.tgz",
-    "integrity": "sha512-LTmvIF/M3p8+bbbniqRt1I8n7oOvFBnZWS7shl7ybV0SJKshqVTl9Teeo97T2R9FSanRol/F/QjgE+aB8Eb9tw=="
+    "path": "third_party/pi-coding-agent/pi-coding-agent-1.4.0-tron.2.tgz",
+    "integrity": "sha512-Zn9gIZby3ERf9Ad0YpVLEOyyqsY0XlhQzq/AiXokntwF5bG3zYVydwBfiITWJt9PeSfReg2tjxQlwBdefbyP8A=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "4fa9cff2842c32e9947b716b59b8cfdc5a9f8bdd8fbe388c02ce47e427ae75e2"
+    "sha256": "8c3071e2a29fa2dd2f58188ebafc7a4655fd5abebc6ddac38ca6e0bebf3ffa8a"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
@@ -31,5 +31,5 @@
     "node": "22.22.0",
     "npm": "10.9.4"
   },
-  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), dequeues delivered image-only (empty-text) queued messages, normalizes steer and follow-up images as prompts are, keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), dequeues delivered image-only (empty-text) queued messages, normalizes steer and follow-up images as prompts are, keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), and preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
 }

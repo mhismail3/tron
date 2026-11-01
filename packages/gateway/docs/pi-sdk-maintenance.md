@@ -39,7 +39,16 @@ Until a release ships them, `pi-coding-agent` is a Tron-built tarball at the fam
 carrying: the `projectDir` option ([project root](../src/machine/README.md#project-root)),
 dequeuing a delivered image-only steer or follow-up, normalizing queued images for the active
 model, an idle `session.systemPrompt` that keeps transcript-provided extension sections, and a
-run start that `preflightResult("started")` can revoke.
+run start that `preflightResult("started")` can revoke, and requested pending tool names
+surviving a narrowed restored loadout until MCP registration.
+
+The Gateway reapplies the transcript's explicit loadout even when Pi auto-activates newly
+registered direct tools. The SDK patch keeps only explicitly requested pending names when
+that removes active tools; addition-only discovery updates retain all pending names. This
+cannot be repaired through the public adapter setter: it ignores unknown names and exposes
+no pending-name API. Passing an allowlist would instead restrict the registry, and replaying
+the selection after registration would add a second pending-state owner. Keep that intent
+with the SDK's existing pending-name owner; upstream auto-activation is not disabled.
 
 `pi-coding-agent-patch.json` owns it: upstream tag and commit, the published tarball's
 integrity, the backported proposal commit, patch SHA-256, bundled `pi-ai` model data,

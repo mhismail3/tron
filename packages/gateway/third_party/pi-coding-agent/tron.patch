@@ -1,6 +1,6 @@
-pi-coding-agent 1.3.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
+pi-coding-agent 1.4.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
 
-Apply with git apply at tag v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0).
+Apply with git apply at tag v1.4.0 (4a080252f06caf63a525d7873c5d94d3c23887e0).
 
 1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
    A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
@@ -36,6 +36,12 @@ Apply with git apply at tag v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0).
    session streaming with no run, so abort() and waitForIdle() never settled. The callback
    now runs inside that cleanup: a throw ends the start like a failed preparation, the
    session is idle again, and the prompt is neither appended nor sent.
+
+6. Explicit pending loadout names (Tron #2181). Reapplying a saved selection may remove
+   newly autoactivated direct tools before MCP servers register. When that narrows the
+   loadout, preserve pending restored names explicitly requested by the same call, while
+   discarding unrequested ones. Addition-only discovery updates still keep pending names.
+   Upstream 1.4 auto-activation remains enabled; Tron still reapplies the recorded selection.
 
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index 5d5eb338e22282d409fe9cb659a5eef2a21f0c6e..bb0f55b2ff58168848e944c9d77429225f1874a2 100644
@@ -230,6 +236,26 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  	}
  
  	/** Current retry attempt (0 if not retrying) */
+@@ -1538,10 +1553,16 @@ export class AgentSession {
+ 	setActiveToolsByName(toolNames: string[]): void {
+ 		const previous = this.getActiveToolNames();
+ 		this._setActiveTools(toolNames);
+-		// A loadout that deactivates a tool replaces the restored one, whose pending tools are dropped.
+-		// One that only adds tools, like activating tool_search, keeps them.
++		// A loadout that deactivates a tool replaces the restored one. Keep its explicitly
++		// requested pending names: MCP servers may still be connecting when a host reapplies it.
++		// One that only adds tools, like activating tool_search, keeps all pending names.
+ 		const active = new Set(this.getActiveToolNames());
+-		if (previous.some((name) => !active.has(name))) this._pendingToolNames.clear();
++		if (previous.some((name) => !active.has(name))) {
++			const requested = new Set(toolNames);
++			for (const name of this._pendingToolNames) {
++				if (!requested.has(name)) this._pendingToolNames.delete(name);
++			}
++		}
+ 	}
+ 
+ 	private _setActiveTools(toolNames: string[]): void {
 @@ -1840,8 +1855,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
