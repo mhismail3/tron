@@ -1368,6 +1368,11 @@ export class GatewayServer {
       return;
     }
     const failure = publicError(error);
+    if (failure.code === "internal") {
+      this.options.logger.log("error", "HTTP request failed", {
+        event: "http.error", source: "transport", code: failure.code, error,
+      });
+    }
     const status = failure.code === "unauthenticated" ? 401
       : failure.code === "not_found" ? 404
         : failure.code === "invalid_request" ? 400

@@ -1,5 +1,7 @@
-import { chmod, readFile, readdir } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { GatewayLogger } from "../../transport/logger.js";
 import { fauxAssistantMessage, fauxToolCall, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
@@ -24,9 +26,9 @@ import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
  *   it from its canonical file (`HomeOwner.recoverTasks`, `cold-no-report`) and the
  *   result wakes Home in the new process.
  *
- * The refused write answers `internal` with the raw file-system error, as
- * `publicError` forwards every non-Gateway error; the lock keeps its code and
- * blinds that message rather than pin a path in the client contract.
+ * The refused write answers with fixed client-safe internal text and keeps its
+ * filesystem diagnostic in the Gateway-local log. The scenario trace normalizes
+ * the message; the unblinded wire and local-log assertions protect that boundary.
  */
 
 const MODULE = "gateway/home";
@@ -114,7 +116,10 @@ describe("gateway/home contention, publication and restart lock", () => {
       }
     };
     const home = { memorySummarizer: () => async () => fauxAssistantMessage("Lock memory summary.") };
-    const first: LockGateway = await startLockGateway(LOCK, { home });
+    const diagnosticRoot = await mkdtemp(join(tmpdir(), "tron-home-errors-"));
+    owned.push(() => rm(diagnosticRoot, { recursive: true, force: true }));
+    const diagnosticPath = join(diagnosticRoot, "gateway.jsonl");
+    const first: LockGateway = await startLockGateway(LOCK, { home, logger: new GatewayLogger(diagnosticPath) });
     let firstDisposed = false;
     owned.push(async () => { if (!firstDisposed) await first.dispose(); });
     first.script(Array.from({ length: 8 }, () => route));
@@ -150,6 +155,13 @@ describe("gateway/home contention, publication and restart lock", () => {
     await chmod(homeRoot, 0o500);
     let pauseRefused: Awaited<ReturnType<typeof command>>;
     try { pauseRefused = await command("home.pauseMemory"); } finally { await chmod(homeRoot, 0o700); }
+    expect(pauseRefused).toMatchObject({ ok: false, error: { code: "internal", message: "Unexpected gateway failure", retryable: false } });
+    expect(JSON.stringify(pauseRefused)).not.toContain(homeRoot);
+    const diagnostic = (await readFile(diagnosticPath, "utf8")).trim().split("\n").map(line => JSON.parse(line))
+      .find(record => record.event === "rpc.error" && record.method === "home.pauseMemory");
+    expect(diagnostic).toMatchObject({ level: "error", code: "exception", error: { code: "EACCES" } });
+    expect(diagnostic.error.message).toContain(homeRoot);
+    expect(diagnostic.error.stack).toContain("EACCES");
     const ledgerAfterRefusal = await ledger();
     const statusAfterRefusal = await phone.request("home.status", {});
     const paused = await command("home.pauseMemory");
