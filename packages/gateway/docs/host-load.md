@@ -50,3 +50,8 @@ from the busy share of all CPUs and the event-loop utilisation:
   connection records (`swapUsedBytes`, `memoryPressure`).
 - The level informs; it does not hold workers back. Home starts each authorized
   worker at once at any level.
+
+The Home task integration test injects monotonic sample time, kernel ticks and
+idle event-loop utilisation before constructing the real sampler. It advances
+sampling windows explicitly, then observes actual task completion and persisted
+`host.pressure` records; shared-host load and timer delays are not its oracle.
