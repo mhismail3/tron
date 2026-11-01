@@ -1422,8 +1422,13 @@ describe("Home task production dispatch", () => {
     let home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
     await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "initial Home terminal");
+    // An idle, eligible Home is woken by a settled result, and that wake could deliver it to
+    // the old chapter before the replacement. With memory paused the result settles pending
+    // for the old route; resuming after the replacement wakes the replacement, which blocks it.
+    await owner.pauseMemory();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
+    expect(task.wake).toMatchObject({ state: "pending" });
     const port = (owner as any).options.sessions;
     const runtimes = (owner as any).options.runtimes;
     const present = runtimes.sessionPresent.bind(runtimes);
@@ -1432,6 +1437,8 @@ describe("Home task production dispatch", () => {
     expect(replacement.sessionId).not.toBe(f.home.sessionId);
     expect((await owner.status() as any).routeGeneration).toBe(task.routeGeneration + 1);
     home = await f.registry.acquire(replacement.sessionId);
+    await owner.resumeMemory();
+    await (owner as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
     f.faux.setResponses([fauxAssistantMessage("replacement sees no old result")]);
     await home.prompt("Continue after replacement"); await waitFor(() => home.snapshot().configurationBlocker === null, "replacement terminal");
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "blocked" } });
