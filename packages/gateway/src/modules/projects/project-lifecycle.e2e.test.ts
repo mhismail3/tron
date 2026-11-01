@@ -160,6 +160,29 @@ describe("Gateway project lifecycle", () => {
     evidence.push({ nativeJourney: { pending, rename, denied, archive } });
   });
 
+  it.each(["create", "rename", "archive"] as const)("confirms the exact %s review after JSON object keys are reordered", async action => {
+    const f = await fixture();
+    if (action !== "create") await f.decide(await f.create("wire-source"));
+    const fields = { action, name: "wire-source", reason: "Native JSON round trip",
+      ...(action === "rename" ? { newName: "wire-renamed" } : {}) };
+    const pending = await f.service.invoke(phone, "projects.change", {
+      ...fields, commandId: `wire-review-${++command}`,
+    }) as unknown as ChangeResult;
+    const intent = JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(pending.intent!).reverse())));
+    const before = await readdir(f.workspace);
+    await expect(f.service.invoke(phone, "projects.change", { ...fields, commandId: `wire-wrong-${++command}`,
+      confirmation: { digest: "0".repeat(64), intent } })).rejects.toMatchObject({ code: "conflict" });
+    expect(await readdir(f.workspace)).toEqual(before);
+    const result = await f.service.invoke(phone, "projects.change", { ...fields, commandId: `wire-confirm-${++command}`,
+      confirmation: { digest: pending.review!.digest, intent } }) as unknown as ChangeResult;
+    expect(result.status).toBe("applied");
+    const destination = action === "archive" ? join(f.workspace, ".archive", intent.destination)
+      : f.path(action === "rename" ? "wire-renamed" : "wire-source");
+    expect(await readFile(join(destination, ".git/HEAD"), "utf8")).toBe("ref: refs/heads/main\n");
+    expect((await f.trust.inspect(destination)).effectiveDecision).toBe(action !== "archive");
+    evidence.push({ reorderedNativeIntent: { action, pending, result } });
+  });
+
   it("native eligibility reads preserve trust, explain actual idle-session move refusal and unsupported saved folders", async () => {
     const f = await fixture();
     await f.decide(await f.create("native-idle"));

@@ -103,8 +103,9 @@ routing uses the same owner as the agent tool, not a tool invocation from the UI
   the tool, with commandId 8–160 characters. Native UI identity is transport-derived,
   never caller-supplied; local clients cannot confirm. The shared card's Approve resends
   the request with `confirmation: {digest, intent}` under a new command ID; the owner
-  revalidates canonical filesystem, Git, occupancy and trust state against the digest
-  before effects. Create applies only after that tap and creates a trusted repository.
+  reconstructs the validated typed intent independently of JSON object-key order,
+  then revalidates canonical filesystem, Git, occupancy and trust state against the
+  digest before effects. Create applies only after that tap and creates a trusted repository.
   Agent tools reach the same review through the native `change` interaction.
 
 Canonical receipts bind caller + commandId + method: retries return the original
@@ -127,6 +128,10 @@ changes. No second project cache, change stream or approval engine is introduced
 Settings Changes key `project.lifecycle` (started/applied/failed action facts) diagnoses
 the phase. A failed or uncertain action instructs the requester to inspect operation
 state before retry.
+
+| Signal | One-step diagnosis / boundary |
+| --- | --- |
+| `projects.change` conflict, “Project changed since review” | Compare the reviewed typed intent and current filesystem/Git/trust state before requesting a new review. JSON object-key order alone is not an intent change; the create/rename/archive reordered-confirmation journey protects that distinction and still refuses a wrong digest. |
 
 ## Verify
 

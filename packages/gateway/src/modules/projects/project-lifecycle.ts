@@ -196,7 +196,11 @@ export class ProjectLifecycle {
       if (typeof p.destination !== "string" || !p.destination.startsWith(`${p.name}-`) || !/^[A-Za-z0-9_-]{1,110}$/.test(p.destination)) throw new GatewayError("invalid_request", "Invalid archive destination");
     } else if (p.destination !== undefined) throw new GatewayError("invalid_request", "Unexpected destination");
     if (p.github && p.operation !== "trust" && p.operation !== "create") throw new GatewayError("invalid_request", "GitHub creation requires a trust action");
-    return p as unknown as Action;
+    // JSON object order is not intent. Rebuild the same typed identity used by
+    // planning before hashing it; native encoders may reorder the echoed keys.
+    return { operation: p.operation as Operation, name: this.name(p.name), identity: p.identity,
+      ...(p.destination === undefined ? {} : { destination: p.destination as string }),
+      ...(p.github ? { github: true } : {}) };
   }
   private async root(): Promise<void> {
     await this.directory(this.workspace);
