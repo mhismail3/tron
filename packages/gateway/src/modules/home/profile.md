@@ -61,6 +61,9 @@ Retired and superseded notes stay readable as current heads, never active by
 placement alone. Refine replaces a head; its previous text remains in shared
 Changes before/after facts for Undo, not a generally readable historical revision.
 Only a current Correction's exact claim link retains an older edition for reads.
+The exposure integration case runs unconditionally against a committed synthetic
+21-note current-file fixture: paged areas, Unsorted, provenance, confirmation,
+retirement and an exact Correction link. It never needs private Profile exports.
 
 ## Home proposals and maintainer decisions
 

@@ -36,7 +36,8 @@ it does not publish, execute source, network or create a second index.
   the reviewed head/instance. Accepted uncertain commands never replay on reconnect.
 - V1 remains readable through the named reader. Only explicit opted-in update
   backs it up and publishes v2; no read/restart upgrade or SQLite migration.
-  The named tool install contract remains v1-only and cannot downgrade v2.
+  There is no direct tool install action or v1 creation writer. Persisted v1
+  readers and explicit backed-up upgrade remain for retained historical data.
 - Source/state are exact data, never transcript-clipped. V2 opens additionally
   read fresh declared feeds; source/state themselves come from one store mutex cut.
 - `ios-builds` reads only the configured Gateway home's publisher. Debug and

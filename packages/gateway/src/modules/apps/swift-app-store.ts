@@ -17,8 +17,8 @@ import { admitDigest, admitFeeds, digest, MANIFEST_BYTES, offerIdentity, referen
 export type { SwiftAppManifest } from "./swift-app-format.js";
 
 /** Installed single-file Swift apps (#1156). One owner for
- * `<workspace>/state/apps/<appId>/`: `app.json` (manifest), `App.swift` (source)
- * and `data.sqlite` (the app's key/value state). docs/swift-apps.md owns the
+ * `<workspace>/state/apps/<appId>/`: `app.json`, immutable `sources/<sha>.swift`
+ * (or retained v1 `App.swift`) and `data.sqlite`. docs/swift-apps.md owns the
  * contract that #1158 persistence, #1159 feeds and #1161 the Apps sheet build on. */
 export const SWIFT_APPS_CAPABILITY = "swift-apps.v1";
 
@@ -510,39 +510,6 @@ export class SwiftAppStore {
       await rename(temporary, destination);
       await syncDirectory(backups);
     } finally { await rm(temporary, { recursive: true, force: true }); }
-  }
-
-  /** Named v1 tool contract. New installs through review use installOffer. */
-  async install(input: { appId: string; name: string; icon?: string; source: string }): Promise<{ app: SwiftAppManifest; created: boolean }> {
-    const appId = admitSwiftAppId(input.appId);
-    const name = boundedLabel(input.name, "name", SWIFT_APP_LIMITS.nameBytes);
-    const icon = input.icon === undefined ? undefined : boundedLabel(input.icon, "icon", SWIFT_APP_LIMITS.iconBytes);
-    const sourceBytes = Buffer.byteLength(input.source);
-    if (sourceBytes < 1 || sourceBytes > SWIFT_APP_LIMITS.sourceBytes) {
-      throw new GatewayError("invalid_request", `App source must be 1-${SWIFT_APP_LIMITS.sourceBytes} bytes`);
-    }
-    return this.mutex.run(async () => {
-      const apps = (await this.appsRoot(true))!;
-      const directory = join(apps, appId);
-      const existing = await ownerDirectory(directory) ? await this.readManifest(directory, appId) : undefined;
-      if (existing?.version === 2) throw new GatewayError("conflict", "Update this v2 app through an explicit Install App review; it cannot be downgraded to v1");
-      if (!existing) {
-        const count = (await readdir(apps)).filter(entry => APP_ID.test(entry)).length;
-        if (count >= SWIFT_APP_LIMITS.apps) throw new GatewayError("conflict", `At most ${SWIFT_APP_LIMITS.apps} apps can be installed`);
-        if (await ensureOwnerDirectory(directory)) await syncDirectory(apps);
-      }
-      // A new app's state database exists before its manifest, so a listed app always has state.
-      this.withDatabase(directory, () => undefined, !existing);
-      await durableAtomicWriteText(join(directory, "App.swift"), input.source);
-      const app: SwiftAppManifest = {
-        version: 1, id: appId, name, ...(icon ? { icon } : {}),
-        revision: (existing?.revision ?? 0) + 1,
-        sourceSha256: createHash("sha256").update(input.source).digest("hex"),
-        sourceBytes, updatedAt: new Date().toISOString(),
-      };
-      await durableAtomicWriteJson(join(directory, "app.json"), app);
-      return { app, created: !existing };
-    });
   }
 
   /** Delete the app folder (manifest, source and data). The folder is first

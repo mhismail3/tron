@@ -21,7 +21,7 @@ const leg = process.env.TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE;
 // both admission paths. Installed-file tampering would only test digest refusal.
 // Each case runs this file in a nested vitest so the pinned closure is its own
 // payload; the nested leg imports only the managed-subagents module it refuses.
-it.skipIf(Boolean(leg)).each([
+if (!leg) it.each([
   { entries: ["../outside.js"] },
   { entries: ["./missing.js"] },
   { entries: [] },
@@ -55,7 +55,7 @@ it.skipIf(Boolean(leg)).each([
     pin.closure = { path: "invalid-closure.tgz", sha512: createHash("sha512").update(archive).digest("hex") };
     await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(pin));
     for (const directory of ["agent", "workspace", "home", "tmp"]) await mkdir(join(root, directory));
-    await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", `src/kernel/delegation/${ownTestFile}`], {
+    await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", `src/kernel/delegation/${ownTestFile}`, "--reporter=json", `--outputFile.json=${join(root, "child-vitest.json")}`], {
       // Hang guard only: this file runs alone in the nested pass (vitest.nested.config.ts);
       // a passing cold child takes about 3-14 s, so a reached bound means a hung child.
       cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,
@@ -65,6 +65,9 @@ it.skipIf(Boolean(leg)).each([
         TRON_TEST_PROCESS_OWNER_FAILURE: process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"),
         NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
     });
+    // Process success alone cannot prove the staged child actually ran its oracle.
+    const child = JSON.parse(await readFile(join(root, "child-vitest.json"), "utf8"));
+    expect(child).toMatchObject({ numPassedTests: 1, numFailedTests: 0, numPendingTests: 0 });
   } finally {
     await refuseUnjoinedFixture(root);
     await rm(root, { recursive: true, force: true });
@@ -72,7 +75,7 @@ it.skipIf(Boolean(leg)).each([
 }, 150_000);
 
 // Runs in the nested child only: the staged payload's pin selects the invalid closure.
-it.skipIf(!leg)("refuses the staged invalid extension entry", async () => {
+if (leg) it("refuses the staged invalid extension entry", async () => {
   const root = await realpath(process.env.TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE!);
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
