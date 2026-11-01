@@ -375,6 +375,27 @@ describe("catalog metadata store (#2164)", () => {
     expect(await lstat(join(gateway, "catalog-metadata-v2.json")).then(() => true, () => false)).toBe(false);
   });
 
+  it("keeps the v2 document through a refused save and removes it with the first save that refuses nothing", async () => {
+    const { root, gateway, index } = await storeFixture("migrate-refused-save");
+    const legacyRows = realisticCatalogRows(root, 300, 1);
+    const legacyPath = join(gateway, "catalog-metadata-v2.json");
+    const legacy = JSON.stringify({ version: 3, root, rows: legacyRows });
+    const rows = realisticCatalogRows(root, 300, 2);
+    const target = catalogMetadataShard(root, rows[0]!.path);
+    const heavy: CatalogMetadataIndexRow[] = [];
+    for (let number = 10_000; heavy.length < 2_100; number += 1) {
+      const row = realisticCatalogRow(root, number);
+      if (catalogMetadataShard(root, row.path) === target) heavy.push({ ...row, cwd: "c".repeat(4_096) });
+    }
+    await mkdir(gateway, { recursive: true });
+    await writeFile(legacyPath, legacy, { mode: 0o600 });
+    expect(await index.save(root, [...rows, ...heavy])).toBe(false);
+    expect(await readFile(legacyPath, "utf8")).toBe(legacy);
+    expect(await index.save(root, rows)).toBe(true);
+    expect(await lstat(legacyPath).then(() => true, () => false)).toBe(false);
+    expect(sortedCatalogRows(await new CatalogMetadataIndex(gateway).load(root))).toEqual(sortedCatalogRows(rows));
+  });
+
   it("keeps the v2 document and serves its rows when the shards cannot be written, then migrates on a later load", async () => {
     const { root, gateway, index, failures } = await storeFixture("migrate-blocked");
     const legacyRows = realisticCatalogRows(root, 300);

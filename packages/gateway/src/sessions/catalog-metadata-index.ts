@@ -687,11 +687,14 @@ export class CatalogMetadataIndex {
       if (rows.length > CATALOG_METADATA_INDEX_WARN_ENTRIES) {
         this.pressure("rows", { rows: rows.length, limit: CATALOG_METADATA_INDEX_MAX_ENTRIES });
       }
+      // A save that refused nothing supersedes any v2 document still present,
+      // so the document is removed before this manifest commits: no state can
+      // hold both a newer committed cut and a v2 document that a later
+      // migration would publish over it. A crash between the two leaves the
+      // previous manifest, which no longer matches the rewritten shards, so
+      // their rows are reuse candidates only. A refused save keeps v2.
+      if (stage === "save" && manifest.refused.length === 0) await durableRemove(this.legacyPath);
       await durableAtomicWriteText(join(this.directory, MANIFEST_NAME), JSON.stringify(manifest));
-      // A committed save is newer than any v2 document still present, so the
-      // document is removed here; a later migration would otherwise publish
-      // its older rows over this cut.
-      if (stage === "save") await durableRemove(this.legacyPath);
       // Pruned only after the manifest commit: a shard that became empty. A
       // refused shard keeps its last accepted file.
       for (const name of existing) {
