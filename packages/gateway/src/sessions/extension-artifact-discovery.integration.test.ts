@@ -171,31 +171,55 @@ describe("ambient extension artifact discovery change detection", () => {
     expect(passes).toBe(1);
   });
 
-  it("re-reads a watcher-named status.json whose in-place rewrite kept its stat identity", async () => {
-    const { delegatedRoot, runsRoot } = await artifactTree("in-place");
-    const names = await terminalRuns(runsRoot, 10, Date.now() - 60_000);
-    const target = names[4]!;
-    const file = join(runsRoot, target, "status.json");
-    // A whole-second mtime survives utimes exactly, so the rewrite below keeps
-    // dev, ino, size and mtimeMs.
+  it("finds a same-size in-place rewrite that kept mtime, with or without its watcher event", async () => {
     const pinned = new Date(1_700_000_000_000);
     const completedAt = 1_700_000_000_000 - 5_000;
-    await writeFile(file, statusBytes(target, "complete", completedAt));
-    await utimes(file, pinned, pinned);
-    const before = await stat(file);
-    const { slots, offers } = recordingSlot(new Set([target]));
-    const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot });
-    await passesUntil(owner, () => offers.includes(join(runsRoot, target)), "first offer");
-    offers.length = 0;
+    /** Rewrites the target in its own inode with the same length and a pinned
+     * whole-second mtime, so dev, ino, size and mtimeMs are all unchanged. */
+    const rewriteInPlace = async (file: string, runId: string) => {
+      const before = await stat(file);
+      const rewritten = statusBytes(runId, "complete", completedAt + 1_000);
+      expect(rewritten.length).toBe(statusBytes(runId, "complete", completedAt).length);
+      await writeFile(file, rewritten);
+      await utimes(file, pinned, pinned);
+      const after = await stat(file);
+      expect([after.dev, after.ino, after.size, after.mtimeMs]).toEqual([before.dev, before.ino, before.size, before.mtimeMs]);
+    };
+    const seed = async (runsRoot: string, runId: string) => {
+      const file = join(runsRoot, runId, "status.json");
+      await writeFile(file, statusBytes(runId, "complete", completedAt));
+      await utimes(file, pinned, pinned);
+      return file;
+    };
 
-    // Same length (only timestamp digits change), written into the same inode.
-    const rewritten = statusBytes(target, "complete", completedAt + 1_000);
-    expect(rewritten.length).toBe(statusBytes(target, "complete", completedAt).length);
-    await writeFile(file, rewritten);
-    await utimes(file, pinned, pinned);
-    const after = await stat(file);
-    expect([after.dev, after.ino, after.size, after.mtimeMs]).toEqual([before.dev, before.ino, before.size, before.mtimeMs]);
-    await passesUntil(owner, () => offers.includes(join(runsRoot, target)), "in-place rewrite");
+    // Production watcher: the event names the file.
+    const watched = await artifactTree("in-place");
+    const target = (await terminalRuns(watched.runsRoot, 10, Date.now() - 60_000))[4]!;
+    const file = await seed(watched.runsRoot, target);
+    const live = recordingSlot(new Set([target]));
+    const owner = discovery(live.slots, { delegatedArtifactRoot: watched.delegatedRoot });
+    await passesUntil(owner, () => live.offers.includes(join(watched.runsRoot, target)), "first offer");
+    live.offers.length = 0;
+    await rewriteInPlace(file, target);
+    await passesUntil(owner, () => live.offers.includes(join(watched.runsRoot, target)), "watched in-place rewrite");
+
+    // The event is dropped: the backstop sweep's stat still sees the write.
+    const dropped = await artifactTree("in-place-dropped");
+    await terminalRuns(dropped.runsRoot, 10, Date.now() - 60_000);
+    const droppedFile = await seed(dropped.runsRoot, target);
+    const backend = silentWatcher();
+    const silent = recordingSlot(new Set([target]));
+    const swept = discovery(silent.slots, {
+      delegatedArtifactRoot: dropped.delegatedRoot, watchArtifactRoot: backend.watchArtifactRoot, fullSweepMs: 200,
+    });
+    await swept.runPass();
+    expect(silent.offers).toHaveLength(1);
+    await rewriteInPlace(droppedFile, target);
+    await swept.runPass();
+    expect(silent.offers).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await swept.runPass();
+    expect(silent.offers).toEqual([join(dropped.runsRoot, target), join(dropped.runsRoot, target)]);
   });
 
   it("re-reads an active artifact on every pass without a watcher event", async () => {
