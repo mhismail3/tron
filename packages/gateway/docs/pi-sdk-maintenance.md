@@ -103,6 +103,13 @@ fails when a session, tool selection, model, provider key or MCP credential stop
 
 ## Candidate review
 
+The 1.4 SDK requests compaction and branch summaries up to the model's output
+limit rather than a fixed `reserveTokens` fraction. Its retry classifier matches
+HTTP status codes only as standalone numbers and recognizes additional upstream
+stream failures. Resumed branches activate newly registered declarable extension
+tools unless they were explicitly removed or registered with `defaultActive: false`.
+These are behavior contracts to review, not version-only metadata.
+
 Inventory every release-note, API and documentation delta against its seam as inherited,
 adapted with evidence, deferred with criteria, or not applicable; keep the matrix in the
 candidate's issue. Seams: `StreamFn` wrappers (`src/runtime/`), canonical entries and
