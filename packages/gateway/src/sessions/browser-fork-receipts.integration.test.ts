@@ -60,7 +60,9 @@ describe("installed agent-browser fork receipts", () => {
       url: "https://example.test/",
       lifecycle: { browserBinding: binding },
     } });
-    const fakeExecutable = `#!/bin/sh\nif [ "$1" = "--version" ]; then\n  printf '%s\\n' 'agent-browser 0.33.2'\nelse\n  printf '%s\\n' '${envelope}'\nfi\n`;
+    // The pinned fork prepends its file-access safety flags even to --version.
+    // Match the CLI option, not its argv position, so the real version gate runs.
+    const fakeExecutable = `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = "--version" ]; then\n    printf '%s\\n' 'agent-browser 0.33.2'\n    exit 0\n  fi\ndone\nprintf '%s\\n' '${envelope}'\n`;
     const fakePath = join(fakeBin, "agent-browser");
     await writeFile(fakePath, fakeExecutable, { mode: 0o755 });
     await chmod(fakePath, 0o755);
