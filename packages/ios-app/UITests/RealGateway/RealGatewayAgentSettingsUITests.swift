@@ -138,6 +138,8 @@ extension RealGatewayPairAndChatUITests {
                 revealBelowNavigationBar(app, row)
                 let edit = row.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label != 'Reset'", label)).firstMatch
                 XCTAssertTrue(edit.waitForExistence(timeout: 15), "Queue has no editor: \(row.debugDescription)")
+                // Rows stay disabled until an accepted change is canonical.
+                XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
                 edit.tap()
                 XCTAssertTrue(app.navigationBars.staticTexts[label].waitForExistence(timeout: 15), app.debugDescription)
                 expandAgentSheet(app, title: label)
@@ -151,12 +153,14 @@ extension RealGatewayPairAndChatUITests {
                 app.buttons["Save"].tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == ["tron-e2e/e2e-alternate", "tron-e2e/e2e-model"] }, "Ordered draft did not reach the canonical Gateway store")
                 revealBelowNavigationBar(app, row)
+                XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
                 edit.tap()
                 XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-model"].waitForExistence(timeout: 15), app.debugDescription)
                 app.buttons["Remove tron-e2e/e2e-model"].tap()
                 app.buttons["Save"].tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == ["tron-e2e/e2e-alternate"] })
                 revealBelowNavigationBar(app, row)
+                XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
                 edit.tap()
                 XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
                 app.buttons["Remove tron-e2e/e2e-alternate"].tap()
@@ -165,6 +169,7 @@ extension RealGatewayPairAndChatUITests {
                 revealBelowNavigationBar(app, row)
                 let reset = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
                 XCTAssertTrue(reset.waitForExistence(timeout: 15), app.debugDescription)
+                XCTAssertTrue(waitForEnabled(reset, timeout: 30), app.debugDescription)
                 reset.tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == nil }, "Reset must remove, not copy, the inherited value")
             }
