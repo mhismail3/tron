@@ -4022,6 +4022,18 @@ extension AppModel {
         }
     }
 
+    /// Presentation reads the same session admission as a renderer mutation;
+    /// it never decides that an uninstalled or retired snapshot is writable.
+    func rendererConfigurationLockedReason(target: JSONValue) -> String? {
+        guard target.objectValue?["kind"]?.stringValue == "session",
+              let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }
+        guard let snapshot = authoritativeSnapshot(for: sessionID), admitsConfigurationSend(snapshot) else {
+            return sessionContextPresentation(for: sessionID)?.configurationLockedReason
+                ?? SessionConfigurationBlocker.unavailable.message
+        }
+        return nil
+    }
+
     private func rendererConfigurationSnapshot(_ target: JSONValue) throws -> SessionSnapshot? {
         guard target.objectValue?["kind"]?.stringValue == "session",
               let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }

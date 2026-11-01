@@ -11,6 +11,7 @@ struct SettingsRendererRow: View {
     /// Detailed rows show the registry's help beside the shared editor.
     var detailed = false
     var modelConfiguration = false
+    var modelSelectionAvailability: ModelSelectionAvailability = .ready
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
     var instanced = false
@@ -154,12 +155,14 @@ struct SettingsRendererRow: View {
                                titleFont: SessionSummaryTypography.headline) {
             TronProgressiveSheetLink(accessibilityLabel: "Switch Model", identity: "manage.model.switch", detents: .contentFit) {
                 SettingsModelPicker(setting: setting, target: target, title: "Models",
+                                    selectionAvailability: modelSelectionAvailability,
                                     onReset: canReset ? { onChange(nil) } : nil) { onChange($0) }
             } label: {
                 TronInlineActionLabel("Switch Model")
             }
             .disabled(!editable || control == .readOnly || setting.projectSetting != nil)
             .accessibilityIdentifier("manage-model-switch")
+            .accessibilityValue(modelSelectionAvailability.accessibilityValue)
         }
         .lineLimit(1)
     }
@@ -415,6 +418,7 @@ private struct SettingsModelPicker: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let title: String
+    var selectionAvailability: ModelSelectionAvailability = .ready
     var onReset: (() -> Void)? = nil
     let onChoose: (JSONValue) -> Void
     @Environment(AppModel.self) private var model
@@ -445,7 +449,7 @@ private struct SettingsModelPicker: View {
                 return ModelRef(provider: provider, id: id)
             },
             set: { ref in
-                guard let ref else { return }
+                guard let ref, selectionAvailability.canSelect else { return }
                 // A pick closes the picker, as every settings choice does.
                 onChoose(.object(["provider": .string(ref.provider), "id": .string(ref.id)]))
                 dismiss()
@@ -463,7 +467,7 @@ private struct SettingsModelPicker: View {
                 TronPlaceholderState(title: "No Models", detail: "No available model can be used here.", icon: "cpu")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let models {
-                ModelPicker(selection: selection, models: models)
+                ModelPicker(selection: selection, models: models, selectionAvailability: selectionAvailability)
             } else {
                 TronSheetLoadingState(label: "Loading models…")
             }
@@ -472,11 +476,15 @@ private struct SettingsModelPicker: View {
             .toolbar {
                 if let onReset {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { onReset(); dismiss() } label: {
+                        Button {
+                            guard selectionAvailability.canSelect else { return }
+                            onReset(); dismiss()
+                        } label: {
                             Image(systemName: "arrow.uturn.backward").tronToolbarAction()
                         }
                         .accessibilityLabel("Reset to inherited")
                         .accessibilityIdentifier("\(settingsRowIdentifier(setting))-picker-reset")
+                        .disabled(!selectionAvailability.canSelect)
                     }
                 }
             }

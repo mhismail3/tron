@@ -558,7 +558,6 @@ final class TronSmokeUITests: XCTestCase {
                     XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref"].waitForExistence(timeout: 5), app.debugDescription)
                 }
                 keepScreenshot(named: "1308-\(surface)-\(appearance)")
-                app.terminate()
             }
         }
     }
@@ -2095,6 +2094,10 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
         high.tap()
         wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        let modelReset = app.buttons["settings-row-model.ref_role_chat_-reset"]
+        XCTAssertTrue(modelReset.exists)
+        XCTAssertFalse(modelReset.isEnabled, "Pending configuration must disable independent model Revert")
+        modelReset.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let switchModel = app.buttons["Switch Model"]
         XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
         XCTAssertEqual(switchModel.value as? String, "Applying configuration")
@@ -2112,10 +2115,21 @@ final class TronSmokeUITests: XCTestCase {
         let search = app.textFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 3))
         if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "Pending-state model search must focus the real native keyboard")
         search.typeText("Alternative")
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch.waitForExistence(timeout: 3))
+        let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
+        XCTAssertTrue(alternative.waitForExistence(timeout: 3))
+        XCTAssertFalse(alternative.isEnabled, "A competing model choice stays unavailable while Effort owns its receipt")
+        alternative.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let pickerReset = app.buttons["settings-row-model.ref_role_chat_-picker-reset"]
+        XCTAssertTrue(pickerReset.exists)
+        XCTAssertFalse(pickerReset.isEnabled, "Picker reset must not compete with the pending Effort receipt")
+        pickerReset.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(search.exists, "Refused choices and resets must not dismiss browsing")
         app.buttons["Close search"].tap()
         app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Model requests: 0"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["fixture.session-settings-decisions"].label, "decisions:none")
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)

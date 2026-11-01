@@ -82,9 +82,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   drafts write only on Save. Numeric-map list controls use read-only value/provenance rows instead of
   a native form; agents configure them through `settings`, including the shared native card for a
   task-budget raise and logged Undo for
-  reversible changes. Unknown fields stay read-only. While a session setting receipt is pending,
-  the model-card picker remains available for browsing, but the renderer's change gate still blocks
-  additional writes until the accepted command completes. Outside-change recovery
+  reversible changes. Unknown fields stay read-only. Model cards share the renderer's pending
+  receipt and the session owner's admission state with `ModelSelectionAvailability`: model browsing
+  stays available while choices, Revert and picker reset are disabled. Their existing change gate
+  still serializes writes; no presentation value grants mutation authority. Outside-change recovery
   remains an explicit inline Apply again action beneath the same value control, not a row-opening
   detail link. The real-Gateway outside-change journey verifies the live value, receipt-backed restore
   and marker removal on that row. The Gateway supplies override presence and permissions;
