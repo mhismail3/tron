@@ -551,14 +551,13 @@ final class TronSmokeUITests: XCTestCase {
                     XCTAssertTrue(app.buttons["settings-change-project-change"].waitForExistence(timeout: 5))
                     chooseChangesFilter(app, row: "settings-changes-layer", option: "All scopes")
                 default:
-                    let model = app.buttons["settings-section-model-open"]
-                    XCTAssertTrue(model.waitForExistence(timeout: 10))
-                    model.tap()
-                    XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 5))
-                    expandSettingsSheet(app, title: "Models")
+                    let behavior = app.buttons["settings-link-Agent Behavior"]
+                    XCTAssertTrue(behavior.waitForExistence(timeout: 10))
+                    behavior.tap()
+                    XCTAssertTrue(app.navigationBars.staticTexts["Agent Behavior"].waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref"].waitForExistence(timeout: 5), app.debugDescription)
                 }
                 keepScreenshot(named: "1308-\(surface)-\(appearance)")
-                app.terminate()
             }
         }
     }
@@ -1082,10 +1081,9 @@ final class TronSmokeUITests: XCTestCase {
                     title = "Project Settings"
                 }
                 expandSettingsSheet(app, title: title)
-                let anchor = scope == "project"
+                let anchor = scope == "project" || scope == "session"
                     ? app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
-                    : scope == "home" ? app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
-                    : app.buttons["settings-section-model-open"]
+                    : app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
                 XCTAssertTrue(anchor.waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1634-\(scope)-\(appearance)-xxxl")
                 app.swipeUp()
@@ -1313,7 +1311,14 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertFalse(app.descendants(matching: .any)["home-manage-stop"].exists)
                 keepScreenshot(named: "manage-home-\(appearance)-\(type)")
                 for sheet in sheets {
-                    tapManageRow(app, sheet.row)
+                    if sheet.row == "home-manage-chapters" {
+                        let row = app.descendants(matching: .any)[sheet.row]
+                        app.scrollViews.element(boundBy: app.scrollViews.count - 1).swipeUp()
+                        XCTAssertTrue(row.isHittable, app.debugDescription)
+                        row.tap()
+                    } else {
+                        tapManageRow(app, sheet.row)
+                    }
                     XCTAssertTrue(app.descendants(matching: .any)[sheet.content].waitForExistence(timeout: 5), app.debugDescription)
                     keepScreenshot(named: "proof-\(appearance)-\(type)-\(sheet.name)")
                     app.buttons["home-sheet-done-\(sheet.doneID)"].tap()
@@ -2071,25 +2076,28 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
-        let thinking = app.buttons["thinking-level-control"]
-        XCTAssertTrue(thinking.waitForExistence(timeout: 5))
-        XCTAssertFalse(thinking.isEnabled)
+        let thinkingRow = app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"]
+        let thinking = app.buttons["Effort"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(thinking.isEnabled, "Effort remains available to inspect while configuration is settling")
         keepScreenshot(named: "configuration-lock-\(appearance)")
-        let explanation = app.buttons["Why configuration is unavailable"]
-        XCTAssertTrue(explanation.waitForExistence(timeout: 3), "A disabled control needs a touch-accessible explanation")
-        explanation.tap()
-        XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
-        keepScreenshot(named: "configuration-lock-explanation-\(appearance)")
-        app.buttons["Done"].tap()
+        thinking.tap()
+        let high = app.buttons["settings-option-High"]
+        XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
+        high.tap()
+        app.buttons["Complete superseded thinking"].tap()
+        XCTAssertFalse(app.staticTexts["Superseded receipt delivered"].exists,
+                       "A locked Effort selection must not reach the Gateway mutation socket")
         app.buttons["Release terminal settlement"].tap()
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
-        let viewport = app.scrollViews.firstMatch.frame
         thinking.tap()
-        let slider = app.descendants(matching: .any)["thinking-level-slider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 3))
-        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        dismissConfigurationSlider(slider, in: app, viewport: viewport)
+        XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
+        high.tap()
         wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        let modelReset = app.buttons["settings-row-model.ref_role_chat_-reset"]
+        XCTAssertTrue(modelReset.exists)
+        XCTAssertFalse(modelReset.isEnabled, "Pending configuration must disable independent model Revert")
+        modelReset.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let switchModel = app.buttons["Switch Model"]
         XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
         XCTAssertEqual(switchModel.value as? String, "Applying configuration")
@@ -2107,10 +2115,21 @@ final class TronSmokeUITests: XCTestCase {
         let search = app.textFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 3))
         if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "Pending-state model search must focus the real native keyboard")
         search.typeText("Alternative")
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch.waitForExistence(timeout: 3))
+        let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
+        XCTAssertTrue(alternative.waitForExistence(timeout: 3))
+        XCTAssertFalse(alternative.isEnabled, "A competing model choice stays unavailable while Effort owns its receipt")
+        alternative.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let pickerReset = app.buttons["settings-row-model.ref_role_chat_-picker-reset"]
+        XCTAssertTrue(pickerReset.exists)
+        XCTAssertFalse(pickerReset.isEnabled, "Picker reset must not compete with the pending Effort receipt")
+        pickerReset.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(search.exists, "Refused choices and resets must not dismiss browsing")
         app.buttons["Close search"].tap()
         app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Model requests: 0"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["fixture.session-settings-decisions"].label, "decisions:none")
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
@@ -2990,19 +3009,22 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testDefaultToolsMovesToToolsAndPreservesUnmanagedSelectors() {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write"]
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write", "-settings-ui-extensions"]
         app.launch(); defer { app.terminate() }
         tapScrolling(app.buttons["settings-link-Extensions"], in: app)
-        XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Default Tools"].exists)
+        XCTAssertTrue(app.navigationBars.staticTexts["Extensions"].waitForExistence(timeout: 10), app.debugDescription)
+        let codemode = app.switches["Codemode"]
+        XCTAssertTrue(codemode.waitForExistence(timeout: 10), app.debugDescription)
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: codemode)], timeout: 5)
         XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch.exists)
         closeTopSheet(app)
         tapScrolling(app.buttons["settings-section-tools-open"], in: app)
-        XCTAssertTrue(app.staticTexts["Default Tools"].waitForExistence(timeout: 5))
         let toggle = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
+        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: toggle)], timeout: 5)
         tapScrolling(toggle, in: app)
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.tools-write"], containing: "mac@mac=read,retired,+codemode", timeout: 5),
-                      "The relocated control writes only its own layer and preserves unknown selectors")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.tools-write"], containing: "global@global=read,retired,+codemode", timeout: 5),
+                      "The relocated control writes only its Global layer and preserves unknown selectors")
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:1")
         closeTopSheet(app)
         tapScrolling(app.buttons["settings-section-tools-open"], in: app)

@@ -281,6 +281,12 @@ struct SettingsRendererView: View {
         }
     }
 
+    private var modelSelectionAvailability: ModelSelectionAvailability {
+        if changingID != nil || previewingID != nil { return .applying }
+        if let reason = model.rendererConfigurationLockedReason(target: target) { return .blocked(reason) }
+        return .ready
+    }
+
     private func row(_ setting: ResolvedSetting, resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
                      detailed: Bool, instanced: Bool = false, baseInstanceTitle: String? = nil, instanceHelp: String? = nil) -> some View {
         SettingsRendererRow(
@@ -289,6 +295,7 @@ struct SettingsRendererView: View {
             editable: writableLayer(for: setting) != nil,
             detailed: detailed,
             modelConfiguration: modelConfiguration,
+            modelSelectionAvailability: modelSelectionAvailability,
             instanced: instanced,
             baseInstanceTitle: baseInstanceTitle,
             // A live control keeps its surface's viewport-wide slider host;
@@ -297,7 +304,7 @@ struct SettingsRendererView: View {
                 AnyView(control(setting).environment(\.configurationSliderPresentation,
                     inheritedSliderPresentation ?? sliderPresentation))
             },
-            resetDisabled: resetDisabled,
+            resetDisabled: resetDisabled || (modelConfiguration && !modelSelectionAvailability.canSelect),
             canReset: writableLayer(for: setting) != nil && setting.overridden == true,
             instanceHelp: instanceHelp,
             options: options[setting.id],
@@ -308,9 +315,10 @@ struct SettingsRendererView: View {
             },
             onApplyAgain: writableLayer(for: setting) == nil ? nil : { changeID in applyAgain(changeID, rowID: setting.id) }
         )
-        // Keep the presenting control's identity while its accepted change
-        // completes; replacing it with read-only would retire its child sheet.
-        .disabled(changingID != nil || previewingID != nil)
+        // Keep accepted changes serialized, but let a model card open its picker
+        // to browse while another setting's receipt is pending. `change` still
+        // rejects any new write until the current command completes.
+        .disabled((changingID != nil && !(modelConfiguration && setting.key == "model.ref[role=chat]")) || previewingID != nil)
     }
 
     // MARK: Reads and changes
