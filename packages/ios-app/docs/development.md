@@ -169,8 +169,10 @@ lease re-execution. Boundary `run`/`all`/`iterate` own the two default methods;
 means each command keeps its existing default sequence; foreign, class and suite selectors refuse.
 
 `run-ui` pairs the production scene against a fresh fixture per journey, leaving
-`results/<utc>-ui.*`. The invitation journey checks sent transcript content rather
-than a static-text AX role: copyable message rows are interactive controls. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
+`results/<utc>-ui.*`. The invitation journey requires the full accepted prompt
+label before and after foreground, independent of AX role: overflowing prompts
+are reader buttons. Generated navigation-title snippets are not transcript
+retention evidence and cannot satisfy the full-label query. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
 `clean` before deleting a worktree. DTO changes need Gateway tests and Swift decoding.
 The fixture's canonical lifecycle root is its isolated `HOME/Workspace` (exact spelling).
 `testProjectLifecycleApproveMovesAndArchives`, `testProjectLifecycleDenialRetainsUntrustedRepository`
