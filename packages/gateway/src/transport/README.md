@@ -48,7 +48,9 @@ streams and rotation: [observability](../../docs/observability.md); records: Sig
 failure` and the existing retry hint. Internal `details` never cross that boundary.
 Other typed refusals retain their owned message/details. The original fault stays in
 Gateway-local diagnostics (`rpc.error` or `http.error`), bounded and redacted by the
-logger. `home-restart.lock.integration.test.ts` checks a real refused Home ledger
+logger. Typed internal details become diagnostic text (1,000 UTF-8 bytes, at most
+64 traversed values); credential fields are redacted, cyclic/oversized values get
+a bounded marker. Restored log lines keep the same bounds. `home-restart.lock.integration.test.ts` checks a real refused Home ledger
 write; `server-blob.integration.test.ts` checks HTTP exception/typed/domain projection.
 
 ## Invariants
