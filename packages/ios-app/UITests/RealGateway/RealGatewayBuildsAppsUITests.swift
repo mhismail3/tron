@@ -22,7 +22,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
         try buildsPrompt(app, "BUILDS-APP-JOURNEY")
-        XCTAssertTrue(app.staticTexts["Builds app ready for review."].firstMatch.waitForExistence(timeout: 60), app.debugDescription)
         // Leave the producing chat without ever opening its inline offer card.
         app.buttons["Back"].tap()
         buildsOpenApps(app)
@@ -266,6 +265,10 @@ extension RealGatewayPairAndChatUITests {
         composer.tap(); composer.typeText(text)
         XCTAssertTrue(waitForEnabled(app.buttons["Send message"], timeout: 30), app.debugDescription)
         app.buttons["Send message"].tap()
+        // The terminal reply adds its footer and moves the bottom-pinned card.
+        // Acquire the review target only after that canonical turn is complete.
+        XCTAssertTrue(app.staticTexts["Builds app ready for review."].firstMatch.waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(app.buttons["Stop Tron"].waitForNonExistence(timeout: 60), app.debugDescription)
     }
     @MainActor private func buildsDismissReview(_ app: XCUIApplication) {
         // Review has Info/Install, not Done. Dismiss its own toolbar, never a
@@ -273,7 +276,7 @@ extension RealGatewayPairAndChatUITests {
         let review = app.scrollViews["apps.install.review"]
         let bar = app.navigationBars.containing(.button, identifier: "apps.install.confirm").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 15), app.debugDescription)
-        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0,
             thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         XCTAssertTrue(review.waitForNonExistence(timeout: 15), app.debugDescription)
     }

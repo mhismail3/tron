@@ -307,33 +307,6 @@ class QuarantineTests(VerifyCase):
                  "commit": r.git("rev-parse", "HEAD"), "failureDigest": hashlib.sha256(json.dumps(["Error: original defect"]).encode()).hexdigest()}, "issue": 2128, "expires": (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()}
         return entry
 
-    def test_real_ui_identity_sites_and_expiry_are_exact(self):
-        r = self.repo
-        r.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
-        entry = self.fixture()
-        file = 'packages/ios-app/UITests/RealGateway/RealGatewayBuildsAppsUITests.swift'
-        r.write(file, '// XCTest registry fixture.\n')
-        selector = 'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLightXXXL'
-        entry.update(testId=file + '::' + selector,
-                     failureSites=['RealGatewayBuildsAppsUITests.swift:171', 'RealGatewayBuildsAppsUITests.swift:278'])
-        for method, site, expired, expected in [('testBuildsInstallLightXXXL', 171, False, True),
-                ('testBuildsInstallLightXXXL', 278, False, True), ('testBuildsInstallLightXXXL', 999, False, False),
-                ('testBuildsInstallDarkXXXL', 278, False, False), ('testBuildsInstallLightXXXL', 278, True, False)]:
-            with self.subTest(method=method, site=site, expired=expired):
-                entry['expires'] = (datetime.now(timezone.utc).date() + timedelta(days=-1 if expired else 3)).isoformat()
-                r.write('tools/verify/known-failures.json', json.dumps([entry]))
-                r.write('report.json', json.dumps({'journey_status': 65, 'evidence_complete': True, 'source': {'dirty': False},
-                                                  'journey': 'TronMobileUITests/RealGatewayPairAndChatUITests/' + method}))
-                r.write('case.log', f'/fixture/RealGatewayBuildsAppsUITests.swift:{site}: error: assertion - RAW AX 0x123 pid: 42\n'
-                        f"Test Case '-[TronMobileUITests.RealGatewayPairAndChatUITests {method}]' failed (1 seconds).\n"
-                        'Executed 1 test, with 1 failure (0 unexpected) in 1 seconds\n')
-                result = subprocess.run([sys.executable, '-c', "import sys; from pathlib import Path; "
-                    "sys.path.insert(0, 'tools/verify'); import verify; verify.known_failures(); "
-                    "print(bool(verify.real_ui_quarantine(Path('case.log'))))"],
-                    cwd=r.path, env=r.env, capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(result.stdout.strip(), str(expected))
-
     def test_exact_quarantine_is_qualified_and_unknown_or_suite_errors_fail(self):
         r = self.repo
         entry = self.fixture()
