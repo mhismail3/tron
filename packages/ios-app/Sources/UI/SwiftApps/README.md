@@ -29,7 +29,7 @@ sheet and the node views that turn interpreter values into SwiftUI.
   by dragging its own navigation bar with no initial hold; holding invokes the
   accessibility title HUD rather than the sheet pan. Hosted install journeys
   await the completed offer reply and idle turn before acquiring the inline card:
-  terminal reply/footer growth moves its bottom-pinned frame during streaming.
+  terminal reply/footer growth at message settlement moves its bottom-pinned frame.
   Hosted journeys retain the failed-command
   refusal before dismissing review and checking installed source/data removal.
   Same-offer reinstallation opens the original producing session by its exact
