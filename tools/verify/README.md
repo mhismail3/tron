@@ -77,15 +77,22 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 ### Known failures
 
+**Implementation description, not exemption policy.**
+[Principles P2/P3/P9](../../docs/PRINCIPLES.md) forbid quarantines, waivers,
+known-failure exemptions and qualified greens. Existing runner labels/exit codes below
+do not establish green or authorize adding/renewing entries. The two live registry
+entries remain tracked by #2196 (including the #2191 lane); this docs-only reconciliation
+does not change them. Runner/gate reconciliation belongs to #2176/#2194, not a second path.
+
 `tools/verify/known-failures.json` is validated on every selection, including plans.
 Entries require exact `<repository-relative-test-path>::<full-case-name>`, failing `evidence.command`,
 full ancestor `evidence.commit`, SHA-256 `evidence.failureDigest`, owner `issue` and ISO `expires`.
 Gateway matching hashes the full failure-message array (JSON, `ensure_ascii=False`), replacing only
 the checkout root with `<repo>`; changed failures refuse. Reproductions require current-main and raw logs/JSON.
 Expiry is 00:00 UTC, strictly after the reproduction commit's UTC date and at most seven days later.
-Renew once: retain the original and append `renewedFrom` equal to its commit. The new descendant
-reproduction must be dated on/after original expiry with a newly reproduced digest (possibly unchanged)
-and the same seven-day bound. Reachable history prevents deletion resetting the budget; second renewals refuse.
+The validator accepts at most one `renewedFrom` record, dated on/after original expiry
+with a descendant reproduction and the same seven-day bound. Reachable history prevents
+deletion resetting that bound. This schema capability is not permission to renew a red.
 Mac cases under `packages/mac-app/Tests/Integration/` retain branch observations with original commit,
 exact xcresult failure-text-array digest and issue, never waivers. Restored ancestry is not main evidence.
 
@@ -102,7 +109,8 @@ All selections list unrelated `expiredEntries`: authorship stays allowed, checkp
 reports any expiry as `expired`. Unknown/changed signatures, suite/runtime errors, missing reports and
 malformed registry data exit 1. Health retains expired/deferred verdicts and unwaived expired reds.
 Selections have `checkpointEligible: false`; only complete batches establish eligibility.
-A maintainer-requested install despite expiry must name the expired red. No wildcard/file waiver, retries or alternate runner.
+None of these verdicts waives a red for checkpoint acceptance; fix at the root or causally
+revert. No wildcard/file waiver, retry-to-green or alternate runner.
 
 Verify runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
 counts to `test-results/measure/`; its counts and errors never fail verify.

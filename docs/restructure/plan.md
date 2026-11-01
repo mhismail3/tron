@@ -62,7 +62,8 @@ inside a source target.
 ### 6.2 `scripts/tron verify` (V2): the one command
 
 [Verify](../../tools/verify/README.md) owns affected selection, none/partial/full
-tiers, explicit batches, exact quarantine matching, cancellation and evidence.
+tiers, explicit batches, cancellation and evidence. Registry mechanics are not permission
+for exemptions; [P2](../PRINCIPLES.md#p2-verification-gates-promotion-not-authorship) owns red/green policy.
 A plan is selection evidence, never a test pass. No second runner or receipt gate.
 
 ### 6.4 Gateway behavior locks (V3)

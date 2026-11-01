@@ -1,5 +1,8 @@
 # Lightweight health reporting
 
+[P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship) owns red/green policy:
+legacy verifier verdicts below are diagnostics, never permission for exemptions or qualified green.
+
 The implemented scope is the on-demand `scripts/tron health` scorecard and approved
 content-free Home response/capability completion diagnostics (#2135). Approval timestamp
 recording awaits the settings owner. Scheduling/time remains undecided: no nightly

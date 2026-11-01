@@ -67,9 +67,10 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   accessibility, Dynamic Type and focus. UI reuses the shared owners
   ([Presentation parity](packages/ios-app/docs/architecture.md#presentation-parity));
   a new pattern updates that owner and its docs, with proof.
-- **Prove rather than imply** (inspected ≠ inferred ≠ reproduced ≠ verified); label visuals
-  honestly; comments explain why. Whoever adds, moves or deletes a file updates every
-  reference; commit no scratch or reports (`progress.md` is gitignored).
+- **Prove rather than imply** (inspected ≠ inferred ≠ reproduced ≠ verified); label visuals honestly.
+- **Comments:** explain current-code invariants, ownership, ordering or non-obvious tradeoffs;
+  never justify hacks/temporary workarounds or narrate dialogue/history. Delete stale comments,
+  not useful rationale (no blanket ban). Update changed-file references; commit no scratch/reports.
 - **Dependencies:** exact pins/lockfiles; Node via `scripts/tron-node exec`, not the signed
   runtime. Pi SDK/`pi-subagents` change atomically through updaters; behavior deltas need a decision.
 
@@ -84,8 +85,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   maintainer tap; never hide defects with tolerance, retries or skips. A non-author reviewer
   must name surviving oracles and explicitly ACCEPT test edits. Subjective design goes to
   the maintainer with inline visuals. Follow the [oracle policy](tools/verify/test-oracles.md).
-- Base reds need reproduced exact signatures, an owner and expiry in the existing registry;
-  changed/expired/unknown failures fail. Retain `test-results/` logs and qualified counts.
+- Reds are fixed at the root or causally reverted, never exempted by base matches or a registry.
+  Retain first-failure `test-results/` logs and raw counts; missing required coverage is not green.
 
 ## Resources and cleanup
 
@@ -132,14 +133,13 @@ owns deferred serial tests and risk; no phase/LOC gate, merge queue or automatic
 
 - A blocker is a bug in the system. Unblock it right away. If the same kind of failure
   has happened before, or the fix is cheap, fix the mechanism behind it with a script,
-  a test or a rule. Otherwise write it down and move on. A guard that costs more than
-  the failures it prevents gets deleted.
-- Home decides objective gates; exact known-failure matches are qualified, not green. Independent
-  review is required for test edits and security/data-loss/irreversible changes, not a new queue.
+  a test or a rule. Otherwise record it and move on. Delete guards that cost more than they prevent.
+- Home decides objective gates; [P2](docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)
+  forbids exemptions. Independent review covers test edits and security/data-loss/irreversible changes.
 - Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
   file-length targets or blanket base-lock runs. Build ahead on branches.
 - Default 2h tasks, 30-minute SHA/change/blocker check-ins; land green or settle in ≤25 lines.
-  Landings never wait for a batch or checkpoint. Gateway/Mac/iPhone rebuilds wait until all
+  Gateway/Mac/iPhone rebuilds wait until all
   workers stop/park cleanly; Home coordinates, the maintainer executes lockstep delivery.
 
 ## Documentation

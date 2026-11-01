@@ -20,10 +20,16 @@ or file a gap. Mark boundaries not crossed; whole AX-tree equality is not intera
 Preserve the first failure, seed/order, configuration and log. Separate scheduling
 assumptions from product races using bounded owner-event waits. Confirm cleanup on
 success, failure, timeout and cancellation; isolate files, ports, processes and lanes.
-Reproduce on unchanged base before claiming a base red; quarantine only exact cases
-with owner, signature and expiry. No retry/skip/tolerance change to manufacture green.
+An unchanged-base reproduction helps diagnose cause, never excuses a red. Fix at the
+root or causally revert; no quarantines, waivers or retry/skip/tolerance changes for green.
+
+After two failed fix attempts on the same red/flake, stop patching. Before a third,
+re-attack the premise both fixes assumed: record the retained attempts' SHA, test,
+order/seed, lane and host load (mark unavailable facts), and an observation that could
+falsify that premise. Write the evidence and revised diagnosis in the issue/report.
+This is not permission to weaken an oracle, skip a red or retry to green.
 
 Intended-behavior golden/assertion/fixture/timeout edits need cause and delta evidence,
 not a maintainer tap. Get non-author ACCEPT naming surviving oracles; subjective
-visual choices go to the maintainer. Report counts, skips, quarantines and untested
+visual choices go to the maintainer. Report raw counts, failures, skips and untested
 boundaries honestly; a green subset is not complete coverage.
