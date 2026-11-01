@@ -275,7 +275,10 @@ content may not declare `@State` unless the line says `// view-local: <reason>`.
 behavior is not overridden. `TronForegroundCaptureUITests` observes native controller lifetime,
 retained paging/viewport, keyboard input routing, socket read demand and anchor deallocation in
 the hosted UI lane. `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
-exercises the paired-Gateway path.
+checks Mac Terminal setup-panel and nested MCP-form retention on the paired-Gateway
+path. Real SSH/tmux shell and output continuity is separately exercised by
+`TronMacTerminalUITests/testShellAndOutputSurviveDismissAndBackground` through
+`scripts/ios-mac-terminal-journey`; reconnect repaints a fresh emulator attachment.
 
 ## Presentation activity
 
