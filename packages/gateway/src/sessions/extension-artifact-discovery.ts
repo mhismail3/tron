@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { watch } from "node:fs";
 import { opendir, open, readdir, stat } from "node:fs/promises";
 import { dirname, basename, join, resolve } from "node:path";
@@ -95,11 +96,14 @@ interface ExtensionArtifactDiscoverySlot {
   };
 }
 
-/** The ambient decision for one run directory. The identity is the stat of the
- * same status.json a read would have opened, so an unchanged artifact is never
- * read again. */
+/** The ambient decision for one run directory. `stat` is the stat identity of
+ * the status.json the decision was read from, so an artifact whose stat is
+ * unchanged is not read again unless the watcher names that file; `identity`
+ * adds a digest of the bytes read, so routing re-offers changed bytes even when
+ * an in-place rewrite kept the stat identity. */
 interface AmbientArtifactFact {
   asyncDir: string;
+  stat: string;
   identity: string;
   active: boolean;
   timestamp: number;
@@ -120,6 +124,9 @@ interface AmbientArtifactRoot {
   facts: Map<string, AmbientArtifactFact>;
   changed: Set<string>;
   sweep: Set<string>;
+  /** Directories whose status.json the watcher named: read even when its stat
+   * identity is unchanged. */
+  rewritten: Set<string>;
   /** Directories listed after the first listing that have no fact yet, with
    * when they were first listed. */
   fresh: Map<string, number>;
@@ -273,7 +280,7 @@ export class ExtensionArtifactDiscovery {
       let state = this.roots.get(root);
       if (!state) {
         state = {
-          root, names: new Set(), facts: new Map(), changed: new Set(), sweep: new Set(), fresh: new Map(),
+          root, names: new Set(), facts: new Map(), changed: new Set(), sweep: new Set(), rewritten: new Set(), fresh: new Map(),
           sweepRequested: true, sweepStartedAt: 0, watchRetryAt: 0,
         };
         this.roots.set(root, state);
@@ -374,6 +381,7 @@ export class ExtensionArtifactDiscovery {
       state.facts.clear();
       state.changed.clear();
       state.sweep.clear();
+      state.rewritten.clear();
       state.fresh.clear();
       state.watchRetryAt = 0;
       state.sweepRequested = true;
@@ -405,6 +413,7 @@ export class ExtensionArtifactDiscovery {
       for (const name of state.facts.keys()) if (!names.has(name)) state.facts.delete(name);
       for (const name of state.fresh.keys()) if (!names.has(name)) state.fresh.delete(name);
       for (const name of state.sweep) if (!names.has(name)) state.sweep.delete(name);
+      for (const name of state.rewritten) if (!names.has(name)) state.rewritten.delete(name);
       for (const name of names) {
         if (state.names.has(name) || firstListing) continue;
         state.changed.add(name);
@@ -475,14 +484,21 @@ export class ExtensionArtifactDiscovery {
       state.facts.delete(name);
       return undefined;
     }
-    const identity = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
-    if (state.facts.get(name)?.identity === identity) return undefined;
-    if (counts.statusReads >= MAX_EXTENSION_DISCOVERY_WORK) return "budget";
+    const statIdentity = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
+    // Taken before the read: an event for this file during the read names a
+    // write the read may have preceded, so it forces another read.
+    const rewritten = state.rewritten.delete(name);
+    if (!rewritten && state.facts.get(name)?.stat === statIdentity) return undefined;
+    if (counts.statusReads >= MAX_EXTENSION_DISCOVERY_WORK) {
+      if (rewritten) state.rewritten.add(name);
+      return "budget";
+    }
     counts.statusReads += 1;
-    let decision: { active: boolean; timestamp: number } | "replaced" | undefined;
+    let decision: { active: boolean; timestamp: number; digest: string } | "replaced" | undefined;
     try {
       decision = await this.readAmbientExtensionArtifact(asyncDir, metadata);
     } catch {
+      if (rewritten) state.rewritten.add(name);
       return "retry";
     }
     if (decision === "replaced") return "retry";
@@ -491,7 +507,10 @@ export class ExtensionArtifactDiscovery {
       state.facts.delete(name);
       return undefined;
     }
-    state.facts.set(name, { asyncDir, identity, active: decision.active, timestamp: decision.timestamp });
+    state.facts.set(name, {
+      asyncDir, stat: statIdentity, identity: `${statIdentity}:${decision.digest}`,
+      active: decision.active, timestamp: decision.timestamp,
+    });
     return undefined;
   }
 
@@ -506,8 +525,14 @@ export class ExtensionArtifactDiscovery {
           const name = filename?.split(/[\\/]/u)[0];
           // A nameless event (the root itself, or the platform reporting that
           // it lost track) can hide any change, so the whole root is swept.
-          if (!name || name === ".") state.sweepRequested = true;
-          else state.changed.add(name);
+          if (!name || name === ".") {
+            state.sweepRequested = true;
+            return;
+          }
+          state.changed.add(name);
+          // An in-place rewrite can keep the stat identity (same size, a
+          // timestamp at the same resolution), so the named file is read.
+          if (filename!.slice(name.length + 1) === "status.json") state.rewritten.add(name);
         },
         // Tied to this handle: a reset from a watcher already replaced must not
         // stop its successor.
@@ -555,7 +580,7 @@ export class ExtensionArtifactDiscovery {
   private async readAmbientExtensionArtifact(
     asyncDir: string,
     expected: { dev: number; ino: number },
-  ): Promise<{ active: boolean; timestamp: number } | "replaced" | undefined> {
+  ): Promise<{ active: boolean; timestamp: number; digest: string } | "replaced" | undefined> {
     const handle = await open(join(asyncDir, "status.json"), "r");
     try {
       const metadata = await handle.stat();
@@ -564,6 +589,8 @@ export class ExtensionArtifactDiscovery {
       const { bytesRead: headerBytesRead } = await handle.read(headerBuffer, 0, headerBuffer.length, 0);
       const headerBytes = headerBuffer.subarray(0, headerBytesRead);
       let parsed: unknown;
+      // The digest covers exactly the bytes the decision was parsed from.
+      let decided: Uint8Array = headerBytes;
       if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
         const projection = inspectExtensionLifecycleProjection(
           parseExtensionLifecycleProjectionHeader(headerBytes),
@@ -578,6 +605,7 @@ export class ExtensionArtifactDiscovery {
         const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
         if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
+        decided = buffer.subarray(0, bytesRead);
         try {
           parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
         } catch {
@@ -597,7 +625,8 @@ export class ExtensionArtifactDiscovery {
         || state === "detached" || state === "paused");
       const timestamps = [value.lastUpdate, value.startedAt, value.endedAt]
         .filter((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0);
-      return { active, timestamp: Math.max(0, ...timestamps) };
+      const digest = createHash("sha256").update(decided).digest("base64url");
+      return { active, timestamp: Math.max(0, ...timestamps), digest };
     } finally {
       await handle.close();
     }

@@ -1,5 +1,5 @@
 import { createHook } from "node:async_hooks";
-import { mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -169,6 +169,33 @@ describe("ambient extension artifact discovery change detection", () => {
     await writeStatus(runsRoot, "run-new", "running", Date.now());
     const passes = await passesUntil(owner, () => offers.includes(join(runsRoot, "run-new")), "new run");
     expect(passes).toBe(1);
+  });
+
+  it("re-reads a watcher-named status.json whose in-place rewrite kept its stat identity", async () => {
+    const { delegatedRoot, runsRoot } = await artifactTree("in-place");
+    const names = await terminalRuns(runsRoot, 10, Date.now() - 60_000);
+    const target = names[4]!;
+    const file = join(runsRoot, target, "status.json");
+    // A whole-second mtime survives utimes exactly, so the rewrite below keeps
+    // dev, ino, size and mtimeMs.
+    const pinned = new Date(1_700_000_000_000);
+    const completedAt = 1_700_000_000_000 - 5_000;
+    await writeFile(file, statusBytes(target, "complete", completedAt));
+    await utimes(file, pinned, pinned);
+    const before = await stat(file);
+    const { slots, offers } = recordingSlot(new Set([target]));
+    const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot });
+    await passesUntil(owner, () => offers.includes(join(runsRoot, target)), "first offer");
+    offers.length = 0;
+
+    // Same length (only timestamp digits change), written into the same inode.
+    const rewritten = statusBytes(target, "complete", completedAt + 1_000);
+    expect(rewritten.length).toBe(statusBytes(target, "complete", completedAt).length);
+    await writeFile(file, rewritten);
+    await utimes(file, pinned, pinned);
+    const after = await stat(file);
+    expect([after.dev, after.ino, after.size, after.mtimeMs]).toEqual([before.dev, before.ino, before.size, before.mtimeMs]);
+    await passesUntil(owner, () => offers.includes(join(runsRoot, target)), "in-place rewrite");
   });
 
   it("re-reads an active artifact on every pass without a watcher event", async () => {
