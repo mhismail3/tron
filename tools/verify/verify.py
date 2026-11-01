@@ -434,7 +434,7 @@ def known_failures() -> dict[str, dict]:
             raise ValueError("expected an array of at most 100 entries")
         known = {}
         for entry in entries:
-            if not isinstance(entry, dict) or set(entry) not in ({"testId", "evidence", "issue", "expires"}, {"testId", "evidence", "issue", "expires", "renewedFrom"}):
+            if not isinstance(entry, dict) or set(entry) - {"failureSites"} not in ({"testId", "evidence", "issue", "expires"}, {"testId", "evidence", "issue", "expires", "renewedFrom"}):
                 raise ValueError("each entry needs testId, evidence, issue and expires")
             identity, evidence = entry["testId"], entry["evidence"]
             if not isinstance(identity, str) or "::" not in identity:
@@ -442,7 +442,13 @@ def known_failures() -> dict[str, dict]:
             file, case = identity.split("::", 1)
             gateway_case = file.startswith(f"{GATEWAY}/src/") and file.endswith(".test.ts")
             mac_observation = file.startswith("packages/mac-app/Tests/Integration/") and file.endswith(".swift")
-            if not (gateway_case or mac_observation) or ".." in Path(file).parts or not case.strip() or not (ROOT / file).is_file():
+            real_ui = file.startswith("packages/ios-app/UITests/RealGateway/") and file.endswith(".swift") and bool(re.fullmatch(r'\w+/\w+/\w+', case))
+            sites = entry.get('failureSites')
+            if real_ui != ('failureSites' in entry) or (real_ui and (not isinstance(sites, list) or not 1 <= len(sites) <= 8
+                    or any(not isinstance(site, str) or not re.fullmatch(r'\w+\.swift:[1-9]\d*', site) for site in sites)
+                    or len(sites) != len(set(sites)))):
+                raise ValueError(f"invalid real-UI failureSites: {identity}")
+            if not (gateway_case or mac_observation or real_ui) or ".." in Path(file).parts or not case.strip() or not (ROOT / file).is_file():
                 raise ValueError(f"invalid testId: {identity}")
             previous = known.get(identity)
             if previous and (previous.get("renewedFrom") or entry.get("renewedFrom") != previous["evidence"]["commit"]):
@@ -490,11 +496,29 @@ def known_failures() -> dict[str, dict]:
         for identity, commits in history.items():
             if len(commits) > 2 or not commits <= retained[identity]:
                 raise ValueError(f"renewal history must be retained; at most one renewal: {identity}")
-        # Swift observations are retained provenance, never executable waivers.
-        # The Mac runner must still pass; matching is only applied to Gateway reports.
+        # Mac observations remain provenance only; real-UI sites have a separate matcher.
         return known
     except (OSError, ValueError, TypeError, VerifyError) as error:
         raise VerifyError(f"known-failures: {error}") from error
+
+
+def real_ui_quarantine(log: Path) -> dict | None:
+    """Match one actual failed XCTest identity/site; retain raw diagnostics unchanged."""
+    if not log.is_file() or not (log.parent / 'report.json').is_file():
+        return None
+    text = log.read_text()
+    report = json.loads((log.parent / 'report.json').read_text())
+    cases = re.findall(r"^Test Case '-\[(\w+)\.(\w+) (\w+)\]' (passed|failed)", text, re.M)
+    sites = re.findall(r'^/[^\n]+/(\w+\.swift:\d+): error:', text, re.M)
+    if len(cases) != 1 or cases[0][3] != 'failed' or len(sites) != 1 or len(re.findall(r'^.*\berror:', text, re.M)) != 1 or 'Executed 1 test, with 1 failure (0 unexpected)' not in text:
+        return None
+    if report['journey_status'] != 65 or not report['evidence_complete'] or report['source']['dirty'] or report['journey'] != '/'.join(cases[0][:3]):
+        return None
+    identity = 'packages/ios-app/UITests/RealGateway/' + sites[0].split(':')[0] + '::' + '/'.join(cases[0][:3])
+    entry = known_failures().get(identity)
+    if entry and sites[0] in entry.get('failureSites', []) and entry['expires'] > datetime.now(timezone.utc).date().isoformat():
+        return {'testId': identity, 'site': sites[0], 'issue': entry['issue'], 'expires': entry['expires']}
+    return None
 
 
 def expired_failures(known: dict[str, dict]) -> list[dict]:

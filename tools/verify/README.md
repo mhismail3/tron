@@ -78,32 +78,31 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 ### Known failures
 
 `tools/verify/known-failures.json` is validated on every selection, including plans.
-Each entry names an exact `<repository-relative-test-path>::<full-case-name>`,
-failing `evidence.command`, full base `evidence.commit`, SHA-256
-`evidence.failureDigest`, owner `issue` number and ISO `expires` date. The digest
-covers the full failure-message array (JSON, `ensure_ascii=False`), replacing only
-the checkout root with `<repo>`; a changed failure inside the same test refuses.
-The commit must be an ancestor of HEAD. Expiry is 00:00 UTC on the named date,
-strictly after the reproduction commit's UTC date and at most seven days later.
-A case may be renewed once: retain the original entry, then append its renewal with
-`renewedFrom` equal to the original `evidence.commit`. Renewal requires a new descendant
-reproduction commit dated on/after the original expiry and a newly reproduced digest
-(the same defect may have the same digest). Its own expiry has the same seven-day bound.
-The validator checks reachable registry history, so deleting entries after a fix does
-not reset a case's renewal budget. A second renewal is refused; fix or revert instead.
-Gateway waivers require fresh current-main reproductions and raw logs/JSON. Swift cases under `packages/mac-app/Tests/Integration/` may instead record explicit branch observations with original commit, exact xcresult failure-text-array digest and owner issue; they never enter the waiver map or waive Mac failures. Restoring ancestry never makes branch evidence main evidence.
+Entries require exact `<repository-relative-test-path>::<full-case-name>`, failing `evidence.command`,
+full ancestor `evidence.commit`, SHA-256 `evidence.failureDigest`, owner `issue` and ISO `expires`.
+Gateway matching hashes the full failure-message array (JSON, `ensure_ascii=False`), replacing only
+the checkout root with `<repo>`; changed failures refuse. Reproductions require current-main and raw logs/JSON.
+Expiry is 00:00 UTC, strictly after the reproduction commit's UTC date and at most seven days later.
+Renew once: retain the original and append `renewedFrom` equal to its commit. The new descendant
+reproduction must be dated on/after original expiry with a newly reproduced digest (possibly unchanged)
+and the same seven-day bound. Reachable history prevents deletion resetting the budget; second renewals refuse.
+Mac cases under `packages/mac-app/Tests/Integration/` retain branch observations with original commit,
+exact xcresult failure-text-array digest and issue, never waivers. Restored ancestry is not main evidence.
 
-Tests execute unchanged. Exact, unexpired case AND digest matches allow exit 0
-with verdict `quarantined` (qualified, never green); `failedTests`, passing counts,
-logs and each expiry/issue remain visible. Exact expired matches instead yield
-`expired` (exit 0 pre-land), retaining `expiredReds`, not waiving them as qualified.
-Every selection lists all `expiredEntries`, even unrelated ones: expiry never blocks
-authorship, but blocks checkpoint proposals. `--all` reports `expired` whenever any
-entry is expired so the batch cannot qualify it. Unknown/changed signatures,
-suite/runtime errors, missing reports and malformed registry data still exit 1.
-Health retains expired/deferred verdicts and counts expired failures as unwaived reds.
-Selections record `checkpointEligible: false`; only a complete batch establishes eligibility.
-A maintainer-requested install despite expiry must list the expired red explicitly. No wildcard/file waiver, retries or alternate runner.
+Real-UI entries under `packages/ios-app/UITests/RealGateway/` additionally require
+`failureSites` (`Filename.swift:line`) and exact `target/class/method`. Their digest
+is raw provenance: only identity plus an allowed site qualifies. Incomplete evidence,
+unexpected errors and expiry refuse. `run-ui` collects every selected original outcome;
+the batch retains each outcome and the complete raw XCTest/AX log, including quarantines.
+
+Tests execute unchanged. Exact unexpired Gateway case AND digest matches allow exit 0 with verdict
+`quarantined` (qualified, never green); failures, passing counts, logs, expiry and issue stay visible.
+Exact expired matches yield `expired` (exit 0 pre-land), retaining `expiredReds`, never qualified.
+All selections list unrelated `expiredEntries`: authorship stays allowed, checkpoints block; `--all`
+reports any expiry as `expired`. Unknown/changed signatures, suite/runtime errors, missing reports and
+malformed registry data exit 1. Health retains expired/deferred verdicts and unwaived expired reds.
+Selections have `checkpointEligible: false`; only complete batches establish eligibility.
+A maintainer-requested install despite expiry must name the expired red. No wildcard/file waiver, retries or alternate runner.
 
 Verify runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
 counts to `test-results/measure/`; its counts and errors never fail verify.

@@ -1032,13 +1032,14 @@ run_ui_journey() {
   fi
   echo "Real-UI journey $journey completed in $((SECONDS - case_started))s (status $final_status); evidence: $attempt_dir"
   report_result_bundle_failures "$result_bundle"
-  return "$final_status"
+  # Collect every journey; the batch owner classifies failures, never skips them.
+  ((final_status == 0)) || ui_status="$final_status"
 }
 
 run_ui() {
   # Journey code and the fixture that drives it are one source state, exactly as
   # the E2E lane: prove the products before renewing any Gateway state.
-  local started=$SECONDS xctestrun journey
+  local started=$SECONDS xctestrun journey ui_status=0
   local -a journeys
   xctestrun="$(find_xctestrun "$ui_xctestrun_glob")"
   [[ -f "$xctestrun" ]] || die "UI test products are not built; run '$0 run-ui'"
@@ -1060,7 +1061,8 @@ run_ui() {
   for journey in "${journeys[@]}"; do
     run_ui_journey "$journey" "$xctestrun"
   done
-  echo "Real-UI journeys completed in $((SECONDS - started))s (status 0); evidence: $run_root/results"
+  echo "Real-UI journeys completed in $((SECONDS - started))s (status $ui_status); evidence: $run_root/results"
+  return "$ui_status"
 }
 
 run_test() {
@@ -1137,9 +1139,9 @@ reset_hosted_app_state() {
 finish_e2e_run() {
   local status=$?
   trap - EXIT
-  # A passing run whose reset failed is not a passing run: the lane would keep the
-  # pairing the E2E lane shares.
-  if ! reset_hosted_app_state && ((status == 0)); then
+  # Cleanup failure must stay red even when XCTest's failure is quarantined:
+  # otherwise the lane would keep the pairing the E2E lane shares.
+  if ! reset_hosted_app_state; then
     status=1
   fi
   # A real-UI command owns the fixture it renewed for its journeys: it stops it on
