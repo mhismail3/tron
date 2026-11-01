@@ -80,14 +80,13 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 **Implementation description, not exemption policy.**
 [Principles P2/P3/P9](../../docs/PRINCIPLES.md) forbid quarantines, waivers,
 known-failure exemptions and qualified greens. Existing runner labels/exit codes below
-do not establish green or authorize adding/renewing entries. The two live registry
-entries remain tracked by #2196 (including the #2191 lane); this docs-only reconciliation
-does not change them. Runner/gate reconciliation belongs to #2176/#2194, not a second path.
+do not establish green or authorize adding/renewing entries. The live registry entry
+remains tracked by #2196. Runner/gate reconciliation belongs to #2176/#2194, not a second path.
 
 The runner validates `tools/verify/known-failures.json` on every selection, including plans.
 Its schema requires exact case, reproduction command/ancestor commit, full failure digest,
 owner issue and bounded expiry. Gateway digests hash the failure-message array, normalizing
-only the checkout root; real-UI records also bind failure sites and target/class/method.
+only the checkout root. Real-UI journeys have no registry matcher: every failure stays red.
 Tests execute unchanged and raw outcomes/logs remain visible. The validator's bounded
 `renewedFrom` capability is not permission to renew a red.
 
