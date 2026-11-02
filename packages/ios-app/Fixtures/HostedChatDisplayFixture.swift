@@ -777,7 +777,10 @@ private actor HostedHomeShellGateway {
             return (taskRecord(id), nil)
         case "home.taskPermissions":
             if sheetState == "tasks-empty" {
-                return (nil, .object(["code": .string("conflict"), "message": .string("Home task namespace refused: not-initialized"), "retryable": .bool(false)]))
+                // A real refusal takes a round trip; the embedded section re-reads it every 5 s.
+                try? await Task.sleep(for: .seconds(1))
+                return (nil, .object(["code": .string("conflict"), "message": .string("Home task permissions refused"), "retryable": .bool(false),
+                                      "details": .object(["reason": .string("not-initialized")])]))
             }
             return (taskPermissions(), nil)
         case "home.redeliverTaskResult":

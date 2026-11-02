@@ -1586,9 +1586,19 @@ final class TronSmokeUITests: XCTestCase {
                 keepScreenshot(named: "home-tasks-empty")
                 app.buttons["home-sheet-done-tasks"].tap()
                 tapManageRow(app, "home-manage-settings")
-                reveal(app.staticTexts["Home task namespace refused: not-initialized"], in: app)
-                XCTAssertTrue(app.staticTexts["Home task namespace refused: not-initialized"].exists)
+                let refusal = app.staticTexts["Home task permissions refused"]
+                XCTAssertTrue(refusal.waitForExistence(timeout: 10), app.debugDescription)
+                reveal(refusal, in: app)
+                XCTAssertTrue(refusal.exists)
                 XCTAssertFalse(app.buttons["Reconfirm permissions"].exists)
+                // The section re-reads every 5 s; each 1 s refused re-read keeps the
+                // refusal on screen instead of flashing "Loading Home…".
+                let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Loading Home…")).firstMatch
+                let deadline = Date().addingTimeInterval(12)
+                while Date() < deadline {
+                    XCTAssertFalse(loading.exists, "A refused re-read must not replace the refusal with loading")
+                    XCTAssertTrue(refusal.exists, "The refusal stays visible across its periodic re-read")
+                }
             } else {
                 XCTAssertTrue(app.staticTexts["Task recovery needed"].waitForExistence(timeout: 5))
                 XCTAssertTrue(app.staticTexts["unsafe-state"].exists)
