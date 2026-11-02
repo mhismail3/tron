@@ -1432,7 +1432,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 30) {
             let stored = (try? self.globalSettingsDocument(fixture.agentDirectory))?["codemode"] as? [String: Any]
             return stored?["mode"] as? String == "only"
-        }, "The native Default Tools editor must persist through settings.change")
+        }, "The native Default Tools editor must persist through settings.change: \(app.debugDescription)")
         dismissTopSheet(app)
         openSettingsSection(app, "tools")
         XCTAssertEqual(codeMode.value as? String, "Codemode only", "Reopening reads the stored code-mode setting")
