@@ -1100,6 +1100,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
         }
         func openSheet(_ identifier: String, _ name: String, section: String? = nil) {
+            // The presenting surface loads its rows; the opened sheet must not.
+            _ = app.buttons.matching(identifier: identifier).firstMatch.waitForExistence(timeout: 30)
             guard let button = app.buttons.matching(identifier: identifier).allElementsBoundByIndex.last else {
                 XCTFail("no \(identifier): \(app.debugDescription)"); return
             }
@@ -1124,7 +1126,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSheet("chat-settings-link", "session-settings")
         let settings = app.descendants(matching: .any)["session-settings-content"]
         XCTAssertFalse(settings.buttons["Switch Model"].exists)
-        openSheet("settings-section-advanced-open", "session-more", section: "run")
+        // A fresh session serves no session-overridable More Settings keys, so that
+        // destination is absent; its served Tools sheet must still open on content.
+        openSheet("settings-section-tools-open", "session-tools", section: "tools")
+        // Session Settings has loaded its served links (beneath the open Tools sheet).
+        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "An empty section has no destination")
         dismissTopSheet(app)
         dismissTopSheet(app) // Session Settings
         dismissTopSheet(app) // Manage Session
@@ -1249,9 +1255,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Connections (Accounts) and Push Notifications (System).
         for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
             let link = app.buttons["settings-link-\(title)"]
-            for _ in 0..<20 where !link.isHittable {
-                if title == "Connections" { app.swipeDown() } else { app.swipeUp() }
-            }
+            // A row under the navigation bar reports hittable while a tap lands on the bar.
+            revealBelowNavigationBar(app, link)
             link.tap()
             func labelled(_ text: String) -> XCUIElement {
                 app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
@@ -1410,9 +1415,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             globalSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 1, "one More Settings row (#1627)")
+        // Global embeds Model, Workers & delegation, Compaction, Agent changes and
+        // Connection in Agent Behavior; only scoped surfaces have More Settings.
+        openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 0,
+                                             "Global embeds its former More Settings groups in Agent Behavior")
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
-            "workers": "Models", "run": "More Settings", "sources": "Extensions", "setup": "Setup"])
+            "model": "Agent Behavior", "workers": "Agent Behavior", "context": "Agent Behavior", "run": "Agent Behavior",
+            "sources": "Extensions", "setup": "Setup"])
         openSettingsSection(app, "tools")
         let codeMode = app.buttons["Other tools with codemode"]
         revealBelowNavigationBar(app, codeMode)
@@ -1424,20 +1433,20 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 30) {
             let stored = (try? self.globalSettingsDocument(fixture.agentDirectory))?["codemode"] as? [String: Any]
             return stored?["mode"] as? String == "only"
-        }, "The native Default Tools editor must persist through settings.change")
+        }, "The native Default Tools editor must persist through settings.change: \(app.debugDescription)")
         dismissTopSheet(app)
         openSettingsSection(app, "tools")
         XCTAssertEqual(codeMode.value as? String, "Codemode only", "Reopening reads the stored code-mode setting")
         keepScreenshot(app, name: "settings-surface-settings-code-mode-edit")
         dismissTopSheet(app)
-        openSettingsSection(app, "setup", linkLabel: "Setup")
-        let globalEdit = toggleSetting(app, key: "setup.installTelemetry")
+        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
+        let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
         XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
         dismissTopSheet(app) // Setup Settings
         dismissTopSheet(app) // Settings
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup")
+        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
         let reopenedTelemetry = topSwitchRow(app, key: "setup.installTelemetry")
         XCTAssertTrue(waitForOverride(reopenedTelemetry, timeout: 30),
                       "the reopened Settings must offer the Global reset: \(reopenedTelemetry.debugDescription)")
@@ -1469,8 +1478,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup")
-        let globalEdit = toggleSetting(app, key: "setup.installTelemetry")
+        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
+        let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
         dismissTopSheet(app) // Setup
         dismissTopSheet(app) // Settings
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
@@ -1481,7 +1490,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             document["enableInstallTelemetry"] = globalEdit.before == "1"
         }
         openGlobalSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup")
+        openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
         // Outside-change recovery is inline beside the existing control; it no
         // longer replaces the row with a detail link. Keep the live-value and
         // receipt-backed Apply again assertions on that same owning row.
@@ -1669,11 +1678,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let surface: XCUIElement = app
         var groups: [String] = []
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
+        // Hand-built owners hold these keys on Settings; their own journeys prove the control.
+        let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
+            "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Install Package card (#1482)",
+            "permissions.macTerminalServer": "Mac Terminal and this Mac's Connections page (UI journey gap #2208)"] : [:]
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
         for group in groups {
-            let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
+            // A section rendering one row has no container of its own: that row is the section.
+            let rendered = schema.keys.filter { $0.group == group && !$0.layers.isDisjoint(with: layers) && customOwners[$0.id] == nil }
+            let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group],
+                                                     loneRow: rendered.count == 1 ? settingRowToken(rendered[0].id) : nil)
             // One accessibility snapshot per destination preserves the same row,
             // badge and value checks without a remote AX round-trip per descendant.
             let snapshot: XCUIElementSnapshot
@@ -1682,7 +1698,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 XCTFail("could not read the \(name) \(group) accessibility tree: \(error)")
                 return coverage
             }
-            let elements = descendants(of: snapshot)
+            let elements = [snapshot] + descendants(of: snapshot)
             for key in schema.keys where key.group == group {
                 var keyElements = elements
                 var instances: XCUIElement?
@@ -1735,9 +1751,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     coverage.valueChecked += 1
                     continue
                 }
-                if name == "settings", let owner = ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
-                    "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Install Package card (#1482)"][key.id] {
-                    // A hand-built owner holds this key on Settings; its own journey proves that control.
+                if let owner = customOwners[key.id] {
                     XCTAssertEqual(rows.count, 0, "\(name) must not repeat \(key.id) beside \(owner)")
                     coverage.customOwnerChecked += 1
                     continue
@@ -1751,7 +1765,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 coverage.rowsPresent += 1
                 let row = rows[0]
                 let children = descendants(of: row)
-                let rowElement = (instances ?? detail ?? surface).descendants(matching: .any).matching(identifier: row.identifier).firstMatch
+                let rowElement = instances == nil && detail?.identifier == row.identifier ? detail!
+                    : (instances ?? detail ?? surface).descendants(matching: .any).matching(identifier: row.identifier).firstMatch
                 let provenance = rowProvenance(rowElement)
                 let reverts = provenance.contains("Revert") || provenance.contains("Reset")
                 XCTAssertEqual(provenance.contains("Overridden"), reverts && !isGlobalTarget,
@@ -1784,14 +1799,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// Opens a section's settings sub-sheet from the top-most surface, revealing
     /// its full-row link first (primary surfaces scroll; links may be above).
     @MainActor
-    func openSettingsSection(_ app: XCUIApplication, _ group: String, linkLabel: String? = nil) {
-        XCTAssertNotNil(openSettingsSectionIfServed(app, group, linkLabel: linkLabel),
+    func openSettingsSection(_ app: XCUIApplication, _ group: String, linkLabel: String? = nil, loneRow: String? = nil) {
+        XCTAssertNotNil(openSettingsSectionIfServed(app, group, linkLabel: linkLabel, loneRow: loneRow),
                         "the \(group) section has no settings link: \(app.debugDescription)")
     }
 
     @MainActor
     func openSettingsSectionIfServed(_ app: XCUIApplication, _ group: String,
-                                           linkLabel: String? = nil) -> XCUIElement? {
+                                           linkLabel: String? = nil, loneRow: String? = nil) -> XCUIElement? {
         let links = linkLabel.map { app.buttons.matching(NSPredicate(format: "label == %@", $0)) }
             ?? app.buttons.matching(identifier: "settings-section-\(group)-open")
         guard links.firstMatch.waitForExistence(timeout: 5) else { return nil }
@@ -1811,12 +1826,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         guard link.isHittable, link.frame.minY >= barBottom() else { return nil }
         link.tap()
         let details = app.descendants(matching: .any).matching(identifier: "settings-section-\(group)-detail")
+        // A one-row section has no container of its own: its row keeps its
+        // identity and is the section (SettingsRendererView).
+        let lone = loneRow.map { app.descendants(matching: .any).matching(identifier: $0) }
         if let linkLabel {
             XCTAssertTrue(app.navigationBars.staticTexts[linkLabel].waitForExistence(timeout: 30),
                           "the \(linkLabel) destination did not open: \(app.debugDescription)")
             // Extensions embeds Sources below its inventory in a lazy stack;
             // reveal it before demanding its existence, not after that assertion.
-            for _ in 0..<24 where !details.firstMatch.exists { app.swipeUp() }
+            for _ in 0..<24 where !details.firstMatch.exists && lone?.firstMatch.exists != true { app.swipeUp() }
+        }
+        if let lone, !details.firstMatch.exists, lone.firstMatch.waitForExistence(timeout: 30) {
+            return lone.element(boundBy: max(lone.count - 1, 0))
         }
         XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30),
                       "the \(group) sub-sheet did not open: \(app.debugDescription)")
@@ -1933,12 +1954,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// Toggles one row's switch through the shared control and waits for the
     /// Gateway's accepted state: the value flips and the row offers its revert.
     @MainActor
-    private func toggleSetting(_ app: XCUIApplication, key: String) -> (before: String?, after: String?) {
+    private func toggleSetting(_ app: XCUIApplication, key: String, confirmingReview: Bool = false) -> (before: String?, after: String?) {
         XCTAssertTrue(settingRow(app, key: key).waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
         let row = topSwitchRow(app, key: key)
         let toggle = row.switches.firstMatch
         let before = switchValue(row)
         toggle.tap()
+        if confirmingReview {
+            // A key whose change needs the maintainer's tap applies only after the
+            // exact native review card's Approve (#2128).
+            let approve = app.buttons["change-review-approve"]
+            XCTAssertTrue(approve.waitForExistence(timeout: 30), "\(key) must ask for its exact review: \(app.debugDescription)")
+            approve.tap()
+        }
         XCTAssertTrue(waitUntil(timeout: 60) { self.switchValue(row) != before },
                       "The Gateway did not accept the \(key) value")
         let after = switchValue(row)
