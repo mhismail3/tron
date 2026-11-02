@@ -151,7 +151,7 @@ async function discoverExtensionArtifactsUntil(
   settled: () => boolean = () => true,
   passLimit = DISCOVERY_PASS_LIMIT,
 ): Promise<number> {
-  const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
+  const state = registry as unknown as { artifactDiscoveryInFlight: Promise<void> | undefined };
   let passes = 0;
   await waitFor(async () => {
     // A pass that is already in flight returns without discovering anything; let
@@ -516,7 +516,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // all-scope durable-index candidate. An administrative read establishes the
     // complete sidecar used by the restart half of this regression.
     await cold.list("all");
-    const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(cold);
     expect(existsSync(indexPath)).toBe(true);
     await cold.dispose();
@@ -1639,7 +1639,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     secondManager.appendMessage(fauxAssistantMessage("unchanged canonical body"));
     fixture.manager.appendMessage(fauxAssistantMessage("initial canonical body"));
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
@@ -1686,11 +1686,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // in-memory cut and their counts and sizes are not the ones the owner
     // stamped. Those rows would hand the next startup content it must distrust.
     await settleCatalog(fixture.registry);
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     expect(existsSync(indexPath)).toBe(true);
     // With no document to load, the next read takes the full canonical
     // materialization path — the one that used to persist a second copy.
-    await rm(indexPath, { force: true });
+    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
     (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
     const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
     try {
@@ -1712,7 +1712,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     it("rejects an unowned append that races durable-index reconciliation", async () => {
     const fixture = await coldFixture("unowned-index-append-race");
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
     // A restart is how a reader reaches the durable index with no in-memory cut.
@@ -1874,7 +1874,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     registries.splice(registries.indexOf(fixture.registry), 1);
     // The durable document is what would otherwise keep a row: drop it, then
     // leave the transcript mid-append so no row can be rebuilt from the file.
-    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json"), { force: true });
+    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
     const completeBytes = (await fsPromises.stat(fixture.sessionFile)).size;
     await appendFile(fixture.sessionFile, '{"type":"message"');
 
@@ -5263,8 +5263,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(stopped).toEqual([{ entries: 1_025, statusReads: 1_024, work: 0, dropped: 0 }]);
     expect(routed.mock.calls).toEqual([]);
 
-    // The unchanged root repeats the same stop, and a repeat inside its episode
-    // is not recorded again.
+    // The unchanged root has no changed work left, so a later pass does not stop
+    // and records nothing.
     await discoverExtensionArtifactsUntil(fixture.registry);
     expect(stopped).toHaveLength(1);
 
@@ -5286,10 +5286,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       details: { runId: late.runId, asyncDir: late.asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
     });
     // The run must be offered by the first pass this call runs. Everything the
-    // pass needs is already derived: the root was walked above, so every
-    // unchanged artifact fact is cached by identity and the walk reaches the end
-    // of the root without spending the `MAX_EXTENSION_DISCOVERY_WORK` read
-    // budget; the per-root routing budget (`rootBudget`, the remaining work split
+    // pass needs is already derived: the root was swept above, so every
+    // unchanged artifact fact is cached by identity and the pass spends none of
+    // the `MAX_EXTENSION_DISCOVERY_WORK` read budget; the per-root routing budget (`rootBudget`, the remaining work split
     // across the roots and live slots — 512 at most for one root and two slots)
     // is an upper bound, and candidates no live slot can attribute are filtered
     // out before that slice, so the late run is the only candidate left to

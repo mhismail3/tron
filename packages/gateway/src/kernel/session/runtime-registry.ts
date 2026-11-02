@@ -77,6 +77,7 @@ import { projectTranscriptPage, type TranscriptPage } from "../projection/projec
 import {
   CatalogMetadataIndex,
   type CatalogMetadataIndexFailure,
+  type CatalogMetadataIndexPressure,
   type CatalogMetadataIndexSummary,
 } from "../../sessions/catalog-metadata-index.js";
 import { branchFromParsedSession, validateSearchBranch, type SessionSearchForkBoundary } from "../../sessions/session-branch.js";
@@ -612,7 +613,9 @@ export class RuntimeRegistry implements SessionOperations {
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private readonly artifactDiscovery: ExtensionArtifactDiscovery;
-  private artifactDiscoveryInFlight = false;
+  /** The admitted discovery pass, joined by disposal before the discovery
+   * owner closes its root watchers. */
+  private artifactDiscoveryInFlight: Promise<void> | undefined;
   private slotAdmissionsInFlight = 0;
   private administrativeDrainStarted = false;
   private readonly workRegistry: GatewayWorkRegistry;
@@ -671,6 +674,9 @@ export class RuntimeRegistry implements SessionOperations {
       /** Handled catalog-index write failures. The index write is fire-and-forget
        * outside any request span, so its owner records them. */
       catalogIndexFailure?: CatalogMetadataIndexFailure;
+      /** A catalog-index save that passed a warning threshold, well before its
+       * refusal bound. */
+      catalogIndexPressure?: (pressure: CatalogMetadataIndexPressure) => void;
       /** One catalog reconcile, with the files it covered and the rows it
        * changed. An incomplete or failed pass is reported instead of silent. */
       catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
@@ -721,7 +727,7 @@ export class RuntimeRegistry implements SessionOperations {
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
     this.archive = new SessionArchiveStore(options.tronHome);
-    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure);
+    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure, options.catalogIndexPressure);
     this.sessionCatalog = new SessionCatalog({
       catalogRoot: () => this.catalogDirectory(),
       index: this.catalogMetadataIndex,
@@ -3856,16 +3862,19 @@ export class RuntimeRegistry implements SessionOperations {
   /** One bounded Gateway owner discovers shared extension artifacts. Exact
    * live bindings are refreshed first; ambient enumeration and routed reads
    * share one hard work budget and cannot starve a known drain owner. */
-  private async discoverExtensionArtifacts(): Promise<void> {
-    if (this.artifactDiscoveryInFlight || this.shutdownState !== "active") return;
-    this.artifactDiscoveryInFlight = true;
-    let truncated: ExtensionArtifactDiscoveryCounts | undefined;
-    try {
-      truncated = await this.artifactDiscovery.runPass();
-    } finally {
-      this.artifactDiscoveryInFlight = false;
-    }
-    this.artifactDiscovery.recordPassOutcome(truncated);
+  private discoverExtensionArtifacts(): Promise<void> {
+    if (this.artifactDiscoveryInFlight || this.shutdownState !== "active") return Promise.resolve();
+    const pass = (async () => {
+      let truncated: ExtensionArtifactDiscoveryCounts | undefined;
+      try {
+        truncated = await this.artifactDiscovery.runPass();
+      } finally {
+        this.artifactDiscoveryInFlight = undefined;
+      }
+      this.artifactDiscovery.recordPassOutcome(truncated);
+    })();
+    this.artifactDiscoveryInFlight = pass;
+    return pass;
   }
 
   private async evictIdle(forCapacity = false, requestedSessionID?: string): Promise<void> {
@@ -4340,6 +4349,11 @@ export class RuntimeRegistry implements SessionOperations {
     }
     const entries = await this.mutex.run(() => [...this.slots.entries()]);
     const results = await Promise.allSettled(entries.map(([, slot]) => slot.shutdown()));
+    // Admission closed with the timer, so at most the pass already in flight
+    // remains: it is joined after the slots it offers to have retired (their
+    // fence makes its offers transient), and only then are its watchers closed.
+    await Promise.allSettled([this.artifactDiscoveryInFlight]);
+    this.artifactDiscovery.close();
     const failures: unknown[] = [];
     for (let index = 0; index < entries.length; index += 1) {
       const [id, slot] = entries[index]!;

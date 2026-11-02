@@ -39,9 +39,10 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Model contains direct model/thinking; Workers & delegation contains all three ordered model queues
   and the task budget. Scoped Home navigation still names its workers/delegation destination Models.
   Queue drafts add available physical models through the shared picker, reorder/remove locally,
-  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. The retained
-  list editor is keyed by its canonical input so reopening reflects accepted saves. Local changes
-  keep stable row identity until Save; the renderer’s existing presentation gate controls refresh.
+  and write only on Save; an empty list is distinct from Reset/Revert to inheritance. Each
+  presentation seeds its list draft once from the canonical input; a refresh while it is open never
+  replaces unsaved edits. After an accepted change the renderer's rows stay disabled until the shared
+  snapshot reflects it, so no editor reopens on the superseded value.
   Other routine settings have no editor exposure; explicit values retain read-only Reset/Revert and Project inspection.
   Automatic compaction and Summary thinking are excluded by the shared iPhone row selection even
   when saved; canonical Gateway values, scope rules and writers are unchanged. Other Compaction

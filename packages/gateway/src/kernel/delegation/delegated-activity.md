@@ -85,6 +85,15 @@ Native alone writes SDK invocation
 rows; K5 writes their activity projection
 through the actual Native resource operation without borrowing the tool-row map.
 The bounded Gateway discovery scheduler offers each frame's actual K5 owner directly.
+Every 750 ms (`extension-artifact-discovery.ts`) it stats a run directory's `status.json`
+only when it may have changed: a recursive root watcher's event, a new directory in the
+root's listing (one root stat per pass), an active artifact, one of a live slot's 64 newest
+attributed runs it has not accepted at the current stat identity (ctime included), or a
+sweep. Startup, a
+watcher error, a nameless event and every 5 minutes start a full sweep; an unwatchable
+root is swept back to back. Directories a pass's 4,096-stat budget does not reach stay
+queued, so no root size hides an artifact. Disposal joins the in-flight pass, then
+closes the watchers.
 Native process rows, exact process-to-child projection bindings, canonical append and
 physical SDK/work/publication resources retain their original identities and lifetimes.
 

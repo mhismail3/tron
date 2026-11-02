@@ -43,10 +43,8 @@ extension RealGatewayPairAndChatUITests {
         settings.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home Settings"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(app.buttons["settings-link-Agent Behavior"].exists, "Global consolidation must not replace Home's routes")
-        let models = app.buttons["settings-section-model-open"]
-        revealBelowNavigationBar(app, models)
-        models.tap()
-        XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 30), app.debugDescription)
+        // Home Settings embeds its former Models section in place (Settings README).
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Home has no first-level Models drill-in")
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
         revealBelowNavigationBar(app, row)
         let edit = row.buttons.matching(NSPredicate(format: "label == 'Worker models' AND NOT identifier ENDSWITH '-reset'")).firstMatch
@@ -59,19 +57,30 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == ["tron-e2e/e2e-alternate"] }, "Home Save must reach the canonical Home profile")
         XCTAssertNil(queue(globalFile, field: "modelQueues"), "A Home edit must not change Global")
         revealBelowNavigationBar(app, row)
+        // Rows stay disabled until an accepted change is canonical.
+        XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
         edit.tap()
         XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
         dismissAgentSheet(app, title: "Worker models")
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         revealBelowNavigationBar(app, revert)
+        XCTAssertTrue(waitForEnabled(revert, timeout: 30), app.debugDescription)
         revert.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == nil }, "Home Revert must remove its override")
         XCTAssertNil(queue(globalFile, field: "modelQueues"))
         keepScreenshot(app, name: "2029-home-queue-scope-and-reopen-\(appearance)")
-        let refusal = app.staticTexts["Home task namespace refused: not-initialized"]
+        // The fixture's Home task namespace is not initialized, so the embedded
+        // permissions read is refused. The Gateway keeps an untyped store
+        // refusal's text in local diagnostics and publishes only its internal-
+        // failure copy; the section names the refusal and offers Reload, never
+        // delegation controls.
+        let refusal = app.staticTexts["Home could not be read"]
         revealBelowNavigationBar(app, refusal)
         XCTAssertTrue(refusal.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Unexpected gateway failure"].exists, app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Home task namespace refused: not-initialized"].exists, "Store text stays in local diagnostics")
         XCTAssertFalse(app.buttons["home-permissions-reconfirm"].exists)
+        XCTAssertFalse(app.staticTexts["Delegation: All trusted projects"].exists, "A refused read shows no delegation controls")
         keepScreenshot(app, name: "2029-delegation-refusal-\(appearance)")
     }
 
@@ -132,6 +141,8 @@ extension RealGatewayPairAndChatUITests {
                 revealBelowNavigationBar(app, row)
                 let edit = row.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label != 'Reset'", label)).firstMatch
                 XCTAssertTrue(edit.waitForExistence(timeout: 15), "Queue has no editor: \(row.debugDescription)")
+                // Rows stay disabled until an accepted change is canonical.
+                XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
                 edit.tap()
                 XCTAssertTrue(app.navigationBars.staticTexts[label].waitForExistence(timeout: 15), app.debugDescription)
                 expandAgentSheet(app, title: label)
@@ -145,12 +156,14 @@ extension RealGatewayPairAndChatUITests {
                 app.buttons["Save"].tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == ["tron-e2e/e2e-alternate", "tron-e2e/e2e-model"] }, "Ordered draft did not reach the canonical Gateway store")
                 revealBelowNavigationBar(app, row)
+                XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
                 edit.tap()
                 XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-model"].waitForExistence(timeout: 15), app.debugDescription)
                 app.buttons["Remove tron-e2e/e2e-model"].tap()
                 app.buttons["Save"].tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == ["tron-e2e/e2e-alternate"] })
                 revealBelowNavigationBar(app, row)
+                XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
                 edit.tap()
                 XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
                 app.buttons["Remove tron-e2e/e2e-alternate"].tap()
@@ -159,13 +172,24 @@ extension RealGatewayPairAndChatUITests {
                 revealBelowNavigationBar(app, row)
                 let reset = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
                 XCTAssertTrue(reset.waitForExistence(timeout: 15), app.debugDescription)
+                XCTAssertTrue(waitForEnabled(reset, timeout: 30), app.debugDescription)
                 reset.tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == nil }, "Reset must remove, not copy, the inherited value")
             }
+            // The default policy belongs to the shared Trusted Projects owner, not a
+            // duplicate generic row in Agent Behavior.
+            XCTAssertFalse(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].exists,
+                           "Agent Behavior must not duplicate the Trusted Projects policy row")
+            let projects = app.buttons["Trusted Projects"]
+            revealBelowNavigationBar(app, projects)
+            XCTAssertTrue(projects.waitForExistence(timeout: 15), app.debugDescription)
+            projects.tap()
+            XCTAssertTrue(app.navigationBars.staticTexts["Trusted Projects"].waitForExistence(timeout: 30), app.debugDescription)
             let trust = app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"]
             revealBelowNavigationBar(app, trust)
             XCTAssertTrue(trust.exists, app.debugDescription)
             keepScreenshot(app, name: "2010-agent-settings-trust-\(appearance)")
+            dismissAgentSheet(app, title: "Trusted Projects")
             for _ in 0..<5 { app.swipeUp() }
             keepScreenshot(app, name: "2010-agent-settings-more-\(appearance)")
             dismissAgentSheet(app, title: "Agent Behavior")
