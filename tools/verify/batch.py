@@ -180,7 +180,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             result.update(status='uncovered', reason='missing test report')
     elif lane.get('probe'):
         output = log.read_text(errors='replace')
-        group = lane['name'].removeprefix('tests: ')
+        # A sharded iOS step is named `tests: ios k/N`; its runner group is the first word.
+        group = lane['name'].removeprefix('tests: ').split()[0]
         failures = []
         count = 0 if lane['name'].startswith('tests:') else None
         if vitest and vitest.exists():
