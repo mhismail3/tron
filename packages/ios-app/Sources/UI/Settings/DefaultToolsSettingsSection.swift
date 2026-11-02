@@ -79,9 +79,7 @@ struct DefaultToolsSettingsSection: View {
     private func load() async {
         guard activity.allowsPresentationPublication else { return }
         let ticket = generation, identity = model.knowledgePresentationIdentity
-        // `loading` covers only the first read. A refresh keeps the loaded
-        // values usable: an abandoned refresh (this owner covered by the
-        // picker it presented) must not leave that picker's choices disabled.
+        loading = true
         do {
             let resolution = try await model.resolveSettingsForRenderer(
                 target: target.gatewayTarget, keys: [Self.toolsKey, Self.codemodeModeKey, Self.extensionsKey]
