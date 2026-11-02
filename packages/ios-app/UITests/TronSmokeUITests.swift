@@ -3127,6 +3127,25 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "1261-push-separate-summary")
     }
 
+    /// Picking the displayed default pins it at the edited layer; only a value that
+    /// layer already stores is a no-op.
+    @MainActor
+    func testRendererPickOfDisplayedDefaultPinsIt() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch(); defer { app.terminate() }
+        let applied = app.staticTexts["fixture.settings-renderer-applied"]
+        XCTAssertTrue(applied.waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-lab-open"], in: app)
+        let row = app.descendants(matching: .any)["settings-row-lab.focusMode"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(settingEditor(row), in: app)
+        let calm = app.buttons["settings-option-Calm"]
+        XCTAssertTrue(calm.waitForExistence(timeout: 5), app.debugDescription)
+        calm.tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5), "A displayed default is written to the edited layer")
+    }
+
     @MainActor
     func testRendererConfirmationSurvivesCoverageAndCancelDoesNotWrite() {
         let app = XCUIApplication()
