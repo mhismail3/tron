@@ -779,8 +779,12 @@ final class TronSmokeUITests: XCTestCase {
         for target in [editor, reset] {
             // Sheet presentation briefly scales the underlying AX geometry.
             // Wait for the target's actual admitted 44-point frame, not a sleep.
+            // Frames are derived from fractional origins, so compare on the
+            // display's pixel grid rather than raw floating-point differences.
+            let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.windows.firstMatch.frame.width
+            func points(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-                predicate: NSPredicate { _, _ in target.isHittable && target.frame.height >= 44 && target.frame.width >= 44 },
+                predicate: NSPredicate { _, _ in target.isHittable && points(target.frame.height) >= 44 && points(target.frame.width) >= 44 },
                 object: target)], timeout: 5), .completed, "\(target.label): \(target.frame)")
         }
         XCTAssertFalse(editor.frame.intersects(reset.frame), "Editing and Revert must not share targets")
@@ -2183,25 +2187,40 @@ final class TronSmokeUITests: XCTestCase {
             let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
             let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
             XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+            // A pick closes the shared picker; the scripted receipt is held until released.
             alternative.tap()
-            wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: alternative)], timeout: 2)
+            let switchModel = app.buttons["manage-model-switch"]
+            let picker = app.staticTexts["Models"]
+            wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+            XCTAssertEqual(switchModel.value as? String, "Applying configuration")
+            // Browsing stays available while the receipt is pending; choices do not.
+            switchModel.tap()
+            XCTAssertTrue(alternative.waitForExistence(timeout: 5))
             XCTAssertFalse(original.isEnabled, "Rapid replacement choices are refused while one intent owns the receipt")
             XCTAssertFalse(alternative.isEnabled)
             keepScreenshot(named: "model-\(order)-pending-open")
+            app.buttons["Deliver model receipt"].tap()
             let confirmed = order == "superseded" ? original : alternative
             wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: confirmed)], timeout: 10)
-            XCTAssertTrue(app.staticTexts["Models"].exists, "Acknowledgement must not dismiss the picker")
+            XCTAssertTrue(picker.exists, "Acknowledgement must not dismiss the picker")
             keepScreenshot(named: "model-\(order)-confirmed-open")
-            confirmed.tap() // Reselect is a no-op, not another mutation.
-            XCTAssertEqual(confirmed.value as? String, "Selected")
-            app.buttons["Done"].tap()
-            XCTAssertTrue(app.staticTexts["Model requests: 1"].waitForExistence(timeout: 3))
-            app.buttons["Switch Model"].tap()
+            confirmed.tap() // Reselect is a no-op, not another mutation; the pick closes the picker.
+            wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+            let requests = app.staticTexts.matching(identifier: "fixture.model-requests").firstMatch
+            XCTAssertTrue(app.staticTexts["Model requests: 1"].waitForExistence(timeout: 3),
+                          "\(requests.label); switch: \(switchModel.value ?? "nil")\n\(app.debugDescription)")
+            switchModel.tap()
+            XCTAssertTrue(confirmed.waitForExistence(timeout: 5))
             XCTAssertEqual(confirmed.value as? String, "Selected", "Reopening derives the acknowledged authoritative model")
             if order != "superseded" {
                 original.tap()
+                wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+                XCTAssertEqual(switchModel.value as? String, "Applying configuration")
+                app.buttons["Deliver model receipt"].tap()
+                wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 10)
+                switchModel.tap()
                 wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: original)], timeout: 10)
-                XCTAssertTrue(app.staticTexts["Models"].exists, "A second distinct choice remains usable in this presentation")
+                XCTAssertTrue(picker.exists, "A second distinct choice is acknowledged and remains browsable")
             }
             app.buttons["Done"].tap()
             XCTAssertTrue(app.staticTexts[order == "superseded" ? "Model requests: 1" : "Model requests: 2"].waitForExistence(timeout: 3))
@@ -2224,19 +2243,30 @@ final class TronSmokeUITests: XCTestCase {
         let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
         let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
         XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+        // A pick closes the shared picker; the scripted refusal is held until released.
         alternative.tap()
-        let failureNotice = app.descendants(matching: .any)["in-app-notice-card"]
-        XCTAssertTrue(failureNotice.waitForExistence(timeout: 10))
-        XCTAssertTrue(failureNotice.label.contains("Model choice refused; try again."))
-        XCTAssertTrue(failureNotice.isHittable)
-        keepScreenshot(named: "model-failure-visible-in-picker")
-        XCTAssertTrue(app.staticTexts["Models"].exists)
+        let switchModel = app.buttons["manage-model-switch"]
+        let picker = app.staticTexts["Models"]
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+        XCTAssertEqual(switchModel.value as? String, "Applying configuration")
+        app.buttons["Deliver model receipt"].tap()
+        // The refusal is reported on the model row the picker closed back to.
+        let failure = app.staticTexts.matching(identifier: "settings-row-model.ref_role_chat_-error").firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(failure.label.contains("Model choice refused; try again."))
+        XCTAssertTrue(failure.isHittable)
+        keepScreenshot(named: "model-failure-visible-on-row")
+        wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 5)
+        switchModel.tap()
+        XCTAssertTrue(alternative.waitForExistence(timeout: 5))
         XCTAssertEqual(original.value as? String, "Selected")
         XCTAssertTrue(alternative.isEnabled)
         alternative.tap()
-        wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: alternative)], timeout: 2)
-        app.buttons["Done"].tap() // Accepted mutation survives picker dismissal.
-        app.buttons["Switch Model"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+        XCTAssertEqual(switchModel.value as? String, "Applying configuration") // Accepted mutation survives picker dismissal.
+        app.buttons["Deliver model receipt"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 10)
+        switchModel.tap()
         wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: alternative)], timeout: 10)
         keepScreenshot(named: "model-retry-confirmed-after-reopen")
         app.buttons["Done"].tap()
@@ -2397,8 +2427,8 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
-        tapManageRow(app, "home-manage-settings")
+        // Only Global Settings has a Changes entry; its feed spans every scope.
+        app.navigationBars.buttons["Settings"].firstMatch.tap()
         tapScrolling(app.buttons["Changes"].firstMatch, in: app)
         let row = app.buttons["settings-change-worker-setting"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
@@ -2665,11 +2695,12 @@ final class TronSmokeUITests: XCTestCase {
             let tools = app.descendants(matching: .any)["settings-row-tools.active"]
             XCTAssertTrue(tools.waitForExistence(timeout: 5))
             tapScrolling(settingEditor(tools), in: app)
-            XCTAssertTrue(app.switches["Ask User"].waitForExistence(timeout: 5))
+            // Tool rows use the shared friendly tool identities.
+            XCTAssertTrue(app.switches["Ask user"].waitForExistence(timeout: 5))
             keepScreenshot(named: "1332-home-tools-\(appearance)")
             XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Ask the user one bounded set of questions")).firstMatch.exists,
                           "Home tool rows carry their catalog's explanatory subtitles\n\(app.debugDescription)")
-            app.switches["Ask User"].tap()
+            app.switches["Ask user"].tap()
             closeTopSheet(app)
             XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5), "Preview dismissal does not save a draft")
         }
@@ -2691,28 +2722,28 @@ final class TronSmokeUITests: XCTestCase {
         let count = app.staticTexts["fixture.home-control-count"]
         func openTools() {
             tapScrolling(settingEditor(row), in: app)
-            XCTAssertTrue(app.switches["Ask User"].waitForExistence(timeout: 5),
+            XCTAssertTrue(app.switches["Ask user"].waitForExistence(timeout: 5),
                           "Home's real resource:{} options must produce actual tool rows")
             XCTAssertFalse(app.staticTexts["No tools"].exists)
         }
         openTools()
-        XCTAssertEqual(app.switches["Ask User"].value as? String, "1")
-        app.switches["Ask User"].tap()
+        XCTAssertEqual(app.switches["Ask user"].value as? String, "1")
+        app.switches["Ask user"].tap()
         closeTopSheet(app) // Cancel the unsaved draft.
         XCTAssertTrue(waitForLabel(count, containing: "control-count:0", timeout: 5))
         openTools()
-        XCTAssertEqual(app.switches["Ask User"].value as? String, "1", "Cancel does not alter Home defaults")
-        app.switches["Ask User"].tap()
+        XCTAssertEqual(app.switches["Ask user"].value as? String, "1", "Cancel does not alter Home defaults")
+        app.switches["Ask user"].tap()
         app.buttons["tron-sheet-save"].tap()
         XCTAssertTrue(waitForLabel(count, containing: "control-count:1", timeout: 5))
         openTools()
-        XCTAssertEqual(app.switches["Ask User"].value as? String, "0", "Reopen reads the accepted profile change")
+        XCTAssertEqual(app.switches["Ask user"].value as? String, "0", "Reopen reads the accepted profile change")
         closeTopSheet(app)
         let reset = app.buttons["settings-row-tools.active-reset"]
         tapScrolling(reset, in: app)
         XCTAssertTrue(waitForLabel(count, containing: "control-count:2", timeout: 5))
         openTools()
-        XCTAssertEqual(app.switches["Ask User"].value as? String, "1", "Unset restores the inherited tool selection")
+        XCTAssertEqual(app.switches["Ask user"].value as? String, "1", "Unset restores the inherited tool selection")
         keepScreenshot(named: "1325-home-tools-accepted-unset")
     }
 
@@ -3103,11 +3134,12 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         let toggle = app.descendants(matching: .any)["settings-row-context.images.block"].switches.firstMatch
         tapScrolling(toggle, in: app)
-        let confirm = app.buttons["Change setting"]
+        // A dry run that requires a tap opens the shared exact review card.
+        let confirm = app.buttons["change-review-approve"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(app.alerts.count, 0)
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
-        app.buttons["confirmation-cancel"].tap()
+        app.buttons["change-review-cancel"].tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
         tapScrolling(toggle, in: app)
@@ -3156,7 +3188,8 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
             if surface == "placement" {
                 tapScrolling(app.buttons["settings-link-Extensions"], in: app)
-                XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 5), app.debugDescription)
+                // The section's lone heading is hidden in this subsheet; its own detail identifies it.
+                XCTAssertTrue(app.staticTexts["Turn a built-in off for all sessions."].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-extensions")
                 app.staticTexts.matching(identifier: "Extensions").allElementsBoundByIndex.last!
                     .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))

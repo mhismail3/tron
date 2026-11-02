@@ -626,12 +626,15 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         }
         var outcome: [String: JSONValue] = ["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
             "layer": .string("global"), "status": .string("applied"), "tier": .string("quiet")]
-        if dryRun && key == "context.images.block" && ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") {
-            outcome["confirm"] = .string("Confirm changing image delivery.")
-        }
+        // A dry run that needs the maintainer's exact tap returns a digest-bound review.
+        let review: [String: JSONValue] = dryRun && key == "context.images.block" && ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm")
+            ? ["review": .object(["digest": .string(String(repeating: "b", count: 64)), "title": .string("Change image delivery"),
+                "requiresTap": .bool(true), "reason": .string("Confirm changing image delivery."),
+                "items": .array([.object(["label": .string("Block images"), "before": .string("Off"), "after": .string("On")])])])]
+            : [:]
         return .object([
             "status": .string("applied"), "tier": .string("quiet"), "changes": .array([.object(outcome)]),
-        ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 })
+        ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 }.merging(review) { $1 })
     }
 
     /// `set` is a value saved at Global (its Reset is offered); otherwise the row inherits the default.

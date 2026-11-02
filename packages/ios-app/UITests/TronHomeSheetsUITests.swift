@@ -179,7 +179,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         let metadata = settings.staticTexts["Assistant profile and worker launch choices"]
         let settingsTitle = settings.staticTexts["Home Settings"]
         XCTAssertTrue(metadata.exists && settingsTitle.exists)
-        let metadataHeight = metadata.frame.height
+        // This row's subtitle wraps onto two lines at accessibility text; compare one line.
+        let metadataLines = name == "ax-large" ? 2.0 : 1.0
+        let metadataHeight = metadata.frame.height / metadataLines
         XCTAssertGreaterThan(metadataHeight, 0)
         XCTAssertLessThan(metadataHeight, settingsTitle.frame.height,
                           "Default shared-row callers keep their smaller metadata style")
