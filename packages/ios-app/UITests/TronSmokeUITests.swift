@@ -2183,14 +2183,8 @@ final class TronSmokeUITests: XCTestCase {
             let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
             let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
             XCTAssertTrue(alternative.waitForExistence(timeout: 5))
-            // A pick closes the shared settings picker (#884, 1d74856b4); the Manage model
-            // card opens that picker since 28f672dd5. Its receipt state moves to Switch Model.
             alternative.tap()
-            let switchModel = app.buttons["Switch Model"]
-            wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: switchModel)], timeout: 2)
-            // Browsing stays available while the receipt is pending (b6933346d).
-            switchModel.tap()
-            XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+            wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: alternative)], timeout: 2)
             XCTAssertFalse(original.isEnabled, "Rapid replacement choices are refused while one intent owns the receipt")
             XCTAssertFalse(alternative.isEnabled)
             keepScreenshot(named: "model-\(order)-pending-open")
@@ -2198,17 +2192,14 @@ final class TronSmokeUITests: XCTestCase {
             wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: confirmed)], timeout: 10)
             XCTAssertTrue(app.staticTexts["Models"].exists, "Acknowledgement must not dismiss the picker")
             keepScreenshot(named: "model-\(order)-confirmed-open")
-            confirmed.tap() // Reselect is a no-op, not another mutation; the pick closes the picker.
-            wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Models"])], timeout: 5)
+            confirmed.tap() // Reselect is a no-op, not another mutation.
+            XCTAssertEqual(confirmed.value as? String, "Selected")
+            app.buttons["Done"].tap()
             XCTAssertTrue(app.staticTexts["Model requests: 1"].waitForExistence(timeout: 3))
-            switchModel.tap()
-            XCTAssertTrue(confirmed.waitForExistence(timeout: 5))
+            app.buttons["Switch Model"].tap()
             XCTAssertEqual(confirmed.value as? String, "Selected", "Reopening derives the acknowledged authoritative model")
             if order != "superseded" {
                 original.tap()
-                wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Models"])], timeout: 5)
-                wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 10)
-                switchModel.tap()
                 wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: original)], timeout: 10)
                 XCTAssertTrue(app.staticTexts["Models"].exists, "A second distinct choice remains usable in this presentation")
             }
