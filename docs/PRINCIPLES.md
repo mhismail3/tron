@@ -107,4 +107,7 @@ approval. The code-revert gate is not authority to reverse live data or a produc
 Line-count targets, the deletion program, Pi 1.4/`pi-subagents` bumps (#2181), visual tweaks,
 health dashboards, the two-green-batches rule and batch/quarantine/known-failure machinery
 are not epic goals. Dependency and deletion work remains open post-checkpoint, not a hidden
-prerequisite. No process ceremony or validation theater substitutes for these outcomes.
+prerequisite. A forked dependency is an upstream release tag plus the fewest patches: each
+fix is proposed upstream first and dropped once a release contains it; a Tron-only patch
+needs maintainer approval
+([Forked dependencies](../packages/gateway/docs/pi-sdk-maintenance.md#forked-dependencies)). No process ceremony or validation theater substitutes for these outcomes.
