@@ -4796,6 +4796,144 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }, 15_000,
   );
 
+  /** One admitted running workflow root with one reciprocal child edge, built like
+   * the optional-child case above from the producer capture. The registry's 750 ms
+   * pass is stopped so each case owns every discovery read of these artifacts. */
+  async function workflowChildFixture(label: string) {
+    const fixture = await coldFixture(label);
+    const registryInternal = fixture.registry as unknown as { artifactDiscoveryTimer?: NodeJS.Timeout };
+    if (registryInternal.artifactDiscoveryTimer) clearInterval(registryInternal.artifactDiscoveryTimer);
+    registryInternal.artifactDiscoveryTimer = undefined;
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = `${label}-root`;
+    const toolCallId = `${label}-tool`;
+    const childRun = `${label}-child`;
+    const artifactRoot = join(await realpath(fixture.cwd), ".pi", "subagents", "async-subagent-runs");
+    const asyncDir = join(artifactRoot, runId);
+    const childDir = join(artifactRoot, childRun);
+    const childSessionDir = join(dirname(slot.sessionFile!), basename(slot.sessionFile!, ".jsonl"), childRun, "run-0");
+    await mkdir(childSessionDir, { recursive: true });
+    const manager = SessionManager.create(fixture.cwd, childSessionDir, { id: `${label}-child-session` });
+    manager.appendMessage(fauxAssistantMessage("Child transcript"));
+    const childFile = join(childSessionDir, "session.jsonl");
+    await rename(manager.getSessionFile()!, childFile);
+    const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "frozen-real-active.json"), "utf8"));
+    const started = captured.startedAt as number;
+    const edge = { agent: "worker", label: "Worker", status: "running", async: true, runId: childRun,
+      workflowKey: "worker", sessionOwnerId: childRun, sessionFile: childFile };
+    const document = (id: string, mode: string, steps: unknown[], update: number, state = "running") => ({
+      lifecycleProjection: { ...captured.lifecycleProjection, runId: id, toolCallId, sessionId: slot.sessionFile,
+        generatedAt: update, omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+        root: { id, kind: mode === "workflow" ? "workflow" : "subagent", label: "Root", state: state === "running" ? state : "complete", startedAt: started, updatedAt: update, children: [] } },
+      runId: id, toolCallId, sessionId: slot.sessionFile, mode, state, startedAt: started, lastUpdate: update, steps,
+      ...(state === "running" ? {} : { endedAt: update }),
+    });
+    const child = (detail: Record<string, unknown>) => ({
+      ...document(childRun, "single", [{ agent: "worker", sessionFile: childFile, status: "running", ...detail }], started + 5_000),
+      parentWorkflowRunId: runId, workflowKey: "worker", sessionOwnerId: childRun,
+    });
+    const replace = async (directory: string, value: unknown) => {
+      await mkdir(directory, { recursive: true });
+      const temp = join(directory, "replacement.json");
+      await writeFile(temp, JSON.stringify(value));
+      await rename(temp, join(directory, "status.json"));
+    };
+    const owner = slot.ownedTurns;
+    owner.extensionActivities.set(toolCallId, { id: toolCallId, runId, toolCallId,
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running", children: [],
+      startedAt: new Date(started).toISOString(), updatedAt: new Date(started).toISOString(),
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: new Date(started).toISOString() } });
+    owner.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager.appendMessage({
+      role: "toolResult", toolName: "subagent", toolCallId, content: [{ type: "text", text: "Workflow started" }],
+      details: { runId, asyncId: runId, asyncDir, mode: "workflow", state: "running" }, isError: false, timestamp: started });
+    await replace(asyncDir, document(runId, "workflow", [edge], started + 5_000));
+    return {
+      slot, owner, toolCallId, asyncDir, childDir, child, replace,
+      activity: () => owner.extensionActivities.get(toolCallId),
+      // This fixture owns synthetic running evidence, not a provider process.
+      // Settle it before drain-aware cleanup, even after a failed assertion.
+      dispose: async () => {
+        try {
+          await replace(asyncDir, document(runId, "workflow", [], started + 20_000, "completed"));
+          await owner.discoverExtensionArtifact(asyncDir);
+        } finally {
+          await fixture.registry.dispose().finally(() => rm(fixture.root, { recursive: true, force: true }));
+        }
+      },
+    };
+  }
+
+  it("keeps a workflow child's detail when its status read loses to the producer's atomic replacement", async () => {
+    const f = await workflowChildFixture("child-replace");
+    try {
+      await f.replace(f.childDir, f.child({ model: "fixture/child", toolCount: 3 }));
+      expect(await f.owner.discoverExtensionArtifact(f.asyncDir), "root artifact admission").toBe("accepted");
+      expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 3 });
+      // Watchers are a second reader of the child file. Retire them so the one
+      // injected rename lands inside this discovery read's own child open.
+      f.owner.stopExtensionActivityWatcher(f.toolCallId);
+      const discovery = new AsyncLocalStorage<true>();
+      statusJsonReplace.insideRetryInvocation = () => discovery.getStore() === true;
+      statusJsonReplace.payload = JSON.stringify(f.child({ model: "fixture/child", toolCount: 4 }));
+      statusJsonReplace.statusPath = join(f.childDir, "status.json");
+      statusJsonReplace.tempPath = join(f.childDir, "status.tmp");
+      statusJsonReplace.losses = 0;
+      statusJsonReplace.replacements = 0;
+      statusJsonReplace.armed = true;
+      try {
+        await discovery.run(true, () => f.owner.discoverExtensionArtifact(f.asyncDir));
+      } finally {
+        statusJsonReplace.armed = false;
+        statusJsonReplace.insideRetryInvocation = () => false;
+      }
+      expect(statusJsonReplace.replacements, "one real rename between the child open and its verifying stat").toBe(1);
+      // The child never stopped publishing its detail: the lost read is a reader race,
+      // not an unavailable child, so the frame keeps model and tool count.
+      expect(f.activity()?.lifecycleOmissions?.children ?? 0).toBe(0);
+      expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 4 });
+      expect(f.slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/child", toolCount: 4 })]));
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("never publishes an older artifact read over a newer read's frame", async () => {
+    const f = await workflowChildFixture("read-order");
+    try {
+      // The older read observes the root edge before the child's runner has written
+      // its status, then is held after its real reads and before its publication.
+      let observeHeld!: () => void;
+      const held = new Promise<void>((resolve) => { observeHeld = resolve; });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const read = f.owner.artifacts.readExtensionStatusArtifactWithReplacementRetry.bind(f.owner.artifacts);
+      let holdNextRootRead = true;
+      vi.spyOn(f.owner.artifacts, "readExtensionStatusArtifactWithReplacementRetry").mockImplementation(async (...args) => {
+        const hold = holdNextRootRead && args[0] === f.asyncDir;
+        if (hold) holdNextRootRead = false;
+        const value = await read(...args);
+        if (hold) {
+          observeHeld();
+          await gate;
+        }
+        return value;
+      });
+      const older = f.owner.discoverExtensionArtifact(f.asyncDir);
+      await awaitsWithin(held, "older read holds its real bytes before publication");
+      await f.replace(f.childDir, f.child({ model: "fixture/child", toolCount: 0 }));
+      expect(await f.owner.discoverExtensionArtifact(f.asyncDir), "newer read").toBe("accepted");
+      expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 0 });
+      release();
+      await older;
+      expect(f.activity()?.lifecycleOmissions?.children ?? 0, "older bytes never replace a newer frame").toBe(0);
+      expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 0 });
+      expect(f.slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/child", toolCount: 0 })]));
+    } finally {
+      await f.dispose();
+    }
+  });
+
   it("discovers real producer-serialized lifecycle headers without parsing oversized reports", async () => {
     const fixture = await coldFixture("embedded-lifecycle-header");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());

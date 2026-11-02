@@ -58,7 +58,16 @@ export class OwnedTurnOwner {
     bindingRetries: number;
   }>();
 
+  /** Ticket of the latest artifact read begun for, or invalidation of, each tool
+   * call. A watcher read that sees a later ticket discards its bytes. */
   readonly extensionActivityReadGenerations = new Map<string, number>();
+
+  /** Ticket of the latest read published per tool call. Watcher, discovery and
+   * drain reads run concurrently and finish in any order; none may replace a
+   * frame built from bytes read after its own. */
+  readonly extensionActivityPublishedReads = new Map<string, number>();
+
+  private extensionArtifactReadTickets = 0;
 
   readonly extensionArtifactMissingSince = new Map<string, number>();
 
@@ -455,11 +464,31 @@ export class OwnedTurnOwner {
   }
 
 
+  /** Starts one artifact read before its first await. The watcher lane, and its
+   * invalidation, pass the tool call so an older in-flight watcher read stands
+   * down; publication order across lanes is `extensionArtifactReadSuperseded`'s. */
+  beginExtensionArtifactRead(toolCallId?: string): number {
+    const ticket = ++this.extensionArtifactReadTickets;
+    if (toolCallId !== undefined) this.extensionActivityReadGenerations.set(toolCallId, ticket);
+    return ticket;
+  }
+
+
+  /** True when a read begun after this one already published for the tool call.
+   * Callers check before claiming any effect and record in the same synchronous
+   * frame as their publication, so the published bytes only move forward. */
+  extensionArtifactReadSuperseded(toolCallId: string, ticket: number): boolean {
+    return (this.extensionActivityPublishedReads.get(toolCallId) ?? 0) > ticket;
+  }
+
+
+  recordPublishedExtensionArtifactRead(toolCallId: string, ticket: number): void {
+    this.extensionActivityPublishedReads.set(toolCallId, ticket);
+  }
+
+
   stopExtensionActivityWatcher(toolCallId: string): void {
-    this.extensionActivityReadGenerations.set(
-      toolCallId,
-      (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1
-    );
+    this.beginExtensionArtifactRead(toolCallId);
     const tracked = this.extensionActivityWatchers.get(toolCallId);
     if (!tracked) return;
     if (tracked.timer) clearTimeout(tracked.timer);
@@ -472,6 +501,7 @@ export class OwnedTurnOwner {
   clearExtensionActivityWatchers(): void {
     for (const toolCallId of this.extensionActivityWatchers.keys()) this.stopExtensionActivityWatcher(toolCallId);
     this.extensionActivityReadGenerations.clear();
+    this.extensionActivityPublishedReads.clear();
   }
 
 
