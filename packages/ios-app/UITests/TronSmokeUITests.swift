@@ -2759,12 +2759,13 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         // A one-line row subtitle at this size is the unit the intro is measured in
         // (the custom-model row was retired by 8ef595612).
-        let subtitle = app.staticTexts["Agent alerts on this iPhone"]
+        let subtitle = app.staticTexts["Provider accounts and sign-in"]
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
         let line = subtitle.frame.height
         XCTAssertGreaterThan(line, 8)
         tapScrolling(app.buttons["Changes"].firstMatch, in: app)
-        let intro = app.staticTexts["Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it."]
+        // The Changes intro copy is the audit-history caption (b2d3a6dd3).
+        let intro = app.staticTexts["One audit history · All scopes. Includes your changes, agent requests, and observed external edits. History never supplies configuration values."]
         XCTAssertTrue(intro.waitForExistence(timeout: 5), app.debugDescription)
         // A medium-detent sheet is drawn slightly scaled; measure at large, settled.
         app.staticTexts["Changes"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
