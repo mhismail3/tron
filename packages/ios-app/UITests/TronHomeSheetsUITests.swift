@@ -486,15 +486,24 @@ final class TronHomeSheetsUITests: XCTestCase {
             if abs(now - last) < 0.5 { break }
             last = now
         }
-        // Drag the sheet by its own top edge, above the navigation bar. A press on the
-        // bar can open the accessibility large-content viewer, and a flick on the content
-        // races the content scroll view's pan and can scroll it instead;
-        // the edge belongs to the sheet's resize gesture alone.
+        // Drag by the bar's empty leading edge, as `expand` does. At accessibility
+        // sizes a press on the bar can open the large-content viewer instead, so
+        // later tries flick the scrolled-to-top content below it or swipe it up.
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: title.frame.minY - 14))
-            .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 40)),
-                   withVelocity: .slow, thenHoldForDuration: 0.1)
-        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: title)], timeout: 5)
+        for attempt in 0..<6 where title.frame.minY > 120 {
+            switch attempt % 3 {
+            case 0:
+                origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
+                    .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+            case 1:
+                origin.withOffset(CGVector(dx: 60, dy: title.frame.maxY + 30))
+                    .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)),
+                           withVelocity: .fast, thenHoldForDuration: 0)
+            default:
+                app.swipeUp()
+            }
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: title)], timeout: 2)
+        }
         XCTAssertLessThan(title.frame.minY, 120, "\(text) reached its large detent")
     }
 
