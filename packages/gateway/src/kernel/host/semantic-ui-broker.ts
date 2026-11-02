@@ -106,6 +106,23 @@ function requireBoundedString(value: string, maximumBytes: number, field: string
   }
 }
 function stripTerminalPresentation(value: string): string { return stripTerminalControls(value, true); }
+/**
+ * One-line, unique labels for select options; the answer maps back by position
+ * to the extension's own option. Pi's terminal select renders multi-line options
+ * (CortexKit's `/claude` sections carry their status lines), but a semantic
+ * select option is a single line on the wire and in the app.
+ */
+function selectLabels(options: readonly string[]): string[] {
+  const used = new Set<string>();
+  return options.map((option) => {
+    if (typeof option !== "string") return option as string;
+    const base = stripTerminalPresentation(option).split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.length > 0).join(" · ");
+    let label = base;
+    for (let copy = 2; used.has(label); copy += 1) label = `${base} (${copy})`;
+    used.add(label);
+    return label;
+  });
+}
 function boundedWidgetLines(content: unknown): string[] | undefined {
   if (!Array.isArray(content) || !content.every((line) => typeof line === "string") || content.length > MAX_WIDGET_LINES) return undefined;
   const lines: string[] = [];
@@ -398,8 +415,10 @@ export class SemanticUIBroker {
     const broker = this;
     const context: ExtensionUIContext = {
       async select(title, options, opts) {
-        const result = await broker.request({ method: "select", title, options }, opts);
-        return typeof result === "string" && options.includes(result) ? result : undefined;
+        const labels = selectLabels(options);
+        const result = await broker.request({ method: "select", title, options: labels }, opts);
+        const index = typeof result === "string" ? labels.indexOf(result) : -1;
+        return index < 0 ? undefined : options[index];
       },
       async confirm(title, message, opts) { return (await broker.request({ method: "confirm", title, message }, opts)) === true; },
       async input(title, placeholder, opts) {
