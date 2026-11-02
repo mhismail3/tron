@@ -3035,6 +3035,24 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "1261-tools-persisted-selectors")
     }
 
+    /// #2207: the codemode choice sheet Default Tools presents is usable once
+    /// the section has read its values.
+    @MainActor
+    func testDefaultToolsCodemodePickerOffersEnabledChoices() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write", "-settings-ui-extensions"]
+        app.launch(); defer { app.terminate() }
+        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+        let codeMode = app.buttons["Other tools with codemode"]
+        XCTAssertTrue(codeMode.waitForExistence(timeout: 10), app.debugDescription)
+        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: codeMode)], timeout: 10)
+        tapScrolling(codeMode, in: app)
+        let only = app.buttons["settings-option-Codemode only"]
+        XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(only.isEnabled, "The presented choices must be enabled: \(app.debugDescription)")
+        XCTAssertTrue(app.buttons["settings-option-Both"].isEnabled)
+    }
+
     @MainActor
     func testPushReadinessAndRegistrationAreSeparateFromPolicyToggles() {
         let app = XCUIApplication()
