@@ -18,6 +18,23 @@ deployment, Gateway lifecycle command, Stable install or restart is part of this
   the one-time manual Mac Release reinstall.
 - Provider IDs and credentials follow the Pi catalog; retired IDs are never migrated or aliased.
 
+## Forked dependencies
+
+Tron carries a fork only for a fix upstream has not released, or for a product-specific
+change the maintainer approved as Tron-only. New fixes go upstream first; the patch only
+bridges until a release ships it. A fork is rebuilt on an upstream release
+tag as a patch queue, one commit per patch, versioned `<upstream>-tron.<n>`, with a patch
+list naming each patch's reason, upstream PR or issue, drop condition and the test that fails
+without it. Each bump (#2181) rebases onto the newest tag, runs upstream suites, the patch
+tests and Tron's affected checks, and deletes patches the release contains; a rebase
+conflict or a persisted-data migration is a maintainer decision, never applied automatically.
+
+| Fork | Pin | Current patch form |
+| --- | --- | --- |
+| `pi-coding-agent` | `pi-coding-agent-patch.json` (`removeWhen`) | one numbered `third_party/pi-coding-agent/tron.patch`; queue form at its next bump |
+| `pi-subagents` | `pi-subagents-pin.json` | fork commits on v0.76.1, each with tests and a drop condition in TRON-PATCHES.md in the fork; queue form at its next bump |
+| CortexKit `anthropic-auth` | user package in `~/.tron/agent/settings.json` | a 1.23.1-tron fork build; its replacement is a patch queue on upstream 2.4.12 (PATCHES.md in the fork, patch tests in one file) that the maintainer switches to |
+
 ## Version authority and checks
 
 `packages/gateway/package.json` is the sole version authority: `pi-agent-core`, `pi-ai`,
