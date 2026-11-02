@@ -185,6 +185,56 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
+  // #1698: a run's terminal notice that the provider queues into the report turn, before the
+  // report seals, is context for that turn, not a reason for another one. The SDK continues a
+  // run that ends with queued messages, so the sealed boundary must leave none queued.
+  it("records a notice queued into the report turn as context and starts no turn after the sealed report", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    const seen: { runDir?: string; queued?: boolean; extraTurn?: FauxContext } = {};
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      async (context: FauxContext) => {
+        await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+        seen.runDir = launchedAsyncDir(context, "async-launch");
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.runDir) }, { id: "own-stop" })], { stopReason: "toolUse" });
+      },
+      async () => {
+        const slot = await f.registry.acquire(run.sessionId);
+        // The stopped run's notice reaches the parent while this report turn streams.
+        await waitFor(() => !slot.catalogHasActiveSubagents && slot.runtime.session.agent.hasQueuedMessages(), "stop notice queued into the report turn", bound);
+        seen.queued = true;
+        return fauxAssistantMessage([reportCall("report-with-queued-notice")], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        seen.extraTurn = context;
+        return fauxAssistantMessage("A turn after the sealed report");
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(seen.queued).toBe(true);
+    expect(seen.extraTurn).toBeUndefined();
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(result.reportRef).toMatchObject({ resultId: "report-with-queued-notice" });
+    const slot = await f.registry.acquire(run.sessionId);
+    const entries = slot.canonicalSessionEntries();
+    const runId = basename(seen.runDir!);
+    const report = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron-home-task-report");
+    const notice = entries.findIndex(entry => entry.type === "custom_message" && entry.customType === "subagent-notify" && entryText(entry).includes(runId));
+    const receipt = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron.context-delivery.v4"
+      && (entry.data as { targetEntryId?: string })?.targetEntryId === entries[notice]?.id);
+    const fact = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron-home-task-subagents");
+    // The notice stays canonical, receipted evidence, after the report and before the settlement fact,
+    // and no assistant message follows the sealed report.
+    expect(notice).toBeGreaterThan(report);
+    expect(receipt).toBeGreaterThan(notice);
+    expect(fact).toBeGreaterThan(receipt);
+    expect(entries.slice(report).filter(entry => entry.type === "message" && entry.message.role === "assistant")).toHaveLength(0);
+    expect(slot.runtime.session.agent.hasQueuedMessages()).toBe(false);
+    expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
   it("refuses a report while a completed workflow's async child is live, and accepts it once the child has ended", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);

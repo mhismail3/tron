@@ -81,7 +81,8 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
   Choices are fixed in the brief and reported (`worker`, `subagentModels`; subagents default to
   `tron/subagent`). A usage limit moves to the next worker model in place.
 - A worker has project tools plus `report` and a canonical `tron-home-task` marker checked
-  before cold construction. A sealed report ends the task at that turn boundary; Stop is
+  before cold construction. A sealed report ends the task at that turn boundary: a provider
+  notice already queued into that turn is appended as context and starts no turn; Stop is
   terminal (`task-stopped-before-delivery` receipts for unconsumed steers);
   `DelegationOperations` has a 24-hour ceiling. Individual reply completions update
   attention without stamping the task's root run marker. A notice or report reminder
