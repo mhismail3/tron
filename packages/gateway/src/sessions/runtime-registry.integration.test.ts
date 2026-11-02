@@ -4879,6 +4879,25 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     };
   }
 
+  it("disposes a runtime whose ownership write completed while the event loop was stalled past its deadline", async () => {
+    const fixture = await coldFixture("ownership-write-stall");
+    try {
+      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+      // A real durable marker write: its fsync chain runs on the fs threadpool
+      // and needs the loop between steps. Block the thread past the 20 s window,
+      // as a synchronous extension transform does under load.
+      const write = slot.enqueueMarkerOwnership("stalled-ownership-operation");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 21_000);
+      await expect(write).resolves.toBeUndefined();
+      expect(slot.runPersistence.hasBlockedOwnershipWrite).toBe(false);
+      await slot.clearMarkerOwnership("stalled-ownership-operation");
+    } finally {
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("keeps a workflow child's detail when its status read loses to the producer's atomic replacement", async () => {
     const f = await workflowChildFixture("child-replace");
     try {

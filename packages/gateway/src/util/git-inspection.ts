@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { GatewayError } from "../errors.js";
+import { StallTolerantDeadline } from "./stall-tolerant-deadline.js";
 import { workspaceGitEnvironment } from "./workspace-git-environment.js";
 
 const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
@@ -59,11 +60,11 @@ export async function runGit(
     let truncated = false;
     let timedOut = false;
     let overflowed = false;
-    const timer = setTimeout(() => {
+    // Git runs outside this loop; a stalled loop must not expire a finished Git.
+    const deadline = new StallTolerantDeadline(options.timeoutMs ?? GIT_TIMEOUT_MS, () => {
       timedOut = true;
       killProcessGroup();
-    }, options.timeoutMs ?? GIT_TIMEOUT_MS);
-    timer.unref();
+    });
 
     child.stdout.on("data", (chunk: Buffer) => {
       if (truncated) return;
@@ -89,11 +90,11 @@ export async function runGit(
       errorBytes += Math.min(chunk.length, remaining);
     });
     child.once("error", (error) => {
-      clearTimeout(timer);
+      deadline.cancel();
       rejectPromise(new GatewayError("internal", `Git could not be started: ${error.message}`, true));
     });
     child.once("close", (code) => {
-      clearTimeout(timer);
+      deadline.cancel();
       if (timedOut) return rejectPromise(new GatewayError("busy", "Git inspection timed out", true));
       if (overflowed) return rejectPromise(new GatewayError("conflict", "Git output exceeded the bounded inspection limit", true));
       if (truncated && options.truncate) return resolvePromise({
