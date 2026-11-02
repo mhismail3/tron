@@ -853,6 +853,7 @@ class IosLaneTests(VerifyCase):
         spec = importlib.util.spec_from_file_location("shipped_verify", ROOT / "tools/verify/verify.py")
         shipped = importlib.util.module_from_spec(spec); spec.loader.exec_module(shipped)
         size = shipped.IOS_SHARD_TESTS  # the shipped shard size; the class holds one full shard plus two
+        self.assertGreaterEqual(size, 2, "this fixture's two method shards need at least two tests per shard")
         methods = [f"testCase{index}" for index in range(size + 2)]
         split = size - 1  # the class file's methods; the extension file holds the other three
         body = "\n".join(f"    @MainActor func {name}() {{}}" for name in methods[:split])
