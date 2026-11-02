@@ -30,6 +30,7 @@
     "sessions/session-catalog.ts",
     "sessions/session-export.ts",
     "kernel/session/canonical-reader.ts",
+    "kernel/session/canonical-reader.integration.test.ts",
     "kernel/session/README.md"
   ],
   "dependsOn": [

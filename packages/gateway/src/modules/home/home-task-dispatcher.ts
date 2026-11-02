@@ -460,7 +460,8 @@ export class HomeTaskDispatcher {
     const instructions = [...carried, ...(text ? [text] : [])];
     const epoch = await this.stage("setup", taskId, signal, () => this.store.restoreEpoch());
     const budget = await this.stage("budget", taskId, signal, () => this.policy.budget());
-    const entries = await this.sessions.readTaskEvidence(sessionId);
+    // The settled predecessor's operation precedes anything appended since.
+    const entries = await this.sessions.readTaskEvidence(sessionId, { appendStable: true });
     const brief = resumeBrief(previous, instructions, interruptedQuestion(homeTaskOperationSpan(entries, previous.operationId!).run));
     const task = await this.stage("create", taskId, signal, () => this.store.put({
       version: 1, taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
@@ -1016,7 +1017,7 @@ export class HomeTaskDispatcher {
       || task.terminalEvidence.reason !== "no-report" || !task.sessionId || !task.operationId
       || task.terminalEvidence.sessionId !== task.sessionId) return null;
     try {
-      const entries = await this.sessions.readTaskEvidence(task.sessionId);
+      const entries = await this.sessions.readTaskEvidence(task.sessionId, { appendStable: true });
       // The operation's own span: a resumed successor appends its operation after it.
       const span = homeTaskOperationSpan(entries, task.operationId);
       if (span.index < 0) return null;
@@ -1159,7 +1160,8 @@ export class HomeTaskDispatcher {
     }
     if (task.reportRef) {
       if (!task.sessionId || !task.operationId) throw new GatewayError("conflict", "Task evidence is missing");
-      const entries = await this.sessions.readTaskEvidence(task.sessionId);
+      // A reference proves its report present; later appends cannot remove it.
+      const entries = await this.sessions.readTaskEvidence(task.sessionId, { appendStable: true });
       const evidence = await this.reportEvidence(task, entries);
       const ref = task.reportRef;
       if (!evidence || evidence.entryId !== ref.entryId || evidence.report.resultId !== ref.resultId

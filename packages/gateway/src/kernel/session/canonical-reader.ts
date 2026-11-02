@@ -288,6 +288,9 @@ async function readWholeFile(
  * the SDK's repairing/migrating SessionManager just to inspect evidence. */
 export async function readCanonicalSessionFile(options: {
   path: string; sessionId: string; maxLineBytes: number;
+  /** Accept an append to the same file during the read: the entries are then the
+   * exact prefix that existed when the read began, proven unchanged by a second read. */
+  appendStable?: boolean;
 }): Promise<EpisodicCanonicalEntry[]> {
   const handle = await open(options.path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -301,7 +304,20 @@ export async function readCanonicalSessionFile(options: {
       if (entry.parentId !== null && !parents.has(entry.parentId)) throw new EpisodicMemoryError("source", "Canonical session evidence has a missing parent");
       parents.add(entry.id);
     }
-    if (!sameSnapshot(start, await handle.stat())) throw new EpisodicSourceChangedError();
+    const end = await handle.stat();
+    if (!sameSnapshot(start, end)) {
+      // Pi appends to the same inode and never rewrites a session in place, so a
+      // grown file whose first `start.size` bytes read back the same lines kept them.
+      if (!options.appendStable || end.dev !== start.dev || end.ino !== start.ino || end.size < start.size) throw new EpisodicSourceChangedError();
+      // Bytes that no longer parse were changed under the first pass, not malformed at its start.
+      const again = await readWholeFile(handle, { ...options, endBytes: start.size }).catch((error: unknown) => {
+        if (error instanceof EpisodicMemoryError && error.kind === "source") throw new EpisodicSourceChangedError();
+        throw error;
+      });
+      if (again.batch.lines.length !== batch.lines.length || again.batch.lines.some((line, index) => line !== batch.lines[index])) {
+        throw new EpisodicSourceChangedError();
+      }
+    }
     return entries;
   } finally { await handle.close(); }
 }
