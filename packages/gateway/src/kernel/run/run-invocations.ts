@@ -30,6 +30,7 @@ export class RunInvocations {
       // settlement can retire the operation's own work first, so the inbox
       // acknowledgement holds its own work: the session is not idle before it,
       // and an idle notice refused as busy meanwhile is delivered when it ends.
+      // Stop and abort end a run without an idle notice, so they get none here.
       const work = this.operations.dependencies.workRegistry.beginDerived({
         kind: "terminal-receipt-persistence", sessionId: this.operations.id, hostEpoch: this.operations.ui.hostEpoch,
       });
@@ -39,7 +40,7 @@ export class RunInvocations {
         });
       } finally {
         work.settle();
-        this.operations.noteHomeIdle();
+        if (receipt.lifecycle !== "interrupted") this.operations.noteHomeIdle();
       }
     }
   }
