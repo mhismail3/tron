@@ -182,10 +182,11 @@ struct SettingsRendererView: View {
         })
         let groups = Self.detailGroups(section, keys: keys)
         if !showsGroupHeadings, !ownsDefaultTools, groups.count == 1, let only = groups.first, only.manyInstances == nil,
-           Self.rowsNameGroup(only), (only.detail ?? section.note) == nil {
-            // The section is one group whose rows already name it: no repeated
-            // heading, and no wrapper that would take over a lone row's own
-            // accessibility identity when single-child containers collapse.
+           Self.rowsNameGroup(only) || only.keys.count == 1, (only.detail ?? section.note) == nil {
+            // The section is one headless group (its rows name it, or its lone
+            // heading is hidden anyway): no repeated heading, and no wrapper that
+            // would take over a lone row's own accessibility identity when
+            // single-child containers collapse.
             TronSettingsGroup(nil) {
                 VStack(spacing: 0) { rows(only.keys, resolution: resolution, options: options, detailed: true, instanced: only.instanced) }
             }
