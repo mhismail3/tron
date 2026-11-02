@@ -2705,11 +2705,22 @@ describe("Tron Home activations end to end", () => {
     let releaseSecondResponse!: () => void;
     const secondResponseGate = new Promise<void>(resolve => { releaseSecondResponse = resolve; });
     const invoke = f.service.invoke.bind(f.service);
+    let publishedAfterResync = false;
     (f.service as unknown as { invoke: typeof f.service.invoke }).invoke = async (context, method, params) => {
       methods.push(method);
       const second = method === "session.prompt" && (params as { text?: string }).text === "refusal two";
       if (second) holdSecondSnapshots = true;
+      // The forced resync's baseline owns everything published before it. Like a
+      // real Gateway, publish every later event to the reattached client.
+      const resyncOpen = method === "session.open" && holdSecondSnapshots;
+      if (resyncOpen) holdSecondSnapshots = false;
       const result = await invoke(context, method, params);
+      if (resyncOpen && !publishedAfterResync) {
+        // One real sequenced event after that baseline, while refusal 2's response
+        // is still held: the client must receive it in order, with no event gap.
+        publishedAfterResync = true;
+        slot.publishConfiguration();
+      }
       if (second) {
         await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
           receipt.receiptKind === "terminal" && receipt.operationId === (result as { operationId: string }).operationId));
@@ -2765,6 +2776,9 @@ describe("Tron Home activations end to end", () => {
       await waitUntil(() => (stderr.match(/Tron synchronized/gu)?.length ?? 0) > syncsBefore, 10_000);
       await waitUntil(() => (stdout.match(/Home memory is not configured/gu)?.length ?? 0) >= 2, 2_000).catch(() => { throw new Error(`missing second refusal; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
       releaseSecondResponse();
+      // The next ordinary sequenced event proves the post-baseline one arrived:
+      // the client checks each event against the sequence it last received.
+      slot.publishConfiguration();
       const repeatedRefusalCount = stdout.match(/Home memory is not configured/gu)?.length ?? 0;
       await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 3, 10_000);
       terminal.stdin.write("/home memory anthropic\n");
@@ -2817,6 +2831,8 @@ describe("Tron Home activations end to end", () => {
       await mkdir(join(process.cwd(), "test-results", "terminal-chat-home"), { recursive: true });
       await writeFile(join(process.cwd(), "test-results", "terminal-chat-home", "transcript.json"), `${JSON.stringify(artifact, null, 2)}\n`);
       expect(scrub(stderr)).not.toContain("tron-chat:");
+      expect(publishedAfterResync, "a real event followed the forced resync baseline").toBe(true);
+      expect(scrub(stderr), "the reattached client missed no sequenced event").not.toContain("reason=event-gap");
       expect(code).toBe(0);
       expect(signal).toBeNull();
       expect(artifact.assertions.repeatedRefusalCount).toBeGreaterThanOrEqual(2);
