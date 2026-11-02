@@ -135,20 +135,24 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(detail.contains("1.8M total tokens") && detail.contains("91.4% cache hit"), detail)
     }
 
-    @MainActor func testBulkProfileConfirmationRequiresThePill() {
+    /// The learned profile is organized by personal area, in the area order, with
+    /// no bulk confirmation: each note is confirmed exactly from its own detail.
+    @MainActor func testProfileGroupsNotesByAreaWithoutBulkConfirmation() {
         let app = launchPolishManage(); defer { app.terminate() }
         open(app, element(app, "home-manage-profile"), ready: "home-profile-items", name: "profile-polish")
         expand(app, done: "home-sheet-done-profile")
-        let row = element(app, "home-profile-confirm-all")
-        XCTAssertTrue(row.exists)
-        row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
-        XCTAssertFalse(app.buttons["Confirm all"].firstMatch.exists, "The row itself is inert")
-        let pill = app.buttons["home-profile-confirm-all-button"]
-        XCTAssertTrue(pill.exists && pill.isHittable)
-        XCTAssertGreaterThan(pill.frame.midX, row.frame.midX, "Confirm is trailing")
-        pill.tap()
-        XCTAssertTrue(app.buttons["Confirm all"].firstMatch.waitForExistence(timeout: 5), "Only the pill opens the existing confirmation")
-        shot("1723-profile-pill-confirmation")
+        let areas = ["Communication", "Machines, devices & services", "Unsorted"].map { app.staticTexts[$0].firstMatch }
+        for area in areas { XCTAssertTrue(area.exists, area.description) }
+        XCTAssertLessThan(areas[0].frame.minY, areas[1].frame.minY, "Areas keep their order")
+        XCTAssertLessThan(areas[1].frame.minY, areas[2].frame.minY, "Unsorted follows the reviewed areas")
+        for kind in ["Preferences", "Standing decisions", "Delegation defaults", "Facts"] {
+            XCTAssertFalse(app.staticTexts[kind].exists, "\(kind) is a note's kind, not its group")
+        }
+        XCTAssertFalse(element(app, "home-profile-confirm-all").exists, "No bulk confirmation")
+        XCTAssertFalse(app.buttons["home-profile-confirm-all-button"].exists)
+        let unsorted = element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
+        XCTAssertTrue(unsorted.label.contains("inferred/needs-split") && unsorted.label.contains("Inferred"), unsorted.label)
+        shot("profile-areas")
     }
 
     @MainActor func testRetireIconAndSubtextUseDestructiveInk() {
@@ -1040,7 +1044,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, profileRow, ready: "home-profile-items", name: "profile")
         expand(app, done: "home-sheet-done-profile")
         assertTitleTint(app, "Profile", matches: rowTint, and: manageTint)
-        for kind in ["Standing decisions", "Delegation defaults", "Facts"] { XCTAssertTrue(app.staticTexts[kind].exists, kind) }
+        for area in ["Communication", "Machines, devices & services", "Unsorted"] { XCTAssertTrue(app.staticTexts[area].exists, area) }
         let item = element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
         XCTAssertTrue(item.label.contains("screenshots") && !item.label.contains("**"), item.label)
         XCTAssertTrue(item.label.contains("Inferred"), item.label)
@@ -1073,17 +1077,17 @@ final class TronHomeSheetsUITests: XCTestCase {
         expand(app, done: "home-sheet-done-profile")
 
         // Rows only open their item (#971): no row carries its own Confirm, and each row
-        // spans its group so the text keeps the full width. Rows still say Inferred or Confirmed.
+        // spans its group so the text keeps the full width. Rows still say Inferred or Confirmed by you.
         let inferred = "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc", confirmed = "6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c"
         let rowActions = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-confirm-' AND NOT (identifier BEGINSWITH 'home-profile-confirm-all')"))
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-confirm-'"))
         XCTAssertEqual(rowActions.count, 0, "Profile rows carry no inline Confirm")
         let inferredRow = element(app, "home-profile-item-\(inferred)")
         XCTAssertTrue(inferredRow.label.contains("Inferred"), inferredRow.label)
-        XCTAssertTrue(element(app, "home-profile-item-\(confirmed)").label.contains("Confirmed"))
+        XCTAssertTrue(element(app, "home-profile-item-\(confirmed)").label.contains("Confirmed by you"))
         let group = element(app, "home-profile-items")
         XCTAssertLessThan(abs(inferredRow.frame.width - group.frame.width), 2, "The row spans its group: \(inferredRow.frame) in \(group.frame)")
-        XCTAssertTrue(app.staticTexts["3 items become binding on every Home turn"].exists)
+        XCTAssertFalse(element(app, "home-profile-confirm-all").exists, "Notes are confirmed one at a time")
         keep("profile-edit-00-list")
 
         // An item is confirmed from its detail; the last change offers Undo, which restores it.
@@ -1091,7 +1095,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         expand(app, done: "home-sheet-done-profile-item")
         XCTAssertTrue(element(app, "home-profile-item-state").label.hasSuffix("Inferred"))
         element(app, "home-profile-item-confirm").tap()
-        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed by you'"))
         XCTAssertTrue(element(app, "home-profile-last-change").waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "home-profile-item-confirm").exists, "A confirmed item has nothing to confirm")
         keep("profile-edit-01-confirmed-undo")
@@ -1100,17 +1104,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(element(app, "home-profile-item-confirm").waitForExistence(timeout: 5))
         app.buttons["home-sheet-done-profile-item"].tap()
         XCTAssertTrue(waitFor(element(app, "home-profile-item-\(inferred)"), "label CONTAINS 'Inferred'"))
-
-        // Confirm all asks first, then confirms every inferred item at once.
-        element(app, "home-profile-confirm-all-button").tap()
-        let confirmAll = app.buttons["Confirm all"].firstMatch
-        XCTAssertTrue(confirmAll.waitForExistence(timeout: 5))
-        keep("profile-edit-02-confirm-all")
-        confirmAll.tap()
-        XCTAssertTrue(app.staticTexts["Confirmed 3 items"].waitForExistence(timeout: 5))
-        XCTAssertFalse(element(app, "home-profile-confirm-all").exists)
-        element(app, "home-profile-undo").tap()
-        XCTAssertTrue(waitFor(element(app, "home-profile-confirm-all"), "exists == true"))
 
         // An item's detail: Edit is the Settings value editor with Save, and an edit is confirmed.
         let decision = "00a809ef-ca94-49ec-938d-1a11444c657b"
@@ -1129,7 +1122,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("profile-edit-04-editor")
         assertToolbarTint(app, title: "Edit item")
         app.buttons["tron-sheet-save"].tap()
-        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed by you'"))
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'top wins: Chat > Home profile > Project > Mac.'")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Edited: '")).firstMatch.exists)
         keep("profile-edit-05-edited")
@@ -1145,7 +1138,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertFalse(element(app, "home-profile-item-edit").exists, "A retired item no longer changes")
         keep("profile-edit-07-retired")
         element(app, "home-profile-undo").tap()
-        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed by you'"))
         app.buttons["home-sheet-done-profile-item"].tap()
         // The Profile sheet re-read behind its item: the edited text is listed.
         XCTAssertTrue(waitFor(element(app, "home-profile-item-\(decision)"), "label CONTAINS 'top wins'"))
