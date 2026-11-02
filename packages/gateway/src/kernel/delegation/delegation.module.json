@@ -18,6 +18,7 @@
     "managed-subagents.invalid-entry.integration.test.ts",
     "managed-subagents.payload.integration.test.ts",
     "managed-subagents.rollback.integration.test.ts",
+    "managed-subagents.transform.integration.test.ts",
     "managed-subagents.ts",
     "managed-workflow-children.integration.test.ts",
     "delegation-operations.ts",

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, opendirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { Worker } from "node:worker_threads";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
@@ -64,6 +65,34 @@ interface RequiredChildApi {
   registerRequiredChildExtensions?: (input: { sessionId: string; extensions: readonly { id: string; path: string }[] }) => { dispose(): void };
 }
 interface Entry { name: string; type: string; bytes: Buffer; target: string; mode: number; }
+interface JitiOptions { moduleCache: boolean; alias: Record<string, string>; fsCache: string }
+type JitiFactory = (base: string, options: JitiOptions) => { import: (path: string, options: { default?: true }) => Promise<unknown> };
+
+/** Transforms every TypeScript module of the verified build with the Gateway's
+ * exact jiti options, exactly as an ESM import would, leaving each result in the
+ * private cache. Nothing is evaluated, so no provider code runs here, and the
+ * cache also covers modules the provider imports lazily. */
+const TRANSFORM_CACHE_WORKER = `
+const { parentPort, workerData } = require("node:worker_threads");
+const { readdirSync, readFileSync } = require("node:fs");
+const { join } = require("node:path");
+(async () => {
+  const { createJiti } = await import(workerData.jitiUrl);
+  const jiti = createJiti(workerData.base, workerData.jiti);
+  // jiti silently disables an unwritable cache; nothing would then be prepared.
+  if (!jiti.options.fsCache) throw new Error("transform cache is not writable");
+  const visit = (directory) => {
+    for (const item of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, item.name);
+      if (item.isDirectory() && item.name !== "node_modules") visit(path);
+      else if (item.isFile() && /\\.[cm]?tsx?$/.test(item.name) && !/\\.d\\.[cm]?tsx?$/.test(item.name)) {
+        jiti.transform({ filename: path, source: readFileSync(path, "utf8"), ts: true, async: true, jsx: jiti.options.jsx });
+      }
+    }
+  };
+  visit(workerData.root);
+})().then(() => parentPort.postMessage({}), (error) => parentPort.postMessage({ error: String(error && error.message || error) }));
+`;
 
 /** The pinned builder emits ustar only. No arbitrary archive metadata or
  * install scripts are executable at activation; unsupported entries fail closed. */
@@ -360,17 +389,73 @@ export class ManagedSubagents {
   /** Use the closure's declared TypeScript loader with exact host peer aliases.
    * No user package tree or copied SDK participates in factory execution. */
   private async loadFactory(path: string): Promise<ExtensionFactory> {
-    const factory = await this.loadModule(path, true);
+    const factory = await this.loadModule(path, { defaultExport: true });
     if (typeof factory !== "function") throw new GatewayError("conflict", "managed pi-subagents entry does not export a factory");
     return factory as ExtensionFactory;
   }
 
-  private async loadModule(path: string, defaultExport = false): Promise<unknown> {
+  /** pi-subagents' own agent discovery module for the subagent catalog. It only
+   * reads definitions and settings, so jiti's module cache keeps it across reads. */
+  loadDiscovery(): Promise<unknown> {
+    return this.loadModule(this.discoveryEntry(), { moduleCache: true });
+  }
+
+  private discoveryEntry(): string {
+    return join(this.root, "src", "agents", "agents.js");
+  }
+
+  private async loadModule(path: string, options: { defaultExport?: boolean; moduleCache?: boolean } = {}): Promise<unknown> {
+    const loader = this.jitiOptions();
+    // Factory loads evaluate a fresh module graph (sessions keep separate module
+    // state), but only from transforms the worker below left in the private cache.
+    // Without them the import would transform on this thread, so the load refuses
+    // instead and a later load prepares again.
+    const prepared = this.transformCache ??= this.prepareTransformCache(loader);
+    try {
+      await prepared;
+    } catch {
+      if (this.transformCache === prepared) this.transformCache = undefined;
+      throw new GatewayError("busy", "managed pi-subagents could not prepare its TypeScript transforms; retry the load", true);
+    }
+    const { createJiti } = await import(loader.jitiUrl) as { createJiti: JitiFactory };
+    return await createJiti(import.meta.url, { ...loader.jiti, moduleCache: options.moduleCache ?? false })
+      .import(path, options.defaultExport ? { default: true } : {});
+  }
+
+  private transformCache: Promise<void> | undefined;
+
+  /** The closure's declared jiti with exact host peer aliases and a private,
+   * per-build transform cache outside the verified installs. No user package tree,
+   * copied SDK or shared temporary directory participates in factory execution. */
+  private jitiOptions(): { jitiUrl: string; jiti: JitiOptions } {
     const require = createRequire(join(this.root, "package.json"));
-    const { createJiti } = await import(pathToFileURL(require.resolve("jiti")).href) as {
-      createJiti: (base: string, options: { moduleCache: boolean; alias: Record<string, string> }) => { import: (path: string, options: { default?: true }) => Promise<unknown> };
-    };
-    return await createJiti(import.meta.url, { moduleCache: false, alias: piExtensionAliases() }).import(path, defaultExport ? { default: true } : {});
+    const fsCache = join(dirname(dirname(this.root)), "pi-subagents-transform-cache", basename(this.root));
+    privateDirectory(fsCache);
+    return { jitiUrl: pathToFileURL(require.resolve("jiti")).href, jiti: { moduleCache: false, alias: piExtensionAliases(), fsCache } };
+  }
+
+  /** jiti's TypeScript transform is synchronous and, for this closure, takes
+   * seconds of CPU. A worker transforms the build once per process (a cache hit
+   * after the first) so the Gateway thread reads cached transforms instead of
+   * blocking every session on that work. */
+  private async prepareTransformCache(options: { jitiUrl: string; jiti: JitiOptions }): Promise<void> {
+    let worker: Worker | undefined;
+    try {
+      const started = new Worker(TRANSFORM_CACHE_WORKER, { eval: true, workerData: { ...options, base: import.meta.url, root: this.verify() } });
+      worker = started;
+      await new Promise<void>((resolveWorker, rejectWorker) => {
+        started.once("message", (message: { error?: string }) => message.error ? rejectWorker(new Error(message.error)) : resolveWorker());
+        started.once("error", rejectWorker);
+        started.once("exit", (code) => rejectWorker(new Error(`transform worker exited with code ${code}`)));
+      });
+    } catch (error) {
+      this.logger?.log("warning", "Managed subagent transforms could not be prepared off the Gateway thread", {
+        event: "pi-subagents.transform-cache-failed", source: "managed-subagents",
+      });
+      throw error;
+    } finally {
+      await worker?.terminate();
+    }
   }
 
   admit(extensions: readonly Extension[]): void {
