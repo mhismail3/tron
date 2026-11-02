@@ -549,7 +549,9 @@ export function keyForHome(key: KeyDeclaration, home: boolean): KeyDeclaration {
   if (key.sessionOverridable && layers.session?.store === "session-settings" && !layers.home) {
     layers.home = { store: "home", path: ["settings", ...layers.session.path] };
   }
-  return { ...key, layers, ...(key.home && Object.hasOwn(key.home, "defaultValue") ? { defaultValue: key.home.defaultValue } : {}) };
+  const type = key.id === "tools.active" ? { ...key.type, summary: (value: unknown) =>
+    `${key.type.summary!(value)}; Home wake turns omit write, edit and bash` } : key.type;
+  return { ...key, type, layers, ...(key.home && Object.hasOwn(key.home, "defaultValue") ? { defaultValue: key.home.defaultValue } : {}) };
 }
 
 export function keyDefault(key: KeyDeclaration, qualifiers: Partial<Record<QualifierName, string>>): unknown {

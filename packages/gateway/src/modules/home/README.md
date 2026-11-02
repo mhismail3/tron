@@ -103,12 +103,13 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` and
-  `tron-web-research` load. [Projects](../projects/README.md) owns the `projects` tool
-  for creation and tap-gated lifecycle actions. Shared Pi file/search/shell tools allow direct
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-home`, `tron-home-research` and `tron-web-research` load.
+  [Projects](../projects/README.md) owns tap-gated lifecycle actions. Shared Pi file/search/shell tools allow direct
   work; only canonical maintainer turns admit general writes, edits or shell execution.
-  Agent `SYSTEM.md`/
-  `APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
+  Home's current recipe owns model, thinking and tools on creation/reconstruction and every request; chapter choices are records, never overrides.
+  Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
+  Settings counts enabled tools; every producer-owned input is a wake and withholds `write`, `edit` and `bash`.
+  Agent `SYSTEM.md`/`APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical
   selection metadata. Composition supplies lazy runtime acquisition, proxy isolation and Home
@@ -269,6 +270,7 @@ and the [built-in improvement-loop design](../../../../../tools/home-retro/DESIG
 | `home.task.store-refused`; `home.task.authorization`; `home.task.transition`; `home.task.checkin`; `home.task.spend`; `home.task.dispatch-stage`; `home.task.producer-refused`; `home.task.report-reminder` | info; refusals and slow, timed-out, cancelled or abandoned-cleanup-failed dispatch stages warn | Keyed by `taskHash`/`operationHash`, never intent, report or path ([tasks.md](tasks.md)): task-store refusal `reason` (fenced until the next start, in `home.status.taskRecovery`); scope, grant and decision transitions; durable `pending`/`active`/`terminal` transitions with `reason`, `failureCause`, `errorCode`; check-in `attention`; deduplicated token spend; a `delegate` admission `stage` slow (≥ 5 s), timed out (60 s), cancelled or `abandon-failed` (the late resource cleanup rejected); a refused detached-capable producer (`reason: unverified-provider` diagnoses a reviewed-version/pin mismatch before launch); the single report-only continuation |
 | `home.task.control`; `home.task.runaway-stop`; `home.task.detached-work`; `home.task.subagents`; `home.taskStatus.subagentRuns`; `home.taskStatus.ownerSettlement` | info; runaway stop and detached work warn; `home.taskStatus.*` are read-only status fields | Steer, interrupt and Stop `disposition` (`accepted`, `persisted`, `refused` with a finite `reason`; interrupt `calls`); the deadline cancel-and-join outcome; detached work outliving settlement (outcome unknown); subagent `started`, `stoppedAtEnd`, `noticesUndelivered`; the exact live runs that report and Stop select; the owner-settlement proof (`null` is unproven) |
 | `home.task.inbox`; `home.wake`; `home.inbox.admission-slow`; `home-inbox-settlement-failed` code on `session.diagnostic`; `home-worker-attention-failed` | info; refused wakes, slow admission (≥ 2 s) and failures warn | Wake-inbox transitions (`eventHash`, `state`, coded `reason`); each wake decision (`admitted`, `deferred`, `refused` with `reason`); result delivery into an activation (`delivery`, `durationMs`); a durable terminal whose inbox settlement rejected (session event); a failed acknowledgement of a new worker's earlier completion |
+| `session.context.activeTools` versus Home `settings.resolve` → `tools.active` | read-only RPC fields | Both describe the enabled recipe after runtime construction. A mismatch diagnoses stale selection; `home.context.breakdown.activation.kind` explains why wake requests omit `write`, `edit` and `bash` without changing that recipe |
 | `TRON_SETTINGS_OUTCOME_PROOF_DEFERRED` | warning | A settings delivery's canonical proof failed; its outbox remains retained for later proof, without exposing request IDs or paths |
 | `home.response-timing`; `home.task.history-summary` | info | Content-free accepted-input→visible/terminal scalar sample with queue/model/tool durations and completeness; authoritative admitted operation/resume counts with root hash and root-created time for page deduplication. A crash loses live timing correlation; a bounded log export is partial coverage |
 | `host.pressure` | info; warning at `critical` | A Home-status read saw the host-pressure level change: `state`, `transition`, CPU busy, loop utilization and load per CPU; it informs and never holds a worker back |
@@ -276,6 +278,7 @@ and the [built-in improvement-loop design](../../../../../tools/home-retro/DESIG
 ## Verify
 `scripts/tron verify --module gateway/home` or `scripts/tron test gateway <file>` covers
 `src/modules/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested suites add `--config vitest.nested.config.ts`).
+`src/automations/home-tool-admission.e2e.test.ts` captures provider declarations for fresh/stale chapters, maintainer/automation turns and saved selections.
 Boundary fixtures read session presence/files through Native; chapter metrics remain Home-owned.
 The redelivery rollover case keeps the result pending across rollover, observes the
 successor wake's acknowledgement, then waits for both `hasActiveAgentRun` and

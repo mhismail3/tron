@@ -67,7 +67,7 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
     const keys = this.schema.KEYS.filter(hasRuntimeRequestApplier);
     // The provider-request boundary reads values only: outside comparison and git
     // state belong to settings reads and file events, not to every model request.
-    const resolved = await this.resolve({ kind: "session", sessionId }, session, [...keys.map(key => key.id), "model.ref[role=chat]", "model.thinking[role=chat]"], { storeState: false });
+    const resolved = await this.resolve({ kind: "session", sessionId }, session, [...keys.map(key => key.id), "model.ref[role=chat]", "model.thinking[role=chat]", ...(session.home ? ["tools.active"] : [])], { storeState: false });
     const settings: Record<string, unknown> = {};
     const requestPins = structuredClone(previousPins);
     for (const row of resolved.keys) {
@@ -84,7 +84,7 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
       }
       if (value !== undefined) setPath(settings, binding.path, await key.type.validate(value, key.id));
     }
-    return { settings, requestPins, admission: resolved.keys.filter(row => row.key === "model.ref[role=chat]" || row.key === "model.thinking[role=chat]") };
+    return { settings, requestPins, admission: resolved.keys.filter(row => row.key === "model.ref[role=chat]" || row.key === "model.thinking[role=chat]" || (session.home && row.key === "tools.active")) };
   }
 
   options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest): Promise<SettingsOptionsResult> {
