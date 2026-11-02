@@ -188,7 +188,8 @@ The terminal task and its wake event share one fsynced record. Events move `pend
   receipt; ordinary chats never drain the inbox. A quiet pass proves the inbox quiet until the
   next write (`home.inbox.admission-slow` names slow ones).
 - `HomeOwner`'s single-flight scheduler wakes when a result settles while Home is eligible,
-  after recovery, after `home.resumeMemory` and when an activation goes idle; receipts use
+  after recovery, after `home.resumeMemory` and when an activation goes idle. Home is not idle
+  until its terminal receipt's inbox acknowledgement settles; receipts use
   source `homeWake`, no user row. The text opens with title, outcome, subagent counts and
   elapsed time, then report and evidence.
 - Results arrive whole in order within context and chapter headroom; the rest stays pending
