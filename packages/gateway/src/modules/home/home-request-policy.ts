@@ -7,7 +7,7 @@ import {
   type ModelRuntime,
   type SessionProjection,
 } from "../../kernel/pi/coding-agent.js";
-import { markAnthropicBlocks } from "../../episodic/cache-layout.js";
+import { markAnthropicBlocks, VIEW_BLOCK_LINES } from "../../episodic/cache-layout.js";
 import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
 import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
@@ -177,10 +177,6 @@ export interface HomeActivationView {
   text: string;
   /** The view as request blocks (`viewPieces`); they rejoin to `text`. */
   pieces: string[];
-  /** Records that a request carrying this view was prepared, so the next
-   * activation's blocks start where this one ended. Called after every refusal
-   * check: a refused activation sends nothing, and must not move it. */
-  commit: () => void;
   /** Milliseconds spent waiting for the memory to cover the activation's start;
    * 0 when every line it needed was already built. */
   waitedMs: number;
@@ -476,7 +472,6 @@ export class HomeRequestPolicy {
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
       activation.step = { effectiveTokens, viewBytes, viewLines, contextWindow, sections };
-      memoryView.commit();
       // Once per activation, not once per request: a tool loop or a retry is the
       // same activation and its effective size and wait are already reported.
       if (activation.unrecorded) {
@@ -735,7 +730,7 @@ export class HomeRequestPolicy {
         else excludedMessages += 1;
       }
     });
-    // The view first, as its cache blocks (#491), and the per-activation nonce
+    // The view first, as its cache blocks (#2228), and the per-activation nonce
     // last: anything that changes every activation must follow the view, or no
     // request could re-read the view from a provider's cache (gist §8).
     const memory: AgentMessage = {
@@ -874,12 +869,13 @@ function digestLlmMessages(messages: unknown): string {
 }
 
 /**
- * Place Home's cache breakpoints on the memory message of an Anthropic Messages
- * payload (#491): one on the view's base block, which is unchanged between
- * rebalances, and one on its last line, where the next request's 20-block
- * lookback finds this request's entry; none on the footer or the nonce. It runs
- * as Home's `before_provider_request` handler, after this seam validated the
- * request, and changes only `cache_control` fields (cache-layout.ts).
+ * Place Home's cache breakpoint on the memory message of an Anthropic Messages
+ * payload (#2228): on the view's last whole line group (`viewPieces`), the last
+ * block every later request sends unchanged until a rebalance, or on the header
+ * when the view has no whole group yet. Never on the partial last group, the
+ * footer or the nonce, which change between activations. It runs as Home's
+ * `before_provider_request` handler, after this seam validated the request, and
+ * changes only `cache_control` fields (cache-layout.ts).
  */
 export function markHomeMemoryCache(payload: unknown): unknown {
   const messages = (payload as { messages?: unknown } | null)?.messages;
@@ -893,20 +889,22 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   });
   if (index < 0) return payload;
   const blocks = (messages[index] as { content: unknown[] }).content;
-  // [first, ...lines, footer, nonce]: the last line is third from the end, or the
-  // first block when no line followed it. The first block is found by shape, not
-  // position: a provider that composes its own request may put blocks before it
-  // (CortexKit prepends its cached prompt block to the first user message).
-  const last = blocks.length - 3;
-  let first = last;
-  while (first > 0 && isViewLineBlock(blocks[first])) first -= 1;
-  return last < 0 ? payload : markAnthropicBlocks(payload, index, [...new Set([first, last])]);
+  // [header, ...groups, footer, nonce]: the last group is third from the end. A
+  // provider that composes its own request may put blocks before the header
+  // (CortexKit prepends its cached prompt block to the first user message), so
+  // the mark is found from the end.
+  let mark = blocks.length - 3;
+  if (mark < 0) return payload;
+  const lines = viewGroupLines(blocks[mark]);
+  if (lines !== undefined && lines < VIEW_BLOCK_LINES) mark -= 1;
+  return markAnthropicBlocks(payload, index, [mark]);
 }
 
-/** One block per view line after the first block (`viewPieces`): `id+n|text` and a line end. */
-function isViewLineBlock(block: unknown): boolean {
+/** The number of `id+n|text` lines a view group block holds, or undefined for any other block. */
+function viewGroupLines(block: unknown): number | undefined {
   const text = (block as { type?: unknown; text?: unknown } | null)?.text;
-  return (block as { type?: unknown } | null)?.type === "text" && typeof text === "string" && /^\d+\+\d+\|[^\n]*\n$/u.test(text);
+  if ((block as { type?: unknown } | null)?.type !== "text" || typeof text !== "string") return undefined;
+  return /^(?:\d+\+\d+\|[^\n]*\n)+$/u.test(text) ? text.split("\n").length - 1 : undefined;
 }
 
 /**

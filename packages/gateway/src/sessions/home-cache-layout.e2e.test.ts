@@ -2,6 +2,7 @@ import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-supp
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../test-support/session-settings-change.js";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import type { GatewayConfig } from "../config.js";
-import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, cachePieces } from "../episodic/cache-layout.js";
+import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, VIEW_BLOCK_LINES, cachePieces } from "../episodic/cache-layout.js";
 import { EPISODIC_COMPACT_PROMPT } from "../episodic/episodic-compactor.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
@@ -20,7 +21,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
-// Recipe §8 caching, proved on the wire (#491): Home
+// Recipe §8 caching, proved on the wire (#491, #2228): Home
 // turns and the episodic summarizer's calls go through pi-ai's real Anthropic
 // request builder to a local Anthropic-compatible endpoint that records every
 // request body and header. Nothing here calls a real provider.
@@ -213,42 +214,88 @@ function markTtls(captured: Captured): Set<string> {
   return ttls;
 }
 
-/** The base block (header plus base lines), one block per later line, the footer. */
+/** The header, the lines in groups of `VIEW_BLOCK_LINES` (only the last may be
+ * shorter), the footer. */
 function expectViewLayout(pieces: string[]): void {
   expect(pieces[0]!.startsWith(HOME_MEMORY_VIEW_MARKER)).toBe(true);
+  expect(pieces[0]!.endsWith("<chat>\n")).toBe(true);
   expect(pieces.at(-1)).toBe("</chat>");
-  for (const piece of pieces.slice(1, -1)) expect(piece).toMatch(/^\d+\+\d+\|[^\n]*\n$/u);
-  for (const piece of pieces.slice(0, -1)) expect(piece.endsWith("\n")).toBe(true);
+  const groups = pieces.slice(1, -1);
+  groups.forEach((piece, index) => {
+    expect(piece).toMatch(/^(?:\d+\+\d+\|[^\n]*\n)+$/u);
+    const lines = piece.split("\n").length - 1;
+    if (index < groups.length - 1) expect(lines).toBe(VIEW_BLOCK_LINES);
+    else expect(lines).toBeLessThanOrEqual(VIEW_BLOCK_LINES);
+  });
+}
+
+/** Every block of one request in Anthropic's prefix order (tools, system, then
+ * each message's content), without its mark, and whether it carried one. */
+function wireBlocks(captured: Captured): Array<{ path: string; json: string; marked: boolean }> {
+  const out: Array<{ path: string; json: string; marked: boolean }> = [];
+  const add = (path: string, block: unknown) => {
+    const { cache_control: control, ...rest } = block as Record<string, unknown>;
+    out.push({ path, json: JSON.stringify(rest), marked: control !== undefined });
+  };
+  for (const key of ["tools", "system"] as const) {
+    const list = captured.body[key];
+    if (Array.isArray(list)) list.forEach((block, index) => add(`.${key}[${index}]`, block));
+  }
+  messagesOf(captured).forEach((message, index) => blocks(message).forEach((block, at) => add(`.messages[${index}].content[${at}]`, block)));
+  return out;
+}
+
+/** The cumulative hash of every block up to and including each block. */
+function prefixHashes(list: ReadonlyArray<{ json: string }>): string[] {
+  const hash = createHash("sha256");
+  return list.map(({ json }) => { hash.update(json); return hash.copy().digest("hex"); });
 }
 
 /**
- * Anthropic's cache rule for the memory message: a request re-reads an
- * entry the previous request wrote at one of its marks when that mark's offset is
- * a block end of this request with the same text before it, within 20 blocks
- * before one of this request's marks. Home marks the first block and the last
- * line (`markHomeMemoryCache`). Returns the longest re-read offset, in characters.
+ * Anthropic's documented cache rule (prompt-caching "How automatic prefix checking
+ * works"): a mark writes one entry keyed by the cumulative hash of every block up
+ * to it, and a request reads the deepest prior entry found walking back at most
+ * 20 blocks, the mark itself first, from each of its marks. The same text cut into
+ * other blocks is another key. Returns the path of the block whose entry `next`
+ * re-reads from `previous`, or undefined.
  */
-function anthropicReuse(previous: Captured, next: Captured): number {
-  const ends = (texts: string[]) => texts.reduce<number[]>((acc, text) => [...acc, (acc.at(-1) ?? 0) + text.length], []);
-  const marked = (texts: string[]) => [...new Set([0, texts.length - 1])];
-  const before = viewBlocksOf(previous), after = viewBlocksOf(next);
-  const beforeText = before.join(""), afterText = after.join("");
-  const beforeEnds = ends(before), afterEnds = ends(after);
-  let reused = 0;
-  for (const mark of marked(before)) {
-    const offset = beforeEnds[mark]!;
-    const block = afterEnds.indexOf(offset);
-    if (block < 0 || afterText.slice(0, offset) !== beforeText.slice(0, offset)) continue;
-    if (marked(after).some((nextMark) => nextMark >= block && nextMark - block <= 20)) reused = Math.max(reused, offset);
-  }
-  return reused;
+function reread(previous: Captured, next: Captured): string | undefined {
+  const before = wireBlocks(previous), after = wireBlocks(next);
+  const written = new Set(prefixHashes(before).filter((_hash, index) => before[index]!.marked));
+  const hashes = prefixHashes(after);
+  let deepest = -1;
+  after.forEach((block, index) => {
+    if (!block.marked) return;
+    for (let at = index; at >= 0 && at > index - 20; at -= 1) {
+      if (written.has(hashes[at]!)) { deepest = Math.max(deepest, at); return; }
+    }
+  });
+  return deepest < 0 ? undefined : after[deepest]!.path;
 }
 
-/** "extend" when the next request re-reads the previous request's whole view. */
+/** The memory message's marks in one request. */
+function viewMarks(captured: Captured): string[] {
+  return wireBlocks(captured).filter((block) => block.marked && block.path.startsWith(".messages[0].")).map((block) => block.path);
+}
+
+/** The path of the memory message's last mark in one request. */
+function viewMark(captured: Captured): string {
+  return viewMarks(captured).at(-1)!;
+}
+
+/** "extend" when the next request re-reads the entry the previous request wrote at
+ * its view mark; "partial" for an earlier memory block, "rewrite" for none. */
 function transition(previous: Captured, next: Captured): "extend" | "partial" | "rewrite" {
-  const reused = anthropicReuse(previous, next);
-  const whole = viewBlocksOf(previous).join("").length;
-  return reused === whole ? "extend" : reused > 0 ? "partial" : "rewrite";
+  const read = reread(previous, next);
+  return read === viewMark(previous) ? "extend" : read?.startsWith(".messages[0].") ? "partial" : "rewrite";
+}
+
+/** Leading view blocks two requests share, byte for byte. */
+function sharedViewBlocks(previous: Captured, next: Captured): number {
+  const a = viewBlocksOf(previous), b = viewBlocksOf(next);
+  let index = 0;
+  while (index < a.length && index < b.length && a[index] === b[index]) index += 1;
+  return index;
 }
 
 /** Bytes of the view text the next request shares with the previous one, from its start. */
@@ -335,24 +382,26 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(lastMemory.length).toBeGreaterThanOrEqual(2);
     expect(lastMemory.at(-1)!.text).toMatch(new RegExp(`^${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
     expect(JSON.stringify(last!.body).split(HOME_NONCE_MARKER).length - 1).toBe(1);
-    // The base block, then one block per line since it, then the
-    // footer: they rejoin to the view text exactly as the model reads it.
+    // Consecutive turns: the next request's blocks up to the previous request's
+    // view mark are the same blocks, byte for byte, and its own mark finds that
+    // entry within Anthropic's lookback.
+    const previousBlocks = wireBlocks(previous!), lastBlocks = wireBlocks(last!);
+    const previousMark = previousBlocks.findIndex((block) => block.path === viewMark(previous!));
+    expect(lastBlocks.slice(0, previousMark + 1).map((block) => block.json)).toEqual(previousBlocks.slice(0, previousMark + 1).map((block) => block.json));
+    expect(transition(previous!, last!)).toBe("extend");
+    // The header, the lines in fixed groups, then the footer: they rejoin to the
+    // view text exactly as the model reads it.
     expect(view.length).toBeGreaterThan(50_000);
     expectViewLayout(viewPieces);
-    // Marks on the base and on the last line, none on the
-    // footer or the nonce, the request end marked, the limit kept, every mark long-lived.
-    const lastLine = lastMemory.length - 3;
-    expect(lastMarks).toContain(".messages[0].content[0]");
-    expect(lastMarks).toContain(`.messages[0].content[${lastLine}]`);
-    expect(lastMarks).not.toContain(`.messages[0].content[${lastMemory.length - 2}]`);
-    expect(lastMarks).not.toContain(`.messages[0].content[${lastMemory.length - 1}]`);
+    // One view mark, on the last whole group (never the partial group, the footer
+    // or the nonce), the request end marked, the limit kept, every mark long-lived.
+    const lastGroup = lastMemory.length - 3;
+    const viewMarkAt = (lastMemory[lastGroup]!.text ?? "").split("\n").length - 1 === VIEW_BLOCK_LINES ? lastGroup : lastGroup - 1;
+    expect(viewMarks(last!)).toEqual([`.messages[0].content[${viewMarkAt}]`]);
     const lastMessage = messagesOf(last!).length - 1;
     expect(lastMarks).toContain(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(lastMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     expect(markTtls(last!)).toEqual(new Set(["1h"]));
-    // The previous turn's view is a block prefix of this one, with
-    // its end within Anthropic's 20-block lookback of this request's end mark.
-    expect(transition(previous!, last!)).toBe("extend");
     expect(JSON.stringify(previous!.body.system)).toBe(JSON.stringify(last!.body.system));
     expect(JSON.stringify(previous!.body.tools)).toBe(JSON.stringify(last!.body.tools));
     // The tool step reuses the frozen view and marks its own end.
@@ -430,7 +479,12 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       const { shared, previous: size } = sharedViewBytes(previous, next);
       // A rewrite is any change before the previous view's end: a rebalance,
       // wherever its merges landed. Everything else only appended.
-      return { turn: index + 1, kind: transition(previous, next), shared, size, rewrite: shared < size };
+      const linesOf = (request: Captured) => viewBlocksOf(request).slice(1).join("").split("\n").slice(0, -1);
+      const before = linesOf(previous), after = linesOf(next);
+      let sharedLines = 0;
+      while (sharedLines < before.length && before[sharedLines] === after[sharedLines]) sharedLines += 1;
+      return { turn: index + 1, kind: transition(previous, next), shared, size, rewrite: shared < size,
+        sharedBlocks: sharedViewBlocks(previous, next), sharedLines };
     });
     // The budget was passed: a view at least half the budget was rebalanced.
     const firstRewrite = steps.find((step) => step.rewrite && step.size >= EPISODIC_DEFAULTS.viewBytes / 2);
@@ -444,11 +498,16 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     // Every turn that is not a rebalance extends the previous turn's blocks
     // within Anthropic's lookback, so its marked end is found again.
     for (const step of past) if (!step.rewrite) expect(step.kind, `turn ${step.turn}`).toBe("extend");
+    // A rebalance keeps every block before its first merged line: the header and
+    // each whole group of unchanged lines are the same blocks as before.
+    for (const step of rewrites) {
+      expect(step.sharedBlocks, `rebalance at turn ${step.turn}`).toBeGreaterThanOrEqual(1 + Math.floor(step.sharedLines / VIEW_BLOCK_LINES));
+    }
     // The layout holds at every size.
     for (const request of turns.slice(-3)) expectViewLayout(memoryOf(request).slice(0, -1).map((block) => block.text ?? ""));
     report.cases.push({
       case: "past-budget", turns: turns.length, firstRewrite: firstRewrite!.turn, turnsPast: past.length,
-      rewrites: rewrites.map((step) => ({ turn: step.turn, sharedBytes: step.shared, previousBytes: step.size })),
+      rewrites: rewrites.map((step) => ({ turn: step.turn, sharedBytes: step.shared, previousBytes: step.size, sharedBlocks: step.sharedBlocks, kind: step.kind })),
       transitions: past.reduce<Record<string, number>>((counts, step) => ({ ...counts, [step.kind]: (counts[step.kind] ?? 0) + 1 }), {}),
       lastViewBytes: Buffer.byteLength(viewBlocksOf(turns.at(-1)!).join("")),
     });

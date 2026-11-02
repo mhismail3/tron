@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { EpisodicMemoryError } from "../../errors.js";
+import { VIEW_BLOCK_LINES } from "../../episodic/cache-layout.js";
 import { EPISODIC_SEARCH_QUERY_CHARS, type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "../../episodic/episodic-memory.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
@@ -134,8 +134,6 @@ interface HomeMemoryOptions {
 
 interface MemoryBinding {
   memory: EpisodicMemory;
-  /** What the last activation's request sent from this memory (#491). */
-  sent?: SentView;
 }
 
 /** The attribution every Home memory view carries. Summaries of the earlier
@@ -156,37 +154,29 @@ const VIEW_HEADER = [
 ].join("\n");
 const VIEW_FOOTER = "</chat>";
 
-/** The view lines one request sent, by count and digest (#491). */
-interface SentView {
-  lines: number;
-  digest: string;
-}
-
-function digestLines(lines: readonly string[]): string {
-  return createHash("sha256").update(lines.join("\n")).digest("hex");
-}
-
 /**
- * The view as the blocks a Home request sends (#491): the header with every line
- * the previous request sent, one block per line after it, then the footer. They
- * rejoin to exactly `header\nlines\nfooter`, the text the model reads.
+ * The view as the blocks a Home request sends (#2228): the header, the lines in
+ * groups of `VIEW_BLOCK_LINES` (cache-layout.ts) counted from the view's first line, then the
+ * footer. They rejoin to exactly `header\nlines\nfooter`, the text the model reads.
  *
- * Between two rebalances the view only gains lines at its end, so the previous
- * request's lines are still this view's start, and the first block ends exactly
- * where that request marked its last line: a provider that caches only where a
- * request marks it (Anthropic) re-reads that entry, and only the new lines are
- * written. After a rebalance the start changed, so nothing earlier is reusable
- * and the whole view is one block, written once.
+ * Anthropic keys a cache entry by the cumulative hash of every block up to its
+ * mark, so a later request re-reads it only if its blocks up to there are the same
+ * blocks, not merely the same text. Grouping by position from the start makes
+ * the blocks a function of the view alone: between two rebalances the view only
+ * gains lines at its end, so every whole group a request sent is a block of the
+ * next request too, and only the last, partial group can change. The request
+ * marks the last whole group (`markHomeMemoryCache`); a later request's mark finds
+ * that entry within Anthropic's 20-block lookback while an activation adds fewer
+ * than about 80 lines. A rebalance changes the blocks from its first merged line
+ * on, and the blocks before it stay.
  */
-function viewPieces(text: string, previous: SentView | undefined): { pieces: string[]; sent: SentView } {
+function viewPieces(text: string): string[] {
   const lines = text === "" ? [] : text.split("\n");
-  const kept = previous && previous.lines <= lines.length && digestLines(lines.slice(0, previous.lines)) === previous.digest
-    ? previous.lines : lines.length;
-  const base = `${VIEW_HEADER}\n${lines.slice(0, kept).map(line => `${line}\n`).join("")}${lines.length === 0 ? "\n" : ""}`;
-  return {
-    pieces: [base, ...lines.slice(kept).map(line => `${line}\n`), VIEW_FOOTER],
-    sent: { lines: lines.length, digest: digestLines(lines) },
-  };
+  const groups: string[] = [];
+  for (let start = 0; start < lines.length; start += VIEW_BLOCK_LINES) {
+    groups.push(lines.slice(start, start + VIEW_BLOCK_LINES).map(line => `${line}\n`).join(""));
+  }
+  return [`${VIEW_HEADER}\n${lines.length === 0 ? "\n" : ""}`, ...groups, VIEW_FOOTER];
 }
 
 export class HomeMemory {
@@ -288,8 +278,8 @@ export class HomeMemory {
     if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     if (!this.config || !this.summarizer) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     if (signal?.aborted) throw new HomeMemoryRefusal("memory-wait-cancelled", "Chapter activation was cancelled");
-    const { pieces } = viewPieces("", undefined);
-    return { text: pieces.join(""), pieces, waitedMs: 0, commit: () => {} };
+    const pieces = viewPieces("");
+    return { text: pieces.join(""), pieces, waitedMs: 0 };
   }
 
   /**
@@ -349,15 +339,8 @@ export class HomeMemory {
       if (blocked) throw this.blockedRefusal(blocked);
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not cover the activation start: ${messageOf(error)}`);
     }
-    const view = binding.memory.renderView(cut);
-    const { pieces, sent } = viewPieces(view.text, binding.sent);
-    return {
-      text: pieces.join(""),
-      pieces,
-      waitedMs: Math.round(performance.now() - waitingSince),
-      // A reopened memory starts from nothing sent; an old activation must not move it.
-      commit: () => { if (this.binding === binding) binding.sent = sent; },
-    };
+    const pieces = viewPieces(binding.memory.renderView(cut).text);
+    return { text: pieces.join(""), pieces, waitedMs: Math.round(performance.now() - waitingSince) };
   }
 
   /** The bounded memory status, for `home.status` and for the seam's evidence. */

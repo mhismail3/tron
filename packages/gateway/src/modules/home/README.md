@@ -129,7 +129,9 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   separately. Historical system deltas are not additional heads. Output reserve remains.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
   `results`, `input`. For caching, system prompt and tools are stable within an origin kind; the view only
-  grows between rebalances, and Home requests ask for `long` retention.
+  grows between rebalances and is sent in four-line blocks from its first line, with one Anthropic mark on
+  the last whole block (#2228), and Home requests ask for `long` retention. A provider that composes its own
+  body without Pi's `before_provider_request` hook (CortexKit) keeps only its own marks.
 
 ### Maintainer obligations
 
