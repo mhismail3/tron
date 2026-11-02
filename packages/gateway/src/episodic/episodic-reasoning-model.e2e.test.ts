@@ -27,6 +27,10 @@ async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
   const bodies: Array<Record<string, unknown>> = [];
   const server: Server = createServer((request, response) => {
     let raw = "";
+    // Decode the whole stream, not each chunk: a chunk may end inside a
+    // multi-byte character (the prompt's ’), which per-chunk decoding turns into
+    // U+FFFD and so changes the recorded prefix bytes (#2228).
+    request.setEncoding("utf8");
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
       const body = JSON.parse(raw) as Record<string, unknown>;

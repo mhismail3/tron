@@ -210,7 +210,7 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
    with `scripts/tron-ios-test build`. Subsequent runs reuse that build.
 2. **`layers ios`** reads that index. Stale/missing indexes fail; no symbol-scan fallback.
 3. **`tests: ios`** uses the same products. Each selected class (named or extended by the
-   file) runs as its `test` methods, at most six per runner process (`tests: ios 1/N`), so
+   file) runs as its `test` methods, at most three per runner process (`tests: ios 1/N`), so
    every process keeps the runner's focused deadline; a class whose methods cannot be read
    or that holds test-shaped methods the reader cannot place runs whole. Each method shard must
    pass exactly its named tests. Every admitted shard runs before a failure is reported; a busy

@@ -849,30 +849,37 @@ class IosLaneTests(VerifyCase):
         r = self.repo
         calls = self.ios_fixture()
         ios = "packages/ios-app/UITests"
-        methods = [f"testCase{index}" for index in range(8)]
-        body = "\n".join(f"    @MainActor func {name}() {{}}" for name in methods[:5])
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("shipped_verify", ROOT / "tools/verify/verify.py")
+        shipped = importlib.util.module_from_spec(spec); spec.loader.exec_module(shipped)
+        size = shipped.IOS_SHARD_TESTS  # the shipped shard size; the class holds one full shard plus two
+        self.assertGreaterEqual(size, 2, "this fixture's two method shards need at least two tests per shard")
+        methods = [f"testCase{index}" for index in range(size + 2)]
+        split = size - 1  # the class file's methods; the extension file holds the other three
+        body = "\n".join(f"    @MainActor func {name}() {{}}" for name in methods[:split])
         r.write(f"{ios}/FixtureJourneyUITests.swift", "final class FixtureJourneyUITests {\n"
                 + body + "\n    private func testHelper() {}\n    func testWithArgument(_ value: Int) {}\n}\n")
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
-                + "\n".join(f"    func {name}() {{}}" for name in methods[5:]) + "\n}\nstruct Other {\n    func testNotAMethodOfTheClass() {}\n}\n")
+                + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n}\nstruct Other {\n    func testNotAMethodOfTheClass() {}\n}\n")
         r.commit("a large class")
         owner = "TronMobileUITests/FixtureJourneyUITests"
         planned = r.verify("--module", "ios-app/ui-tests", "--plan")
         plan = json.loads(planned.stdout[planned.stdout.index("{"):])
         self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios ")], ["tests: ios 1/3", "tests: ios 2/3", "tests: ios 3/3"])
         calls.write_text("")
-        r.env.update(FIXTURE_IOS_FAIL=f"{owner}/testCase1()", FIXTURE_IOS_FAIL_IN=f"{owner}/testCase1 ")
+        # Sources are read in path order, so the extension file's methods come first.
+        ordered = methods[split:] + methods[:split]
+        red = ordered[0]
+        r.env.update(FIXTURE_IOS_FAIL=f"{owner}/{red}()", FIXTURE_IOS_FAIL_IN=f"{owner}/{red} ")
         result = r.verify("--module", "ios-app/ui-tests")
         runs = [line for line in calls.read_text().splitlines() if line.startswith("run ")]
-        # Sources are read in path order, so the extension file's methods come first.
-        ordered = methods[5:] + methods[:5]
         self.assertEqual(runs, [
-            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[:6]),
-            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[6:]),
+            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[:size]),
+            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[size:]),
             "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"], result.stdout)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("tests: ios 1/3 FAILED", result.stdout)
-        self.assertIn(f"failed: {owner}/testCase1(): a11y differs", result.stdout)
+        self.assertIn(f"failed: {owner}/{red}(): a11y differs", result.stdout)
         self.assertIn("tests: ios 2/3 OK", result.stdout)
         self.assertIn("tests: ios 3/3 OK", result.stdout)
 
@@ -880,7 +887,7 @@ class IosLaneTests(VerifyCase):
         r.env.pop("FIXTURE_IOS_FAIL"); r.env.pop("FIXTURE_IOS_FAIL_IN")
         (r.path / f"{ios}/TronMacTerminalUITests.swift").unlink()  # its harness lane would make the run incomplete
         r.commit("no harnessed journey")
-        r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=f"{owner}/{ordered[6]}")
+        r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=f"{owner}/{ordered[size]}")
         deferred = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         steps = {step["name"]: step["status"] for step in r.report()["steps"]}
         self.assertEqual([steps[f"tests: ios {index}/3"] for index in (1, 2, 3)], ["ok", "deferred", "deferred"], deferred.stdout)
@@ -888,15 +895,15 @@ class IosLaneTests(VerifyCase):
         r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN")
 
         # A shard whose runner passes fewer tests than it names fails: a selector matched nothing.
-        r.env.update(FIXTURE_IOS_PASSED="5")
+        r.env.update(FIXTURE_IOS_PASSED=str(size - 1))
         short = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(short.returncode, 1, short.stdout)
-        self.assertIn("tests: ios 1/3 passed 5 of its 6 named test(s)", short.stdout)
+        self.assertIn(f"tests: ios 1/3 passed {size - 1} of its {size} named test(s)", short.stdout)
         r.env.pop("FIXTURE_IOS_PASSED")
 
         # A test-shaped method the reader cannot place makes the class run whole, never dropped.
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n    let text = \"\"\"\nunplaced\n    \"\"\"\n"
-                + "\n".join(f"    func {name}() {{}}" for name in methods[5:]) + "\n}\n")
+                + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n}\n")
         r.commit("an unreadable extension")
         planned = r.verify("--module", "ios-app/ui-tests", "--plan")
         plan = json.loads(planned.stdout[planned.stdout.index("{"):])
@@ -904,7 +911,7 @@ class IosLaneTests(VerifyCase):
         self.assertIn(f"--only-testing {owner} ", " ".join(next(c["command"] for c in plan["commands"] if c["name"] == "tests: ios")) + " ")
         # So does a test in the class itself spelled in a way the reader does not select.
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
-                + "\n".join(f"    func {name}() {{}}" for name in methods[5:]) + "\n    nonisolated func testSpelledDifferently() {}\n}\n")
+                + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n    nonisolated func testSpelledDifferently() {}\n}\n")
         r.commit("a differently spelled test")
         planned = r.verify("--module", "ios-app/ui-tests", "--plan")
         plan = json.loads(planned.stdout[planned.stdout.index("{"):])
