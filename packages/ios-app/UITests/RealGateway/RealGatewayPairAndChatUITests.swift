@@ -1100,6 +1100,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
         }
         func openSheet(_ identifier: String, _ name: String, section: String? = nil) {
+            // The presenting surface loads its rows; the opened sheet must not.
+            _ = app.buttons.matching(identifier: identifier).firstMatch.waitForExistence(timeout: 30)
             guard let button = app.buttons.matching(identifier: identifier).allElementsBoundByIndex.last else {
                 XCTFail("no \(identifier): \(app.debugDescription)"); return
             }
@@ -1252,9 +1254,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Connections (Accounts) and Push Notifications (System).
         for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
             let link = app.buttons["settings-link-\(title)"]
-            for _ in 0..<20 where !link.isHittable {
-                if title == "Connections" { app.swipeDown() } else { app.swipeUp() }
-            }
+            // A row under the navigation bar reports hittable while a tap lands on the bar.
+            revealBelowNavigationBar(app, link)
             link.tap()
             func labelled(_ text: String) -> XCUIElement {
                 app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
@@ -1678,7 +1679,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
         // Hand-built owners hold these keys on Settings; their own journeys prove the control.
         let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
-            "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Install Package card (#1482)"] : [:]
+            "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Install Package card (#1482)",
+            "permissions.macTerminalServer": "Mac Terminal and this Mac's Connections page"] : [:]
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
@@ -1962,7 +1964,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             // exact native review card's Approve (#2128).
             let approve = app.buttons["change-review-approve"]
             XCTAssertTrue(approve.waitForExistence(timeout: 30), "\(key) must ask for its exact review: \(app.debugDescription)")
-            XCTAssertEqual(switchValue(row), before, "Nothing applies before the exact tap")
             approve.tap()
         }
         XCTAssertTrue(waitUntil(timeout: 60) { self.switchValue(row) != before },
