@@ -453,6 +453,10 @@ struct SettingsRendererView: View {
                 guard identity == model.knowledgePresentationIdentity, requestTarget == target,
                       admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
                 model.noteSettingsChanged()
+                // Rows stay disabled until the shared snapshot reflects the accepted
+                // change: an editor opened earlier would seed the superseded value,
+                // and saving that draft would silently revert this change.
+                try? await model.refreshSettingsSnapshot(for: requestTarget)
             } catch is CancellationError {
                 return
             } catch {
