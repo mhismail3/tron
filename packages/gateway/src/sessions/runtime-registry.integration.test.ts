@@ -516,7 +516,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // all-scope durable-index candidate. An administrative read establishes the
     // complete sidecar used by the restart half of this regression.
     await cold.list("all");
-    const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(cold);
     expect(existsSync(indexPath)).toBe(true);
     await cold.dispose();
@@ -1639,7 +1639,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     secondManager.appendMessage(fauxAssistantMessage("unchanged canonical body"));
     fixture.manager.appendMessage(fauxAssistantMessage("initial canonical body"));
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
@@ -1686,11 +1686,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // in-memory cut and their counts and sizes are not the ones the owner
     // stamped. Those rows would hand the next startup content it must distrust.
     await settleCatalog(fixture.registry);
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     expect(existsSync(indexPath)).toBe(true);
     // With no document to load, the next read takes the full canonical
     // materialization path — the one that used to persist a second copy.
-    await rm(indexPath, { force: true });
+    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
     (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
     const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
     try {
@@ -1712,7 +1712,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     it("rejects an unowned append that races durable-index reconciliation", async () => {
     const fixture = await coldFixture("unowned-index-append-race");
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
     // A restart is how a reader reaches the durable index with no in-memory cut.
@@ -1874,7 +1874,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     registries.splice(registries.indexOf(fixture.registry), 1);
     // The durable document is what would otherwise keep a row: drop it, then
     // leave the transcript mid-append so no row can be rebuilt from the file.
-    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json"), { force: true });
+    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
     const completeBytes = (await fsPromises.stat(fixture.sessionFile)).size;
     await appendFile(fixture.sessionFile, '{"type":"message"');
 

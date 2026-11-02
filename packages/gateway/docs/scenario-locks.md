@@ -170,7 +170,7 @@ Mutation-path locks (`test-support/store-path-lock.ts`) drive one store's
 writes on a fresh home under a fixed clock and pin each step's result or refusal
 and the exact files after it: session attention (`gateway/projection`), session
 archive, the blob store behind `gateway/blobs/` and `gateway/exports/`, and the
-cold-catalog metadata index `gateway/catalog-metadata-v2.json`
+cold-catalog metadata index `gateway/catalog-metadata-v3/` and its v2 migration
 (`gateway/session-catalog`), command receipts (`gateway/transport`), run
 markers (`gateway/run`), Home tasks and their
 authority (`gateway/home`), and the workspace-state markers (`gateway/workspace`).
