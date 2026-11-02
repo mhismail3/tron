@@ -430,7 +430,7 @@ final class TronHomeSheetsUITests: XCTestCase {
             link.tap()
             expandSheet(app, title: "Session Settings")
             let content = element(app, "session-settings-content")
-            // One untitled container: Compaction, Tools, Project Trust, More Settings (28f672dd5).
+            // One untitled container: Compaction, Tools, Project Trust, More Settings.
             XCTAssertTrue(app.buttons["settings-section-tools-open"].waitForExistence(timeout: 8), app.debugDescription)
             XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Session Settings has no Models subsheet")
             let suffix = size.contains("Accessibility") ? "ax-large" : appearance
@@ -443,7 +443,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         }
     }
 
-    /// Session Settings is one untitled container (28f672dd5): Compaction, Tools and
+    /// Session Settings is one untitled container: Compaction, Tools and
     /// More Settings share one card width in that order; Tools is a drill-in row,
     /// not an inline editor, and the retired Agent / Tools & Extensions headings are gone.
     @MainActor private func groupCards(_ app: XCUIApplication, _ content: XCUIElement) {
@@ -900,7 +900,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         }
         for index in 0..<2 {
             // These canonical records deliberately omit labels as well as origin; the chip
-            // names them by tool name (527f266a2), so admission must not depend on labels.
+            // names them by tool name, so admission must not depend on labels.
             // They are the oldest records: the last chip of their kind once scrolled to the top.
             for _ in 0..<8 { app.swipeDown() }
             let zooms = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Expand memory, Completed,'"))
