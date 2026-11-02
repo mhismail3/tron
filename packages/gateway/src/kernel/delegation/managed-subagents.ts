@@ -68,29 +68,62 @@ interface Entry { name: string; type: string; bytes: Buffer; target: string; mod
 interface JitiOptions { moduleCache: boolean; alias: Record<string, string>; fsCache: string }
 type JitiFactory = (base: string, options: JitiOptions) => { import: (path: string, options: { default?: true }) => Promise<unknown> };
 
-/** Transforms every TypeScript module of the verified build with the Gateway's
- * exact jiti options, exactly as an ESM import would, leaving each result in the
- * private cache. Nothing is evaluated, so no provider code runs here, and the
- * cache also covers modules the provider imports lazily. */
+/** Transforms TypeScript modules of the verified build with the Gateway's exact
+ * jiti options, exactly as an ESM import would, leaving each result in the private
+ * cache. Nothing is evaluated, so no provider code runs here. Without entries it
+ * transforms the whole build (factories import lazily); with entries, only the
+ * modules they reach through static and literal dynamic imports. */
 const TRANSFORM_CACHE_WORKER = `
 const { parentPort, workerData } = require("node:worker_threads");
-const { readdirSync, readFileSync } = require("node:fs");
-const { join } = require("node:path");
+const { existsSync, readdirSync, readFileSync, statSync } = require("node:fs");
+const { dirname, join, relative, resolve, sep } = require("node:path");
+const typescript = (path) => /\\.[cm]?tsx?$/.test(path) && !/\\.d\\.[cm]?tsx?$/.test(path);
+const ownModule = (path) => {
+  const inside = relative(workerData.root, path);
+  return inside && !inside.startsWith("..") && !inside.split(sep).includes("node_modules");
+};
+const specifiers = (source) => [
+  ...source.matchAll(/(?:^|[;}\\n])\\s*(?:import|export)\\s+(?!type\\s)(?:[^'";]*?\\sfrom\\s*)?["']([^"']+)["']/g),
+  ...source.matchAll(/(?<!typeof\\s)\\bimport\\(\\s*["']([^"']+)["']\\s*\\)/g),
+].map((match) => match[1]);
+const resolveModule = (from, specifier) => {
+  if (!specifier.startsWith(".")) return undefined;
+  const base = resolve(dirname(from), specifier);
+  for (const candidate of [base, base.replace(/\\.js$/, ".ts"), base + ".ts", join(base, "index.ts")]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+  }
+  return undefined;
+};
 (async () => {
   const { createJiti } = await import(workerData.jitiUrl);
   const jiti = createJiti(workerData.base, workerData.jiti);
   // jiti silently disables an unwritable cache; nothing would then be prepared.
   if (!jiti.options.fsCache) throw new Error("transform cache is not writable");
-  const visit = (directory) => {
-    for (const item of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, item.name);
-      if (item.isDirectory() && item.name !== "node_modules") visit(path);
-      else if (item.isFile() && /\\.[cm]?tsx?$/.test(item.name) && !/\\.d\\.[cm]?tsx?$/.test(item.name)) {
-        jiti.transform({ filename: path, source: readFileSync(path, "utf8"), ts: true, async: true, jsx: jiti.options.jsx });
+  const transform = (path, source) => jiti.transform({ filename: path, source, ts: true, async: true, jsx: jiti.options.jsx });
+  if (!workerData.entries) {
+    const visit = (directory) => {
+      for (const item of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, item.name);
+        if (item.isDirectory() && item.name !== "node_modules") visit(path);
+        else if (item.isFile() && typescript(item.name)) transform(path, readFileSync(path, "utf8"));
       }
+    };
+    visit(workerData.root);
+    return;
+  }
+  const pending = workerData.entries.map((entry) => resolveModule(entry, "./" + entry.split(sep).pop())).filter(Boolean);
+  const seen = new Set();
+  while (pending.length) {
+    const path = pending.pop();
+    if (seen.has(path) || !ownModule(path) || !typescript(path)) continue;
+    seen.add(path);
+    const source = readFileSync(path, "utf8");
+    transform(path, source);
+    for (const specifier of specifiers(source)) {
+      const dependency = resolveModule(path, specifier);
+      if (dependency) pending.push(dependency);
     }
-  };
-  visit(workerData.root);
+  }
 })().then(() => parentPort.postMessage({}), (error) => parentPort.postMessage({ error: String(error && error.message || error) }));
 `;
 
@@ -397,24 +430,30 @@ export class ManagedSubagents {
   /** pi-subagents' own agent discovery module for the subagent catalog. It only
    * reads definitions and settings, so jiti's module cache keeps it across reads. */
   loadDiscovery(): Promise<unknown> {
-    return this.loadModule(this.discoveryEntry(), { moduleCache: true });
+    return this.loadModule(this.discoveryEntry(), { moduleCache: true, prepare: "discovery" });
   }
 
   private discoveryEntry(): string {
     return join(this.root, "src", "agents", "agents.js");
   }
 
-  private async loadModule(path: string, options: { defaultExport?: boolean; moduleCache?: boolean } = {}): Promise<unknown> {
+  private async loadModule(path: string, options: { defaultExport?: boolean; moduleCache?: boolean; prepare?: "build" | "discovery" } = {}): Promise<unknown> {
     const loader = this.jitiOptions();
     // Factory loads evaluate a fresh module graph (sessions keep separate module
     // state), but only from transforms the worker below left in the private cache.
     // Without them the import would transform on this thread, so the load refuses
-    // instead and a later load prepares again.
-    const prepared = this.transformCache ??= this.prepareTransformCache(loader);
+    // instead and a later load prepares again. Discovery reaches only its own small
+    // graph, so it never waits for the whole build a session's factory needs.
+    const scope = options.prepare ?? "build";
+    let prepared = this.transformCaches.get(scope);
+    if (!prepared) {
+      prepared = this.prepareTransformCache(loader, scope === "discovery" ? [this.discoveryEntry()] : undefined);
+      this.transformCaches.set(scope, prepared);
+    }
     try {
       await prepared;
     } catch {
-      if (this.transformCache === prepared) this.transformCache = undefined;
+      if (this.transformCaches.get(scope) === prepared) this.transformCaches.delete(scope);
       throw new GatewayError("busy", "managed pi-subagents could not prepare its TypeScript transforms; retry the load", true);
     }
     const { createJiti } = await import(loader.jitiUrl) as { createJiti: JitiFactory };
@@ -422,7 +461,7 @@ export class ManagedSubagents {
       .import(path, options.defaultExport ? { default: true } : {});
   }
 
-  private transformCache: Promise<void> | undefined;
+  private readonly transformCaches = new Map<"build" | "discovery", Promise<void>>();
 
   /** The closure's declared jiti with exact host peer aliases and a private,
    * per-build transform cache outside the verified installs. No user package tree,
@@ -435,13 +474,13 @@ export class ManagedSubagents {
   }
 
   /** jiti's TypeScript transform is synchronous and, for this closure, takes
-   * seconds of CPU. A worker transforms the build once per process (a cache hit
+   * seconds of CPU. A worker transforms each scope once per process (cache hits
    * after the first) so the Gateway thread reads cached transforms instead of
    * blocking every session on that work. */
-  private async prepareTransformCache(options: { jitiUrl: string; jiti: JitiOptions }): Promise<void> {
+  private async prepareTransformCache(options: { jitiUrl: string; jiti: JitiOptions }, entries?: string[]): Promise<void> {
     let worker: Worker | undefined;
     try {
-      const started = new Worker(TRANSFORM_CACHE_WORKER, { eval: true, workerData: { ...options, base: import.meta.url, root: this.verify() } });
+      const started = new Worker(TRANSFORM_CACHE_WORKER, { eval: true, workerData: { ...options, base: import.meta.url, root: this.verify(), entries } });
       worker = started;
       await new Promise<void>((resolveWorker, rejectWorker) => {
         started.once("message", (message: { error?: string }) => message.error ? rejectWorker(new Error(message.error)) : resolveWorker());
