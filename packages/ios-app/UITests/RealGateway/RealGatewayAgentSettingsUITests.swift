@@ -57,20 +57,23 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == ["tron-e2e/e2e-alternate"] }, "Home Save must reach the canonical Home profile")
         XCTAssertNil(queue(globalFile, field: "modelQueues"), "A Home edit must not change Global")
         revealBelowNavigationBar(app, row)
+        // Rows stay disabled until an accepted change is canonical.
+        XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
         edit.tap()
         XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
         dismissAgentSheet(app, title: "Worker models")
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         revealBelowNavigationBar(app, revert)
+        XCTAssertTrue(waitForEnabled(revert, timeout: 30), app.debugDescription)
         revert.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == nil }, "Home Revert must remove its override")
         XCTAssertNil(queue(globalFile, field: "modelQueues"))
         keepScreenshot(app, name: "2029-home-queue-scope-and-reopen-\(appearance)")
         // The fixture's Home task namespace is not initialized, so the embedded
-        // permissions read is refused. Since #1568 (9896a8503) the Gateway keeps
-        // an untyped store refusal's text in local diagnostics and sends only
-        // its public internal-failure copy; the section names the refusal and
-        // offers Reload, never delegation controls.
+        // permissions read is refused. The Gateway keeps an untyped store
+        // refusal's text in local diagnostics and publishes only its internal-
+        // failure copy; the section names the refusal and offers Reload, never
+        // delegation controls.
         let refusal = app.staticTexts["Home could not be read"]
         revealBelowNavigationBar(app, refusal)
         XCTAssertTrue(refusal.waitForExistence(timeout: 15), app.debugDescription)
