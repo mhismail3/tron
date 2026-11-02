@@ -503,12 +503,16 @@ final class HomeSheetReadOwner {
         case idle, loading(Read, HomeSheetContent?), loaded(Read, HomeSheetContent), failed(Read, String)
     }
     private(set) var state: State = .idle
+    /// The one load whose outcome may publish. Presentation state alone cannot
+    /// fence it: a re-read of a refused request keeps that refusal on screen.
+    @ObservationIgnored private var inFlight: Read?
 
-    func retire() { state = .idle }
+    func retire() { state = .idle; inFlight = nil }
 
     /// Keep an installed frame while its picker/evidence child covers it; only
     /// pending publication is disposable at that transition.
     func retireLoading() {
+        inFlight = nil
         if case .loading(let read, let installed) = state {
             state = installed.map { .loaded(read, $0) } ?? .idle
         }
@@ -532,11 +536,16 @@ final class HomeSheetReadOwner {
             installed = content
         } else { installed = nil }
         let read = Read(requestID: requestID, loadID: UUID(), identity: identity)
-        state = .loading(read, installed)
+        // A periodic re-read of a refused request keeps the refusal visible until
+        // its own outcome lands, instead of flashing the loading placeholder.
+        if case .failed(let previous, _) = state, previous.requestID == requestID, identity.retainsContent(from: previous.identity) {
+        } else { state = .loading(read, installed) }
+        inFlight = read
         let outcome: Result<HomeSheetContent, Error>
         do { outcome = .success(try await fetch()) }
         catch { outcome = .failure(error) }
-        guard case .loading(let current, _) = state, current == read else { return }
+        guard inFlight == read else { return }
+        inFlight = nil
         guard !Task.isCancelled, isCurrent(), coordinator.activity(for: identity.surfaceToken).allowsPresentationPublication else {
             retireLoading(); return
         }

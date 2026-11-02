@@ -343,7 +343,15 @@ export class HomeOwner {
     return this.tasks;
   }
 
-  async taskPermissions() { return (await this.taskOwner()).permissions(); }
+  async taskPermissions() {
+    const owner = await this.taskOwner();
+    try { return await owner.permissions(); }
+    catch (error) {
+      // Like the task list: a typed refusal reason for clients; the store's own text stays local.
+      if (error instanceof HomeTaskStoreError) throw new GatewayError("conflict", "Home task permissions refused", false, { reason: error.code });
+      throw error;
+    }
+  }
   async revokeTaskScope(scopeId: string): Promise<{ accepted: true }> {
     await (await this.taskOwner()).revokeScope(scopeId); return { accepted: true };
   }
