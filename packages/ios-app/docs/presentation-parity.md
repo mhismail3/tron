@@ -250,6 +250,8 @@ separate:
   Siblings sharing a key let only the last-rendered one present; the presenter logs a
   `ManagedSheetPresentation` fault when a shared one starts presenting and traps under
   `HOSTED_TEST`.
+  The sheet receives its presenter's environment except interaction enablement: a presented
+  sheet is enabled on its own, whatever disabled state its presenter had (#2207).
 - Managed sources publish render-input preferences without adding a background view or AX node
   to a control. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
   `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Native
