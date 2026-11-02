@@ -128,8 +128,8 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   declared tools are origin-filtered and charged with `instructions`, and profile is counted
   separately. Historical system deltas are not additional heads. Output reserve remains.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
-  `results`, `input`. For caching, system prompt and tools are stable within an origin kind; the view only
-  grows between rebalances, and Home requests ask for `long` retention.
+  `results`, `input`. For caching, system prompt and tools are stable within an origin kind; the view only grows between rebalances,
+  goes in four-line blocks with one Anthropic mark on the last whole block (CortexKit's composed body skips that hook), with `long` retention.
 
 ### Maintainer obligations
 

@@ -194,8 +194,9 @@ function viewLowWater(viewBudget: number): number {
  * one `fitView` down to the low-water mark. A fit merges the oldest eligible
  * parts, near the view's head, so fitting after every message rewrote the head of
  * nearly every request and voided every provider's prompt cache. Between two
- * rebalances the view only grows at its end, so a request re-reads everything an
- * earlier one sent, and a rebalance leaves an eighth of the budget before the next.
+ * rebalances the view only grows at its end, so a request re-reads what an earlier
+ * one sent up to that one's last cache mark, and a rebalance leaves an eighth of the
+ * budget before the next.
  */
 export function rebalanceView(
   parts: EpisodicViewPart[],

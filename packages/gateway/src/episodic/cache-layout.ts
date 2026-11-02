@@ -4,14 +4,21 @@
  * The episodic summarizer's context uses the recipe's cuts (OptChat gist §8): the
  * context is cut into pieces at the last line end before each mark, so two calls
  * whose contexts share their start share the pieces before the first cut that
- * differs. Home's activations use the view's own blocks instead (`viewPieces`,
- * #491). Anthropic caches only where a request places `cache_control`, at most
- * four times per request; OpenAI and DeepSeek cache shared prefixes on their
- * own, so for them the order of the request is the whole layout.
+ * differs. Home's activations send the view in fixed groups of lines instead
+ * (`viewPieces`, #2228). Anthropic caches only where a request places
+ * `cache_control`, at most four times per request, and keys each entry by every
+ * block before it; OpenAI and DeepSeek cache shared prefixes on their own, so for
+ * them the order of the request is the whole layout.
  */
 
 /** Where the view is cut, in characters (gist §8; picked there by replaying real sessions). */
 const CACHE_MARKS = [50_000, 80_000, 100_000] as const;
+
+/**
+ * View lines per block of a Home request. Four lines keep the uncached partial
+ * group small, and 20 blocks of lookback cover about 80 new lines per activation.
+ */
+export const VIEW_BLOCK_LINES = 4;
 
 /** Anthropic refuses a request with more `cache_control` blocks than this. */
 export const ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4;
