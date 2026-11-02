@@ -1,5 +1,5 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
-import { chmod, mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -87,6 +87,32 @@ it("refuses a managed load whose transforms could not be prepared instead of tra
     expect(closureRequire.cache[transform]).toBeUndefined();
   } finally {
     await chmod(join(cache), 0o700).catch(() => {});
+    if (previous === undefined) delete process.env[DELEGATED_PROVIDER_ROOT_ENV]; else process.env[DELEGATED_PROVIDER_ROOT_ENV] = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+}, 180_000);
+
+it("prepares only the catalog's own module graph for a discovery read, not the whole build a session needs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-subagent-transform-discovery-"));
+  const tronHome = join(root, "tron");
+  const previous = process.env[DELEGATED_PROVIDER_ROOT_ENV];
+  try {
+    delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
+    const managedSubagents = ManagedSubagents.activateForStartup(tronHome);
+    const closureRequire = createRequire(join(managedSubagents.root, "package.json"));
+    const transform = join(dirname(await realpath(closureRequire.resolve("jiti/package.json"))), "dist", "babel.cjs");
+    const buildCache = join(tronHome, "internal", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!);
+    // A catalog read (packages.list, session resources) waits only for its graph.
+    await expect(managedSubagents.loadDiscovery()).resolves.toMatchObject({ discoverAgentsAll: expect.any(Function) });
+    const discoveryTransforms = (await readdir(buildCache)).length;
+    expect(discoveryTransforms).toBeGreaterThan(0);
+    expect(closureRequire.cache[transform], "no Babel transform loaded on the Gateway thread").toBeUndefined();
+    // A session's managed load still prepares the rest of the build off-thread.
+    const registration = await managedSubagents.requireChildExtensions("discovery-scope-session", []);
+    registration.dispose();
+    expect((await readdir(buildCache)).length, "the session load needed transforms discovery did not wait for").toBeGreaterThan(discoveryTransforms);
+    expect(closureRequire.cache[transform], "no Babel transform loaded on the Gateway thread").toBeUndefined();
+  } finally {
     if (previous === undefined) delete process.env[DELEGATED_PROVIDER_ROOT_ENV]; else process.env[DELEGATED_PROVIDER_ROOT_ENV] = previous;
     await rm(root, { recursive: true, force: true });
   }
