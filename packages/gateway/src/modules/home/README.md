@@ -217,6 +217,8 @@ changes keep its store, cursors and spend.
   `waitingForUser`, `taskRecovery`, memory counters; derived, never stored), `home.context`,
   `home.open`, `home.chapterList` (ledger, metrics and derived `contents`), `home.profileList`,
   `home.taskList`, `home.taskStatus`, `home.taskHistory`, `home.taskPermissions`.
+  A task-store refusal on `home.taskList` or `home.taskPermissions` is a typed `conflict` whose
+  details carry only the store's reason code; the store's own text stays in local diagnostics.
 - Receipted: `home.prompt`, `home.designate`, `home.disable`, `home.pauseMemory`,
   `home.resumeMemory`, `home.profileChange`, `home.reconfirmPermissions`, task controls.
 - **Memory browser.** `home.memory.view` (newest-first lines, `part`, `sessionId` filter,

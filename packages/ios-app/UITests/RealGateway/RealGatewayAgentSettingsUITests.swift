@@ -70,14 +70,14 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertNil(queue(globalFile, field: "modelQueues"))
         keepScreenshot(app, name: "2029-home-queue-scope-and-reopen-\(appearance)")
         // The fixture's Home task namespace is not initialized, so the embedded
-        // permissions read is refused. The Gateway keeps an untyped store
-        // refusal's text in local diagnostics and publishes only its internal-
-        // failure copy; the section names the refusal and offers Reload, never
-        // delegation controls.
+        // permissions read is refused with the Gateway's typed refusal; the store's
+        // own text stays in local diagnostics. The section names the refusal and
+        // offers Reload, never delegation controls.
         let refusal = app.staticTexts["Home could not be read"]
         revealBelowNavigationBar(app, refusal)
         XCTAssertTrue(refusal.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Unexpected gateway failure"].exists, app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Home task permissions refused"].exists, app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Unexpected gateway failure"].exists, "A store refusal is typed, not an internal failure")
         XCTAssertFalse(app.staticTexts["Home task namespace refused: not-initialized"].exists, "Store text stays in local diagnostics")
         XCTAssertFalse(app.buttons["home-permissions-reconfirm"].exists)
         XCTAssertFalse(app.staticTexts["Delegation: All trusted projects"].exists, "A refused read shows no delegation controls")
