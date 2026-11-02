@@ -362,7 +362,7 @@ struct HomeTaskSheet: View {
         switch lifecycle {
         case .pending: .tronSlate
         case .active: .tronEmerald
-        case .terminal: outcome == .final ? .tronSuccess : outcome == .interrupted ? .tronSlate : .tronWarning
+        case .terminal: outcome == .final ? .tronSuccess : outcome == .interrupted ? .tronSlate : .tronAmber
         }
     }
 

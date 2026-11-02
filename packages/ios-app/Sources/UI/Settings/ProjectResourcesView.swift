@@ -35,11 +35,12 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         case .subagents: "person.2"
         }
     }
-    /// Prompt and skill accents are shared with the chat composer; the other
-    /// Resources categories retain their existing destination colors.
+    /// The command accent is shared with chat chips; prompt templates keep
+    /// their Resources purple here (chat gives them the command identity), and
+    /// the other categories retain their existing destination colors.
     @MainActor var accent: Color {
         switch self {
-        case .prompts: ChatSemanticPillRole.prompt.accent
+        case .prompts: .tronPurple
         case .skills: .tronCyan
         case .commands: ChatSemanticPillRole.command.accent
         case .tools: .tronAmber

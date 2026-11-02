@@ -26,7 +26,7 @@ enum ProviderUsagePresentation {
         var accent: Color? {
             switch self {
             case .normal: nil
-            case .warning: .tronWarning
+            case .warning: .tronAmber
             case .exhausted: Color.tronError.opacity(0.75)
             }
         }

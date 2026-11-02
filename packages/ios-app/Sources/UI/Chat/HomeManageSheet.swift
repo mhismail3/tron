@@ -72,7 +72,7 @@ extension HomeSheet {
     static func hostPressureAccent(_ level: HomeStatusDTO.HostPressure.Level) -> Color {
         switch level {
         case .normal: .tronEmerald
-        case .elevated: .tronWarning
+        case .elevated: .tronAmber
         case .critical: .tronError
         }
     }

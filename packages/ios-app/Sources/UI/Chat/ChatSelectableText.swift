@@ -83,7 +83,7 @@ final class ChatAnnotationPresenter {
 struct ChatSelectableTextStyle: Hashable {
     var size: CGFloat = 14
     var weight: TronFontLoader.Weight = .regular
-    var color: Color = .assistantMessageText
+    var color: Color = .tronTextPrimary
 }
 
 /// A completed assistant Markdown block rendered by a non-editable UITextView,
