@@ -40,6 +40,7 @@ IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test"
 NOT_DRIVEN = ("ios-lanes", "mac", "relay")
 # Test methods per iOS runner process. Each process keeps the runner's focused
 # deadline, so a selected class larger than one deadline runs as several processes, not one longer one.
+# Six journeys take about 400 s at the observed ~66 s each: a third of the 1200 s deadline.
 IOS_SHARD_TESTS = 6
 
 
@@ -148,20 +149,34 @@ def ios_selectors(paths: list[str]) -> list[str]:
 
 def ios_test_methods(owner: str) -> list[str]:
     """`Target/Class/testMethod` owners XCTest runs for `Target/Class`: the no-argument, non-private
-    `test` methods declared in the class or its top-level extensions in that target's sources."""
+    `test` methods declared in the class or its top-level extensions in that target's sources.
+    Fails closed: a test-shaped method whose enclosing top-level type cannot be read makes the
+    class run whole (an empty result) rather than silently dropping a test."""
     target, name = owner.split("/")
     folder = next(path for path, candidate in IOS_TARGETS.items() if candidate == target)
-    declaration = re.compile(rf"^(?:(?:final|public|open|@\w+)\s+)*(?:class|extension)\s+{re.escape(name)}\b")
+    top_level = re.compile(r"^(?:(?:final|public|open|private|fileprivate|internal|@\w+(?:\([^)]*\))?)\s+)*"
+                           r"(?:class|struct|enum|actor|extension|protocol)\s+(\w+)")
     method = re.compile(r"^\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:override\s+)?func\s+(test\w*)\(\)")
+    shaped = re.compile(r"\bfunc\s+(test\w*)\s*\(\s*\)")
+    hidden = re.compile(r"\b(?:private|fileprivate|static|class)\s+func\b")
     found: list[str] = []
+    unplaced = False
     for source in sorted((ROOT / IOS / folder).rglob("*.swift")):
-        inside = False
-        for line in source.read_text(errors="replace").splitlines():
-            if line[:1] not in ("", " ", "\t", "}", "/", "#", "@"):
-                inside = bool(declaration.match(line))
-            elif inside and (match := method.match(line)) and match.group(1) not in found:
-                found.append(match.group(1))
-    return [f"{owner}/{test}" for test in found]
+        text = source.read_text(errors="replace")
+        if not re.search(rf"\b(?:class|extension)\s+{re.escape(name)}\b", text):
+            continue
+        scope: str | None = None
+        for line in text.splitlines():
+            # A top-level line opens a type's scope, or an unknown one; a bare attribute line does not.
+            if line[:1] not in ("", " ", "\t", "}", "/", "#") and (
+                    line[:1] != "@" or re.search(r"\b(?:class|struct|enum|actor|extension|protocol|func|var|let)\b", line)):
+                declared = top_level.match(line)
+                scope = declared.group(1) if declared else None
+            elif scope == name and (match := method.match(line)):
+                found += [] if match.group(1) in found else [match.group(1)]
+            elif scope is None and shaped.search(line) and not hidden.search(line):
+                unplaced = True
+    return [] if unplaced else [f"{owner}/{test}" for test in found]
 
 
 def ios_shards(selectors: list[str]) -> list[list[str]]:
@@ -907,6 +922,10 @@ def main(argv: list[str]) -> int:
                     elif not result.get("tests"):
                         result["status"] = "failed"
                         failed_shards.append(f"{label} ran zero passing tests: an empty group is not evidence")
+                    elif all(owner.count("/") == 2 for owner in shard) and result["tests"] != len(shard):
+                        # A method selector that matches nothing passes silently; every named test must run.
+                        result["status"] = "failed"
+                        failed_shards.append(f"{label} passed {result['tests']} of its {len(shard)} named test(s)")
                 # Every shard runs, so one red cannot hide another selected test's outcome.
                 if failed_shards:
                     return finish("failed", "; ".join(failed_shards))

@@ -212,7 +212,9 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
 3. **`tests: ios`** uses the same products. Each selected class (named or extended by the
    file) runs as its `test` methods, at most six per runner process (`tests: ios 1/N`), so
    every process keeps the runner's focused deadline; a class whose methods cannot be read
-   runs whole. Every shard runs before a failure is reported. Harnessed journeys use their own lanes. A file naming
+   or that holds test-shaped methods the reader cannot place runs whole. Each method shard must
+   pass exactly its named tests. Every admitted shard runs before a failure is reported; a busy
+   exit 73 defers that shard and the rest, which is never a pass. Harnessed journeys use their own lanes. A file naming
    neither fails unless iOS is skipped. Counts/failures come from XCTest `summary.json`
    (`passedTests`); `--update-locks` passes `TEST_RUNNER_TRON_UPDATE_LOCKS`. Goldens are
    source: commit and rebuild before comparing.
