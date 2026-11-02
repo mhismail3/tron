@@ -26,10 +26,21 @@ export class RunInvocations {
       this.operations.homeRequestPolicy.responseTiming.terminal(receipt.operationId, receipt.lifecycle as "completed" | "failed" | "interrupted" | "outcomeUnknown");
       // The terminal receipt is already canonical. A failed settlement leaves its
       // delivery admitted for the next activation to re-prove; it must not strand
-      // this operation's work entry or its terminal observers.
-      await this.operations.dependencies.modules.policy("inputAdmission")?.().settle(this.operations.id, receipt.operationId).catch(error => {
-        this.operations.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
+      // this operation's work entry or its terminal observers. Attention
+      // settlement can retire the operation's own work first, so the inbox
+      // acknowledgement holds its own work: the session is not idle before it,
+      // and an idle notice refused as busy meanwhile is delivered when it ends.
+      const work = this.operations.dependencies.workRegistry.beginDerived({
+        kind: "terminal-receipt-persistence", sessionId: this.operations.id, hostEpoch: this.operations.ui.hostEpoch,
       });
+      try {
+        await this.operations.dependencies.modules.policy("inputAdmission")?.().settle(this.operations.id, receipt.operationId).catch(error => {
+          this.operations.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
+        });
+      } finally {
+        work.settle();
+        this.operations.noteHomeIdle();
+      }
     }
   }
 
