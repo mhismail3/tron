@@ -181,6 +181,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(metadata.exists && settingsTitle.exists)
         // This row's subtitle wraps onto two lines at accessibility text; compare one line.
         let metadataLines = name == "ax-large" ? 2.0 : 1.0
+        if name == "ax-large" {
+            XCTAssertGreaterThan(metadata.frame.height, settingsTitle.frame.height, "The subtitle wraps at accessibility text")
+        }
         let metadataHeight = metadata.frame.height / metadataLines
         XCTAssertGreaterThan(metadataHeight, 0)
         XCTAssertLessThan(metadataHeight, settingsTitle.frame.height,

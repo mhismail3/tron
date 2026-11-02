@@ -115,7 +115,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
   entries never show their definition.
 - **Exact reviews.** The maintainer's own edits apply directly; picking the value the edited
-  layer already holds sends nothing, while picking an inherited value pins it there. A row whose dry run requires a
+  layer already stores sends nothing, while picking an inherited or default value pins it there. A row whose dry run requires a
   tap (trust, privacy or spend widening, installs, irreversible effects) opens the shared
   `ChangeReviewSheet`; Approve commits once bound to the shown digest, Cancel sends nothing.
   The shared card, its actions and native review title use `tronPrimary`, including read-only

@@ -379,6 +379,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     }
     private func awaitModelReceiptRelease() async {
         if releasedModelReceipts > 0 { releasedModelReceipts -= 1; return }
+        precondition(modelReceiptGate == nil, "One scripted model receipt is held at a time")
         await withCheckedContinuation { modelReceiptGate = $0 }
     }
     func releaseModelReceipt() {
