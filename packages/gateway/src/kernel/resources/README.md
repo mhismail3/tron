@@ -33,7 +33,9 @@ default budget; the upload producer consumes the same attachment limits.
 ## Contract
 
 `projectRoot(cwd)` returns the real worktree root, or the caller’s cwd when Git
-has no usable worktree. Timeout and overflow remain retryable failures.
+has no usable worktree. Timeout and overflow remain retryable failures; the 5 s
+timeout does not count time the event loop was stalled, so a finished Git is never
+reported as timed out.
 
 ## Invariants
 
