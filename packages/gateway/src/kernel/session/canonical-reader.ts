@@ -309,7 +309,11 @@ export async function readCanonicalSessionFile(options: {
       // Pi appends to the same inode and never rewrites a session in place, so a
       // grown file whose first `start.size` bytes read back the same lines kept them.
       if (!options.appendStable || end.dev !== start.dev || end.ino !== start.ino || end.size < start.size) throw new EpisodicSourceChangedError();
-      const again = await readWholeFile(handle, { ...options, endBytes: start.size });
+      // Bytes that no longer parse were changed under the first pass, not malformed at its start.
+      const again = await readWholeFile(handle, { ...options, endBytes: start.size }).catch((error: unknown) => {
+        if (error instanceof EpisodicMemoryError && error.kind === "source") throw new EpisodicSourceChangedError();
+        throw error;
+      });
       if (again.batch.lines.length !== batch.lines.length || again.batch.lines.some((line, index) => line !== batch.lines[index])) {
         throw new EpisodicSourceChangedError();
       }

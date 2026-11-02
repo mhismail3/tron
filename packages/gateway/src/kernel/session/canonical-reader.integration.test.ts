@@ -82,3 +82,17 @@ it("refuses an append-stable read when the bytes it read were rewritten in place
   await expect(readCanonicalSessionFile({ path, sessionId, maxLineBytes: 1024 * 1024, appendStable: true }))
     .rejects.toBeInstanceOf(EpisodicSourceChangedError);
 });
+
+it("reports a malformed rewrite of already-read bytes as a changed source, not a malformed session", async () => {
+  const { path, sessionId } = await session();
+  const bytes = await readFile(path, "utf8");
+  changeDuringRead.path = path;
+  changeDuringRead.at = "endStat";
+  changeDuringRead.change = async () => {
+    // After the first pass: same inode, grown, and its old prefix no longer parses.
+    await writeFile(path, bytes.replace(/"type":"message"/, '"type":"message"\u0000'));
+    await appendFile(path, bytes.split("\n").at(-2)!.replace(/"id":"[^"]+"/, '"id":"late0000"') + "\n");
+  };
+  await expect(readCanonicalSessionFile({ path, sessionId, maxLineBytes: 1024 * 1024, appendStable: true }))
+    .rejects.toBeInstanceOf(EpisodicSourceChangedError);
+});
