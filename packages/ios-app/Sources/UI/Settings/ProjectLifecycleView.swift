@@ -18,6 +18,9 @@ struct ProjectLifecycleView: View {
     @PresentationState private var listing: ProjectLifecycleListing?
     @PresentationState private var project: ProjectLifecycleRow?
     @PresentationState private var error: String?
+    /// A confirmed command's refusal. Disposable reads own `error` and clear it
+    /// whenever they reload; they must not erase an accepted command's outcome.
+    @PresentationState private var refusal: String?
     @PresentationState private var name = ""
     @PresentationState private var github = false
     @PresentationState private var submitting = false
@@ -38,8 +41,8 @@ struct ProjectLifecycleView: View {
 
     var body: some View {
         Group {
-            if let error {
-                TronSettingsNotice(message: error, title: "Project status", retry: { Task { await load() } })
+            if let message = error ?? refusal {
+                TronSettingsNotice(message: message, title: "Project status", retry: { refusal = nil; Task { await load() } })
             } else { content }
         }
         .disabled(submitting)
@@ -77,7 +80,7 @@ struct ProjectLifecycleView: View {
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in if !active { generation &+= 1 } }
         .onChange(of: model.selectedGatewayProfileID()) { _, _ in
-            generation &+= 1; listing = nil; project = nil; chosenPath = nil; selected = nil; reviewing = nil
+            generation &+= 1; listing = nil; project = nil; chosenPath = nil; selected = nil; reviewing = nil; refusal = nil
         }
         .onDisappear { generation &+= 1 }
     }
@@ -206,18 +209,25 @@ struct ProjectLifecycleView: View {
         guard !submitting, reviewing?.id == reviewed.id, activity.allowsDataPublication else { return }
         submitting = true
         reviewing = nil
+        refusal = nil
         let identity = model.knowledgeDestinationIdentity
-        func admitsPresentation() -> Bool {
-            identity == model.knowledgeDestinationIdentity && PresentationPublicationPolicy.allows(
-                ambient: activity, coordinator: presentationCoordinator, token: surfaceToken)
+        let coordinator = presentationCoordinator, token = surfaceToken
+        // The outcome is this page's own data: it may land while the retiring
+        // card still covers the page (a presenting descendant), never after
+        // the page itself is gone or another destination owns the model.
+        func admitsOutcome() -> Bool {
+            guard identity == model.knowledgeDestinationIdentity else { return false }
+            guard let coordinator else { return activity.allowsDataPublication }
+            guard let token else { return false }
+            return coordinator.activity(for: token).allowsDataPublication
         }
         Task { @MainActor in
             defer { submitting = false }
             do {
                 try await model.settingsTrust.confirmProject(reviewed)
             } catch {
-                guard admitsPresentation() else { return }
-                self.error = error.localizedDescription
+                guard admitsOutcome() else { return }
+                refusal = error.localizedDescription
             }
         }
     }
