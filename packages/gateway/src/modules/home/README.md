@@ -213,10 +213,10 @@ changes keep its store, cursors and spend.
 
 - Capabilities `home.v1`, `home-memory-view.v1`, `home-chapter-list.v1`, `home-profile-list.v1`,
   `home-profile-edit.v1` (profile ones need the Profile owner); shapes in `src/protocol/types.ts`.
-- Reads: `home.status` (phase, readiness, recovery, chapter, `openSessionId`, `live`,
-  `waitingForUser`, `taskRecovery`, memory counters; derived, never stored), `home.context`,
-  `home.open`, `home.chapterList` (ledger, metrics and derived `contents`), `home.profileList`,
-  `home.taskList`, `home.taskStatus`, `home.taskHistory`, `home.taskPermissions`.
+- Reads: `home.status` (phase, readiness, recovery, chapter, `openSessionId`, `live`, `waitingForUser`,
+  `taskRecovery`, memory counters; derived, never stored), `home.context`, `home.open`, `home.chapterList`
+  (ledger, metrics, derived `contents`), `home.profileList`, `home.taskList`, `home.taskStatus`, `home.taskHistory`,
+  `home.taskPermissions`. List/permissions task-store refusals are a typed `conflict` (reason code only).
 - Receipted: `home.prompt`, `home.designate`, `home.disable`, `home.pauseMemory`,
   `home.resumeMemory`, `home.profileChange`, `home.reconfirmPermissions`, task controls.
 - **Memory browser.** `home.memory.view` (newest-first lines, `part`, `sessionId` filter,

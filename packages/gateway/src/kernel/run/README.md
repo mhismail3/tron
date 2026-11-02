@@ -90,6 +90,8 @@ actual K3 host; native frames do not select product modules or keep another list
 - `run-markers.ts`: durable per-operation crash/interruption evidence.
 - `run-persistence.ts`: sole pending-receipt join and durable-write fence, bounded
   retry/retention, conflicts and actual SDK stop/diagnostic cuts through the native frame.
+  Its 20 s write and disposal windows are `StallTolerantDeadline`s: time the event loop
+  spent blocked does not expire a write that completed meanwhile.
 - `gateway-work-registry.ts`: bounded admission/drain tokens and joined settlement.
 - `run-work-owner.ts`: exact per-operation handles, retirement and marker-before-token
   orphan repair, with live retained-owner rechecks after persistence.

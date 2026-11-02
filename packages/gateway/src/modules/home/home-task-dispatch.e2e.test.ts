@@ -28,7 +28,7 @@ import { runHomeInput } from "../../client/terminal-chat.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { answerChangeCard } from "../../../test-support/native-change.js";
 import type { ExtensionInteraction } from "../../protocol/types.js";
-import { GatewayError } from "../../errors.js";
+import { GatewayError, publicError } from "../../errors.js";
 import { freezeHomeLedgerWriter } from "../../../test-support/home-ledger-crash-frozen-owner.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
 import { issueGrant } from "../../../test-support/home-task-grant.js";
@@ -149,6 +149,18 @@ describe("Home task authorization RPC", () => {
     expect(refusal.requestId.length).toBeGreaterThan(0);
     return refusal.requestId as string;
   }
+  it("refuses permissions of an uninitialized task namespace with a typed public error", async () => {
+    const f = await fixture();
+    const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
+      receipts: new CommandReceiptStore(join(f.root, "uninitialized-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { identity: "device:authorization-test", isLocal: true } as ClientContext;
+    const failure = publicError(await service.invoke(client, "home.taskPermissions", {}).then(() => undefined, error => error));
+    // The task list's existing typed refusal, applied to permissions; the store's
+    // own text stays in local diagnostics.
+    expect(failure).toEqual({ code: "conflict", message: "Home task permissions refused", retryable: false, details: { reason: "not-initialized" } });
+    expect(JSON.stringify(failure)).not.toContain("namespace");
+    evidence.push({ case: "rpc-uninitialized-permissions-typed", failure });
+  });
   it("reports no reconfirmation for an active valid scope without changing authority", async () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);

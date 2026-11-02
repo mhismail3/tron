@@ -91,6 +91,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   claims Home. `HomeMutationCoordinator` is the sole Home command authority, receipt-only:
   `missing`/`pending` receipts never replay and one unresolved command per profile stays owned until
   an explicit completion check. `HomeSheetReadOwner` owns one disposable read per managed sheet.
+  A re-read of a refused request keeps the refusal visible until its own outcome lands.
 - **Notices.** `InAppNoticeCenter` holds at most eight notices, 4 KiB each and 16 KiB total, FIFO,
   one card at a time; dwell 2–12 s (4 s normal, 8 s errors) on the injected clock. Notices are
   informational and scope-retired with their owner.

@@ -81,7 +81,8 @@ dispatcher records pending intent, authorizes the snapshot, creates the worker t
   Choices are fixed in the brief and reported (`worker`, `subagentModels`; subagents default to
   `tron/subagent`). A usage limit moves to the next worker model in place.
 - A worker has project tools plus `report` and a canonical `tron-home-task` marker checked
-  before cold construction. A sealed report ends the task at that turn boundary; Stop is
+  before cold construction. A sealed report ends the task at that turn boundary: a provider
+  notice already queued into that turn is appended as context and starts no turn; Stop is
   terminal (`task-stopped-before-delivery` receipts for unconsumed steers);
   `DelegationOperations` has a 24-hour ceiling. Individual reply completions update
   attention without stamping the task's root run marker. A notice or report reminder
@@ -190,7 +191,8 @@ The terminal task and its wake event share one fsynced record. Events move `pend
   names since, so a worker check-in costs one record, not the history; a journal that no
   longer reaches back takes a full pass (`home.inbox.admission-slow` names slow ones).
 - `HomeOwner`'s single-flight scheduler wakes when a result settles while Home is eligible,
-  after recovery, after `home.resumeMemory` and when an activation goes idle; receipts use
+  after recovery, after `home.resumeMemory` and when an activation goes idle. Home is not idle
+  until its terminal receipt's inbox acknowledgement settles; receipts use
   source `homeWake`, no user row. The text opens with title, outcome, subagent counts and
   elapsed time, then report and evidence.
 - Results arrive whole in order within context and chapter headroom; the rest stays pending

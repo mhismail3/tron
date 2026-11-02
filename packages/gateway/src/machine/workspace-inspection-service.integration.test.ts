@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { performance } from "node:perf_hooks";
 import { mkdtemp, mkdir, realpath, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +30,31 @@ async function repository(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+/** Blocks this thread like a long synchronous transform, without spinning a core. */
+function stallEventLoop(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+describe("Git inspection deadlines", () => {
+  it("resolves a Project root whose Git finished while the event loop was stalled past the deadline", async () => {
+    const root = await repository();
+    const canonical = await realpath(root);
+    // The child is spawned synchronously. This thread stays blocked past the 5 s
+    // inspection window and until no process names this unique root any longer,
+    // so Git has exited before the loop resumes beside the due deadline timer.
+    const resolved = projectRoot(root);
+    const stalledAt = performance.now();
+    let gitExited = false;
+    while (performance.now() - stalledAt < 20_000) {
+      stallEventLoop(500);
+      gitExited = spawnSync("/usr/bin/pgrep", ["-f", root]).status === 1;
+      if (gitExited && performance.now() - stalledAt >= 6_000) break;
+    }
+    expect(gitExited, "Git exited while the loop was blocked").toBe(true);
+    await expect(resolved).resolves.toBe(canonical);
+  }, 30_000);
 });
 
 describe("WorkspaceInspectionService", () => {
