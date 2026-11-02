@@ -597,5 +597,25 @@ if sys.argv[1] == 'clean':
                 process.communicate(timeout=40)
 
 
+class ShardedIosProbeTests(unittest.TestCase):
+    """#2173: verify names a sharded iOS step `tests: ios k/N`; its bisect probe is still the iOS
+    group, so a passing shard probe counts its XCTest summary instead of reading as empty."""
+
+    def test_a_sharded_ios_probe_reads_its_xctest_summary(self):
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        with tempfile.TemporaryDirectory(prefix='tron-batch-probe-') as temporary:
+            root = Path(temporary)
+            stub = root / 'runner.py'
+            stub.write_text('import json, pathlib, sys\n'
+                            'out = pathlib.Path(sys.argv[1]); out.mkdir()\n'
+                            '(out / "summary.json").write_text(json.dumps({"passedTests": 3}))\n'
+                            'print("iOS test run complete: " + str(out))\n')
+            lane = {'name': 'tests: ios 2/3', 'command': ['python3', str(stub), str(root / 'run')], 'cwd': '.', 'probe': True}
+            result = batch.execute(root, lane, root / 'probe')
+        self.assertEqual(result['exit'], 0, result)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
