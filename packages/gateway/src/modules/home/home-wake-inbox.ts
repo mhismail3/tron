@@ -64,37 +64,51 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
  * A result wakes Home only through the wake owner; recovery never prompts. */
 export class WakeInboxOwner {
   private readonly mutex = new AsyncMutex();
-  /** The store write count at which a complete pass found no actionable wake. */
-  private quietAt: number | undefined;
+  /** The tasks a complete pass that began at store write `at` found actionable.
+   * Every task actionable now is one of them or was written since: a task no
+   * publication touched still has the state that pass read. */
+  private quietProof: { at: number; actionable: Set<string> } | undefined;
   constructor(private readonly store: HomeTaskStore, private readonly options: Options) {}
 
   /** Records whose wake this owner may still act on. Inert wakes (none yet,
    * acknowledged, blocked until maintainer redelivery, or outcome-unknown with its
-   * push decided) are never yielded. A complete pass that finds none, with no store
-   * write during it, proves the inbox quiet until the next write: recovery,
-   * admission, settlement and wake attempts then read no record. Without it a
-   * quiet Home turn re-read every historical record several times on Home's
-   * session lane (#922, after #906). */
+   * push decided) are never yielded. After one complete pass, a pass reads only
+   * the tasks that pass found actionable and the tasks written since it began
+   * (`taskWritesSince`), so a quiet inbox reads no record until a task write, and
+   * a worker's check-in costs one record, not every historical one (#1995). Only
+   * the first pass, or one after more writes than the store's journal names,
+   * reads every record (#922, after #906). */
   private async *actionable(): AsyncGenerator<HomeTaskRecord> {
     const start = this.store.writeCount;
-    if (this.quietAt === start) return;
-    let quiet = true;
-    for await (const task of this.events()) {
+    const written = this.quietProof && this.store.taskWritesSince(this.quietProof.at);
+    const found = new Set<string>();
+    const source = written ? this.candidates(new Set([...this.quietProof!.actionable, ...written])) : this.events();
+    for await (const task of source) {
       const wake = task.wake;
       if (!wake || wake.state === "acknowledged" || wake.state === "blocked" || (wake.state === "outcome-unknown" && wake.push === "decided")) continue;
-      quiet = false;
+      found.add(task.taskId);
       yield task;
     }
-    if (quiet && this.store.writeCount === start) this.quietAt = start;
+    // Only a complete pass proves anything: an abandoned or failed one keeps the last proof.
+    this.quietProof = { at: start, actionable: found };
   }
 
   /** Project both outboxes through the same admission/proof owner. The attention
    * snapshot has no final report, even if the worker settles during delivery. */
   private async *events(): AsyncGenerator<HomeTaskRecord> {
-    for await (const task of this.store.records()) {
-      if (task.wake) yield task;
-      if (task.attention) yield this.attentionTask(task);
+    for await (const task of this.store.records()) yield* this.outboxes(task);
+  }
+  /** The named tasks' outboxes. Like a full pass, each record is read when it is
+   * reached; callers that need delivery order sort. */
+  private async *candidates(taskIds: Set<string>): AsyncGenerator<HomeTaskRecord> {
+    for (const taskId of taskIds) {
+      const task = await this.store.read(taskId);
+      if (task) yield* this.outboxes(task);
     }
+  }
+  private *outboxes(task: HomeTaskRecord): Generator<HomeTaskRecord> {
+    if (task.wake) yield task;
+    if (task.attention) yield this.attentionTask(task);
   }
   private attentionTask(task: HomeTaskRecord): HomeTaskRecord {
     return { ...task, wake: task.attention!.wake, reportRef: null, terminalEvidence: null };

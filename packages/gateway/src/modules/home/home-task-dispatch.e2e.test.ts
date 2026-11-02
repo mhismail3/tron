@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
 import { type HomeTaskDispatcher, successorTaskId, HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js";
@@ -460,11 +460,18 @@ describe("Home task bounded backlogs", () => {
     const path = (home as any).sessionManager.getSessionFile();
     const before = JSON.parse(await readFile(join(f.tronHome, "gateway/home/home.json"), "utf8"));
     expect(before.chapters.at(-1).activationStarted).toBe(false);
-    f.faux.setResponses([fauxAssistantMessage([reportCall(`report-${kind}`)], { stopReason: "toolUse" })]);
-    const task = await (await owner.dispatchTask(sessionId, { taskId: `task-${kind}`, intent: "Finite work", target: f.cwd })).completion;
     let request = "";
-    f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Reviewed first backlog"); }]);
-    await home.prompt("Review pending"); await waitFor(() => home.snapshot().configurationBlocker === null, "first backlog activation");
+    f.faux.setResponses([fauxAssistantMessage([reportCall(`report-${kind}`)], { stopReason: "toolUse" }),
+      (context) => { request = JSON.stringify(context); return fauxAssistantMessage("Reviewed first backlog"); }]);
+    const task = await (await owner.dispatchTask(sessionId, { taskId: `task-${kind}`, intent: "Finite work", target: f.cwd })).completion;
+    // The settled result asks for a wake before `completion` resolves. Whichever activation
+    // runs first in the chapter admits the backlog: that wake when the chapter can be woken,
+    // otherwise the user's next activation. A prompt racing the wake would be refused busy.
+    await (owner as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
+    if ((await owner.taskResult(task.taskId)).wake?.state === "pending") {
+      await home.prompt("Review pending"); await waitFor(() => home.snapshot().configurationBlocker === null, "first backlog activation");
+    }
+    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "first backlog activation idle");
     expect(request).toContain("Verified result");
     if (kind !== "initial") expect(request).toContain("Initial conversation");
     await waitForTaskAcknowledgement(f, task.taskId);
@@ -740,13 +747,13 @@ describe("Home task cold reconciliation", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Home started")]);
     await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the result");
-    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
-    const run = await dispatch(f); await run.completion;
     const owner = homeOwnerOf(f.registry);
     const settle = vi.spyOn(owner, "settleTaskResults").mockRejectedValueOnce(new Error("settlement store refused"));
     const diagnostic = vi.spyOn(home as any, "emit");
-    f.faux.setResponses([fauxAssistantMessage("Result read although settlement failed")]);
-    await home.prompt("Review the result"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home terminal after failed settlement");
+    // Home is idle and present, so the settled result wakes it; that wake's settlement fails.
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }), fauxAssistantMessage("Result read although settlement failed")]);
+    const run = await dispatch(f); await run.completion;
+    await waitFor(() => settle.mock.calls.length === 1 && home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home terminal after failed settlement");
     expect(settle).toHaveBeenCalledTimes(1);
     expect(diagnostic).toHaveBeenCalledWith("session.diagnostic", expect.objectContaining({ code: "home-inbox-settlement-failed" }));
     expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Result read although settlement failed");
@@ -1127,23 +1134,47 @@ describe("Home task list RPC", () => {
       return { admission, turn: reads };
     };
     // The first turn after startup proves the inbox quiet with one validating and one
-    // reading pass; every later turn reads no task record until a task write (#922).
+    // reading pass; a later turn reads only tasks written since, never history (#922).
     const first = await turn("are you there?");
     const quiet = await turn("still there?");
-    // A new result is a task write, so the quiet proof no longer holds: its wake
-    // delivers it, the next turn proves the inbox quiet again, and the one after reads nothing.
+    // #1995: a running worker's ordinary check-in is a task write that wakes no one.
+    // Home's next admission reads only the written task, never a historical record,
+    // and the worker's later result is still delivered once.
+    let releaseWorker!: () => void;
+    const workerHeld = new Promise<void>(resolve => { releaseWorker = resolve; });
+    let workerTurns = 0;
+    const respond: FauxResponseFactory = async context => {
+      if (!context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) return fauxAssistantMessage("Home answered");
+      if (++workerTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Measure", done: "Read the history", next: "Report" })], { stopReason: "toolUse" });
+      await workerHeld;
+      return fauxAssistantMessage([reportCall("checking", "Checked result")], { stopReason: "toolUse" });
+    };
+    f.faux.setResponses(Array.from({ length: 6 }, () => respond));
+    const checking = await dispatch(f, "checking");
+    await waitFor(async () => (await store.read("checking"))?.checkins?.length === 1 && workerTurns === 2, "worker checked in and still running");
+    reads = 0;
+    await home.prompt("while the worker runs?");
+    const duringCheckin = reads;
+    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle beside the worker");
+    releaseWorker();
+    await checking.completion;
+    await waitFor(async () => (await owner.taskResult("checking")).wake?.state === "acknowledged", "checked-in result delivered once");
+    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle after the checked-in result");
+    expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && (entry as { details?: { taskId?: string } }).details?.taskId === "checking")).toHaveLength(1);
+    // A new result is a task write: its wake delivers it and the next turns read no historical record.
     f.faux.setResponses([fauxAssistantMessage([reportCall("late", "Late result")], { stopReason: "toolUse" }), fauxAssistantMessage("Late result read")]);
     await (await dispatch(f, "late")).completion;
     await waitFor(async () => (await owner.taskResult("late")).wake?.state === "acknowledged", "late result delivered once");
     await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle after wake");
     const reproved = await turn("anything new?");
     const quietAgain = await turn("and now?");
-    evidence.push({ case: "task-store-reads-per-list-and-admission", records: records.size + 1, listReads, first, quiet, reproved, quietAgain });
+    evidence.push({ case: "task-store-reads-per-list-and-admission", records: records.size + 1, listReads, first, quiet, duringCheckin, reproved, quietAgain });
     // Twenty identical reads in flight share one pass over the records.
     expect(listReads).toBe(100);
     expect(first.turn).toBeLessThanOrEqual(200);
     expect(quiet).toEqual({ admission: 0, turn: 0 });
-    expect(reproved.turn).toBeLessThanOrEqual(202);
+    expect(duringCheckin).toBe(0);
+    expect(reproved).toEqual({ admission: 0, turn: 0 });
     expect(quietAgain).toEqual({ admission: 0, turn: 0 });
   }, 60_000);
 });
@@ -1403,8 +1434,13 @@ describe("Home task production dispatch", () => {
     let home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
     await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "initial Home terminal");
+    // An idle, eligible Home is woken by a settled result, and that wake could deliver it to
+    // the old chapter before the replacement. With memory paused the result settles pending
+    // for the old route; resuming after the replacement wakes the replacement, which blocks it.
+    await owner.pauseMemory();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
+    expect(task.wake).toMatchObject({ state: "pending" });
     const port = (owner as any).options.sessions;
     const runtimes = (owner as any).options.runtimes;
     const present = runtimes.sessionPresent.bind(runtimes);
@@ -1413,6 +1449,8 @@ describe("Home task production dispatch", () => {
     expect(replacement.sessionId).not.toBe(f.home.sessionId);
     expect((await owner.status() as any).routeGeneration).toBe(task.routeGeneration + 1);
     home = await f.registry.acquire(replacement.sessionId);
+    await owner.resumeMemory();
+    await (owner as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
     f.faux.setResponses([fauxAssistantMessage("replacement sees no old result")]);
     await home.prompt("Continue after replacement"); await waitFor(() => home.snapshot().configurationBlocker === null, "replacement terminal");
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "blocked" } });
