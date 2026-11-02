@@ -53,7 +53,7 @@ safe to ship.** Tests protect feature work, never become a queue that blocks it.
 ## P4 Coverage follows behavior and grows with it
 
 - Core journeys run end to end through the real Gateway: prompt/reply, delegate/result,
-  exact approval tap, settings change, Home wake and reconnect/restart. A coverage map
+  exact approval tap, settings change, Home wake and reconnect/restart. A [coverage map](../tools/verify/core-journeys.md)
   names each actual test, boundary, behavioral assertion and remaining gap; a filename
   or old passing report is not proof of current coverage.
 - Assert accepted effects, refusal, ordering, identity, persistence and recovery rather
