@@ -897,12 +897,17 @@ final class TronHomeSheetsUITests: XCTestCase {
             XCTAssertTrue(self.element(app, "home-tool-row-Check-in").label.contains("Gateway journey passed"))
         }
         for index in 0..<2 {
-            // These canonical records deliberately omit labels as well as origin.
-            // Raw names stay lowercase; renderer admission must not depend on labels.
-            toolSheet(app, "paged-single-zoom-\(index)", chip: "zoom, Completed", index: 0, outcome: "Opened") {
+            // These canonical records deliberately omit labels as well as origin; the chip
+            // names them by tool name (527f266a2), so admission must not depend on labels.
+            // They are the oldest records: the last chip of their kind once scrolled to the top.
+            for _ in 0..<8 { app.swipeDown() }
+            let zooms = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Expand memory, Completed,'"))
+            toolSheet(app, "paged-single-zoom-\(index)", chip: "Expand memory, Completed", index: zooms.count - 1, outcome: "Opened") {
                 XCTAssertTrue(self.element(app, "home-tool-line-3539+0").exists)
             }
-            let list = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'task, Completed,'")).firstMatch
+            for _ in 0..<8 { app.swipeDown() }
+            let lists = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Manage task, Completed,'"))
+            let list = lists.element(boundBy: lists.count - 1)
             for _ in 0..<12 where !(list.exists && list.isHittable) { app.swipeDown() }
             list.tap()
             XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 5), app.debugDescription)

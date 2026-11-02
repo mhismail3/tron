@@ -2287,12 +2287,15 @@ final class TronSmokeUITests: XCTestCase {
         let thinking = app.buttons["Effort"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5))
         XCTAssertTrue(thinking.isEnabled, "Effort stays inspectable while configuration settles")
+        // The settling reason is the blocked model picker's lock explanation.
+        app.buttons["Switch Model"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let explanation = app.buttons["Why configuration is unavailable"]
-        XCTAssertTrue(explanation.exists)
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5), app.debugDescription)
         explanation.tap()
         XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
         keepScreenshot(named: "post-stop-configuration-settling")
-        app.buttons["Done"].tap()
+        closeTopSheet(app)
+        closeTopSheet(app)
         app.buttons["Release terminal settlement"].tap()
         let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)
         wait(for: [enabled], timeout: 5)
@@ -2348,9 +2351,11 @@ final class TronSmokeUITests: XCTestCase {
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
             openChatSettings(app)
             tapScrolling(app.buttons["settings-section-context-open"], in: app)
-            let compaction = app.switches["Automatic compaction"]
-            reveal(compaction, in: app)
-            XCTAssertTrue(compaction.isHittable, "The canonical compaction policy must stay reachable at XXXL")
+            // Automatic compaction has no iPhone row (d0a766aa2); the Compaction sheet
+            // itself must still open on its content at XXXL.
+            let compaction = app.descendants(matching: .any)["settings-section-context-detail"]
+            XCTAssertTrue(compaction.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(app.switches["Automatic compaction"].exists, "The retired policy row stays retired")
             keepScreenshot(named: "1325-session-\(appearance)-xxxl-policy")
             app.terminate()
         }
