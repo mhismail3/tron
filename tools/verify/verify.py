@@ -38,6 +38,10 @@ IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppU
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
 NOT_DRIVEN = ("ios-lanes", "mac", "relay")
+# Test methods per iOS runner process. Each process keeps the runner's focused
+# deadline, so a selected class larger than one deadline runs as several processes, not one longer one.
+# Six journeys take about 400 s at the observed ~66 s each: a third of the 1200 s deadline.
+IOS_SHARD_TESTS = 6
 
 
 class VerifyError(Exception):
@@ -141,6 +145,51 @@ def ios_selectors(paths: list[str]) -> list[str]:
         owner = f"{IOS_TARGETS[path.split('/')[2]]}/{name}"
         owners += [] if owner in owners else [owner]
     return owners
+
+
+def ios_test_methods(owner: str) -> list[str]:
+    """`Target/Class/testMethod` owners XCTest runs for `Target/Class`: the no-argument, non-private
+    `test` methods declared in the class or its top-level extensions in that target's sources.
+    Fails closed: a test-shaped method whose enclosing top-level type cannot be read makes the
+    class run whole (an empty result) rather than silently dropping a test."""
+    target, name = owner.split("/")
+    folder = next(path for path, candidate in IOS_TARGETS.items() if candidate == target)
+    top_level = re.compile(r"^(?:(?:final|public|open|private|fileprivate|internal|@\w+(?:\([^)]*\))?)\s+)*"
+                           r"(?:class|struct|enum|actor|extension|protocol)\s+(\w+)")
+    method = re.compile(r"^\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:override\s+)?func\s+(test\w*)\(\)")
+    shaped = re.compile(r"\bfunc\s+(test\w*)\s*\(\s*\)")
+    hidden = re.compile(r"\b(?:private|fileprivate|static|class)\s+func\b")
+    found: list[str] = []
+    unplaced = False
+    for source in sorted((ROOT / IOS / folder).rglob("*.swift")):
+        text = source.read_text(errors="replace")
+        if not re.search(rf"\b(?:class|extension)\s+{re.escape(name)}\b", text):
+            continue
+        scope: str | None = None
+        for line in text.splitlines():
+            # A top-level line opens a type's scope, or an unknown one; a bare attribute line does not.
+            if line[:1] not in ("", " ", "\t", "}", "/", "#") and (
+                    line[:1] != "@" or re.search(r"\b(?:class|struct|enum|actor|extension|protocol|func|var|let)\b", line)):
+                declared = top_level.match(line)
+                scope = declared.group(1) if declared else None
+            elif scope == name and (match := method.match(line)):
+                found += [] if match.group(1) in found else [match.group(1)]
+            elif scope == name and shaped.search(line) and not hidden.search(line):
+                unplaced = True  # a test spelled in a way the reader does not select
+            elif scope is None and shaped.search(line) and not hidden.search(line):
+                unplaced = True
+    return [] if unplaced else [f"{owner}/{test}" for test in found]
+
+
+def ios_shards(selectors: list[str]) -> list[list[str]]:
+    """The selected classes' test methods in runs of at most IOS_SHARD_TESTS; classes whose methods
+    cannot be read run whole, together, in one final shard."""
+    methods, whole = [], []
+    for owner in selectors:
+        found = ios_test_methods(owner)
+        methods += found
+        whole += [] if found else [owner]
+    return [methods[index:index + IOS_SHARD_TESTS] for index in range(0, len(methods), IOS_SHARD_TESTS)] + ([whole] if whole else [])
 
 
 def ios_index_stale() -> str | None:
@@ -599,6 +648,13 @@ def per_file(interpreter: str, files: list[str]) -> str:
     return " && ".join(f"echo {shlex.quote(FILE_MARKER + path)} && {interpreter} {shlex.quote(path)}" for path in files)
 
 
+def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[str]:
+    """One step per iOS shard, numbered within the group; one step for any other group."""
+    if group != "ios" or skipped or len(shards) < 2:
+        return [f"tests: {group}"]
+    return [f"tests: ios {index}/{len(shards)}" for index in range(1, len(shards) + 1)]
+
+
 def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True):
     """One command definition shared by planning and execution."""
     node = [str(ROOT / "scripts/tron-node"), "exec"]
@@ -679,6 +735,7 @@ def main(argv: list[str]) -> int:
             groups.setdefault(runner_of(path, nested, mac_terminal), []).append(path)
         # Selectors are needed only by a run that drives the iOS group (#1522).
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
+        shards = ios_shards(selectors)
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
@@ -702,7 +759,7 @@ def main(argv: list[str]) -> int:
                   "moved-lines (advisory)"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios build"] if ios_lane else []) + ["layers ios"] \
-        + [f"tests: {group}" for group in sorted(groups)]
+        + [name for group in sorted(groups) for name in test_step_names(group, shards, skipped_group(group))]
     tron = str(ROOT / "scripts/tron")
     ios_test = str(ROOT / "scripts/tron-ios-test")
     node = [str(ROOT / "scripts/tron-node"), "exec"]
@@ -735,8 +792,9 @@ def main(argv: list[str]) -> int:
             if group in NOT_DRIVEN or skipped_group(group):
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
-                command, cwd, _ = test_spec(group, files, selectors, ROOT / "test-results/verify" / sha, ios_wait=name != "all")
-                commands.append({"name": f"tests: {group}", "command": command, "cwd": str(cwd.relative_to(ROOT))})
+                for label, shard in zip(test_step_names(group, shards, False), shards if group == "ios" else [selectors]):
+                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all")
+                    commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT))})
         deferred_commands = []
         if selection["deferredTests"]:
             command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha)
@@ -845,14 +903,39 @@ def main(argv: list[str]) -> int:
                 not_run.append(group)
                 run.skipped(label, f"{len(files)} file(s) need their own {group} lane(s), which verify does not drive; pass --skip {group.split('-')[0]} to accept")
                 continue
-            if group == "ios" and ios_deferred:
-                run.skipped(label, "iOS build admission deferred to batch")
-                run.steps[-1].update(status="deferred", deferredTests=files)
+            if group == "ios":
+                failed_shards = []
+                for label, shard in zip(test_step_names("ios", shards, False), shards):
+                    if ios_deferred:
+                        run.skipped(label, "iOS acquisition deferred to batch")
+                        run.steps[-1].update(status="deferred", deferredTests=files)
+                        continue
+                    command, cwd, count = test_spec(group, files, shard, run.logs, ios_wait=name != "all")
+                    env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
+                    result = run.step(label, command, cwd=cwd, count=count, env=env)
+                    if result["exit"] == 73:
+                        # Admission refused: this shard and the rest wait for the batch, never pass.
+                        result.update(status="deferred", deferredTests=files)
+                        ios_deferred = True
+                    elif result["status"] == "failed":
+                        result["failedTests"] = ios_failures((ROOT / result["log"]).read_text(errors="replace"))
+                        print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
+                        failed_shards.append(f"{label} failed")
+                    elif not result.get("tests"):
+                        result["status"] = "failed"
+                        failed_shards.append(f"{label} ran zero passing tests: an empty group is not evidence")
+                    elif all(owner.count("/") == 2 for owner in shard) and result["tests"] != len(shard):
+                        # A method selector that matches nothing passes silently; every named test must run.
+                        result["status"] = "failed"
+                        failed_shards.append(f"{label} passed {result['tests']} of its {len(shard)} named test(s)")
+                # Every shard runs, so one red cannot hide another selected test's outcome.
+                if failed_shards:
+                    return finish("failed", "; ".join(failed_shards))
                 continue
             command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all")
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if group == "ios" and args.update_locks else update
+            env = update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
@@ -869,13 +952,6 @@ def main(argv: list[str]) -> int:
                     for entry in result["quarantined"]:
                         print(f"    QUARANTINED: {entry['testId']} — expires {entry['expires']}, issue #{entry['issue']}", flush=True)
                     run.on_update()
-            elif group == "ios":
-                if result["exit"] == 73:
-                    result.update(status="deferred", deferredTests=files)
-                    continue
-                if result["status"] == "failed":
-                    result["failedTests"] = ios_failures((ROOT / result["log"]).read_text(errors="replace"))
-                    print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
             if result["status"] == "failed":
                 return finish("failed", f"{label} failed")
             if not result.get("tests") and not result.get("quarantined") and not result.get("expiredReds"):
@@ -892,7 +968,7 @@ def main(argv: list[str]) -> int:
             return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred; full batch is not green")
         if passing == 0 and not any(step.get("quarantined") or step.get("expiredReds") for step in run.steps):
             return finish("failed", "zero tests ran: an empty selection is not evidence")
-        groups_run = len([step for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"])
+        groups_run = len({step["name"].split()[1] for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"})
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"
                       + (f"; {len(selection['deferredTests'])} serial file(s) deferred to explicit batch" if selection["deferredTests"] else "")
                       + (f"; skipped by request: {', '.join(sorted(skip))}" if skip else ""))
