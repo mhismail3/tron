@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
+import type { Credential, CredentialInfo, CredentialStore, Model, Provider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { ModelQueueOwner } from "./model-queue.js";
@@ -230,5 +230,105 @@ describe("provider usage across a model catalog refresh", () => {
     expect(await service.invoke(client, "provider.usage", { providerId: "opencode-go" })).toMatchObject({
       providers: [{ status: "unavailable", message: "OpenCode Go refused the usage request" }],
     });
+  });
+});
+
+// CortexKit 2.x (`@cortexkit/pi-anthropic-auth`) registers `anthropic` with ambient
+// API-key auth ("CortexKit Native") and no Pi OAuth login. Its offline setup moves the
+// Anthropic login out of Pi's auth.json into its own pool beside the agent files.
+function cortexKitProvider(): Provider {
+  const model = {
+    id: "claude-opus-5-5", name: "Claude Opus 5.5", api: "cortexkit-anthropic-messages", provider: "anthropic",
+    baseUrl: "https://api.anthropic.com", reasoning: true, input: ["text", "image"],
+    cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 }, contextWindow: 1_000_000, maxTokens: 128_000,
+  } as unknown as Model<"cortexkit-anthropic-messages">;
+  const unused = () => { throw new Error("usage reads never stream"); };
+  return {
+    id: "anthropic", name: "Anthropic (CortexKit)", baseUrl: "https://api.anthropic.com",
+    auth: { apiKey: { name: "CortexKit Native", check: async () => ({ type: "api_key", source: "CortexKit Native" }), resolve: async () => ({ auth: {}, source: "CortexKit Native" }) } },
+    getModels: () => [model], stream: unused, streamSimple: unused,
+  } as unknown as Provider;
+}
+/** The pool files CortexKit 2.4.12 setup writes for Pi (synthetic values). */
+async function writeCortexKitPool(agentDir: string, main: { type?: string; expires: number; custody?: string }) {
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(join(agentDir, "anthropic-auth-pool.json"), JSON.stringify({
+    version: 1, mainAccountId: "main-row",
+    accounts: [{ id: "main-row", type: main.type ?? "oauth", addedAt: 1 }, { id: "fallback-row", type: "oauth", addedAt: 2 }],
+    claustrum: { mode: main.custody ?? "local", disabledAccountIdentities: [] },
+  }));
+  await writeFile(join(agentDir, "anthropic-auth-pool-state.json"), JSON.stringify({
+    version: 1,
+    accounts: {
+      "main-row": { access: "sk-ant-oat01-pool-main", refresh: "sk-ant-ort01-pool-main", expires: main.expires, lastRefreshedAt: 1 },
+      "fallback-row": { access: "sk-ant-oat01-pool-fallback", refresh: "sk-ant-ort01-pool-fallback", expires: main.expires, lastRefreshedAt: 1 },
+    },
+  }));
+}
+
+describe("Anthropic usage under CortexKit 2.x", () => {
+  let root = "";
+  let service: GatewayService | undefined;
+  afterEach(async () => {
+    service?.dispose();
+    service = undefined;
+    if (root) await rm(root, { recursive: true, force: true });
+    root = "";
+  });
+
+  it("keeps the Anthropic usage card after auth.json loses its anthropic login, reading the pool's main-account token", async () => {
+    root = await mkdtemp(join(tmpdir(), "gateway-cortexkit-usage-"));
+    const agentDir = join(root, "agent");
+    let clock = Date.parse("2026-11-02T12:00:00Z");
+    // auth.json after CortexKit setup: other providers remain, anthropic is gone.
+    const openai: Credential = { type: "oauth", access: "openai-test-token", refresh: "refresh", expires: clock + 3_600_000 };
+    const credentials: CredentialStore = {
+      read: async (providerId) => providerId === "openai" ? openai : undefined,
+      list: async () => [{ providerId: "openai", type: "oauth" }],
+      modify: async (providerId, fn) => providerId === "openai" ? fn(openai) : undefined,
+      delete: async () => {},
+    };
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: true, allowModelNetwork: false, credentials });
+    runtime.registerNativeProvider(cortexKitProvider());
+    await writeCortexKitPool(agentDir, { expires: clock + 3_600_000 });
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    // Live 2026-11 Ultra shape of /api/oauth/usage.
+    const body = { five_hour: null, seven_day: { utilization: 10, resets_at: "2026-11-09T00:00:00Z" }, limits: [] };
+    const providerUsage = new ProviderUsageOwner({ agentDir, now: () => clock, fetch: async (input, init) => {
+      requests.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") });
+      return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    } });
+    service = new GatewayService({ display: {} as never,
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
+      modelRuntime: runtime,
+      broadcast: () => {},
+      providerUsage,
+      globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation() },
+      sessions: { recentModelUsage: () => [] },
+      receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(), status: async () => undefined },
+    } as unknown as GatewayServiceDependencies);
+
+    const list = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; name: string; usageSupported: boolean; authSource: string | null }> };
+    expect(list.providers.find((provider) => provider.id === "anthropic"))
+      .toMatchObject({ name: "Anthropic (CortexKit)", usageSupported: true, authSource: "CortexKit Native" });
+    const usage = async () => {
+      clock += 61_000; // past the 60 s usage cache, inside the token's life
+      return (await service!.invoke(client, "provider.usage", {}) as { providers: Array<Record<string, unknown>> }).providers
+        .find((provider) => provider.providerId === "anthropic");
+    };
+    expect(await usage()).toMatchObject({
+      providerId: "anthropic", status: "available", source: "anthropic.oauth-usage", scope: "account",
+      windows: [{ id: "seven-day", label: "Weekly", usedPercent: 10, windowSeconds: 604_800 }],
+    });
+    expect(requests).toEqual([{ url: "https://api.anthropic.com/api/oauth/usage", authorization: "Bearer sk-ant-oat01-pool-main" }]);
+
+    // CortexKit owns refresh: a token about to expire, a non-OAuth main row and
+    // vault custody each send nothing rather than refreshing or using another row.
+    for (const pool of [{ expires: clock + 30_000 }, { type: "api_key", expires: clock + 3_600_000 }, { custody: "claustrum", expires: clock + 3_600_000 }]) {
+      await writeCortexKitPool(agentDir, pool);
+      requests.length = 0;
+      expect(await usage()).toMatchObject({ providerId: "anthropic", status: "unconfigured", windows: [] });
+      expect(requests).toEqual([]);
+    }
   });
 });
