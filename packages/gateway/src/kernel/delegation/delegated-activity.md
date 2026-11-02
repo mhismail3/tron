@@ -74,7 +74,12 @@ maps. `subagent-artifact-status.ts` owns bounded opened-file/directory/header pr
 `subagent-activity.ts` folds lifecycle, canonical facts/receipts and publications over those
 same maps. No native subagent artifact parser, run-control method, second index or callback adapter
 exists. Native branch/disposal boundaries call this owner's reset/retirement operations;
-watched refresh checks generation and disposed-frame identity after its read. Admission
+watched refresh checks generation and disposed-frame identity after its read. Every
+watched, discovery or drain read takes one ticket before its first await and publishes only
+if no later-begun read already published for that tool call, so concurrent reads never move
+a frame back to older bytes. A removed row's published ticket is retired once every read
+begun before it has finished. A workflow child read that loses an atomic replacement retries
+like a discovery read rather than projecting the child unavailable. Admission
 retains bounded path/header/inode proofs; ambient discovery uses attribution and receipt-claim
 checks and reads Native’s existing retirement fence (`shuttingDown` or `disposed`)
 at entry, after its read and on read failure, before shared recency, lifecycle

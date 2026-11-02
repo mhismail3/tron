@@ -2536,7 +2536,8 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         // The fixture mounts the Context sheet itself, under its own cover control.
-        XCTAssertTrue(any["settings-section-context-detail"].waitForExistence(timeout: 10), app.debugDescription)
+        // Its one row is the section: a one-row section keeps the row's identity.
+        XCTAssertTrue(any["settings-row-context.images.block"].waitForExistence(timeout: 10), app.debugDescription)
         let toggle = any["settings-row-context.images.block"].switches.firstMatch
         tapScrolling(toggle, in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-held"], containing: "held:1", timeout: 5))
@@ -3032,6 +3033,24 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(toggle.value as? String, "1")
         XCTAssertTrue(app.staticTexts["Other entries"].exists)
         keepScreenshot(named: "1261-tools-persisted-selectors")
+    }
+
+    /// #2207: the codemode choice sheet Default Tools presents is usable once
+    /// the section has read its values.
+    @MainActor
+    func testDefaultToolsCodemodePickerOffersEnabledChoices() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write", "-settings-ui-extensions"]
+        app.launch(); defer { app.terminate() }
+        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+        let codeMode = app.buttons["Other tools with codemode"]
+        XCTAssertTrue(codeMode.waitForExistence(timeout: 10), app.debugDescription)
+        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: codeMode)], timeout: 10)
+        tapScrolling(codeMode, in: app)
+        let only = app.buttons["settings-option-Codemode only"]
+        XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(only.isEnabled, "The presented choices must be enabled: \(app.debugDescription)")
+        XCTAssertTrue(app.buttons["settings-option-Both"].isEnabled)
     }
 
     @MainActor
