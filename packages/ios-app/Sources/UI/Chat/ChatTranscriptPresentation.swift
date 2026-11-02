@@ -1283,7 +1283,8 @@ enum ChatNotificationTone: Hashable, Sendable {
     case command
     case tool
     case information
-    case purple
+    case automation
+    case worker
     case subagent
     case warning
     case success

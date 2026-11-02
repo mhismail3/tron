@@ -34,7 +34,6 @@ extension Color {
     @MainActor static var tronAccentText: Color { .tronPrimary }
     static let tronMint = Color(lightHex: "#10B981", darkHex: "#34D399")
     static let tronSuccess = Color(lightHex: "#15803D", darkHex: "#22C55E")
-    static let tronWarning = Color(lightHex: "#D97706", darkHex: "#F59E0B")
     static let tronError = Color(lightHex: "#DC2626", darkHex: "#EF4444")
     static let tronInfo = Color(lightHex: "#0EA5E9", darkHex: "#38BDF8")
     static let tronAmber = Color(lightHex: "#D97706", darkHex: "#F59E0B")
@@ -61,7 +60,8 @@ extension Color {
     static let tronBurgundy = Color(lightHex: "#9F1239", darkHex: "#FB7185")
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
-    /// System settings identity: blue steel, distinct from Accounts indigo and neutral slate.
+    /// Blue steel: the System settings identity and the chat Worker chip, distinct
+    /// from Accounts indigo, Automation teal and neutral slate.
     static let tronSteel = Color(lightHex: "#36566F", darkHex: "#9BBAD0")
 
     static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#0D0E0F")
@@ -75,16 +75,13 @@ extension Color {
     static let tronTextMuted = Color(lightHex: "#6B7280", darkHex: "#8B949E")
     static let tronTextDisabled = Color(lightHex: "#9CA3AF", darkHex: "#5B6472")
     @MainActor static var userMessageText: Color { .tronPrimary }
-    static let assistantMessageText = Color(lightHex: "#111827", darkHex: "#E8E9EA")
     @MainActor static var inputText: Color { .tronPrimary }
     /// The typed-text ink, dimmed: a placeholder reads as the theme's own quiet draft, not grey.
     @MainActor static var inputPlaceholder: Color { Color.tronPrimary.opacity(0.6) }
     @MainActor static var userBubble: Color { .tronPrimary }
-    static let assistantBubble = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
     static let systemBubble = Color(lightHex: "#E6EBF1", darkHex: "#323842")
     static let toolBubble = Color(lightHex: "#E0F2FE", darkHex: "#14324A")
     static let errorBubble = Color(lightHex: "#FEE2E2", darkHex: "#7F1D1D")
-    static let tronSecondary = Color.tronTextSecondary
 
     init(hex: String) {
         let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)

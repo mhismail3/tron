@@ -148,7 +148,7 @@ struct ProjectLifecycleDetailPage<RenameDestination: View>: View {
             if let reason = project.archiveUnavailableReason {
                 TronSettingsGroup(nil) {
                     TronSettingsRow(icon: "exclamationmark.triangle", title: "Archive unavailable", subtitle: reason,
-                        subtitleLineLimit: nil, accent: .tronWarning)
+                        subtitleLineLimit: nil, accent: .tronAmber)
                 }
             }
             TronSettingsCaption("Every trust, rename, archive or untrust request opens its exact review card. No action is approved automatically.")

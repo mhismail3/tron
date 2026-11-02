@@ -111,7 +111,7 @@ extension HomeSheet {
         switch state {
         case .active: .tronEmerald
         case .sealed: .tronSlate
-        case .reserved, .materializing: .tronWarning
+        case .reserved, .materializing: .tronAmber
         }
     }
 }

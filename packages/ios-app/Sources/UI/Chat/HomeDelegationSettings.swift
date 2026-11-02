@@ -40,7 +40,7 @@ extension HomeTaskSheet {
                             if index > 0 { TronSettingsDivider() }
                             TronSettingsRow(icon: "lock.shield", title: "Delegation: All trusted projects") {
                                 TronStatusPill(text: scope.active ? (permissions.needsReconfirmation ? "Reconfirm" : "Active") : "Revoked",
-                                               accent: scope.active ? (permissions.needsReconfirmation ? .tronWarning : .tronEmerald) : .tronSlate)
+                                               accent: scope.active ? (permissions.needsReconfirmation ? .tronAmber : .tronEmerald) : .tronSlate)
                                     .fixedSize()
                                 if scope.active { revokeButton(label: "Revoke scope \(scope.id)") { requestRevocation(.scope(scope.id)) } }
                             }

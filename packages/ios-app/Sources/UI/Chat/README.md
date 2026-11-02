@@ -99,7 +99,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   command pills never show arguments. `custom_message` is right-aligned context; worker results
   read **Worker · task title**; receipt-attributed Home automation messages read
   **Automation · name**, opening the full untrusted request and its details; subagent
-  messages use the seafoam **Subagent** chip.
+  messages use the seafoam **Subagent** chip. `ChatSemanticPillRole` owns chip color by message
+  category, never origin kind: tools and own-session chrome use theme ink (running amber, failed
+  red), Automation `tronAutomation` teal, Worker `tronSteel`, Subagent seafoam, notifications and
+  processes blue, commands and prompt templates indigo, other inbound context neutral slate.
 - **Provider errors.** The projection kernel joins all adjacent assistant-error occurrences,
   including mixed types. Every visible non-error row (user Continue, model change, assistant
   content or tool activity) splits a run; empty error text parts do not. The first presentation
@@ -225,6 +228,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 native title ink: recovered (count retained), latest failure, no failures, cross-group continuation,
 and active failure/amber. Calls deliberately disagree with collection, result-arrival and timestamp
 ordering. Its capture-only method provides light/dark visual review, not behavioral acceptance.
+
+`TronChatChipCategoryColorUITests` renders one hosted transcript holding every chip category and
+compares each chip's rendered title ink with its category's contrast-safe palette in light and dark;
+its capture-only method provides Burgundy/Emerald light/dark visual review.
 
 `TronWorkerToolRegressionTests` exercises custom worker report outcomes/Markdown/evidence,
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP

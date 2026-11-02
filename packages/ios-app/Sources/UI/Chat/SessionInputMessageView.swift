@@ -32,8 +32,7 @@ enum InboundProducerPresentationPolicy {
         case .subagent: return .subagent
         case .process: return .information
         case .user: return .accent
-        case .extension: return .purple
-        case .gateway, .assistant, .unknown, nil: return .neutral
+        case .extension, .gateway, .assistant, .unknown, nil: return ChatSemanticPillRole.context.tone
         }
     }
 
@@ -194,15 +193,17 @@ struct InboundContextMessagePresentation: Equatable {
         if customType == "tron.home-trigger.v1", origin?.kind == .extension,
            let trigger = details?.objectValue?["trigger"]?.objectValue,
            trigger["kind"]?.stringValue == "automation" {
-            title = trigger["title"]?.stringValue.map { "Automation · \($0)" } ?? "Automation"
+            let role = ChatSemanticPillRole.automation
+            title = trigger["title"]?.stringValue.map { "\(role.label) · \($0)" } ?? role.label
             status = "Message"
-            tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
+            tone = role.tone
             icon = "clock.arrow.circlepath"
             detailsTitle = "Automation message"
         } else if customType == "tron.home-task-result.v1" {
             let object = details?.objectValue
             let taskTitle = object?["taskTitle"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-            title = taskTitle.flatMap { $0.isEmpty ? nil : "Worker · \($0)" } ?? "Worker"
+            let role = ChatSemanticPillRole.worker
+            title = taskTitle.flatMap { $0.isEmpty ? nil : "\(role.label) · \($0)" } ?? role.label
             if object?["resultRef"]?.objectValue != nil || object?["report"]?.objectValue != nil {
                 status = "Reported"
             } else if object?["terminalEvidence"]?.objectValue != nil, object?["resultRef"] == .null {
@@ -210,7 +211,7 @@ struct InboundContextMessagePresentation: Equatable {
             } else {
                 status = InboundContextCompactPresentationPolicy.status(details: details)
             }
-            tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
+            tone = role.tone
             icon = "arrow.down.message.fill"
             detailsTitle = "Context details"
         } else if let status = Self.subagentStatus(customType: customType, details: details)
