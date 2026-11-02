@@ -1424,6 +1424,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSettingsSection(app, "tools")
         let codeMode = app.buttons["Other tools with codemode"]
         revealBelowNavigationBar(app, codeMode)
+        // Default Tools reads its own values; its controls stay disabled until then.
+        XCTAssertTrue(waitForEnabled(codeMode, timeout: 30), app.debugDescription)
         codeMode.tap()
         let only = app.buttons["settings-option-Codemode only"]
         XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
