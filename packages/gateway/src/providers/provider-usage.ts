@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { upstreamAccountRefusal } from "../util/upstream-error.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
+import { CORTEXKIT_ANTHROPIC_API, cortexKitPoolDirectory, readCortexKitAnthropicAccessToken } from "./cortexkit-anthropic-token.js";
 
 export const PROVIDER_USAGE_CAPABILITY = "provider-usage.v1";
 const MAX_PROVIDERS = 16;
@@ -76,6 +77,8 @@ export interface ProviderUsageOptions {
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   timeoutMs?: number;
+  /** Pi agent directory, where CortexKit 2.x keeps its Anthropic account pool. */
+  agentDir?: string;
 }
 
 const adapters: Record<string, Adapter> = {
@@ -459,7 +462,20 @@ export function providerUsageSupported(runtime: ModelRuntime, providerId: string
   const borrowed = borrowedUsage[providerId];
   if (borrowed) return borrowerQualifies(runtime, providerId, borrowed) && adapterFor(runtime, borrowed.from) !== undefined;
   const adapter = adapterFor(runtime, providerId);
-  return adapter !== undefined && (!adapter.oauthOnly || !runtime.hasConfiguredAuth(providerId) || runtime.isUsingOAuth(providerId));
+  return adapter !== undefined && (!adapter.oauthOnly || !runtime.hasConfiguredAuth(providerId) || runtime.isUsingOAuth(providerId) || cortexKitPoolAuth(runtime, providerId));
+}
+/**
+ * True when CortexKit 2.x serves `anthropic` from its own account pool: its
+ * provider has no Pi OAuth login and Pi's auth.json no longer holds the
+ * subscription credential, so the usage bearer comes from that pool instead
+ * (cortexkit-anthropic-token.ts). CortexKit 1.x builds registered Pi OAuth.
+ */
+function cortexKitPoolAuth(runtime: ModelRuntime, providerId: string): boolean {
+  if (providerId !== "anthropic") return false;
+  const provider = runtime.getProvider(providerId);
+  const models = runtime.getModels(providerId);
+  return provider !== undefined && provider.auth.oauth === undefined
+    && models.length > 0 && models.every((model) => model.api === CORTEXKIT_ANTHROPIC_API);
 }
 /**
  * The provider that currently presents this provider's usage as its own, if any.
@@ -548,8 +564,13 @@ export class ProviderUsageOwner {
   private readonly runtimeIdentities = new WeakMap<object, number>();
   private nextRuntimeIdentity = 1;
   private activeReads = 0;
-  private readonly options: Required<ProviderUsageOptions>;
-  constructor(options: ProviderUsageOptions = {}) { this.options = { fetch: options.fetch ?? globalThis.fetch, now: options.now ?? Date.now, timeoutMs: options.timeoutMs ?? REQUEST_TIMEOUT_MS }; }
+  private readonly options: Required<Omit<ProviderUsageOptions, "agentDir">> & Pick<ProviderUsageOptions, "agentDir">;
+  constructor(options: ProviderUsageOptions = {}) {
+    this.options = {
+      fetch: options.fetch ?? globalThis.fetch, now: options.now ?? Date.now, timeoutMs: options.timeoutMs ?? REQUEST_TIMEOUT_MS,
+      ...(options.agentDir === undefined ? {} : { agentDir: options.agentDir }),
+    };
+  }
 
   async read(runtime: ModelRuntime, providerId: string | undefined, signal?: AbortSignal): Promise<ProviderUsageResponse> {
     const ids = providerId === undefined
@@ -579,7 +600,7 @@ export class ProviderUsageOwner {
       admission.release();
       return emptySnapshot(providerId, "unsupported", adapters[providerId]?.source ?? null, adapters[providerId]?.scope ?? null, "Usage is not supported for this provider configuration");
     }
-    if (adapter.oauthOnly && !runtime.isUsingOAuth(providerId)) {
+    if (adapter.oauthOnly && !runtime.isUsingOAuth(providerId) && !cortexKitPoolAuth(runtime, providerId)) {
       admission.release();
       return emptySnapshot(providerId, runtime.hasConfiguredAuth(providerId) ? "unsupported" : "unconfigured", adapter.source, adapter.scope,
         runtime.hasConfiguredAuth(providerId) ? "Anthropic subscription usage requires OAuth sign-in" : "Sign in with Anthropic OAuth to view subscription usage");
@@ -701,6 +722,14 @@ export class ProviderUsageOwner {
     if (signal?.aborted) {
       admission?.release();
       throw new DOMException("Aborted", "AbortError");
+    }
+    if (cortexKitPoolAuth(runtime, providerId)) {
+      // A bounded local read with no detached credential work to wait for.
+      if (admission) admission.authSettled = true;
+      const token = this.options.agentDir === undefined
+        ? undefined
+        : await readCortexKitAnthropicAccessToken(cortexKitPoolDirectory(this.options.agentDir), this.options.now());
+      return token === undefined ? undefined : { auth: { apiKey: token } };
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs);

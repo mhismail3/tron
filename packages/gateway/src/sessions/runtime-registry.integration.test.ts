@@ -6403,6 +6403,48 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await visibleCommand;
   });
 
+  it("presents multi-line select options on one line and answers with the extension's own option", async () => {
+    const root = await temporaryRoot("tron-rpc-semantic-multiline-");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await mkdir(extensionDir, { recursive: true });
+    // CortexKit 2.x's /claude menu shape: each section option carries its status
+    // lines, which Pi's terminal select renders and the app shows as one row.
+    await writeFile(join(extensionDir, "sectioned-menu.ts"), `export default function (pi) {
+      pi.registerCommand("sectioned-menu", { handler: async (_args, ctx) => {
+        const answer = await ctx.ui.select("Claude", [
+          "Accounts: Custody: local\\nmain: main (oauth, enabled, local)\\n- Enrollment: not enrolled",
+          "Routing: Routing: main-first",
+          "Cache: 1-hour cache: enabled\\n\\n- Persisted: pool.json",
+        ]);
+        ctx.ui.setStatus("answer", JSON.stringify(answer ?? null));
+      }});
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = await createTestRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const command = slot.prompt("/sectioned-menu");
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1, "the pending interaction");
+    const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
+    expect(pending.options).toEqual([
+      "Accounts: Custody: local · main: main (oauth, enabled, local) · - Enrollment: not enrolled",
+      "Routing: Routing: main-first",
+      "Cache: 1-hour cache: enabled · - Persisted: pool.json",
+    ]);
+    const internal = slot as unknown as { respondToInteraction: (id: string, epoch: string, revision: number, value: unknown, cancelled: boolean) => void };
+    internal.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, pending.options![0], false);
+    await command;
+    expect(JSON.parse(slot.snapshot().extensionPresentation.semanticState.statuses.answer!))
+      .toBe("Accounts: Custody: local\nmain: main (oauth, enabled, local)\n- Enrollment: not enrolled");
+  });
+
   it("rotates and retires semantic epochs on direct, command, and trust reload paths", async () => {
     const root = await temporaryRoot("tron-semantic-epoch-reload-");
     const agentDir = join(root, "agent");

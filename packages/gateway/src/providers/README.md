@@ -38,7 +38,11 @@ and before worker controls, reading canonical fixed settings and the worker fact
   input bounds and price ceilings.
 - **`provider.usage`** (`provider-usage.v1`) queries only exact first-party shapes:
   Anthropic OAuth (subscription quota `/api/oauth/usage`; also CortexKit's
-  `cortexkit-anthropic-messages` at Anthropic's host), OpenAI Codex, OpenRouter, Kimi
+  `cortexkit-anthropic-messages` at Anthropic's host. CortexKit 2.x registers no Pi
+  OAuth and moves the login out of `auth.json`, so `cortexkit-anthropic-token.ts`
+  reads the main account's unexpired access token, read-only, from CortexKit's local
+  pool beside the agent files; a vault pool, a non-OAuth main or a token within 60 s
+  of expiry is `unconfigured`, and CortexKit alone refreshes), OpenAI Codex, OpenRouter, Kimi
   Coding, Z.ai (incl. China), Moonshot Open Platform (balances per region and
   currency, no windows) and OpenCode Go (5-hour, weekly and monthly windows; a 403 is
   unsupported only for `EntitlementError`, rejected for `AuthError`, else unavailable).
