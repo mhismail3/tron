@@ -1,4 +1,4 @@
-import { upsertExtensionActivity, publishExtensionActivity, updateExtensionActivity, appendExtensionActivityReceipt, canonicalExtensionRunFacts } from "../kernel/delegation/subagent-activity.js";
+import { upsertExtensionActivity, publishExtensionActivity, updateExtensionActivity, appendExtensionActivityReceipt, canonicalExtensionRunFacts, trimExtensionActivities } from "../kernel/delegation/subagent-activity.js";
 import { refreshExtensionActivityFromArtifact, refreshSubagentActivityFromArtifact } from "../kernel/delegation/subagent-artifact-reconcile.js";
 import { createTestRegistry, displayStoreOf, displayOwnerOf } from "../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../kernel/run/run-persistence.js";
@@ -4929,6 +4929,21 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       expect(f.activity()?.lifecycleOmissions?.children ?? 0, "older bytes never replace a newer frame").toBe(0);
       expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 0 });
       expect(f.slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/child", toolCount: 0 })]));
+      // Read tickets live exactly as long as their row: the runtime map's own
+      // eviction retires them, so successive runs never accumulate entries.
+      expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId)).toBe(true);
+      const row = f.activity()!;
+      const fillers = Array.from({ length: 64 }, (_, index) => `filler-${index}`);
+      for (const [index, id] of fillers.entries()) f.owner.extensionActivities.set(id, { ...row, id, toolCallId: id, runId: id,
+        activityId: id, updatedAt: new Date(Date.parse(row.updatedAt) + 1_000 + index).toISOString() });
+      try {
+        trimExtensionActivities(f.owner);
+        expect(f.activity(), "the oldest row is the one evicted").toBeUndefined();
+        expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId)).toBe(false);
+        expect(f.owner.extensionActivityReadGenerations.has(f.toolCallId)).toBe(false);
+      } finally {
+        for (const id of fillers) f.owner.extensionActivities.delete(id);
+      }
     } finally {
       await f.dispose();
     }

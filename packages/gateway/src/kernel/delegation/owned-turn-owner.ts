@@ -487,6 +487,15 @@ export class OwnedTurnOwner {
   }
 
 
+  /** A removed activity row keeps no read tickets. A watcher read still in
+   * flight sees its generation missing and stands down; a later read of a
+   * re-admitted row takes a newer ticket than any read it could supersede. */
+  forgetExtensionArtifactReads(toolCallId: string): void {
+    this.extensionActivityReadGenerations.delete(toolCallId);
+    this.extensionActivityPublishedReads.delete(toolCallId);
+  }
+
+
   stopExtensionActivityWatcher(toolCallId: string): void {
     this.beginExtensionArtifactRead(toolCallId);
     const tracked = this.extensionActivityWatchers.get(toolCallId);
