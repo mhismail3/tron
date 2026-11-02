@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AgentSession, FileEntry } from "../pi/coding-agent.js";
-import type { AgentTurnDecision } from "../pi/agent-core.js";
+import type { AgentMessage, AgentTurnDecision } from "../pi/agent-core.js";
 import type { AgentPipelineStages } from "../pi/adapters.js";
 import type { HomeTaskReportOwner } from "./task-report.js";
 import type { TaskWorkerDiagnostic } from "./worker-contract.js";
@@ -41,9 +41,42 @@ export function workerFinishTurn(worker: WorkerTurnRuntime, created: { readonly 
       }
       return decision ?? undefined;
     }
-    if (worker.runQueue.queuedMessages.length > 0) {
+    // Pi continues a run that ends with queued messages. A producer's notice steered into this
+    // turn (a run that stopped while it streamed) is context the task's evidence keeps, not a
+    // reason for another turn (#1698): it is appended when the run ends. Queued input takes Stop.
+    if (worker.runQueue.queuedMessages.length > 0 || !(await keepQueuedNoticesAsContext(created.session))) {
       taskWorker.requestStop(() => worker.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
     }
     return { action: "end" };
   };
+}
+
+/** Moves every message queued in the agent into the session as context that starts no turn.
+ * Only producer notices (`custom` messages) qualify. With any other queued input it returns false
+ * and leaves both queues as they were, so the caller stops the run. */
+async function keepQueuedNoticesAsContext(session: AgentSession): Promise<boolean> {
+  const agent = session.agent;
+  if (!agent.hasQueuedMessages()) return true;
+  // A queue exposes all its messages only in "all" mode, and steering hides follow-up.
+  const modes = { steering: agent.steeringMode, followUp: agent.followUpMode };
+  agent.steeringMode = "all"; agent.followUpMode = "all";
+  let queued: AgentMessage[];
+  try {
+    const first = agent.peekQueuedMessages();
+    agent.clearSteeringQueue();
+    const followUp = agent.peekQueuedMessages();
+    const steering = first.every((message, index) => followUp[index] === message) && first.length === followUp.length ? [] : first;
+    queued = [...steering, ...followUp];
+    if (queued.some(message => message.role !== "custom")) {
+      for (const message of steering) agent.steer(message);
+      return false;
+    }
+    agent.clearFollowUpQueue();
+  } finally {
+    agent.steeringMode = modes.steering; agent.followUpMode = modes.followUp;
+  }
+  for (const message of queued as Array<Extract<AgentMessage, { role: "custom" }>>) {
+    await session.sendCustomMessage({ customType: message.customType, content: message.content, display: message.display, details: message.details }, { triggerTurn: false });
+  }
+  return true;
 }
