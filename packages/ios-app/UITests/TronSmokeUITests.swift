@@ -1586,7 +1586,7 @@ final class TronSmokeUITests: XCTestCase {
                 keepScreenshot(named: "home-tasks-empty")
                 app.buttons["home-sheet-done-tasks"].tap()
                 tapManageRow(app, "home-manage-settings")
-                let refusal = app.staticTexts["Home task namespace refused: not-initialized"]
+                let refusal = app.staticTexts["Home task permissions refused"]
                 XCTAssertTrue(refusal.waitForExistence(timeout: 10), app.debugDescription)
                 reveal(refusal, in: app)
                 XCTAssertTrue(refusal.exists)
