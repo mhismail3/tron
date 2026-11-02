@@ -127,6 +127,28 @@ extension RealGatewayPairAndChatUITests {
         keepScreenshot(app, name: "2023-real-gateway-denied-rename")
     }
 
+    /// #2206: a confirmed action the Gateway refuses right away (the path appeared
+    /// after review) is reported on the requesting page even though its review
+    /// card is still closing; nothing is created or trusted.
+    @MainActor
+    func testProjectLifecycleRefusedApprovalShowsItsReason() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = try lifecycleSettings(fixture)
+        defer { app.terminate() }
+        let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("lifecycle-raced")
+        try lifecycleCreate(app, name: source.lastPathComponent)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path), "The review alone must not create the project")
+        // Another writer takes the reviewed path before the exact tap.
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+        app.buttons["change-review-approve"].tap()
+        let refusal = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "already exists")).firstMatch
+        XCTAssertTrue(refusal.waitForExistence(timeout: 20), "The refusal must reach the requesting page: \(app.debugDescription)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git").path), "A refused create initializes nothing")
+        XCTAssertNil(try lifecycleTrust(fixture, path: source.path), "A refused create records no trust")
+        keepScreenshot(app, name: "2206-refused-approval-reason")
+    }
+
     @MainActor
     func testProjectLifecycleBusyArchiveUsesCanonicalReason() throws {
         continueAfterFailure = false
