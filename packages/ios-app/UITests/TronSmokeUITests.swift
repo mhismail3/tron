@@ -2200,7 +2200,7 @@ final class TronSmokeUITests: XCTestCase {
             }
             app.buttons["Done"].tap()
             XCTAssertTrue(app.staticTexts[order == "superseded" ? "Model requests: 1" : "Model requests: 2"].waitForExistence(timeout: 3))
-            XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
+            XCTAssertEqual(app.buttons["Effort"].value as? String, "Off")
             app.terminate()
         }
     }
@@ -2248,24 +2248,23 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
         app.buttons["Release terminal settlement"].tap()
-        let thinking = app.buttons["thinking-level-control"]
+        // Thinking is the shared renderer's Effort row and its choice sheet (#1947).
+        let thinking = app.buttons["Effort"]
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
-        let viewport = app.scrollViews.firstMatch.frame
         thinking.tap()
-        let slider = app.descendants(matching: .any)["thinking-level-slider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 3))
-        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        dismissConfigurationSlider(slider, in: app, viewport: viewport)
+        let high = app.buttons["settings-option-High"]
+        XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
+        high.tap()
         wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         XCTAssertTrue(thinking.value as? String == "Off")
         thinking.tap()
-        XCTAssertTrue(slider.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
+        XCTAssertTrue(high.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
         keepScreenshot(named: "superseded-thinking-receipt-ready")
-        app.buttons["Done"].tap()
-        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "Done first closes the owning slider, not Manage Session")
+        app.navigationBars.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(high.waitForNonExistence(timeout: 5), "Done first closes the owning choice sheet, not Manage Session")
         XCTAssertTrue(thinking.exists)
     }
 
@@ -2293,19 +2292,6 @@ final class TronSmokeUITests: XCTestCase {
         thinking.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thinking-level-slider"].waitForExistence(timeout: 3))
         keepScreenshot(named: "post-stop-configuration-ready")
-    }
-
-    @MainActor
-    private func dismissConfigurationSlider(_ slider: XCUIElement, in app: XCUIApplication, viewport: CGRect) {
-        // Save the actual sheet viewport before AX makes the popup modal. Its
-        // inner ScrollView is not the backdrop, and the window gutter can be
-        // outside a medium sheet. Neither tap may replace a real popup dismissal.
-        let window = app.windows.firstMatch
-        window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-            dx: viewport.minX + 4 - window.frame.minX,
-            dy: viewport.midY - window.frame.minY
-        )).tap()
-        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "The owning viewport must dismiss the floating editor")
     }
 
     /// The scope-owned Settings route from the real Manage Session surface.
