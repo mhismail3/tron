@@ -79,6 +79,8 @@ const { join } = require("node:path");
 (async () => {
   const { createJiti } = await import(workerData.jitiUrl);
   const jiti = createJiti(workerData.base, workerData.jiti);
+  // jiti silently disables an unwritable cache; nothing would then be prepared.
+  if (!jiti.options.fsCache) throw new Error("transform cache is not writable");
   const visit = (directory) => {
     for (const item of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, item.name);
@@ -406,7 +408,15 @@ export class ManagedSubagents {
     const loader = this.jitiOptions();
     // Factory loads evaluate a fresh module graph (sessions keep separate module
     // state), but only from transforms the worker below left in the private cache.
-    await (this.transformCache ??= this.prepareTransformCache(loader));
+    // Without them the import would transform on this thread, so the load refuses
+    // instead and a later load prepares again.
+    const prepared = this.transformCache ??= this.prepareTransformCache(loader);
+    try {
+      await prepared;
+    } catch {
+      if (this.transformCache === prepared) this.transformCache = undefined;
+      throw new GatewayError("busy", "managed pi-subagents could not prepare its TypeScript transforms; retry the load", true);
+    }
     const { createJiti } = await import(loader.jitiUrl) as { createJiti: JitiFactory };
     return await createJiti(import.meta.url, { ...loader.jiti, moduleCache: options.moduleCache ?? false })
       .import(path, options.defaultExport ? { default: true } : {});
@@ -427,8 +437,7 @@ export class ManagedSubagents {
   /** jiti's TypeScript transform is synchronous and, for this closure, takes
    * seconds of CPU. A worker transforms the build once per process (a cache hit
    * after the first) so the Gateway thread reads cached transforms instead of
-   * blocking every session on that work. A load whose transforms the worker could
-   * not cache still transforms them itself, correctly. */
+   * blocking every session on that work. */
   private async prepareTransformCache(options: { jitiUrl: string; jiti: JitiOptions }): Promise<void> {
     let worker: Worker | undefined;
     try {
@@ -439,10 +448,11 @@ export class ManagedSubagents {
         started.once("error", rejectWorker);
         started.once("exit", (code) => rejectWorker(new Error(`transform worker exited with code ${code}`)));
       });
-    } catch {
-      this.logger?.log("warning", "Managed subagent transforms were not prepared off the Gateway thread", {
+    } catch (error) {
+      this.logger?.log("warning", "Managed subagent transforms could not be prepared off the Gateway thread", {
         event: "pi-subagents.transform-cache-failed", source: "managed-subagents",
       });
+      throw error;
     } finally {
       await worker?.terminate();
     }
