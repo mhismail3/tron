@@ -72,6 +72,10 @@ struct HostedSessionConfigurationFixture: View {
         .background {
             InAppNoticeWindowInstaller(model: model, colorScheme: .light, presentationActivity: presentationActivity)
                 .frame(width: 0, height: 0).allowsHitTesting(false)
+            if HostedSessionConfigurationSocket.gatesModelReceipts {
+                HostedReceiptGateWindowInstaller { [socket] in Task { await socket.releaseModelReceipt() } }
+                    .frame(width: 0, height: 0)
+            }
         }
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light)
         .tronPresentation()
@@ -125,6 +129,13 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private var pendingThinking: (id: String, revision: Int)?
     private var modelRequests = 0
     private var modelDelivery: Task<Void, Error>?
+    /// Scripted model receipts wait for the test's explicit release (#2173), so the
+    /// pending state is observed without racing a timer.
+    nonisolated static var gatesModelReceipts: Bool {
+        ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("-model-ack-") }
+    }
+    private var modelReceiptGate: CheckedContinuation<Void, Never>?
+    private var releasedModelReceipts = 0
     nonisolated let modelRequestCounts: AsyncStream<Int>
     private let modelRequestContinuation: AsyncStream<Int>.Continuation
     private var decisions: [String] = []
@@ -281,9 +292,15 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 // The remote delivery outlives request-send cancellation on receipt.
                 // close() still owns and cancels it with this isolated socket.
                 modelDelivery = Task {
-                    // Delay only at the scripted socket boundary: the native picker must
+                    // Hold only at the scripted socket boundary: the native picker must
                     // remain pending until both its receipt and projection have arrived.
-                    try await Task.sleep(for: .seconds(3))
+                    if Self.gatesModelReceipts {
+                        await withTaskCancellationHandler { await self.awaitModelReceiptRelease() }
+                            onCancel: { Task { await self.releaseModelReceipt() } }
+                        try Task.checkCancellation()
+                    } else {
+                        try await Task.sleep(for: .seconds(3))
+                    }
                     if scenario == "-model-ack-failure", modelRequests == 1 {
                         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false),
                             "error": .object(["code": .string("conflict"), "message": .string("Model choice refused; try again."), "retryable": .bool(false)])]))
@@ -360,6 +377,13 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
     }
+    private func awaitModelReceiptRelease() async {
+        if releasedModelReceipts > 0 { releasedModelReceipts -= 1; return }
+        await withCheckedContinuation { modelReceiptGate = $0 }
+    }
+    func releaseModelReceipt() {
+        if let gate = modelReceiptGate { modelReceiptGate = nil; gate.resume() } else { releasedModelReceipts += 1 }
+    }
     func releaseSettlement() throws {
         snapshot.configurationBlocker = .ready
         snapshot.eventSequence += 1
@@ -412,12 +436,66 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     }
     func close() async {
         closed = true
+        releasedModelReceipts = 0
         modelDelivery?.cancel()
         _ = await modelDelivery?.result
         modelDelivery = nil
         modelRequestContinuation.finish()
         receiver?.resume(throwing: CancellationError())
         receiver = nil
+    }
+}
+
+/// One fixture control above every sheet, so a test can release a held receipt
+/// while the picker it observes stays presented. Touches elsewhere pass through.
+private struct HostedReceiptGateWindowInstaller: UIViewRepresentable {
+    let release: () -> Void
+    final class Coordinator { var window: UIWindow? }
+    final class AnchorView: UIView {
+        var install: ((UIWindowScene) -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let scene = window?.windowScene { install?(scene) }
+        }
+    }
+    private final class PassthroughWindow: UIWindow {
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            let hit = super.hitTest(point, with: event)
+            return hit === rootViewController?.view ? nil : hit
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIView(context: Context) -> AnchorView {
+        let anchor = AnchorView()
+        let coordinator = context.coordinator
+        let release = release
+        anchor.install = { scene in
+            guard coordinator.window == nil else { return }
+            let window = PassthroughWindow(windowScene: scene)
+            window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue + 3)
+            window.backgroundColor = .clear
+            // A UIKit control: a SwiftUI hosting view would receive every touch as
+            // its root view, which this window passes through.
+            let host = UIViewController()
+            host.view.backgroundColor = .clear
+            let button = UIButton(type: .system, primaryAction: UIAction(title: "Deliver model receipt") { _ in release() })
+            button.titleLabel?.font = .preferredFont(forTextStyle: .caption1)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            host.view.addSubview(button)
+            NSLayoutConstraint.activate([
+                button.leadingAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.leadingAnchor, constant: 6),
+                button.bottomAnchor.constraint(equalTo: host.view.bottomAnchor, constant: -40),
+            ])
+            window.rootViewController = host
+            window.isHidden = false
+            coordinator.window = window
+        }
+        return anchor
+    }
+    func updateUIView(_ uiView: AnchorView, context: Context) {}
+    static func dismantleUIView(_ uiView: AnchorView, coordinator: Coordinator) {
+        coordinator.window?.isHidden = true
+        coordinator.window = nil
     }
 }
 #endif
