@@ -446,10 +446,24 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   ),
   // Both of these are handled background failures outside any request span, so
   // they keep their own warning record.
-  catalogIndexFailure: (stage, durationMs) => logger.log(
+  catalogIndexFailure: (stage, durationMs, detail) => logger.log(
     "warning",
-    `Catalog metadata index ${stage} failed; rows remain unproven until canonical metadata can be read`,
-    { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
+    `Catalog metadata index ${stage} failed${detail ? ` (${detail.reason}${detail.shard ? ` shard ${detail.shard}` : ""}${detail.bytes !== undefined ? `: ${detail.bytes} of ${detail.limit} bytes` : detail.limit !== undefined ? `: ${detail.rows} of ${detail.limit} rows` : ""})` : ""}; rows remain unproven until canonical metadata can be read`,
+    {
+      event: "catalog-index.failure", source: "sessions", step: stage, durationMs,
+      // The shard is its hexadecimal number as a counter, so a reader can aggregate it.
+      ...(detail ? { reason: detail.reason, counts: {
+        ...(detail.shard ? { shard: Number.parseInt(detail.shard, 16) } : {}),
+        ...(detail.rows !== undefined ? { rows: detail.rows } : {}),
+        ...(detail.bytes !== undefined ? { bytes: detail.bytes } : {}),
+        ...(detail.limit !== undefined ? { limit: detail.limit } : {}),
+      } } : {}),
+    },
+  ),
+  catalogIndexPressure: ({ shard, rows, bytes, limit }) => logger.log(
+    "warning",
+    `Catalog metadata index ${shard ? `shard ${shard} holds ${bytes} of ${limit} bytes` : `holds ${rows} of ${limit} rows`}; saves still succeed, and are refused past the limit`,
+    { event: "catalog-index.pressure", source: "sessions", counts: { ...(shard ? { shard: Number.parseInt(shard, 16) } : {}), rows, ...(bytes !== undefined ? { bytes } : {}), limit } },
   ),
   catalogReconciled: ({ outcome, files, added, removed, modified, unproven, durationMs, trigger }) => logger.log(
     outcome === "reconciled" ? "info" : "warning",

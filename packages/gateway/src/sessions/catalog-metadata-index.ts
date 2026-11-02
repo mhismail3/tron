@@ -1,18 +1,37 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promises";
 import { CatalogLineLimitError, readCatalogLines } from "./catalog-jsonl.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { syncDurably } from "../foundation/durable-json.js";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { durableAtomicWriteText, durableRemove, syncDurably } from "../foundation/durable-json.js";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { SessionCreationOrigin } from "../protocol/types.js";
 import { userFacingPromptPreview } from "../kernel/resources/resource-invocation.js";
 import { boundedSummaryText, MAX_SUMMARY_TEXT_BYTES } from "../util/bounded-text.js";
 
 const CATALOG_METADATA_INDEX_VERSION = 3 as const;
-const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;
+/** The catalog's own session bound: the index never holds more rows than the
+ * catalog can list. */
 const CATALOG_METADATA_INDEX_MAX_ENTRIES = 25_000;
+const CATALOG_METADATA_INDEX_WARN_ENTRIES = 20_000;
+/** Rows are spread over a fixed set of shards by a hash of their canonical
+ * path, so no one file grows with the catalog: 25,000 average rows (~1.6 KiB)
+ * are ~625 KiB per shard, and even rows at every field bound stay under the
+ * ceiling. The warning fires at a quarter of the ceiling, far above normal use
+ * and far below refusal. */
+const CATALOG_METADATA_SHARD_COUNT = 64;
+const CATALOG_METADATA_SHARD_MAX_BYTES = 8 * 1_024 * 1_024;
+const CATALOG_METADATA_SHARD_WARN_BYTES = 2 * 1_024 * 1_024;
+const CATALOG_METADATA_MANIFEST_MAX_BYTES = 64 * 1_024;
+/** The single-document form this store replaces; read only to migrate it. */
+const LEGACY_DOCUMENT_NAME = "catalog-metadata-v2.json";
+const LEGACY_DOCUMENT_MAX_BYTES = 8 * 1_024 * 1_024;
+const STORE_DIRECTORY_NAME = "catalog-metadata-v3";
+const MANIFEST_NAME = "manifest.json";
+const SHARD_FILE = /^shard-([0-9a-f]{2})\.json$/u;
+const TEMPORARY_FILE = /\.tmp$/u;
 const TAIL_BOUNDARY_BYTES = 4_096;
 const RECONCILE_CONCURRENCY = 16;
+const SHARD_WRITE_CONCURRENCY = 8;
 
 export interface CatalogMetadataIndexRow {
   id: string;
@@ -132,12 +151,31 @@ export interface CatalogMetadataReconcileProgress {
  * remaining candidates as unproven. */
 export type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcileProgress) => boolean | Promise<boolean>;
 
-/** A handled index-write failure. The affected rows are left to be rebuilt from
+/** A handled index failure. The affected rows are left to be rebuilt from
  * canonical files, so nothing else records it; the index write is
- * fire-and-forget outside any request span, which is why its owner reports it. */
-export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append" | "line-limit";
+ * fire-and-forget outside any request span, which is why its owner reports it.
+ * A refused save names why and how large the refused part was, so one log line
+ * diagnoses a bound. */
+export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append" | "line-limit" | "migrate";
+export interface CatalogMetadataIndexFailureDetail {
+  reason: "entries" | "shard-bytes" | "write" | "readback";
+  shard?: string;
+  rows?: number;
+  bytes?: number;
+  limit?: number;
+}
 export type CatalogMetadataIndexFailure =
-  (stage: CatalogMetadataIndexFailureStage, durationMs: number) => void;
+  (stage: CatalogMetadataIndexFailureStage, durationMs: number, detail?: CatalogMetadataIndexFailureDetail) => void;
+
+/** A save that is still accepted but has passed its warning threshold: one
+ * shard's bytes, or the whole store's rows. Reported once per process for each
+ * shard (or for the row count), well before the refusal bound. */
+export interface CatalogMetadataIndexPressure {
+  shard?: string;
+  rows: number;
+  bytes?: number;
+  limit: number;
+}
 
 interface CatalogMetadataIndexDocument {
   version: typeof CATALOG_METADATA_INDEX_VERSION;
@@ -145,8 +183,66 @@ interface CatalogMetadataIndexDocument {
   rows: CatalogMetadataIndexRow[];
 }
 
+interface CatalogMetadataShardDocument extends CatalogMetadataIndexDocument {
+  shard: string;
+}
+
+/** The commit point of one save. It names each non-empty shard with the hash of
+ * the exact bytes that save wrote; a shard the save refused is listed as
+ * refused, and its last accepted file is kept. Only a manifest whose every
+ * listed shard reads back with its hash, and that refused nothing, is a
+ * complete cut. */
+interface CatalogMetadataManifest {
+  version: typeof CATALOG_METADATA_INDEX_VERSION;
+  root: string;
+  shards: Array<{ shard: string; digest: string }>;
+  refused: string[];
+}
+
+/** What the store holds for one root. `complete` rows are one save's whole cut;
+ * otherwise `rows` are every row a readable shard still holds, which are reuse
+ * candidates only (each is re-verified against its file before reuse). */
+interface ShardFileIdentity {
+  digest: string;
+  ino: number;
+  size: number;
+  mtimeMs: number;
+}
+
+interface BoundedFile {
+  bytes: Buffer;
+  ino: number;
+  size: number;
+  mtimeMs: number;
+}
+
+interface CatalogMetadataStoreRead {
+  complete: boolean;
+  rows: CatalogMetadataIndexRow[];
+  readable: boolean;
+}
+
 function hash(value: Buffer): string {
   return createHash("sha256").update(value).digest("base64url");
+}
+
+/** The shard a row lives in: a stable function of its canonical path relative
+ * to the catalog root, so the assignment does not depend on where the root is. */
+export function catalogMetadataShard(catalogRoot: string, path: string): string {
+  const first = createHash("sha256").update(relative(resolve(catalogRoot), resolve(path))).digest()[0]!;
+  return (first % CATALOG_METADATA_SHARD_COUNT).toString(16).padStart(2, "0");
+}
+
+function shardFileName(shard: string): string {
+  return `shard-${shard}.json`;
+}
+
+function sortedRowsEqual(left: readonly CatalogMetadataIndexRow[], right: readonly CatalogMetadataIndexRow[]): boolean {
+  if (left.length !== right.length) return false;
+  const encode = (rows: readonly CatalogMetadataIndexRow[]) => rows.map((row) => JSON.stringify(row)).sort();
+  const a = encode(left);
+  const b = encode(right);
+  return a.every((value, index) => value === b[index]);
 }
 
 function validString(value: unknown, max: number): value is string {
@@ -160,16 +256,41 @@ function validCreationOrigin(value: unknown): value is SessionCreationOrigin {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(origin.automationId);
 }
 
-/** Gateway-owned acceleration only. This never stores transcript content. */
+/** Gateway-owned acceleration only. This never stores transcript content.
+ *
+ * The store is a directory of shard files plus a manifest, each published by an
+ * atomic temporary-file write, fsync and rename. A save rewrites only the shards
+ * whose bytes changed, then the manifest, then removes shards that became empty.
+ * A crash at any point leaves either the previous manifest (whose hashes then
+ * disagree with a rewritten shard, so the cut is incomplete) or the new one;
+ * neither is ever read as a cut it is not. A corrupt, oversized or missing
+ * shard costs only its own rows: the others still accelerate the rebuild. */
 export class CatalogMetadataIndex {
-  readonly path: string;
+  /** The sharded store directory. */
+  readonly directory: string;
+  /** The superseded single document, migrated on first read and then removed. */
+  readonly legacyPath: string;
   private readonly onFailure: CatalogMetadataIndexFailure | undefined;
+  private readonly onPressure: ((pressure: CatalogMetadataIndexPressure) => void) | undefined;
   private readonly writeMutex = new AsyncMutex();
+  /** Each shard file as this process last read or wrote it: its hash and the
+   * file it was in. A save skips a shard only when its new bytes hash the same
+   * and that same file is still in place unchanged, so a file replaced or
+   * damaged behind the owner is rewritten. A stale entry can only cost an
+   * extra write. */
+  private readonly shardFiles = new Map<string, ShardFileIdentity>();
+  private readonly pressureReported = new Set<string>();
   private closed = false;
 
-  constructor(private readonly gatewayStateRoot: string, onFailure?: CatalogMetadataIndexFailure) {
-    this.path = join(gatewayStateRoot, "catalog-metadata-v2.json");
+  constructor(
+    gatewayStateRoot: string,
+    onFailure?: CatalogMetadataIndexFailure,
+    onPressure?: (pressure: CatalogMetadataIndexPressure) => void,
+  ) {
+    this.directory = join(gatewayStateRoot, STORE_DIRECTORY_NAME);
+    this.legacyPath = join(gatewayStateRoot, LEGACY_DOCUMENT_NAME);
     this.onFailure = onFailure;
+    this.onPressure = onPressure;
   }
 
   /** Its caller persists this index fire-and-forget (a catalog read must not
@@ -182,51 +303,26 @@ export class CatalogMetadataIndex {
     await this.writeMutex.run(() => {});
   }
 
-  /** The durable rows, or undefined when the document is missing, corrupt or
-   * bound to another root. Its caller (the catalog owner) rebuilds from
-   * canonical files, so an unusable document is never membership evidence. */
+  /** The durable rows of one complete cut, or undefined when the store is
+   * missing, incomplete, corrupt or bound to another root. Its caller (the
+   * catalog owner) rebuilds from canonical files, so an unusable store is never
+   * membership evidence. */
   async load(catalogRoot: string): Promise<CatalogMetadataIndexRow[] | undefined> {
-    const document = await this.readDocument(catalogRoot);
-    return document ? document.rows.map((row) => ({ ...row })) : undefined;
+    const store = await this.readStore(catalogRoot);
+    return store.complete ? store.rows.map((row) => ({ ...row })) : undefined;
   }
 
+  /** Publish one complete cut. False when any part was refused (the entry
+   * bound, or a shard over its byte ceiling) or the store is closed: a refused
+   * shard keeps its last accepted file, the manifest records the refusal, and
+   * the failure is reported with its size. */
   async save(catalogRoot: string, rows: readonly CatalogMetadataIndexRow[]): Promise<boolean> {
     return this.writeMutex.run(async () => {
       // Checked inside the mutex: a write queued after disposal began, but
       // before its drain, must observe the closed owner instead of publishing.
       if (this.closed) return false;
-      const started = Date.now();
-    if (rows.length > CATALOG_METADATA_INDEX_MAX_ENTRIES) {
-      this.failed("save", started);
-      return false;
-    }
-    const document: CatalogMetadataIndexDocument = {
-      version: CATALOG_METADATA_INDEX_VERSION,
-      root: await realpath(catalogRoot).catch(() => resolve(catalogRoot)),
-      rows: rows.map((row) => ({ ...row })),
-    };
-    const encoded = JSON.stringify(document);
-    if (Buffer.byteLength(encoded) > CATALOG_METADATA_INDEX_MAX_BYTES) {
-      this.failed("save", started);
-      return false;
-    }
-    await mkdir(this.gatewayStateRoot, { recursive: true });
-    const temporary = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
-    try {
-      await rm(temporary, { force: true });
-      const handle = await open(temporary, "wx", 0o600);
-      try {
-        await handle.writeFile(encoded, "utf8");
-        await syncDurably(handle);
-      } finally { await handle.close(); }
-      await rename(temporary, this.path);
-      const directory = await open(dirname(this.path), "r");
-      try { await syncDurably(directory); } finally { await directory.close(); }
-      return true;
-    } catch (error) {
-      this.failed("save", started);
-      throw error;
-    } finally { await rm(temporary, { force: true }).catch(() => {}); }
+      const root = await realpath(catalogRoot).catch(() => resolve(catalogRoot));
+      return this.writeStore(root, rows, "save");
     });
   }
 
@@ -236,11 +332,11 @@ export class CatalogMetadataIndex {
     rebuild: (candidate: { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }) => Promise<CatalogMetadataIndexSummary | undefined>,
     stop?: CatalogMetadataReconcileStop,
   ): Promise<CatalogMetadataIndexReconciliation | undefined> {
-    const document = await this.readDocument(catalogRoot);
-    if (!document) {
-      return undefined;
-    }
-    const prior = new Map(document.rows.map((row) => [resolve(row.path), row]));
+    // Every readable shard's rows are reuse candidates, whether or not the cut
+    // they belong to is complete: each is re-verified against its file below.
+    const store = await this.readStore(catalogRoot);
+    if (!store.readable) return undefined;
+    const prior = new Map(store.rows.map((row) => [resolve(row.path), row]));
     // Reconcile is an independent bounded read phase: serializing every
     // lstat/header/tail read would make a valid index an O(session-count)
     // startup stall on large catalogs. Keep the candidate
@@ -432,16 +528,241 @@ export class CatalogMetadataIndex {
     finally { await handle?.close().catch(() => {}); }
   }
 
-  private async readDocument(catalogRoot: string): Promise<CatalogMetadataIndexDocument | undefined> {
+  /** The store for one root, migrating the superseded single document first
+   * when it is still present. */
+  private async readStore(catalogRoot: string): Promise<CatalogMetadataStoreRead> {
+    const root = await realpath(catalogRoot).catch(() => resolve(catalogRoot));
+    const legacy = await this.readLegacy(root);
+    if (legacy) return this.migrate(root, legacy);
+    return this.readShards(root);
+  }
+
+  /** The v2 document, if present, valid and bound to this root. */
+  private async readLegacy(root: string): Promise<CatalogMetadataIndexRow[] | undefined> {
+    const file = await this.readBounded(this.legacyPath, LEGACY_DOCUMENT_MAX_BYTES);
+    if (!file) return undefined;
+    try {
+      const document = JSON.parse(file.bytes.toString("utf8")) as unknown;
+      return this.admitDocument(document, root) ? document.rows : undefined;
+    } catch { return undefined; }
+  }
+
+  /** Non-destructive migration: the legacy rows are written as shards, read
+   * back, and the legacy document is removed only when the read-back cut equals
+   * it. Until then the legacy document stays, so a failed or interrupted
+   * migration repeats on the next read, and its rows still serve this one. */
+  private async migrate(root: string, observed: CatalogMetadataIndexRow[]): Promise<CatalogMetadataStoreRead> {
+    const started = Date.now();
+    return this.writeMutex.run(async () => {
+      if (this.closed) return { complete: true, rows: observed, readable: true };
+      // Re-read under the mutex: a save that committed since the document was
+      // first read has removed it, and its newer cut must not be overwritten.
+      const legacy = await this.readLegacy(root);
+      if (!legacy) return this.readShards(root);
+      const served = { complete: true, rows: legacy, readable: true };
+      // A refused or failed write has already reported itself.
+      const written = await this.writeStore(root, legacy, "migrate").catch(() => false);
+      if (!written) return served;
+      try {
+        const readBack = await this.readShards(root);
+        if (!readBack.complete || !sortedRowsEqual(readBack.rows, legacy)) {
+          this.failed("migrate", started, { reason: "readback", rows: legacy.length });
+          return served;
+        }
+        await durableRemove(this.legacyPath);
+        return readBack;
+      } catch {
+        // Only the legacy removal can throw here; the document stays for the
+        // next read, and the shards it matches are already complete.
+        this.failed("migrate", started, { reason: "write", rows: legacy.length });
+        return served;
+      }
+    });
+  }
+
+  private async readShards(root: string): Promise<CatalogMetadataStoreRead> {
+    const names = await readdir(this.directory).catch(() => [] as string[]);
+    const manifest = await this.readManifest(root);
+    const byShard = new Map<string, CatalogMetadataIndexRow[]>();
+    const digests = new Map<string, string>();
+    let total = 0;
+    for (const name of names.sort()) {
+      const shard = SHARD_FILE.exec(name)?.[1];
+      if (shard === undefined) continue;
+      const file = await this.readBounded(join(this.directory, name), CATALOG_METADATA_SHARD_MAX_BYTES);
+      let document: unknown;
+      try { document = file ? JSON.parse(file.bytes.toString("utf8")) : undefined; } catch { document = undefined; }
+      if (!file || !this.admitShard(document, shard, root) || total + document.rows.length > CATALOG_METADATA_INDEX_MAX_ENTRIES) {
+        this.shardFiles.delete(shard);
+        continue;
+      }
+      total += document.rows.length;
+      const digest = hash(file.bytes);
+      this.shardFiles.set(shard, { digest, ino: file.ino, size: file.size, mtimeMs: file.mtimeMs });
+      digests.set(shard, digest);
+      byShard.set(shard, document.rows);
+    }
+    const complete = manifest !== undefined && manifest.refused.length === 0
+      && manifest.shards.every(({ shard, digest }) => byShard.has(shard) && digests.get(shard) === digest);
+    // A complete cut is exactly the manifest's shards: a file the manifest no
+    // longer lists is one a crash left before its removal.
+    const shards = complete ? manifest.shards.map(({ shard }) => shard) : [...byShard.keys()];
+    return {
+      complete,
+      rows: shards.flatMap((shard) => byShard.get(shard) ?? []),
+      readable: manifest !== undefined || byShard.size > 0,
+    };
+  }
+
+  private async readManifest(root: string): Promise<CatalogMetadataManifest | undefined> {
+    const file = await this.readBounded(join(this.directory, MANIFEST_NAME), CATALOG_METADATA_MANIFEST_MAX_BYTES);
+    if (!file) return undefined;
+    try {
+      const value = JSON.parse(file.bytes.toString("utf8")) as Partial<CatalogMetadataManifest> | null;
+      if (!value || typeof value !== "object" || Array.isArray(value)
+        || value.version !== CATALOG_METADATA_INDEX_VERSION || !validString(value.root, 4_096)
+        || resolve(value.root) !== resolve(root)
+        || !Array.isArray(value.shards)
+        || !Array.isArray(value.refused)) return undefined;
+      const shardName = (shard: unknown) => typeof shard === "string" && /^[0-9a-f]{2}$/u.test(shard)
+        && Number.parseInt(shard, 16) < CATALOG_METADATA_SHARD_COUNT;
+      const listed = new Set<unknown>();
+      if (!value.shards.every((entry: unknown) => {
+        const { shard, digest } = (entry && typeof entry === "object" ? entry : {}) as { shard?: unknown; digest?: unknown };
+        if (!shardName(shard) || !validString(digest, 128) || listed.has(shard)) return false;
+        listed.add(shard);
+        return true;
+      })
+        || !value.refused.every(shardName)) return undefined;
+      return value as CatalogMetadataManifest;
+    } catch { return undefined; }
+  }
+
+  /** One save or migration, inside the write mutex. */
+  private async writeStore(
+    root: string,
+    rows: readonly CatalogMetadataIndexRow[],
+    stage: "save" | "migrate",
+  ): Promise<boolean> {
+    const started = Date.now();
+    if (rows.length > CATALOG_METADATA_INDEX_MAX_ENTRIES) {
+      this.failed(stage, started, { reason: "entries", rows: rows.length, limit: CATALOG_METADATA_INDEX_MAX_ENTRIES });
+      return false;
+    }
+    const groups = new Map<string, CatalogMetadataIndexRow[]>();
+    for (const row of rows) {
+      const shard = catalogMetadataShard(root, row.path);
+      const group = groups.get(shard);
+      if (group) group.push({ ...row });
+      else groups.set(shard, [{ ...row }]);
+    }
+    try {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      const existing = await readdir(this.directory);
+      // One Gateway owns this directory and its writes are serialized here, so
+      // any temporary file present now is debris of an interrupted write.
+      for (const name of existing) {
+        if (TEMPORARY_FILE.test(name)) await rm(join(this.directory, name), { force: true });
+      }
+      const manifest: CatalogMetadataManifest = { version: CATALOG_METADATA_INDEX_VERSION, root, shards: [], refused: [] };
+      const changed: Array<{ shard: string; path: string; encoded: string; digest: string }> = [];
+      for (const [shard, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+        const document: CatalogMetadataShardDocument = { version: CATALOG_METADATA_INDEX_VERSION, root, shard, rows: group };
+        const encoded = JSON.stringify(document);
+        const bytes = Buffer.byteLength(encoded);
+        if (bytes > CATALOG_METADATA_SHARD_MAX_BYTES) {
+          manifest.refused.push(shard);
+          this.failed(stage, started, { reason: "shard-bytes", shard, rows: group.length, bytes, limit: CATALOG_METADATA_SHARD_MAX_BYTES });
+          continue;
+        }
+        if (bytes > CATALOG_METADATA_SHARD_WARN_BYTES) {
+          this.pressure(shard, { shard, rows: group.length, bytes, limit: CATALOG_METADATA_SHARD_MAX_BYTES });
+        }
+        const digest = hash(Buffer.from(encoded, "utf8"));
+        manifest.shards.push({ shard, digest });
+        const path = join(this.directory, shardFileName(shard));
+        if (!(await this.shardInPlace(shard, path, digest))) changed.push({ shard, path, encoded, digest });
+      }
+      await this.publishShards(changed);
+      if (rows.length > CATALOG_METADATA_INDEX_WARN_ENTRIES) {
+        this.pressure("rows", { rows: rows.length, limit: CATALOG_METADATA_INDEX_MAX_ENTRIES });
+      }
+      // A save that refused nothing supersedes any v2 document still present,
+      // so the document is removed before this manifest commits: no state can
+      // hold both a newer committed cut and a v2 document that a later
+      // migration would publish over it. A crash between the two leaves the
+      // previous manifest, which no longer matches the rewritten shards, so
+      // their rows are reuse candidates only. A refused save keeps v2.
+      if (stage === "save" && manifest.refused.length === 0) await durableRemove(this.legacyPath);
+      await durableAtomicWriteText(join(this.directory, MANIFEST_NAME), JSON.stringify(manifest));
+      // Pruned only after the manifest commit: a shard that became empty. A
+      // refused shard keeps its last accepted file.
+      for (const name of existing) {
+        const shard = SHARD_FILE.exec(name)?.[1];
+        if (shard === undefined || manifest.shards.some((entry) => entry.shard === shard) || manifest.refused.includes(shard)) continue;
+        this.shardFiles.delete(shard);
+        await durableRemove(join(this.directory, name));
+      }
+      return manifest.refused.length === 0;
+    } catch (error) {
+      this.failed(stage, started, { reason: "write", rows: rows.length });
+      throw error;
+    }
+  }
+
+  /** Each changed shard is written to its own temporary file and synchronized
+   * (a bounded number at once), renamed into place, and the directory is
+   * synchronized once before the caller commits the manifest: no manifest can
+   * become durable ahead of a shard rename it names. */
+  private async publishShards(changed: readonly { shard: string; path: string; encoded: string; digest: string }[]): Promise<void> {
+    if (changed.length === 0) return;
+    for (let start = 0; start < changed.length; start += SHARD_WRITE_CONCURRENCY) {
+      // Settled, not raced: no write of a failed batch may still rename after
+      // this save has returned and released the mutex.
+      const results = await Promise.allSettled(changed.slice(start, start + SHARD_WRITE_CONCURRENCY).map(async ({ shard, path, encoded, digest }) => {
+        this.shardFiles.delete(shard);
+        const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+        try {
+          const handle = await open(temporary, "wx", 0o600);
+          try {
+            await handle.writeFile(encoded, "utf8");
+            await syncDurably(handle);
+          } finally { await handle.close(); }
+          await rename(temporary, path);
+        } catch (error) {
+          await rm(temporary, { force: true }).catch(() => {});
+          throw error;
+        }
+        const written = await lstat(path);
+        this.shardFiles.set(shard, { digest, ino: written.ino, size: written.size, mtimeMs: written.mtimeMs });
+      }));
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
+    }
+    const directory = await open(this.directory, "r");
+    try { await syncDurably(directory); } finally { await directory.close(); }
+  }
+
+  private async shardInPlace(shard: string, path: string, digest: string): Promise<boolean> {
+    const known = this.shardFiles.get(shard);
+    if (!known || known.digest !== digest) return false;
+    const current = await lstat(path).catch(() => undefined);
+    return current !== undefined && current.isFile() && current.ino === known.ino
+      && current.size === known.size && current.mtimeMs === known.mtimeMs;
+  }
+
+  /** One owner-written file read whole, or undefined when it is missing, not a
+   * regular file, over its bound, or changed while it was read. */
+  private async readBounded(path: string, maximumBytes: number): Promise<BoundedFile | undefined> {
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      const beforePath = await lstat(this.path);
-      if (!beforePath.isFile() || beforePath.isSymbolicLink() || beforePath.size > CATALOG_METADATA_INDEX_MAX_BYTES) return undefined;
-      handle = await open(this.path, "r");
+      const beforePath = await lstat(path);
+      if (!beforePath.isFile() || beforePath.isSymbolicLink() || beforePath.size > maximumBytes) return undefined;
+      handle = await open(path, "r");
       const before = await handle.stat();
       if (!before.isFile() || before.size !== beforePath.size
         || before.dev !== beforePath.dev || before.ino !== beforePath.ino
-        || before.size > CATALOG_METADATA_INDEX_MAX_BYTES) return undefined;
+        || before.size > maximumBytes) return undefined;
       const bytes = Buffer.alloc(before.size);
       let offset = 0;
       while (offset < bytes.length) {
@@ -450,15 +771,13 @@ export class CatalogMetadataIndex {
         offset += read.bytesRead;
       }
       const after = await handle.stat();
-      const afterPath = await lstat(this.path);
+      const afterPath = await lstat(path);
       if (!after.isFile() || after.dev !== before.dev || after.ino !== before.ino
         || after.size !== before.size || after.mtimeMs !== before.mtimeMs
         || !afterPath.isFile() || afterPath.isSymbolicLink()
         || afterPath.dev !== before.dev || afterPath.ino !== before.ino
         || afterPath.size !== before.size || afterPath.mtimeMs !== before.mtimeMs) return undefined;
-      const document = JSON.parse(bytes.toString("utf8")) as unknown;
-      const canonicalRoot = await realpath(catalogRoot).catch(() => resolve(catalogRoot));
-      return this.admitDocument(document, canonicalRoot) ? document : undefined;
+      return { bytes, ino: before.ino, size: before.size, mtimeMs: before.mtimeMs };
     } catch { return undefined; }
     finally { await handle?.close().catch(() => {}); }
   }
@@ -487,6 +806,12 @@ export class CatalogMetadataIndex {
       && document.rows.every((row) => this.admitRow(row, catalogRoot));
   }
 
+  private admitShard(value: unknown, shard: string, catalogRoot: string): value is CatalogMetadataShardDocument {
+    return this.admitDocument(value, catalogRoot)
+      && (value as Partial<CatalogMetadataShardDocument>).shard === shard
+      && value.rows.every((row) => catalogMetadataShard(catalogRoot, row.path) === shard);
+  }
+
   private admitRow(row: unknown, catalogRoot: string): row is CatalogMetadataIndexRow {
     if (!row || typeof row !== "object" || Array.isArray(row)) return false;
     const value = row as Partial<CatalogMetadataIndexRow>;
@@ -511,7 +836,13 @@ export class CatalogMetadataIndex {
       && validString(value.tailBoundaryHash, 128);
   }
 
-  private failed(stage: CatalogMetadataIndexFailureStage, started: number): void {
-    this.onFailure?.(stage, Math.max(0, Date.now() - started));
+  private failed(stage: CatalogMetadataIndexFailureStage, started: number, detail?: CatalogMetadataIndexFailureDetail): void {
+    this.onFailure?.(stage, Math.max(0, Date.now() - started), ...(detail ? [detail] as const : []));
+  }
+
+  private pressure(key: string, pressure: CatalogMetadataIndexPressure): void {
+    if (this.pressureReported.has(key)) return;
+    this.pressureReported.add(key);
+    this.onPressure?.(pressure);
   }
 }
