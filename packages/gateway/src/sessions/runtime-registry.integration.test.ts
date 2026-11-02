@@ -4851,6 +4851,21 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     return {
       slot, owner, toolCallId, asyncDir, childDir, child, replace,
       activity: () => owner.extensionActivities.get(toolCallId),
+      /** Evicts this row through the runtime map's own 64-row trim, runs `check`,
+       * then removes the newer filler rows the trim kept. */
+      evict: async (check: () => void | Promise<void>) => {
+        const row = owner.extensionActivities.get(toolCallId)!;
+        const fillers = Array.from({ length: 64 }, (_, index) => `${label}-filler-${index}`);
+        for (const [index, id] of fillers.entries()) owner.extensionActivities.set(id, { ...row, id, toolCallId: id, runId: id,
+          activityId: id, updatedAt: new Date(Date.parse(row.updatedAt) + 1_000 + index).toISOString() });
+        try {
+          trimExtensionActivities(owner);
+          expect(owner.extensionActivities.get(toolCallId), "the oldest row is the one evicted").toBeUndefined();
+          await check();
+        } finally {
+          for (const id of fillers) owner.extensionActivities.delete(id);
+        }
+      },
       // This fixture owns synthetic running evidence, not a provider process.
       // Settle it before drain-aware cleanup, even after a failed assertion.
       dispose: async () => {
@@ -4932,18 +4947,47 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       // Read tickets live exactly as long as their row: the runtime map's own
       // eviction retires them, so successive runs never accumulate entries.
       expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId)).toBe(true);
-      const row = f.activity()!;
-      const fillers = Array.from({ length: 64 }, (_, index) => `filler-${index}`);
-      for (const [index, id] of fillers.entries()) f.owner.extensionActivities.set(id, { ...row, id, toolCallId: id, runId: id,
-        activityId: id, updatedAt: new Date(Date.parse(row.updatedAt) + 1_000 + index).toISOString() });
-      try {
-        trimExtensionActivities(f.owner);
-        expect(f.activity(), "the oldest row is the one evicted").toBeUndefined();
+      await f.evict(() => {
         expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId)).toBe(false);
         expect(f.owner.extensionActivityReadGenerations.has(f.toolCallId)).toBe(false);
-      } finally {
-        for (const id of fillers) f.owner.extensionActivities.delete(id);
-      }
+      });
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("keeps an evicted row's read order until every older read has finished", async () => {
+    const f = await workflowChildFixture("evicted-order");
+    try {
+      let observeHeld!: () => void;
+      const held = new Promise<void>((resolve) => { observeHeld = resolve; });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const read = f.owner.artifacts.readExtensionStatusArtifactWithReplacementRetry.bind(f.owner.artifacts);
+      let holdNextRootRead = true;
+      vi.spyOn(f.owner.artifacts, "readExtensionStatusArtifactWithReplacementRetry").mockImplementation(async (...args) => {
+        const hold = holdNextRootRead && args[0] === f.asyncDir;
+        if (hold) holdNextRootRead = false;
+        const value = await read(...args);
+        if (hold) {
+          observeHeld();
+          await gate;
+        }
+        return value;
+      });
+      const older = f.owner.discoverExtensionArtifact(f.asyncDir);
+      await awaitsWithin(held, "older read holds its real bytes before publication");
+      await f.replace(f.childDir, f.child({ model: "fixture/child", toolCount: 0 }));
+      expect(await f.owner.discoverExtensionArtifact(f.asyncDir), "newer read").toBe("accepted");
+      // The row leaves the runtime map while the older read is still in flight.
+      await f.evict(async () => {
+        expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId), "older read still in flight").toBe(true);
+        release();
+        // Canonical ownership would let it re-admit the row; its bytes are older.
+        expect(await older, "older read cannot re-admit an evicted row").not.toBe("accepted");
+        expect(f.activity()).toBeUndefined();
+        expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId), "retired once older reads finish").toBe(false);
+      });
     } finally {
       await f.dispose();
     }

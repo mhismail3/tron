@@ -64,10 +64,13 @@ export class OwnedTurnOwner {
 
   /** Ticket of the latest read published per tool call. Watcher, discovery and
    * drain reads run concurrently and finish in any order; none may replace a
-   * frame built from bytes read after its own. */
+   * frame built from bytes read after its own. Bounded by the runtime map plus
+   * removed rows that an older in-flight read could still re-admit. */
   readonly extensionActivityPublishedReads = new Map<string, number>();
 
   private extensionArtifactReadTickets = 0;
+
+  private readonly extensionArtifactReadsInFlight = new Set<number>();
 
   readonly extensionArtifactMissingSince = new Map<string, number>();
 
@@ -464,13 +467,21 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Starts one artifact read before its first await. The watcher lane, and its
-   * invalidation, pass the tool call so an older in-flight watcher read stands
-   * down; publication order across lanes is `extensionArtifactReadSuperseded`'s. */
+  /** Starts one artifact read before its first await; the caller finishes it on
+   * every exit. The watcher lane passes its tool call so an older in-flight
+   * watcher read stands down; publication order across lanes is
+   * `extensionArtifactReadSuperseded`'s. */
   beginExtensionArtifactRead(toolCallId?: string): number {
     const ticket = ++this.extensionArtifactReadTickets;
     if (toolCallId !== undefined) this.extensionActivityReadGenerations.set(toolCallId, ticket);
+    this.extensionArtifactReadsInFlight.add(ticket);
     return ticket;
+  }
+
+
+  finishExtensionArtifactRead(ticket: number): void {
+    this.extensionArtifactReadsInFlight.delete(ticket);
+    this.pruneExtensionArtifactReadTickets();
   }
 
 
@@ -487,17 +498,29 @@ export class OwnedTurnOwner {
   }
 
 
-  /** A removed activity row keeps no read tickets. A watcher read still in
-   * flight sees its generation missing and stands down; a later read of a
-   * re-admitted row takes a newer ticket than any read it could supersede. */
+  /** Called after a row leaves the runtime map. A watcher read still in flight
+   * sees its generation missing and stands down. The published ticket outlives
+   * the row until every read begun before it has finished, because an older
+   * discovery read may still re-admit the row from canonical ownership. */
   forgetExtensionArtifactReads(toolCallId: string): void {
     this.extensionActivityReadGenerations.delete(toolCallId);
-    this.extensionActivityPublishedReads.delete(toolCallId);
+    this.pruneExtensionArtifactReadTickets();
+  }
+
+
+  private pruneExtensionArtifactReadTickets(): void {
+    let oldestInFlight = Infinity;
+    for (const ticket of this.extensionArtifactReadsInFlight) oldestInFlight = Math.min(oldestInFlight, ticket);
+    for (const [toolCallId, published] of this.extensionActivityPublishedReads) {
+      if (published < oldestInFlight && !this.extensionActivities.has(toolCallId)) {
+        this.extensionActivityPublishedReads.delete(toolCallId);
+      }
+    }
   }
 
 
   stopExtensionActivityWatcher(toolCallId: string): void {
-    this.beginExtensionArtifactRead(toolCallId);
+    this.extensionActivityReadGenerations.set(toolCallId, ++this.extensionArtifactReadTickets);
     const tracked = this.extensionActivityWatchers.get(toolCallId);
     if (!tracked) return;
     if (tracked.timer) clearTimeout(tracked.timer);
@@ -510,7 +533,6 @@ export class OwnedTurnOwner {
   clearExtensionActivityWatchers(): void {
     for (const toolCallId of this.extensionActivityWatchers.keys()) this.stopExtensionActivityWatcher(toolCallId);
     this.extensionActivityReadGenerations.clear();
-    this.extensionActivityPublishedReads.clear();
   }
 
 
@@ -738,6 +760,7 @@ export class OwnedTurnOwner {
     this.extensionActivities.clear();
     this.extensionActivitySequences.clear();
     this.extensionRunOwnership.clear();
+    this.pruneExtensionArtifactReadTickets();
   }
 
   /** Retire current watches and fence outstanding watched reads before physical SDK disposal. */

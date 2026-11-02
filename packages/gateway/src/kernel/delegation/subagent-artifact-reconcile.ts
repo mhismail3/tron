@@ -20,6 +20,19 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
 ): Promise<ExtensionArtifactDiscoveryOutcome> {
   if (turns.operations.disposed || turns.operations.shuttingDown) return "transient";
   const ticket = turns.beginExtensionArtifactRead();
+  try {
+    return await refreshSubagentActivityFromArtifactRead(turns, asyncDir, ticket, canonicalFacts);
+  } finally {
+    turns.finishExtensionArtifactRead(ticket);
+  }
+}
+
+
+async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
+  asyncDir: string,
+  ticket: number,
+  canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
+): Promise<ExtensionArtifactDiscoveryOutcome> {
   let diagnosticOwner: string | undefined;
   let missingToolCallId: string | undefined;
   let claimedReceipt: { activityId: string; owner: ArtifactReceiptOwner } | undefined;
@@ -461,6 +474,8 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
       extensionArtifactReadFailureReason(error),
       `${previous.runId ?? "run"}\0${toolCallId}`,
     );
+  } finally {
+    turns.finishExtensionArtifactRead(generation);
   }
 }
 

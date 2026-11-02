@@ -77,7 +77,8 @@ exists. Native branch/disposal boundaries call this owner's reset/retirement ope
 watched refresh checks generation and disposed-frame identity after its read. Every
 watched, discovery or drain read takes one ticket before its first await and publishes only
 if no later-begun read already published for that tool call, so concurrent reads never move
-a frame back to older bytes. A workflow child read that loses an atomic replacement retries
+a frame back to older bytes. A removed row's published ticket is retired once every read
+begun before it has finished. A workflow child read that loses an atomic replacement retries
 like a discovery read rather than projecting the child unavailable. Admission
 retains bounded path/header/inode proofs; ambient discovery uses attribution and receipt-claim
 checks and reads Native’s existing retirement fence (`shuttingDown` or `disposed`)
