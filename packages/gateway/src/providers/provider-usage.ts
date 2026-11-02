@@ -358,7 +358,9 @@ function parseAnthropicOAuthUsage(body: unknown) {
     for (const limitValue of root.limits.slice(0, MAX_WINDOWS)) {
       const limit = object(limitValue);
       if (!limit) throw new Error("invalid Anthropic usage limit");
-      if (limit.kind !== "weekly_scoped" || limit.group !== "weekly") continue;
+      // An inactive scoped limit (Ultra's "Fable" share) does not constrain
+      // requests; showing it duplicates the account's weekly row.
+      if (limit.kind !== "weekly_scoped" || limit.group !== "weekly" || limit.is_active === false) continue;
       const scope = object(limit.scope); const model = object(scope?.model);
       const modelName = text(model?.display_name); const modelId = text(model?.id);
       const percent = number(limit.percent);

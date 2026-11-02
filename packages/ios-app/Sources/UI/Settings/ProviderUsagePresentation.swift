@@ -147,17 +147,21 @@ enum ProviderUsagePresentation {
         return parts
     }
 
-    /// The windows compact surfaces summarize: the first two, then each later
-    /// window whose cadence none before it names. Any of a plan's distinct
-    /// windows (OpenCode Go's 5h, weekly and monthly) can block requests on its
-    /// own, so none may be hidden; repeats of a cadence (Anthropic's per-model
-    /// weekly limits) and uncadenced extras stay in the detail sheet.
+    /// The windows compact surfaces summarize: the first window of each
+    /// cadence, plus uncadenced windows among the first two. Any of a plan's
+    /// distinct windows (OpenCode Go's 5h, weekly and monthly) can block
+    /// requests on its own, so none may be hidden; repeats of a cadence
+    /// (Anthropic's per-model weekly limits) would read as a second "Weekly"
+    /// column, so they and later uncadenced extras stay in the detail sheet.
     static func summaryWindows(_ windows: [UsageWindow]) -> [UsageWindow] {
-        var shown = Array(windows.prefix(2))
-        var cadences = Set(shown.compactMap { cadenceLabel($0.windowSeconds) })
-        for window in windows.dropFirst(2) {
-            guard let cadence = cadenceLabel(window.windowSeconds), cadences.insert(cadence).inserted else { continue }
-            shown.append(window)
+        var shown: [UsageWindow] = []
+        var cadences = Set<String>()
+        for (index, window) in windows.enumerated() {
+            if let cadence = cadenceLabel(window.windowSeconds) {
+                if cadences.insert(cadence).inserted { shown.append(window) }
+            } else if index < 2 {
+                shown.append(window)
+            }
         }
         return shown
     }
