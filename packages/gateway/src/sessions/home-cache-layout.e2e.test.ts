@@ -15,7 +15,7 @@ import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, VIEW_BLOCK_LINES, cachePieces } from "
 import { EPISODIC_COMPACT_PROMPT } from "../episodic/episodic-compactor.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
-import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../modules/home/home-request-policy.js";
+import { HOME_NONCE_MARKER, markHomeMemoryCache, type HomeRequestRecord } from "../modules/home/home-request-policy.js";
 import type { HomeStatus } from "../protocol/types.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -278,16 +278,13 @@ function viewMarks(captured: Captured): string[] {
   return wireBlocks(captured).filter((block) => block.marked && block.path.startsWith(".messages[0].")).map((block) => block.path);
 }
 
-/** The path of the memory message's last mark in one request. */
-function viewMark(captured: Captured): string {
-  return viewMarks(captured).at(-1)!;
-}
-
 /** "extend" when the next request re-reads the entry the previous request wrote at
  * its view mark; "partial" for an earlier memory block, "rewrite" for none. */
 function transition(previous: Captured, next: Captured): "extend" | "partial" | "rewrite" {
+  const mark = viewMarks(previous).at(-1);
   const read = reread(previous, next);
-  return read === viewMark(previous) ? "extend" : read?.startsWith(".messages[0].") ? "partial" : "rewrite";
+  if (mark !== undefined && read === mark) return "extend";
+  return read?.startsWith(".messages[0].") ? "partial" : "rewrite";
 }
 
 /** Leading view blocks two requests share, byte for byte. */
@@ -386,7 +383,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     // view mark are the same blocks, byte for byte, and its own mark finds that
     // entry within Anthropic's lookback.
     const previousBlocks = wireBlocks(previous!), lastBlocks = wireBlocks(last!);
-    const previousMark = previousBlocks.findIndex((block) => block.path === viewMark(previous!));
+    const previousMark = previousBlocks.findIndex((block) => block.path === viewMarks(previous!).at(-1));
+    expect(previousMark).toBeGreaterThanOrEqual(0);
     expect(lastBlocks.slice(0, previousMark + 1).map((block) => block.json)).toEqual(previousBlocks.slice(0, previousMark + 1).map((block) => block.json));
     expect(transition(previous!, last!)).toBe("extend");
     // The header, the lines in fixed groups, then the footer: they rejoin to the
@@ -398,6 +396,16 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const lastGroup = lastMemory.length - 3;
     const viewMarkAt = (lastMemory[lastGroup]!.text ?? "").split("\n").length - 1 === VIEW_BLOCK_LINES ? lastGroup : lastGroup - 1;
     expect(viewMarks(last!)).toEqual([`.messages[0].content[${viewMarkAt}]`]);
+    // Before the first whole group the header is marked: the empty first view, then
+    // a two-line partial group; the first whole group takes the mark from there.
+    expect(homeRequests.slice(0, 3).map(viewMarks)).toEqual([[".messages[0].content[0]"], [".messages[0].content[0]"], [".messages[0].content[1]"]]);
+    // A provider that prepends its own block to the memory message (CortexKit's
+    // cached prompt block) moves the mark with the view, found from the end.
+    const prepended = structuredClone(last!.body) as { messages: Array<{ content: Block[] }> };
+    for (const block of prepended.messages[0]!.content) delete block.cache_control;
+    prepended.messages[0]!.content.unshift({ type: "text", text: "provider prompt block", cache_control: { type: "ephemeral", ttl: "1h" } });
+    const remarked = markHomeMemoryCache(prepended) as { messages: Array<{ content: Block[] }> };
+    expect(remarked.messages[0]!.content.flatMap((block, index) => block.cache_control ? [index] : [])).toEqual([0, viewMarkAt + 1]);
     const lastMessage = messagesOf(last!).length - 1;
     expect(lastMarks).toContain(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(lastMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
@@ -408,6 +416,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(memoryOf(toolStep!).map((block) => block.text)).toEqual(lastMemory.map((block) => block.text));
     expect(messagesOf(toolStep!).length).toBeGreaterThan(messagesOf(last!).length);
     const stepLast = messagesOf(toolStep!).length - 1;
+    expect(cacheMarks(toolStep!).length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
+    expect(viewMarks(toolStep!)).toEqual(viewMarks(last!));
     expect(cacheMarks(toolStep!)).toContain(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
 
     // The summarizer's context comes first, cut at the same marks, under the
