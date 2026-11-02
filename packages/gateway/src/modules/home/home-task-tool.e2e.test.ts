@@ -11,11 +11,12 @@ import type { AddressInfo } from "node:net";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 import { disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { WakeInboxOwner } from "./home-wake-inbox.js";
 
 const PROVIDER = "local-anthropic";
 const MODEL_ID = "home-wire";
@@ -144,6 +145,54 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
     expect((await homeOwnerOf(f.registry).taskResult("race-worker")).wake?.state).toBe("acknowledged");
     evidence.push({ case: "idle-to-prompt-wake-race", inputs, results });
+  });
+
+  it("stays busy until the wake's inbox acknowledgement settles (#2213)", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const finishWorker = gate(), finishWake = gate(), holdSettle = gate();
+    let wakeStarted = false, settleHeld = 0;
+    const settle = WakeInboxOwner.prototype.settle;
+    vi.spyOn(WakeInboxOwner.prototype, "settle").mockImplementation(async function(this: WakeInboxOwner, ...args: Parameters<typeof settle>) {
+      settleHeld += 1;
+      await holdSettle.wait();
+      return settle.apply(this, args);
+    });
+    const results: unknown[] = [];
+    f.faux.setResponses([
+      async (_context, options) => {
+        await finishWorker.wait(options?.signal);
+        return fauxAssistantMessage([reportCall("race-result", "Ready")], { stopReason: "toolUse" });
+      },
+      async (_context, options) => {
+        wakeStarted = true;
+        await finishWake.wait(options?.signal);
+        return fauxAssistantMessage("Wake handled");
+      },
+      () => fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: "race-worker" })], { stopReason: "toolUse" }),
+      context => { results.push(context.messages.at(-1)); return fauxAssistantMessage("Control handled"); },
+    ]);
+    try {
+      const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "race-worker", intent: "Finite work", target: f.cwd });
+      try {
+        await promptHomeControl(home, "Inspect race-worker", async () => {
+          finishWorker.open();
+          await run.completion;
+          await waitFor(() => wakeStarted, "real task-result wake owns Home");
+        });
+      } finally { finishWorker.open(); finishWake.open(); }
+      try {
+        await waitFor(() => results.length === 1 && settleHeld > 0, "control answered and the wake settlement started");
+        // Idle is the public completion point: it must not precede the wake's
+        // durable acknowledgement, which is still held here. The bound is the window in
+        // which no idle may occur; the old order went idle within milliseconds.
+        const idleEarly = await waitFor(() => !home.isBusy || undefined, "home idle", { boundMs: 1500 }).then(() => true, () => false);
+        expect(idleEarly).toBe(false);
+      } finally { holdSettle.open(); }
+      await waitFor(() => !home.isBusy, "home idle after settlement");
+      expect((await homeOwnerOf(f.registry).taskResult("race-worker")).wake?.state).toBe("acknowledged");
+    } finally { holdSettle.open(); vi.restoreAllMocks(); }
   });
   it("lists, steers, stops a worker stuck in a long command, resumes it in place and steers it again with minimal calls", async () => {
     const wire = await homeEndpoint();
