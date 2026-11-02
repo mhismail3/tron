@@ -65,8 +65,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   `TronSettingsSections`, including renderer-driven and conditional groups. Settings subsheets
   opt in with `hidesLoneHeading: true`: one container has no heading, multiple containers retain
   their headings, and explanatory detail remains. Top-level settings keep all group headings.
-  A renderer section that shows one headless row has no container of its own, so that row keeps
-  its `settings-row-*` identity; multi-row sections are wrapped as `settings-section-<id>-detail`.
+  A headless renderer section (no group headings shown, one group without detail) whose rows name
+  the group, or which has one row, has no container of its own, so a lone row keeps its
+  `settings-row-*` identity; other sections are wrapped as `settings-section-<id>-detail`.
 - **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only; an

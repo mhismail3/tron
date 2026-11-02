@@ -2536,7 +2536,8 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         // The fixture mounts the Context sheet itself, under its own cover control.
-        XCTAssertTrue(any["settings-section-context-detail"].waitForExistence(timeout: 10), app.debugDescription)
+        // Its one row is the section: a one-row section keeps the row's identity.
+        XCTAssertTrue(any["settings-row-context.images.block"].waitForExistence(timeout: 10), app.debugDescription)
         let toggle = any["settings-row-context.images.block"].switches.firstMatch
         tapScrolling(toggle, in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-held"], containing: "held:1", timeout: 5))

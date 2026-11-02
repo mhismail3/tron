@@ -1128,8 +1128,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(settings.buttons["Switch Model"].exists)
         // A fresh session serves no session-overridable More Settings keys, so that
         // destination is absent; its served Tools sheet must still open on content.
-        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "An empty section has no destination")
         openSheet("settings-section-tools-open", "session-tools", section: "tools")
+        // Session Settings has loaded its served links (beneath the open Tools sheet).
+        XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "An empty section has no destination")
         dismissTopSheet(app)
         dismissTopSheet(app) // Session Settings
         dismissTopSheet(app) // Manage Session
@@ -1680,7 +1681,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Hand-built owners hold these keys on Settings; their own journeys prove the control.
         let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
             "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Install Package card (#1482)",
-            "permissions.macTerminalServer": "Mac Terminal and this Mac's Connections page"] : [:]
+            "permissions.macTerminalServer": "Mac Terminal and this Mac's Connections page (UI journey gap #2208)"] : [:]
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
