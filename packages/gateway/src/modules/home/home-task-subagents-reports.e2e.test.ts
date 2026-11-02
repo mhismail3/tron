@@ -185,7 +185,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
-  // #1698: a run's terminal notice that the provider queues into the report turn, before the
+  // #1698: a run's notice that the provider queues into the report turn, before the
   // report seals, is context for that turn, not a reason for another one. The SDK continues a
   // run that ends with queued messages, so the sealed boundary must leave none queued.
   it("records a notice queued into the report turn as context and starts no turn after the sealed report", async () => {
@@ -195,14 +195,13 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       async (context: FauxContext) => {
+        // This report turn's request has started, so the run's completion notice can only
+        // be steered into it: the child is released here, and the turn waits for the notice.
         await waitFor(() => child.heldRequests() === 1, "async child live", bound);
         seen.runDir = launchedAsyncDir(context, "async-launch");
-        return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.runDir) }, { id: "own-stop" })], { stopReason: "toolUse" });
-      },
-      async () => {
+        child.releaseHeld();
         const slot = await f.registry.acquire(run.sessionId);
-        // The stopped run's notice reaches the parent while this report turn streams.
-        await waitFor(() => !slot.catalogHasActiveSubagents && slot.runtime.session.agent.hasQueuedMessages(), "stop notice queued into the report turn", bound);
+        await waitFor(() => !slot.catalogHasActiveSubagents && slot.runtime.session.agent.hasQueuedMessages(), "completion notice queued into the report turn", bound);
         seen.queued = true;
         return fauxAssistantMessage([reportCall("report-with-queued-notice")], { stopReason: "toolUse" });
       },
