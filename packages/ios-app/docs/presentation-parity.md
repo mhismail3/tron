@@ -290,6 +290,8 @@ canonical state, is never persisted, and is not a second state authority.
   work. Its ancestors continue only bounded data publication a visible descendant needs
   (`allowsDataPublication`), so tool output and completion stay current without covered loads,
   polls, automatic presentation, animation or viewport observation.
+  An accepted command's outcome (a refusal behind a retiring review card) also publishes under
+  that gate, into state the surface's restarted reads do not clear.
 - Surface tokens are generation-qualified; a bounded tombstone ledger rejects content arriving
   after its generation retired. Binding intent registers a child before its transition, and a
   dismissal lease keeps the retiring generation until SwiftUI's callback. The sheet haptic

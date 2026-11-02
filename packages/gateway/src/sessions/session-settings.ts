@@ -1,26 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { getCurrentTools } from "../kernel/pi/ai.js";
-import type { SessionEntry, SessionManager } from "../kernel/pi/coding-agent.js";
+import type { SessionEntry } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { RETIRED_SCOPES, type FixedSetting } from "../kernel/settings/tool-contract.js";
 import { hasSessionSettingsApplier, type SettingsSchema } from "../kernel/settings/settings-schema.js";
 
 export const SESSION_SETTINGS_ENTRY = "tron.settings.v1";
-
-/** Rollover keeps policy, not conversation. Read only recognized canonical
- * state; audit receipts and old message/entry identities belong to the predecessor. */
-export function appendChatSettingsSnapshot(entries: readonly SessionEntry[], manager: SessionManager): void {
-  const model = entries.findLast(entry => entry.type === "model_change");
-  if (model?.type === "model_change") manager.appendModelChange(model.provider, model.modelId);
-  const thinking = entries.findLast(entry => entry.type === "thinking_level_change");
-  if (thinking?.type === "thinking_level_change") manager.appendThinkingLevelChange(thinking.thinkingLevel);
-  const fixed = readSessionFixedSettings(entries);
-  const choice = readSessionToolChoice(entries);
-  if (choice) fixed["tools.active"] = choice.fixed ?? { value: choice.tools, from: "delegate", at: new Date().toISOString(), ref: randomUUID() };
-  manager.appendCustomEntry(SESSION_SETTINGS_ENTRY, {
-    settings: readSessionSettings(entries), fixed, requestPins: readSessionRequestPins(entries),
-  });
-}
 
 /** A choice after the last system frame wins; otherwise that frame is the
  * actual declared loadout, including changes made through the SDK itself. */

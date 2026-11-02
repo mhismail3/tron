@@ -1,5 +1,6 @@
 import { createServer, type AddressInfo, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import fsPromises, { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -84,8 +85,11 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
   const services: GatewayService[] = [];
   let upstreamUrls: string[] = [];
   let upstreamSignals: Array<AbortSignal | undefined> = [];
-  afterEach(async () => {
+  async function disposeFixture() {
     for (const service of services.splice(0)) service.dispose();
+    // Registration starts detached SDK refreshes; an awaited offline pass fences
+    // their config reads and file-store work before the fixture root is removed.
+    await runtime?.refresh({ allowNetwork: false });
     runtime = undefined;
     if (root) await rm(root, { recursive: true, force: true });
     root = "";
@@ -93,7 +97,8 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     server = undefined;
     upstreamUrls = [];
     upstreamSignals = [];
-  });
+  }
+  afterEach(disposeFixture);
 
   async function harness(credential: Credential | undefined, options: { now?: () => number; modelsPath?: string | null; configureModels?: (root: string) => Promise<string>; sessions?: unknown; providerUsage?: unknown; anthropic?: Credential } = {}) {
     root = await mkdtemp(join(tmpdir(), "gateway-openai-eligibility-"));
@@ -415,6 +420,54 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     expect(usageRequests).toEqual([{ url: "/backend-api/wham/usage", authorization: `Bearer ${codexToken}`, account: "fixture-account" }]);
     expect(getAuth.mock.calls.map(([providerId]) => providerId)).not.toContain("openai");
     expect(runtime.getModels("openai-codex").length).toBeGreaterThan(0);
+  });
+
+  it("keeps fixture removal behind registration's real model-store work", async () => {
+    const actualReadFile = fsPromises.readFile;
+    const actualRemove = fsPromises.rm;
+    let released = false;
+    const entered = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<void>();
+    let reads = 0;
+    fsPromises.readFile = ((...args: unknown[]) => {
+      const path = String(args[0]);
+      const ordinal = /\/gateway-openai-eligibility-[^/]+\/models\.json$/u.test(path) ? ++reads : 0;
+      const read = Reflect.apply(actualReadFile, fsPromises, args) as Promise<unknown>;
+      if (ordinal !== 3) return read;
+      // create loads config twice; the next read is detached native-provider
+      // registration. Hold the real result before it can reach FileModelsStore.
+      return read.then(async value => { entered.resolve(); await held.promise; return value; });
+    }) as typeof fsPromises.readFile;
+    fsPromises.rm = ((...args: Parameters<typeof fsPromises.rm>) => {
+      if (String(args[0]) === root && !released) return Promise.reject(new Error("Fixture removal overtook held provider registration"));
+      return Reflect.apply(actualRemove, fsPromises, args);
+    }) as typeof fsPromises.rm;
+    syncBuiltinESMExports();
+    const pending = harness(undefined, { configureModels: async directory => {
+      const path = join(directory, "models.json");
+      await writeFile(path, JSON.stringify({ providers: { openai: { baseUrl: "https://proxy.example/v1", api: "openai-responses", models: [] } } }));
+      return path;
+    } });
+    try {
+      await pending;
+      await entered.promise;
+      expect(reads).toBe(3);
+      const fixtureRoot = root;
+      // The filesystem guard rejects a removal dispatched while the real SDK
+      // continuation is held. No elapsed-time or scheduler-speed assertion.
+      const removing = disposeFixture();
+      const settled = removing.then(() => undefined, error => error);
+      released = true;
+      held.resolve();
+      const error = await settled;
+      if (error) throw error;
+      await expect(fsPromises.readdir(fixtureRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      released = true;
+      held.resolve();
+      try { const ready = await pending; if (root) await ready.runtime.refresh({ allowNetwork: false }); }
+      finally { fsPromises.readFile = actualReadFile; fsPromises.rm = actualRemove; syncBuiltinESMExports(); }
+    }
   });
 
   it("never sends OAuth tokens for a custom OpenAI endpoint", async () => {

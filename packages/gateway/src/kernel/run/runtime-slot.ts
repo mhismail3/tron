@@ -941,6 +941,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     await applyModelAdmission(session, admission, Boolean(this.ownedTurns.worker) || this.liveProfile().modelSelection?.physicalOnly === true,
       owners.model.owner.admitModelChoice);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during model admission");
+    this.applyHomeToolRecipe(session, this.liveProfile(), admission);
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its
     // SettingsManager during queue draining. Never use setters that save defaults.
@@ -949,6 +950,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     session.agent.transport = session.settingsManager.getTransport();
     session.agent.maxRetryDelayMs = session.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
     return settings;
+  }
+
+  private applyHomeToolRecipe(session: AgentSession, profile: SessionProfile, rows: readonly { key: string; value: unknown }[]): void {
+    if (profile.launchDefaults !== "settings-home-recipe") return;
+    const tools = rows.find(row => row.key === "tools.active")?.value;
+    if (Array.isArray(tools)) session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
   }
 
   private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number> {
@@ -1458,12 +1465,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       // Canonical thinking is nevertheless an existing Session choice, not a default.
       const recordedThinking = sessionManager.getBranch().some(entry => entry.type === "thinking_level_change");
       const settingsOwner = this.dependencies.settings();
-      const launchDefaults = startsNewChat && settingsOwner ? await settingsOwner.model.resolve(
+      const launchDefaults = settingsOwner && (startsNewChat || profile.launchDefaults === "settings-home-recipe") ? await settingsOwner.model.resolve(
         { kind: "session", sessionId: sessionManager.getSessionId() },
         { cwd: trust.cwd, home: profile.launchDefaults === "settings-home-recipe", session: { settings: {} }, modelRuntime },
         ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"], { storeState: false },
       ) : undefined;
-      const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && row.layer === "session")?.value as { provider: string; id: string } | undefined;
+      const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && (profile.launchDefaults === "settings-home-recipe" || row.layer === "session"))?.value as { provider: string; id: string } | undefined;
       const selectedProfileModel = profile.launchDefaults === "settings-home-recipe" && profileModel
         ? modelRuntime.getPhysicalModel(profileModel.provider, profileModel.id) : undefined;
       if (profileModel && profile.launchDefaults === "settings-home-recipe" && !selectedProfileModel) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
@@ -1476,11 +1483,12 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         ...(selectedProfileModel ? { model: selectedProfileModel } : {}),
-        ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel }
+        ...(profile.launchDefaults === "settings-home-recipe" && launchThinking ? { thinkingLevel: launchThinking }
+          : recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel }
           : launchThinking ? { thinkingLevel: launchThinking } : {}),
-        // The allowlist is Home's executable ceiling. MCP tools cannot appear
-        // under it because no MCP extension is loaded, and Tron's direct bash
-        // tool is not registered at all for Home.
+        // Home's allowlist is its registration ceiling; its request policy
+        // separately withholds general mutation tools from wake activations.
+        // No MCP extension is loaded for Home.
         ...(profile.tools ? { tools: [...profile.tools] } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
@@ -1504,16 +1512,15 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         ] } : {}),
       });
       if (startsNewChat) this.newSettingsSessions.add(created.session);
-      // The transcript owns a chat's tool loadout. Pi's createAgentSession always
-      // passes its configured defaults, which skips AgentSession's own transcript
-      // restore, so a resumed, forked or reloaded chat would silently fall back
-      // to the defaults and the next prompt would persist that (#327). Apply the
-      // declared loadout here; a session without one keeps the defaults.
-      const toolChoice = readSessionToolChoice(sessionManager.getBranch());
-      if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);
-      else if (profile.launchDefaults === "settings-home-recipe") {
-        const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "session")?.value;
-        if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && profile.tools?.includes(name) === true));
+      if (profile.launchDefaults === "settings-home-recipe") {
+        // Home's saved recipe owns selection, not historical provider declarations
+        // or chapter snapshots. Resolve it on reconstruction as well as creation.
+        this.applyHomeToolRecipe(created.session, profile, launchDefaults?.keys ?? []);
+      } else {
+        // Ordinary chats retain their canonical loadout across resume/fork/reload.
+        // Pi's explicit launch defaults otherwise bypass transcript restoration.
+        const toolChoice = readSessionToolChoice(sessionManager.getBranch());
+        if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);
       }
       this.runtimeProfiles.set(created.session, profile);
       this.homeRequestPolicy = profile.requestPolicy
