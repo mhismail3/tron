@@ -430,7 +430,9 @@ final class TronHomeSheetsUITests: XCTestCase {
             link.tap()
             expandSheet(app, title: "Session Settings")
             let content = element(app, "session-settings-content")
-            XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 8), app.debugDescription)
+            // One untitled container: Compaction, Tools, Project Trust, More Settings (28f672dd5).
+            XCTAssertTrue(app.buttons["settings-section-tools-open"].waitForExistence(timeout: 8), app.debugDescription)
+            XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Session Settings has no Models subsheet")
             let suffix = size.contains("Accessibility") ? "ax-large" : appearance
             shot("1478-session-settings-\(suffix)")
             groupCards(app, content)
@@ -441,19 +443,23 @@ final class TronHomeSheetsUITests: XCTestCase {
         }
     }
 
-    /// Global's Agent card holds Models and More Settings as adjacent rows of one
-    /// card; Tools is a drill-in row in Tools & Extensions, not an inline editor.
+    /// Session Settings is one untitled container (28f672dd5): Compaction, Tools and
+    /// More Settings share one card width in that order; Tools is a drill-in row,
+    /// not an inline editor, and the retired Agent / Tools & Extensions headings are gone.
     @MainActor private func groupCards(_ app: XCUIApplication, _ content: XCUIElement) {
-        let models = app.buttons["settings-section-model-open"], more = content.buttons["settings-section-advanced-open"]
+        let compaction = app.buttons["settings-section-context-open"], more = content.buttons["settings-section-advanced-open"]
         let tools = app.buttons["settings-section-tools-open"]
-        XCTAssertTrue(content.staticTexts["Agent"].exists, content.debugDescription)
+        XCTAssertFalse(content.staticTexts["Agent"].exists, content.debugDescription)
+        XCTAssertFalse(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
         XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
-        for row in [more, tools] { for _ in 0..<4 where !row.isHittable { app.swipeUp() } }
-        XCTAssertTrue(more.exists && tools.exists, content.debugDescription)
-        XCTAssertTrue(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
-        XCTAssertEqual(models.frame.minX, tools.frame.minX, accuracy: 1, "Rows share one card width")
-        XCTAssertEqual(models.frame.width, tools.frame.width, accuracy: 1, "Rows share one card width")
-        XCTAssertLessThan(more.frame.minY, tools.frame.minY, "Agent precedes Tools & Extensions")
+        for row in [compaction, more, tools] { for _ in 0..<4 where !row.isHittable { app.swipeUp() } }
+        XCTAssertTrue(compaction.exists && more.exists && tools.exists, content.debugDescription)
+        for row in [more, tools] {
+            XCTAssertEqual(row.frame.minX, compaction.frame.minX, accuracy: 1, "Rows share one card width")
+            XCTAssertEqual(row.frame.width, compaction.frame.width, accuracy: 1, "Rows share one card width")
+        }
+        XCTAssertLessThan(compaction.frame.minY, tools.frame.minY, "Compaction precedes Tools")
+        XCTAssertLessThan(tools.frame.minY, more.frame.minY, "Tools precedes More Settings")
     }
 
     /// Brings a settings sheet to its large detent.
@@ -843,15 +849,15 @@ final class TronHomeSheetsUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label CONTAINS 'opened-session:home-session'"))
 
-        for (index, selection) in ["Memory search", "Date", "Memory search"].enumerated() {
+        for (index, selection) in ["Search memory", "Memory date", "Search memory"].enumerated() {
             let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", selection + ", Completed,")).firstMatch
             // Alternate across historical rows, not a fixture-only sheet host.
             for _ in 0..<12 where !(chip.exists && chip.isHittable) {
-                if selection == "Memory search" { app.swipeUp() } else { app.swipeDown() }
+                if selection == "Search memory" { app.swipeUp() } else { app.swipeDown() }
             }
             open(app, chip, ready: "home-tool-detail", name: "historical-\(index)")
             let outcome = element(app, "home-tool-outcome")
-            XCTAssertTrue(outcome.label.hasSuffix(selection == "Date" ? "Found" : "2 matches"),
+            XCTAssertTrue(outcome.label.hasSuffix(selection == "Memory date" ? "Found" : "2 matches"),
                           "The selected chip must render its own payload, not the previous tool: \(app.debugDescription)")
             let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
             XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
@@ -884,10 +890,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         }
         // These calls are absent from the authoritative live tail. The native
         // history RPC installs their request/result before their chips can open.
-        toolSheet(app, "paged-zoom", chip: "Zoom, Completed", index: 1, outcome: "Opened") {
+        toolSheet(app, "paged-zoom", chip: "Expand memory, Completed", index: 1, outcome: "Opened") {
             XCTAssertTrue(self.element(app, "home-tool-line-1122+2").exists)
         }
-        toolSheet(app, "paged-task", chip: "Task, Completed", index: 2, outcome: "Running") {
+        toolSheet(app, "paged-task", chip: "Manage task, Completed", index: 2, outcome: "Running") {
             XCTAssertTrue(self.element(app, "home-tool-row-Check-in").label.contains("Gateway journey passed"))
         }
         for index in 0..<2 {
@@ -940,18 +946,18 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label CONTAINS 'opened-session:home-session'"))
 
         // Newest first, so each chip is revealed by scrolling toward older messages.
-        toolSheet(app, "memory-search", chip: "Memory search, Completed", index: 0, outcome: "2 matches") {
+        toolSheet(app, "memory-search", chip: "Search memory, Completed", index: 0, outcome: "2 matches") {
             XCTAssertTrue(self.element(app, "home-tool-row-Range").label.contains("1100–1131"))
             self.assertReads(app, self.element(app, "home-tool-line-1110+0"), contains: "feat/890-sheets")
         }
-        toolSheet(app, "date", chip: "Date, Completed", index: 0, outcome: "Found") {
+        toolSheet(app, "date", chip: "Memory date, Completed", index: 0, outcome: "Found") {
             XCTAssertTrue(self.element(app, "home-tool-row-Date").label.contains("2026"))
             XCTAssertTrue(self.element(app, "home-tool-row-Time").exists)
         }
-        toolSheet(app, "zoom-invalid", chip: "Zoom, Completed", index: 0, outcome: "Not found") {
+        toolSheet(app, "zoom-invalid", chip: "Expand memory, Completed", index: 0, outcome: "Not found") {
             XCTAssertTrue(self.allText(self.element(app, "home-tool-failure")).contains("No line 7+3"))
         }
-        toolSheet(app, "zoom", chip: "Zoom, Completed", index: 1, outcome: "Opened") {
+        toolSheet(app, "zoom", chip: "Expand memory, Completed", index: 1, outcome: "Opened") {
             XCTAssertTrue(self.element(app, "home-tool-line-1122+2").exists)
             self.assertReads(app, self.element(app, "home-tool-line-1120+2"), contains: "handoff")
         }
@@ -973,20 +979,20 @@ final class TronHomeSheetsUITests: XCTestCase {
         toolSheet(app, "settings-resolve", chip: "Settings, Completed", index: 1, outcome: "Read") {
             XCTAssertTrue(self.element(app, "home-tool-row-model.ref[role=worker]").label.contains("Claude Opus 5.5 · Session"))
         }
-        toolSheet(app, "task-rejected", chip: "Task, Failed", index: 0, outcome: "Rejected") {
+        toolSheet(app, "task-rejected", chip: "Manage task, Failed", index: 0, outcome: "Rejected") {
             let failure = self.allText(self.element(app, "home-tool-failure"))
             XCTAssertTrue(failure.contains("Rejected before it ran"), failure)
             XCTAssertTrue(failure.contains("root: must not have additional properties"), failure)
             XCTAssertFalse(failure.contains("Received arguments"), "The schema issues, not the raw arguments: \(failure)")
         }
-        toolSheet(app, "task-steer", chip: "Task, Completed", index: 0, outcome: "Accepted") {
+        toolSheet(app, "task-steer", chip: "Manage task, Completed", index: 0, outcome: "Accepted") {
             XCTAssertTrue(self.allText(self.element(app, "home-tool-text-message")).contains("Profile"))
         }
-        toolSheet(app, "task-report", chip: "Task, Completed", index: 1, outcome: "Final") {
+        toolSheet(app, "task-report", chip: "Manage task, Completed", index: 1, outcome: "Final") {
             XCTAssertTrue(self.element(app, "home-tool-row-Page").label.contains("Bytes 0"))
             XCTAssertTrue(self.allText(self.element(app, "home-tool-text-report")).contains("PR #773"))
         }
-        toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Running") {
+        toolSheet(app, "task-status", chip: "Manage task, Completed", index: 2, outcome: "Running") {
             XCTAssertTrue(self.element(app, "home-tool-row-Check-in").label.contains("Gateway journey passed"))
             XCTAssertTrue(self.element(app, "home-tool-row-Tokens").label.contains("in"))
             XCTAssertTrue(self.element(app, "home-tool-row-Subagents").label.contains("3 started"))

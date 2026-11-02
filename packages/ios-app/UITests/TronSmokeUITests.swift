@@ -391,7 +391,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Canonical original, not the memory projection"].exists)
         keepScreenshot(named: "home-exact-evidence")
-        app.buttons["home-sheet-done-evidence"].tap()
+        // Evidence is a TronDocumentSheet (c87dd50bc): its Done is the sheet's own toolbar Done.
+        let evidenceDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
+        XCTAssertNotNil(evidenceDone, app.debugDescription)
+        evidenceDone?.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForNonExistence(timeout: 5), "Done closes the evidence sheet")
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5))
         app.buttons["home-sheet-done-memory-item"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
@@ -873,7 +877,8 @@ final class TronSmokeUITests: XCTestCase {
             for x in 0..<crop.width {
                 let offset = (y * crop.width + x) * 4
                 let r = Int(bytes[offset]), g = Int(bytes[offset + 1]), b = Int(bytes[offset + 2])
-                if g > r + 100 && g > b + 15 {
+                // ThemeColor.emerald ink: light #065F46 (c87dd50bc), dark #6EE7B7.
+                if g > r + 60 && g > b + 15 {
                     minX = min(minX, x); maxX = max(maxX, x)
                     minY = min(minY, y); maxY = max(maxY, y)
                 }
@@ -999,10 +1004,10 @@ final class TronSmokeUITests: XCTestCase {
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
                     expandSettingsSheet(app, title: "Manage Session")
+                    captureModels(app, scope: scope, appearance: appearance)
                     openChatSettings(app)
                     expandSettingsSheet(app, title: "Session Settings")
                     keepScreenshot(named: "1325-session-\(appearance)")
-                    captureModels(app, scope: scope, appearance: appearance)
                     captureSettingsTools(app, scope: scope, appearance: appearance)
                 } else if scope == "project" {
                     XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
@@ -1146,6 +1151,15 @@ final class TronSmokeUITests: XCTestCase {
             for _ in 0..<12 where !worker.isHittable { app.swipeDown() }
             XCTAssertTrue(worker.isHittable, app.debugDescription)
             XCTAssertFalse(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
+            keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
+            return
+        }
+        if scope == "session" {
+            // Session Settings has no Models subsheet (28f672dd5): the chat's model and
+            // Thinking rows are Manage Session's model card.
+            XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
+            XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
             keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
             return
         }
@@ -2317,13 +2331,11 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
             app.buttons["Release terminal settlement"].tap()
-            openChatSettings(app)
-            tapScrolling(app.buttons["settings-section-model-open"], in: app)
+            // Session Settings has no Models subsheet (28f672dd5): Thinking and its reset
+            // live on Manage Session's model card.
             let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
             reveal(reset, in: app)
             XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
-            closeTopSheet(app)
-            closeTopSheet(app)
             // At accessibility sizes a competing trailing control moves below its
             // labels, so titles and values wrap only at word boundaries (#868): the
             // usage card's Compact Now (#1655) and a row's plain value both stack.
@@ -2747,8 +2759,9 @@ final class TronSmokeUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launch()
         defer { app.terminate() }
-        // A one-line row subtitle at this size is the unit the intro is measured in.
-        let subtitle = app.staticTexts["Your own model definitions"]
+        // A one-line row subtitle at this size is the unit the intro is measured in
+        // (the custom-model row was retired by 8ef595612).
+        let subtitle = app.staticTexts["Agent alerts on this iPhone"]
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
         let line = subtitle.frame.height
         XCTAssertGreaterThan(line, 8)
