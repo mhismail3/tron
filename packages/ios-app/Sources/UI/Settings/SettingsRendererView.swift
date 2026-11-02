@@ -357,6 +357,9 @@ struct SettingsRendererView: View {
         // ancestor. Its covered presentation reads stop; the user's command must not.
         guard let writeLayer = writableLayer(for: setting),
               changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
+        // Picking the value this layer already holds is not a change; picking an
+        // inherited value still writes, because it pins an override at this layer.
+        if let value, setting.layer == writeLayer, setting.value == value { return }
         var object: [String: JSONValue] = [
             "key": .string(setting.key), "layer": .string(writeLayer), "op": .string(value == nil ? "unset" : "set"),
         ]
