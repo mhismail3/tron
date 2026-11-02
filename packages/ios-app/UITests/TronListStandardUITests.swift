@@ -330,8 +330,8 @@ final class TronListStandardUITests: XCTestCase {
         for _ in 0..<6 where !profile.isHittable { app.swipeUp() }
         profile.tap()
         expandSheet(app, title: "Profile")
-        assertSeparateSections(app, list: "home-profile-items", titles: ["Preferences", "Standing decisions"],
-                               row: "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
+        assertSeparateSections(app, list: "home-profile-items", titles: ["Communication", "Machines, devices & services"],
+                               row: "home-profile-item-6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c")
         app.terminate()
 
         app.launchArguments = ["-tron-session-configuration-fixture", "-manage-session-review", "-fixture-appearance", "light"]
