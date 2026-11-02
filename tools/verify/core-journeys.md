@@ -14,7 +14,7 @@ pixel oracle replacement to #2189. Update a row when its test or boundary change
 | **Native** | Process boundary driven by the production app UI (`HOSTED_TEST` build, `TronMobileUITests`) after real pairing. | Same as Process. |
 | **Lock socket** | `startLockGateway` (`packages/gateway/test-support/gateway-lock-harness.ts`): in-process `GatewayServer`, loopback `ws` client, real `RuntimeRegistry`/Pi SDK, temp disk. | Faux provider. Restart = dispose and start on the same root in the same Node process. |
 | **Registry** | Real `RuntimeRegistry`/owners and Pi SDK in the Vitest process; RPCs via `GatewayService.invoke`, no socket. | Faux provider; `f.restart()` recreates the registry in-process. |
-| **Child** | Registry plus the real managed `pi-subagents` install and real child Pi processes. | Faux parent provider, scripted local HTTP child model. |
+| **Child** | Registry plus the real managed `pi-subagents` install running child Pi sessions with their own canonical JSONL. A foreground run records the fixture's own pid (`packages/gateway/test-support/home-task-fixture.ts`), so it is not proof of a separate child process; async/detached runners are separate processes the fixture awaits. | Faux parent provider, scripted local HTTP child model. |
 
 No row is live-provider, physical-device or durable Keychain proof. `RealGatewayPiBoundaryTests`
 uses in-memory profile/token stores (`packages/ios-app/E2ETests/RealGatewayPiBoundaryTests.swift`).
@@ -45,7 +45,7 @@ All rows below were executed on `7964f6dd9` (clean worktree). Raw logs, xcresult
 
 | Test | Boundary | Input → behavioral assertion | Failure / recovery | Run |
 |---|---|---|---|---|
-| `packages/gateway/src/kernel/delegation/delegation.lock.integration.test.ts` › gateway/delegation kernel locks › subagent: a foreground subagent runs a real child… | Child | "delegate the lock task" → non-error subagent result containing child answer; parent idle, no active child; 2 parent requests; child JSONL has task | Success only | G2 pass |
+| `packages/gateway/src/kernel/delegation/delegation.lock.integration.test.ts` › gateway/delegation kernel locks › subagent: a foreground subagent runs a real child… | Child (foreground) | "delegate the lock task" → non-error subagent result containing child answer; parent idle, no active child; 2 parent requests; child JSONL has task | Success only | G2 pass |
 | `packages/gateway/src/modules/home/home-task-subagents-settlement.e2e.test.ts` (11 cases, e.g. "stops a running async run when the task is stopped, and no turn starts after settlement") | Child | Home task launches real runs → task settles only after runs join; counts | Stop, error, 24 h deadline, bounded stop join → `unknown` | G2 pass |
 | `…/home-task-subagents-controls.e2e.test.ts`, `…/home-task-subagents-reports.e2e.test.ts` (26 cases) | Child | Waits/wakes, steer, supervisor reply, report refused while run live | Foreign-run control refused; restart finds live run → `detached-work-outlived-task` | G2 pass |
 | `packages/gateway/src/kernel/delegation/process-transcript-stop.integration.test.ts` › stops only the exact connection-owned child transcript… | Child | Stop targets exact child only | Other children untouched | G2 pass |
@@ -105,9 +105,9 @@ All rows below were executed on `7964f6dd9` (clean worktree). Raw logs, xcresult
 
 ## Oracle audit
 
-`compareWithGolden` (`packages/gateway/test-support/scenario-lock.ts`) runs a lock's
-behavioral `validate` only when the whole trace equals its golden, so these goldens gate
-the assertions above:
+On its normal (non-update, golden-present) path, `compareWithGolden`
+(`packages/gateway/test-support/scenario-lock.ts`) runs a lock's behavioral `validate`
+only when the whole trace equals its golden, so these goldens gate the assertions above:
 
 | Journey | Golden (under `packages/gateway/src/`) | Whole-prompt / schema content | Owner |
 |---|---|---|---|
