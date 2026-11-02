@@ -40,6 +40,7 @@ export class RunInvocations {
         });
       } finally {
         work.settle();
+        this.operations.releaseSettleWaiters();
         if (receipt.lifecycle !== "interrupted") this.operations.noteHomeIdle();
       }
     }

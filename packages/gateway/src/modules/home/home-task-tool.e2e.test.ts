@@ -173,23 +173,26 @@ describe("Home's task tool on the wire (#961)", () => {
       () => fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: "race-worker" })], { stopReason: "toolUse" }),
       context => { results.push(context.messages.at(-1)); return fauxAssistantMessage("Control handled"); },
     ]);
-    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "race-worker", intent: "Finite work", target: f.cwd });
     try {
-      await promptHomeControl(home, "Inspect race-worker", async () => {
-        finishWorker.open();
-        await run.completion;
-        await waitFor(() => wakeStarted, "real task-result wake owns Home");
-      });
-    } finally { finishWorker.open(); finishWake.open(); }
-    try {
-      await waitFor(() => results.length === 1 && settleHeld > 0, "control answered and the wake settlement started");
-      // Idle is the public completion point: it must not precede the wake's
-      // durable acknowledgement, which is still held here.
-      const idleEarly = await waitFor(() => !home.isBusy || undefined, "home idle", { boundMs: 1500 }).then(() => true, () => false);
-      expect(idleEarly).toBe(false);
+      const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "race-worker", intent: "Finite work", target: f.cwd });
+      try {
+        await promptHomeControl(home, "Inspect race-worker", async () => {
+          finishWorker.open();
+          await run.completion;
+          await waitFor(() => wakeStarted, "real task-result wake owns Home");
+        });
+      } finally { finishWorker.open(); finishWake.open(); }
+      try {
+        await waitFor(() => results.length === 1 && settleHeld > 0, "control answered and the wake settlement started");
+        // Idle is the public completion point: it must not precede the wake's
+        // durable acknowledgement, which is still held here. The bound is the window in
+        // which no idle may occur; the old order went idle within milliseconds.
+        const idleEarly = await waitFor(() => !home.isBusy || undefined, "home idle", { boundMs: 1500 }).then(() => true, () => false);
+        expect(idleEarly).toBe(false);
+      } finally { holdSettle.open(); }
+      await waitFor(() => !home.isBusy, "home idle after settlement");
+      expect((await homeOwnerOf(f.registry).taskResult("race-worker")).wake?.state).toBe("acknowledged");
     } finally { holdSettle.open(); vi.restoreAllMocks(); }
-    await waitFor(() => !home.isBusy, "home idle after settlement");
-    expect((await homeOwnerOf(f.registry).taskResult("race-worker")).wake?.state).toBe("acknowledged");
   });
   it("lists, steers, stops a worker stuck in a long command, resumes it in place and steers it again with minimal calls", async () => {
     const wire = await homeEndpoint();
