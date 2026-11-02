@@ -197,11 +197,15 @@ struct ProjectLifecycleView: View {
         }
     }
 
-    /// The maintainer's tap on the exact card. Its accepted command stays with the
-    /// receipt executor; an uncertain outcome is shown, never retried here.
+    /// The maintainer's tap on the exact card. Like every shared review, Approve
+    /// retires the sheet and answers once: while the card covers this page its
+    /// presentation publication is closed, so retirement cannot wait for the
+    /// outcome. The accepted command stays with the receipt executor; an
+    /// uncertain outcome is shown, never retried here.
     private func confirm(_ reviewed: ProjectLifecycleReview) {
         guard !submitting, reviewing?.id == reviewed.id, activity.allowsDataPublication else { return }
         submitting = true
+        reviewing = nil
         let identity = model.knowledgeDestinationIdentity
         func admitsPresentation() -> Bool {
             identity == model.knowledgeDestinationIdentity && PresentationPublicationPolicy.allows(
@@ -211,11 +215,8 @@ struct ProjectLifecycleView: View {
             defer { submitting = false }
             do {
                 try await model.settingsTrust.confirmProject(reviewed)
-                guard admitsPresentation() else { return }
-                reviewing = nil
             } catch {
                 guard admitsPresentation() else { return }
-                reviewing = nil
                 self.error = error.localizedDescription
             }
         }
