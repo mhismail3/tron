@@ -415,11 +415,11 @@ export class ManagedSubagents {
   private transformCache: Promise<void> | undefined;
 
   /** The closure's declared jiti with exact host peer aliases and a private,
-   * per-build transform cache beside the verified root. No user package tree,
+   * per-build transform cache outside the verified installs. No user package tree,
    * copied SDK or shared temporary directory participates in factory execution. */
   private jitiOptions(): { jitiUrl: string; jiti: JitiOptions } {
     const require = createRequire(join(this.root, "package.json"));
-    const fsCache = join(dirname(this.root), `${basename(this.root)}.transform-cache`);
+    const fsCache = join(dirname(dirname(this.root)), "pi-subagents-transform-cache", basename(this.root));
     privateDirectory(fsCache);
     return { jitiUrl: pathToFileURL(require.resolve("jiti")).href, jiti: { moduleCache: false, alias: piExtensionAliases(), fsCache } };
   }

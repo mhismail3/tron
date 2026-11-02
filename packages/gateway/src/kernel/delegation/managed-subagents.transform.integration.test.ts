@@ -50,8 +50,8 @@ it("starts managed-subagent sessions from a fresh build without transforming Typ
       expect(resources.tools.find(tool => tool.name === "subagent"), "the managed factory ran").toMatchObject({ source: MANAGED_SUBAGENTS_SOURCE });
       expect(closureRequire.cache[transform], "no Babel transform loaded on the Gateway thread").toBeUndefined();
     }
-    // The build's transforms persist privately beside its verified root.
-    const cache = await stat(join(dirname(managedSubagents.root), `${managedSubagents.root.split("/").at(-1)}.transform-cache`));
+    // The build's transforms persist privately outside the verified installs.
+    const cache = await stat(join(tronHome, "internal", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!));
     expect(cache.isDirectory() && (cache.mode & 0o777)).toBe(0o700);
   } finally {
     clearInterval(sampler);

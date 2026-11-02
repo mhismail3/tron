@@ -93,7 +93,7 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   `pi-coding-agent`, confines `pi.extensions|skills|prompts` to the verified root, and gives the
   extension a build-bound `tron:pi-subagents@…#…` owner, the only one allowed to register
   `subagent`. Its factory and discovery loads use the closure's jiti with a private
-  `<version>.transform-cache` beside the root. The first load of a process waits (asynchronously)
+  `<gateway-home>/internal/pi-subagents-transform-cache/<version>`. The first load of a process waits (asynchronously)
   for a worker to transform the whole build into that cache, so the Gateway thread never runs
   Babel; each factory load still evaluates a fresh module graph per session.
 - **User declarations** of `npm:pi-subagents` are ignored (filtered by
