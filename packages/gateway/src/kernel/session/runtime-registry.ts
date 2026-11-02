@@ -613,7 +613,9 @@ export class RuntimeRegistry implements SessionOperations {
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private readonly artifactDiscovery: ExtensionArtifactDiscovery;
-  private artifactDiscoveryInFlight = false;
+  /** The admitted discovery pass, joined by disposal before the discovery
+   * owner closes its root watchers. */
+  private artifactDiscoveryInFlight: Promise<void> | undefined;
   private slotAdmissionsInFlight = 0;
   private administrativeDrainStarted = false;
   private readonly workRegistry: GatewayWorkRegistry;
@@ -3860,16 +3862,19 @@ export class RuntimeRegistry implements SessionOperations {
   /** One bounded Gateway owner discovers shared extension artifacts. Exact
    * live bindings are refreshed first; ambient enumeration and routed reads
    * share one hard work budget and cannot starve a known drain owner. */
-  private async discoverExtensionArtifacts(): Promise<void> {
-    if (this.artifactDiscoveryInFlight || this.shutdownState !== "active") return;
-    this.artifactDiscoveryInFlight = true;
-    let truncated: ExtensionArtifactDiscoveryCounts | undefined;
-    try {
-      truncated = await this.artifactDiscovery.runPass();
-    } finally {
-      this.artifactDiscoveryInFlight = false;
-    }
-    this.artifactDiscovery.recordPassOutcome(truncated);
+  private discoverExtensionArtifacts(): Promise<void> {
+    if (this.artifactDiscoveryInFlight || this.shutdownState !== "active") return Promise.resolve();
+    const pass = (async () => {
+      let truncated: ExtensionArtifactDiscoveryCounts | undefined;
+      try {
+        truncated = await this.artifactDiscovery.runPass();
+      } finally {
+        this.artifactDiscoveryInFlight = undefined;
+      }
+      this.artifactDiscovery.recordPassOutcome(truncated);
+    })();
+    this.artifactDiscoveryInFlight = pass;
+    return pass;
   }
 
   private async evictIdle(forCapacity = false, requestedSessionID?: string): Promise<void> {
@@ -4344,6 +4349,11 @@ export class RuntimeRegistry implements SessionOperations {
     }
     const entries = await this.mutex.run(() => [...this.slots.entries()]);
     const results = await Promise.allSettled(entries.map(([, slot]) => slot.shutdown()));
+    // Admission closed with the timer, so at most the pass already in flight
+    // remains: it is joined after the slots it offers to have retired (their
+    // fence makes its offers transient), and only then are its watchers closed.
+    await Promise.allSettled([this.artifactDiscoveryInFlight]);
+    this.artifactDiscovery.close();
     const failures: unknown[] = [];
     for (let index = 0; index < entries.length; index += 1) {
       const [id, slot] = entries[index]!;
