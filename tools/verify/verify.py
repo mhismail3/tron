@@ -40,8 +40,9 @@ IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test"
 NOT_DRIVEN = ("ios-lanes", "mac", "relay")
 # Test methods per iOS runner process. Each process keeps the runner's focused
 # deadline, so a selected class larger than one deadline runs as several processes, not one longer one.
-# Six journeys take about 400 s at the observed ~66 s each: a third of the 1200 s deadline.
-IOS_SHARD_TESTS = 6
+# Six HomeSheets methods overran the 1200 s deadline on a quiet host: journeys there take ~150-290 s
+# and the tool-detail journey 250-450 s. Three methods fit two such journeys plus ~35 s of launch.
+IOS_SHARD_TESTS = 3
 
 
 class VerifyError(Exception):
