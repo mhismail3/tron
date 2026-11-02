@@ -31,6 +31,24 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+/** Blocks this thread like a long synchronous transform, without spinning a core. */
+function stallEventLoop(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+describe("Git inspection deadlines", () => {
+  it("resolves a Project root whose Git finished while the event loop was stalled past the deadline", async () => {
+    const root = await repository();
+    const canonical = await realpath(root);
+    // The child is spawned synchronously and exits while this thread is blocked
+    // longer than the 5 s inspection window; its exit is already queued when
+    // the loop resumes, alongside the due deadline timer.
+    const resolved = projectRoot(root);
+    stallEventLoop(6_000);
+    await expect(resolved).resolves.toBe(canonical);
+  }, 30_000);
+});
+
 describe("WorkspaceInspectionService", () => {
   it("derives repository identity and status from the selected workspace, not inherited Git selectors", async () => {
     const root = await repository();

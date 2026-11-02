@@ -1,8 +1,8 @@
 import type { RunOperations } from "./run-operations.js";
-import { performance } from "node:perf_hooks";
 import { asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../../errors.js";
 import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
+import { StallTolerantDeadline } from "../../util/stall-tolerant-deadline.js";
 
 /** Default bound on one durable ownership write's transient-failure retries.
  * Long enough to ride out a brief disk/permission outage, short enough that a
@@ -84,13 +84,14 @@ export class RunPersistence {
     if (existing) return existing.waiter;
     this.assertOwnershipPersistence();
     const owner = { blocked: false, admittedAt: new Date().toISOString(), waiter: undefined as unknown as Promise<void> };
-    const deadline = performance.now() + DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS;
-    let timer: NodeJS.Timeout | undefined;
+    // The write runs on the fs threadpool. A deadline that a stalled loop reaches
+    // first would fence a runtime whose write had already completed.
+    let deadline!: StallTolerantDeadline;
     const expired = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
+      deadline = new StallTolerantDeadline(DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS, () => {
         owner.blocked = true;
         reject(uncertainOutcome("Canonical ownership persistence exceeded its wait deadline; the exact write remains unresolved"));
-      }, DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS);
+      });
     });
     const completion = (async () => {
       let attempt = 0;
@@ -99,14 +100,14 @@ export class RunPersistence {
           await operation();
           return;
         } catch (error) {
-          if (owner.blocked || performance.now() >= deadline
+          if (owner.blocked || deadline.expired
             || error instanceof RunMarkerCompletionConflictError
             || error instanceof CanonicalCustomEntryConflictError
             || this.operations.dependencies.modules.policy("appendGuard")?.(this.operations.canonicalAppendContext).isPreAppendRefusal(error)
             || isUncertainOutcome(error)) throw error;
           attempt += 1;
           if (attempt === 1) this.diagnostic("canonical-ownership-persistence-retrying");
-          await new Promise<void>(resolve => setTimeout(resolve, Math.min(1_000, 25 * attempt, Math.max(0, deadline - performance.now()))));
+          await new Promise<void>(resolve => setTimeout(resolve, Math.min(1_000, 25 * attempt)));
           if (owner.blocked) throw uncertainOutcome("Canonical ownership persistence remains unresolved");
         }
       }
@@ -128,7 +129,7 @@ export class RunPersistence {
       this.block();
       this.diagnostic("canonical-ownership-persistence-blocked");
       throw asUncertainOutcome(error, "Canonical ownership persistence could not be proven");
-    }).finally(() => { if (timer) clearTimeout(timer); });
+    }).finally(() => deadline.cancel());
     this.durableWrites.set(key, owner);
     // Promise.race observes late completion/rejection without releasing the
     // blocked owner or appending a second record. A supported SDK recovery
@@ -143,26 +144,23 @@ export class RunPersistence {
   async waitForReceiptWrites(): Promise<void> {
     // Every write bounds its own retry, so an exhausted wait means a backstop
     // promise that cannot settle or a continuous stream of new writes. Race each
-    // join against the remaining grace instead of awaiting without a clock, then
-    // report a bounded blocker and leave the outstanding writes admitted so a
-    // later attempt can still settle them.
+    // join against one stall-tolerant grace instead of awaiting without a clock,
+    // then report a bounded blocker and leave the outstanding writes admitted so
+    // a later attempt can still settle them.
     this.assertOwnershipPersistence();
-    const deadline = performance.now() + DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS;
-    while (this.pendingReceiptWrites.size > 0) {
-      const remaining = deadline - performance.now();
-      if (remaining <= 0) break;
-      let timer: NodeJS.Timeout | undefined;
-      const expiry = new Promise<"expired">((resolve) => { timer = setTimeout(() => resolve("expired"), remaining); });
-      let settled: "joined" | "expired";
-      try {
-        settled = await Promise.race([
+    let expire!: () => void;
+    const expiry = new Promise<"expired">((resolve) => { expire = () => resolve("expired"); });
+    const deadline = new StallTolerantDeadline(DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS, expire);
+    try {
+      while (this.pendingReceiptWrites.size > 0 && !deadline.expired) {
+        const settled = await Promise.race([
           Promise.allSettled([...this.pendingReceiptWrites]).then(() => "joined" as const),
           expiry,
         ]);
-      } finally {
-        if (timer) clearTimeout(timer);
+        if (settled === "expired") break;
       }
-      if (settled === "expired") break;
+    } finally {
+      deadline.cancel();
     }
     this.assertOwnershipPersistence();
     if (this.pendingReceiptWrites.size > 0) {
