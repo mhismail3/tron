@@ -180,6 +180,10 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
         let history = app.buttons["Session History"]
+        // Hittability is undefined while the sheet presents (XCTest raises on an element
+        // without a frame); scroll only once the row is laid out.
+        let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in history.exists && !history.frame.isEmpty }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [laidOut], timeout: 10), .completed, app.debugDescription)
         for _ in 0..<12 where !history.isHittable { app.swipeUp() }
         history.tap()
         XCTAssertTrue(element(app, "history-row-h-6732").waitForExistence(timeout: 10), app.debugDescription)
@@ -301,7 +305,10 @@ final class TronListStandardUITests: XCTestCase {
         ring.tap()
         let chapters = element(app, "home-manage-chapters")
         XCTAssertTrue(chapters.waitForExistence(timeout: 10), app.debugDescription)
-        for _ in 0..<6 where !chapters.isHittable { app.swipeUp() }
+        // XCTest calls a row hittable when a sliver shows at the medium sheet's bottom
+        // edge, where a tap lands on the sheet edge; bring the whole row into view.
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<6 where !(chapters.isHittable && chapters.frame.maxY <= window.maxY - 40) { app.swipeUp() }
         chapters.tap()
         let chapter = app.buttons["home-chapter-1"]
         XCTAssertTrue(chapter.waitForExistence(timeout: 10), app.debugDescription)
@@ -414,7 +421,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Manage Home")
         for (row, title, placeholder, viewport, caption, done) in [
-            ("home-manage-profile", "Profile", "Nothing learned yet", "home-profile-viewport", "Learned from", "home-sheet-done-profile"),
+            ("home-manage-profile", "Profile", "Nothing learned yet", "home-profile-viewport", "About you, organized by area", "home-sheet-done-profile"),
             ("home-manage-memory-browser", "Memory", "No memory yet", "home-memory-viewport", "Newest first", "home-sheet-done-memory"),
             ("home-manage-tasks", "Tasks", "No tasks", "home-tasks-viewport", "Newest first", "home-sheet-done-tasks"),
         ] {
