@@ -176,6 +176,11 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         var environment = nativeEnvironment
         environment.scenePhase = nativeScenePhase
         environment.tronPresentationDependencyRead = nativeDependencyRead
+        // A presented sheet is its own interaction context. A disabled presenter
+        // cannot present; its disabled state must not reach the sheet, and a
+        // native sheet kept the disabled state its source mounted with even after
+        // the presenter was enabled again (#2207).
+        environment.isEnabled = true
         // Install the native node while idle: the first request must change
         // an existing sheet binding, not insert an already-presenting graph
         // into a surface whose own presentation may still be settling.
@@ -316,6 +321,11 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         var environment = nativeEnvironment
         environment.scenePhase = nativeScenePhase
         environment.tronPresentationDependencyRead = nativeDependencyRead
+        // A presented sheet is its own interaction context. A disabled presenter
+        // cannot present; its disabled state must not reach the sheet, and a
+        // native sheet kept the disabled state its source mounted with even after
+        // the presenter was enabled again (#2207).
+        environment.isEnabled = true
         // Keep the native item node installed before its first request too.
         let source = NativeSheetSource(
             owner: nativeHost,
