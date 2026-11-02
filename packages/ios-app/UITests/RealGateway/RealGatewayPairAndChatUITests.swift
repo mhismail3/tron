@@ -601,7 +601,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let original = app.buttons[originalRowID]
         XCTAssertTrue(waitForHittable(original, timeout: 60), app.debugDescription)
         original.tap()
-        let ask = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask User, Completed")).firstMatch
+        // The transcript chip uses the canonical friendly tool identity (ToolDetailPresentation).
+        let ask = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask user, Completed")).firstMatch
         XCTAssertTrue(waitForHittable(ask, timeout: 60), app.debugDescription)
         ask.tap()
         XCTAssertTrue(app.staticTexts["Review answers"].waitForExistence(timeout: 15),
