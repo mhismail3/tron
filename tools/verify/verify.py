@@ -174,6 +174,8 @@ def ios_test_methods(owner: str) -> list[str]:
                 scope = declared.group(1) if declared else None
             elif scope == name and (match := method.match(line)):
                 found += [] if match.group(1) in found else [match.group(1)]
+            elif scope == name and shaped.search(line) and not hidden.search(line):
+                unplaced = True  # a test spelled in a way the reader does not select
             elif scope is None and shaped.search(line) and not hidden.search(line):
                 unplaced = True
     return [] if unplaced else [f"{owner}/{test}" for test in found]

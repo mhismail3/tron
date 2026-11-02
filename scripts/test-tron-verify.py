@@ -878,16 +878,18 @@ class IosLaneTests(VerifyCase):
 
         # A busy runner after the first shard defers that shard and the rest: never a pass.
         r.env.pop("FIXTURE_IOS_FAIL"); r.env.pop("FIXTURE_IOS_FAIL_IN")
+        (r.path / f"{ios}/TronMacTerminalUITests.swift").unlink()  # its harness lane would make the run incomplete
+        r.commit("no harnessed journey")
         r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=f"{owner}/{ordered[6]}")
         deferred = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         steps = {step["name"]: step["status"] for step in r.report()["steps"]}
         self.assertEqual([steps[f"tests: ios {index}/3"] for index in (1, 2, 3)], ["ok", "deferred", "deferred"], deferred.stdout)
-        self.assertNotEqual(r.report()["verdict"], "passed", deferred.stdout)  # incomplete here: the harnessed journey is not run
+        self.assertEqual(r.report()["verdict"], "deferred", deferred.stdout)
         r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN")
 
         # A shard whose runner passes fewer tests than it names fails: a selector matched nothing.
         r.env.update(FIXTURE_IOS_PASSED="5")
-        short = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
+        short = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(short.returncode, 1, short.stdout)
         self.assertIn("tests: ios 1/3 passed 5 of its 6 named test(s)", short.stdout)
         r.env.pop("FIXTURE_IOS_PASSED")
@@ -898,8 +900,15 @@ class IosLaneTests(VerifyCase):
         r.commit("an unreadable extension")
         planned = r.verify("--module", "ios-app/ui-tests", "--plan")
         plan = json.loads(planned.stdout[planned.stdout.index("{"):])
-        self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios") and step != "tests: ios-lanes"], ["tests: ios"])
+        self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios")], ["tests: ios"])
         self.assertIn(f"--only-testing {owner} ", " ".join(next(c["command"] for c in plan["commands"] if c["name"] == "tests: ios")) + " ")
+        # So does a test in the class itself spelled in a way the reader does not select.
+        r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
+                + "\n".join(f"    func {name}() {{}}" for name in methods[5:]) + "\n    nonisolated func testSpelledDifferently() {}\n}\n")
+        r.commit("a differently spelled test")
+        planned = r.verify("--module", "ios-app/ui-tests", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios")], ["tests: ios"])
 
 
 # The Gateway runner `mutate` drives, faked at `scripts/tron-node`: a flipped comparison
