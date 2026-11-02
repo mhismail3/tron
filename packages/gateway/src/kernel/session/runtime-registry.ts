@@ -470,8 +470,7 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot>, Owne
   create(cwd: string, profile?: string, taskWorker?: HomeTaskReportOwner): Promise<RuntimeSlot>;
   readonly delegation: DelegationOperations<RuntimeSlot>;
   readonly administrativeWorkRegistry: GatewayWorkRegistry;
-  readTaskEvidence(sessionId: string): Promise<FileEntry[]>;
-  readAppendStableTaskEvidence(sessionId: string): Promise<FileEntry[]>;
+  readTaskEvidence(sessionId: string, options?: { appendStable?: boolean }): Promise<FileEntry[]>;
   readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence>;
   readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]>;
   recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void;
@@ -4069,19 +4068,13 @@ export class RuntimeRegistry implements SessionOperations {
   /** Shared live/cold task evidence boundary: never constructs executable
    * resources or repairs the canonical file. Sync and identity checks precede
    * immutable terminal/outbox publication and operation acknowledgement. */
-  async readTaskEvidence(sessionId: string): Promise<FileEntry[]> {
-    const entries = await this.canonicalSessionEvidenceCut(sessionId);
-    if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
-    return entries;
-  }
-
-  /** The same evidence cut, except that a later append to the session does not
-   * refuse it: the result is the exact prefix that existed when the read began. A
+  /** The exact evidence cut by default. `appendStable` accepts a later append to
+   * the session and returns the exact prefix that existed when the read began. A
    * worker session keeps receiving entries after its operation settles (late
-   * provider notices, a resumed successor), so this proves what a settled operation
-   * or an existing report reference recorded. It never proves an entry absent. */
-  async readAppendStableTaskEvidence(sessionId: string): Promise<FileEntry[]> {
-    const entries = await this.canonicalSessionEvidenceCut(sessionId, true);
+   * provider notices, a resumed successor), so that cut proves what a settled
+   * operation or an existing report reference recorded. It never proves an entry absent. */
+  async readTaskEvidence(sessionId: string, options: { appendStable?: boolean } = {}): Promise<FileEntry[]> {
+    const entries = await this.canonicalSessionEvidenceCut(sessionId, options.appendStable === true);
     if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
     return entries;
   }
