@@ -391,7 +391,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Canonical original, not the memory projection"].exists)
         keepScreenshot(named: "home-exact-evidence")
-        app.buttons["home-sheet-done-evidence"].tap()
+        // Evidence is a TronDocumentSheet: its Done is the sheet's own toolbar Done.
+        let evidenceDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
+        XCTAssertNotNil(evidenceDone, app.debugDescription)
+        evidenceDone?.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForNonExistence(timeout: 5), "Done closes the evidence sheet")
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5))
         app.buttons["home-sheet-done-memory-item"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
@@ -873,7 +877,8 @@ final class TronSmokeUITests: XCTestCase {
             for x in 0..<crop.width {
                 let offset = (y * crop.width + x) * 4
                 let r = Int(bytes[offset]), g = Int(bytes[offset + 1]), b = Int(bytes[offset + 2])
-                if g > r + 100 && g > b + 15 {
+                // ThemeColor.emerald ink: light #065F46, dark #6EE7B7.
+                if g > r + 60 && g > b + 15 {
                     minX = min(minX, x); maxX = max(maxX, x)
                     minY = min(minY, y); maxY = max(maxY, y)
                 }
@@ -999,10 +1004,10 @@ final class TronSmokeUITests: XCTestCase {
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
                     expandSettingsSheet(app, title: "Manage Session")
+                    captureModels(app, scope: scope, appearance: appearance)
                     openChatSettings(app)
                     expandSettingsSheet(app, title: "Session Settings")
                     keepScreenshot(named: "1325-session-\(appearance)")
-                    captureModels(app, scope: scope, appearance: appearance)
                     captureSettingsTools(app, scope: scope, appearance: appearance)
                 } else if scope == "project" {
                     XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
@@ -1146,6 +1151,15 @@ final class TronSmokeUITests: XCTestCase {
             for _ in 0..<12 where !worker.isHittable { app.swipeDown() }
             XCTAssertTrue(worker.isHittable, app.debugDescription)
             XCTAssertFalse(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].exists)
+            keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
+            return
+        }
+        if scope == "session" {
+            // Session Settings has no Models subsheet: the chat's model and
+            // Thinking rows are Manage Session's model card.
+            XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
+            XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
             keepScreenshot(named: "1325-\(scope)-\(appearance)-canonical-models")
             return
         }
@@ -2054,7 +2068,7 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     /// A running chat's Manage Session stays locked while the Gateway rebaselines
-    /// it: the lock and the disabled Thinking control never blink.
+    /// it: the lock never blinks, and Effort stays enabled for inspection.
     @MainActor
     func testRunningConfigurationLockHoldsAcrossRebaselines() {
         continueAfterFailure = false
@@ -2064,14 +2078,19 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Manage running session"].waitForExistence(timeout: 5))
         app.buttons["Manage running session"].tap()
-        let thinking = app.buttons["thinking-level-control"]
-        let lock = app.buttons["Why configuration is unavailable"]
+        // Effort stays enabled and inspectable while the session is locked; the lock
+        // reason is the model switch's accessibility value.
+        let thinking = app.buttons["Effort"]
+        let lock = app.buttons["manage-model-switch"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
         var samples: [String] = []
         for _ in 0..<30 {
-            samples.append("\(lock.exists ? "L" : "-")\(thinking.exists ? (thinking.isEnabled ? "E" : "D") : "?")")
+            let locked = lock.exists && !((lock.value as? String) ?? "").isEmpty
+            samples.append("\(locked ? "L" : "-")\(thinking.exists ? (thinking.isEnabled ? "E" : "D") : "?")")
         }
-        XCTAssertEqual(Set(samples), ["LD"], "Lock/Thinking across rebaselines: \(samples.joined(separator: " "))")
+        XCTAssertEqual(Set(samples), ["LE"], "The lock must hold and Effort stay enabled across rebaselines: \(samples.joined(separator: " "))")
+        thinking.tap()
+        XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), "Effort opens its choices for inspection")
     }
 
     @MainActor
@@ -2186,7 +2205,7 @@ final class TronSmokeUITests: XCTestCase {
             }
             app.buttons["Done"].tap()
             XCTAssertTrue(app.staticTexts[order == "superseded" ? "Model requests: 1" : "Model requests: 2"].waitForExistence(timeout: 3))
-            XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
+            XCTAssertEqual(app.buttons["Effort"].value as? String, "Off")
             app.terminate()
         }
     }
@@ -2234,24 +2253,23 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
         app.buttons["Release terminal settlement"].tap()
-        let thinking = app.buttons["thinking-level-control"]
+        // Thinking is the shared renderer's Effort row and its choice sheet.
+        let thinking = app.buttons["Effort"]
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
-        let viewport = app.scrollViews.firstMatch.frame
         thinking.tap()
-        let slider = app.descendants(matching: .any)["thinking-level-slider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 3))
-        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        dismissConfigurationSlider(slider, in: app, viewport: viewport)
+        let high = app.buttons["settings-option-High"]
+        XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
+        high.tap()
         wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         XCTAssertTrue(thinking.value as? String == "Off")
         thinking.tap()
-        XCTAssertTrue(slider.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
+        XCTAssertTrue(high.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
         keepScreenshot(named: "superseded-thinking-receipt-ready")
-        app.buttons["Done"].tap()
-        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "Done first closes the owning slider, not Manage Session")
+        app.navigationBars.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(high.waitForNonExistence(timeout: 5), "Done first closes the owning choice sheet, not Manage Session")
         XCTAssertTrue(thinking.exists)
     }
 
@@ -2264,34 +2282,28 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
-        let thinking = app.buttons["thinking-level-control"]
+        // Effort stays enabled and inspectable while configuration settles; the lock
+        // explains why.
+        let thinking = app.buttons["Effort"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5))
-        XCTAssertFalse(thinking.isEnabled, "Foreground Stop alone must not make settling configuration editable")
+        XCTAssertTrue(thinking.isEnabled, "Effort stays inspectable while configuration settles")
+        // The settling reason is the blocked model picker's lock explanation.
+        app.buttons["Switch Model"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let explanation = app.buttons["Why configuration is unavailable"]
-        XCTAssertTrue(explanation.exists)
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5), app.debugDescription)
         explanation.tap()
         XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
         keepScreenshot(named: "post-stop-configuration-settling")
-        app.buttons["Done"].tap()
+        closeTopSheet(app)
+        closeTopSheet(app)
+        let switchModel = app.buttons["manage-model-switch"]
+        XCTAssertEqual(switchModel.value as? String, "Finishing the session. Configuration will be available shortly.")
         app.buttons["Release terminal settlement"].tap()
-        let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)
-        wait(for: [enabled], timeout: 5)
+        wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 5)
+        XCTAssertTrue(thinking.isEnabled)
         thinking.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["thinking-level-slider"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), app.debugDescription)
         keepScreenshot(named: "post-stop-configuration-ready")
-    }
-
-    @MainActor
-    private func dismissConfigurationSlider(_ slider: XCUIElement, in app: XCUIApplication, viewport: CGRect) {
-        // Save the actual sheet viewport before AX makes the popup modal. Its
-        // inner ScrollView is not the backdrop, and the window gutter can be
-        // outside a medium sheet. Neither tap may replace a real popup dismissal.
-        let window = app.windows.firstMatch
-        window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-            dx: viewport.minX + 4 - window.frame.minX,
-            dy: viewport.midY - window.frame.minY
-        )).tap()
-        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "The owning viewport must dismiss the floating editor")
     }
 
     /// The scope-owned Settings route from the real Manage Session surface.
@@ -2317,13 +2329,11 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
             app.buttons["Release terminal settlement"].tap()
-            openChatSettings(app)
-            tapScrolling(app.buttons["settings-section-model-open"], in: app)
+            // Session Settings has no Models subsheet: Thinking and its reset
+            // live on Manage Session's model card.
             let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
             reveal(reset, in: app)
             XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
-            closeTopSheet(app)
-            closeTopSheet(app)
             // At accessibility sizes a competing trailing control moves below its
             // labels, so titles and values wrap only at word boundaries (#868): the
             // usage card's Compact Now (#1655) and a row's plain value both stack.
@@ -2343,9 +2353,15 @@ final class TronSmokeUITests: XCTestCase {
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
             openChatSettings(app)
             tapScrolling(app.buttons["settings-section-context-open"], in: app)
-            let compaction = app.switches["Automatic compaction"]
-            reveal(compaction, in: app)
-            XCTAssertTrue(compaction.isHittable, "The canonical compaction policy must stay reachable at XXXL")
+            // Automatic compaction has no iPhone row; the Compaction sheet's own
+            // policy rows must still be reachable at XXXL.
+            let compaction = app.descendants(matching: .any)["settings-section-context-detail"]
+            XCTAssertTrue(compaction.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(app.switches["Automatic compaction"].exists, "The retired policy row stays retired")
+            let policy = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-context.'")).firstMatch
+            XCTAssertTrue(policy.waitForExistence(timeout: 5), app.debugDescription)
+            reveal(policy, in: app)
+            XCTAssertTrue(policy.isHittable, "The canonical compaction policy must stay reachable at XXXL")
             keepScreenshot(named: "1325-session-\(appearance)-xxxl-policy")
             app.terminate()
         }
@@ -2748,12 +2764,13 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         // A one-line row subtitle at this size is the unit the intro is measured in.
-        let subtitle = app.staticTexts["Your own model definitions"]
+        let subtitle = app.staticTexts["Provider accounts and sign-in"]
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
         let line = subtitle.frame.height
         XCTAssertGreaterThan(line, 8)
         tapScrolling(app.buttons["Changes"].firstMatch, in: app)
-        let intro = app.staticTexts["Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it."]
+        // The Changes intro copy is the audit-history caption.
+        let intro = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "One audit history · All scopes.")).firstMatch
         XCTAssertTrue(intro.waitForExistence(timeout: 5), app.debugDescription)
         // A medium-detent sheet is drawn slightly scaled; measure at large, settled.
         app.staticTexts["Changes"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))

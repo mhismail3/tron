@@ -1,6 +1,3 @@
-import { createRequire } from "node:module";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { type SettingsManager } from "../pi/coding-agent.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import type { ResourceDistribution } from "../../protocol/types.js";
@@ -127,21 +124,6 @@ export function availableSubagentRow(subagent: AvailableSubagent): AvailableSuba
   };
 }
 
-/** pi-subagents declares `jiti` but exposes no public discovery entry point, so
- * load its own `src/agents/agents.ts` through that declared dependency. The
- * imported module reads agent definitions and settings only; it spawns nothing. */
-async function loadPiSubagentsDiscovery(packageRoot: string): Promise<unknown> {
-  const require = createRequire(join(packageRoot, "package.json"));
-  const jitiEntry = require.resolve("jiti");
-  const loaded = await import(pathToFileURL(jitiEntry).href) as {
-    createJiti?: (base: string) => { import: (id: string) => Promise<unknown> };
-    default?: { createJiti?: (base: string) => { import: (id: string) => Promise<unknown> } };
-  };
-  const createJiti = loaded.createJiti ?? loaded.default?.createJiti;
-  if (typeof createJiti !== "function") throw new Error("jiti did not expose createJiti");
-  return createJiti(import.meta.url).import(join(packageRoot, "src", "agents", "agents.js"));
-}
-
 async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown> {
   const exports = discovery as {
     discoverAgentsAll?: (cwd: string) => unknown;
@@ -157,9 +139,10 @@ async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown>
  * diagnostic; it never rejects, so subagents cannot take down the response. */
 export async function loadSubagentCatalog(request: SubagentCatalogRequest): Promise<SubagentCatalog> {
   try {
-    const packageRoot = request.managedSubagents?.verify();
-    if (!packageRoot) return unavailable(`managed ${SUBAGENT_PACKAGE} is not installed`);
-    const discovery = await (request.loadDiscovery ?? loadPiSubagentsDiscovery)(packageRoot);
+    const managed = request.managedSubagents;
+    const packageRoot = managed?.verify();
+    if (!managed || !packageRoot) return unavailable(`managed ${SUBAGENT_PACKAGE} is not installed`);
+    const discovery = await (request.loadDiscovery ? request.loadDiscovery(packageRoot) : managed.loadDiscovery());
     const raw = await discoverAgents(discovery, request.cwd);
     const reports = raw !== null && typeof raw === "object" ? (raw as { agentDiagnostics?: unknown }).agentDiagnostics : undefined;
     const invalid = Array.isArray(reports) ? reports.filter((report): report is { error: string } =>

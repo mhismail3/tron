@@ -92,12 +92,17 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   (else `conflict`), sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to the payload's
   `pi-coding-agent`, confines `pi.extensions|skills|prompts` to the verified root, and gives the
   extension a build-bound `tron:pi-subagents@…#…` owner, the only one allowed to register
-  `subagent`.
+  `subagent`. Its factory and discovery loads use the closure's jiti with a private
+  `<gateway-home>/internal/pi-subagents-transform-cache/<version>`. The first load of a process waits (asynchronously)
+  for a worker to transform the whole build into that cache, so the Gateway thread never runs
+  Babel; if the worker cannot fill the cache the load is refused (`busy`, retryable) and the next
+  load prepares again. Each factory load still evaluates a fresh module graph per session.
 - **User declarations** of `npm:pi-subagents` are ignored (filtered by
   `managedProviderSettingsView`, which also refuses package writes; `extensionsOverride` is too
   late to exclude); `packages.list` shows a typed `conflict` (`managed-provider`), Settings says
   "Remove it with `pi remove npm:pi-subagents`"; one `pi-subagents.user-package-ignored` per load.
 - **Proof:** `managed-subagents.install.integration.test.ts`,
+  `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
   `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original
   JSONL prefixes unchanged; `TRON_SUBAGENTS_ROLLBACK_ROOT` keeps the home; join failures go to
