@@ -1277,6 +1277,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 assertToolbarTint(app, title: deviceName)
                 keepScreenshot(app, name: "963-device-detail")
                 dismissTopSheet(app)
+                // This Mac's page renders the served Mac Terminal section, including
+                // the private SSH service switch the Global surface check excludes.
+                let server = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND NOT label CONTAINS ' on '")).firstMatch
+                XCTAssertTrue(server.waitForExistence(timeout: 30), app.debugDescription)
+                server.tap()
+                let service = app.descendants(matching: .any)[settingRowToken("permissions.macTerminalServer")]
+                revealBelowNavigationBar(app, service)
+                XCTAssertTrue(service.waitForExistence(timeout: 30), "This Mac's page must show the SSH service row: \(app.debugDescription)")
+                XCTAssertTrue(service.staticTexts["Private Mac SSH service"].exists, app.debugDescription)
+                XCTAssertEqual(service.switches.firstMatch.value as? String, "0", "The fixture's private SSH service starts stopped")
+                keepScreenshot(app, name: "2208-mac-terminal-service-row")
+                dismissTopSheet(app)
             }
             keepScreenshot(app, name: "939-\(name)")
             dismissTopSheet(app)
@@ -1681,7 +1693,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Hand-built owners hold these keys on Settings; their own journeys prove the control.
         let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
             "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Install Package card (#1482)",
-            "permissions.macTerminalServer": "Mac Terminal and this Mac's Connections page (UI journey gap #2208)"] : [:]
+            "permissions.macTerminalServer": "this Mac's Connections page (testSettingsSourcesTextDoneAndRoutes)"] : [:]
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
