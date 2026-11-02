@@ -58,7 +58,19 @@ export class OwnedTurnOwner {
     bindingRetries: number;
   }>();
 
+  /** Ticket of the latest artifact read begun for, or invalidation of, each tool
+   * call. A watcher read that sees a later ticket discards its bytes. */
   readonly extensionActivityReadGenerations = new Map<string, number>();
+
+  /** Ticket of the latest read published per tool call. Watcher, discovery and
+   * drain reads run concurrently and finish in any order; none may replace a
+   * frame built from bytes read after its own. Bounded by the runtime map plus
+   * removed rows that an older in-flight read could still re-admit. */
+  readonly extensionActivityPublishedReads = new Map<string, number>();
+
+  private extensionArtifactReadTickets = 0;
+
+  private readonly extensionArtifactReadsInFlight = new Set<number>();
 
   readonly extensionArtifactMissingSince = new Map<string, number>();
 
@@ -455,11 +467,60 @@ export class OwnedTurnOwner {
   }
 
 
+  /** Starts one artifact read before its first await; the caller finishes it on
+   * every exit. The watcher lane passes its tool call so an older in-flight
+   * watcher read stands down; publication order across lanes is
+   * `extensionArtifactReadSuperseded`'s. */
+  beginExtensionArtifactRead(toolCallId?: string): number {
+    const ticket = ++this.extensionArtifactReadTickets;
+    if (toolCallId !== undefined) this.extensionActivityReadGenerations.set(toolCallId, ticket);
+    this.extensionArtifactReadsInFlight.add(ticket);
+    return ticket;
+  }
+
+
+  finishExtensionArtifactRead(ticket: number): void {
+    this.extensionArtifactReadsInFlight.delete(ticket);
+    this.pruneExtensionArtifactReadTickets();
+  }
+
+
+  /** True when a read begun after this one already published for the tool call.
+   * Callers check before claiming any effect and record in the same synchronous
+   * frame as their publication, so the published bytes only move forward. */
+  extensionArtifactReadSuperseded(toolCallId: string, ticket: number): boolean {
+    return (this.extensionActivityPublishedReads.get(toolCallId) ?? 0) > ticket;
+  }
+
+
+  recordPublishedExtensionArtifactRead(toolCallId: string, ticket: number): void {
+    this.extensionActivityPublishedReads.set(toolCallId, ticket);
+  }
+
+
+  /** Called after a row leaves the runtime map. A watcher read still in flight
+   * sees its generation missing and stands down. The published ticket outlives
+   * the row until every read begun before it has finished, because an older
+   * discovery read may still re-admit the row from canonical ownership. */
+  forgetExtensionArtifactReads(toolCallId: string): void {
+    this.extensionActivityReadGenerations.delete(toolCallId);
+    this.pruneExtensionArtifactReadTickets();
+  }
+
+
+  private pruneExtensionArtifactReadTickets(): void {
+    let oldestInFlight = Infinity;
+    for (const ticket of this.extensionArtifactReadsInFlight) oldestInFlight = Math.min(oldestInFlight, ticket);
+    for (const [toolCallId, published] of this.extensionActivityPublishedReads) {
+      if (published < oldestInFlight && !this.extensionActivities.has(toolCallId)) {
+        this.extensionActivityPublishedReads.delete(toolCallId);
+      }
+    }
+  }
+
+
   stopExtensionActivityWatcher(toolCallId: string): void {
-    this.extensionActivityReadGenerations.set(
-      toolCallId,
-      (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1
-    );
+    this.extensionActivityReadGenerations.set(toolCallId, ++this.extensionArtifactReadTickets);
     const tracked = this.extensionActivityWatchers.get(toolCallId);
     if (!tracked) return;
     if (tracked.timer) clearTimeout(tracked.timer);
@@ -699,6 +760,7 @@ export class OwnedTurnOwner {
     this.extensionActivities.clear();
     this.extensionActivitySequences.clear();
     this.extensionRunOwnership.clear();
+    this.pruneExtensionArtifactReadTickets();
   }
 
   /** Retire current watches and fence outstanding watched reads before physical SDK disposal. */

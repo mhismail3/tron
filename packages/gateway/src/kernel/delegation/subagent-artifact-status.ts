@@ -85,7 +85,8 @@ export function extensionArtifactReadFailureReason(error: unknown): ExtensionArt
 
 /** A producer replaces status.json by an atomic rename, so a read can open the
  * old inode and stat the new one. The discovery lane owns no watcher for that
- * directory, so it re-reads a bounded number of times before reporting the
+ * directory, and a workflow child's read has no retry of its own inside its root's
+ * frame, so both re-read a bounded number of times before reporting the
  * replacement; the producer's next replace is a whole status-update cadence
  * away, so an immediate retry lands in a settled window. */
 const EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES = 3;
@@ -162,7 +163,10 @@ export class SubagentArtifactStatus {
       // Even an absent directory must remain subscribed for its first status.
       directories.push(directory);
       unavailableChildren += 1;
-      const child = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
+      // A child read that loses the producer's atomic replace is a reader race, not
+      // an unavailable child. Both lanes retry it here, so no root frame drops the
+      // child's published model, counters or output for a rename it observed.
+      const child = await this.readExtensionStatusArtifactWithReplacementRetry(directory, false).catch(() => undefined);
       if (!child || child.runId !== edge.runId || child.parentWorkflowRunId !== status.runId
         || child.workflowKey !== edge.workflowKey || child.sessionOwnerId !== edge.sessionOwnerId || child.sessionId !== status.sessionId
         || child.mode !== "single" || !Array.isArray(child.steps) || child.steps.length !== 1) continue;
@@ -424,16 +428,18 @@ export class SubagentArtifactStatus {
   }
 
 
-  /** The discovery lane's read of one owned artifact. A racing replacement is
-   * retried here rather than warned (G-8a); the watcher lane keeps its own
-   * per-directory retry budget, and the 60 s per-(owner, reason) dedup in
-   * `warnExtensionArtifact` still collapses a genuine replacement. */
+  /** The discovery lane's read of one owned artifact, and every lane's read of a
+   * workflow child. A racing replacement is retried here rather than warned (G-8a);
+   * the watcher lane keeps its own per-directory retry budget for root reads, and
+   * the 60 s per-(owner, reason) dedup in `warnExtensionArtifact` still collapses
+   * a genuine replacement. */
   async readExtensionStatusArtifactWithReplacementRetry(
     asyncDir: string,
+    includeWorkflowChildren = true,
   ): Promise<Record<string, unknown> | undefined> {
-    let value = await this.readExtensionStatusArtifact(asyncDir);
+    let value = await this.readExtensionStatusArtifact(asyncDir, includeWorkflowChildren);
     for (let attempt = 0; value === undefined && attempt < EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES; attempt += 1) {
-      value = await this.readExtensionStatusArtifact(asyncDir);
+      value = await this.readExtensionStatusArtifact(asyncDir, includeWorkflowChildren);
     }
     return value;
   }

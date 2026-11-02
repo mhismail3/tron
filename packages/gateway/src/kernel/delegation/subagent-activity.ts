@@ -177,6 +177,7 @@ export function trimExtensionActivities(turns: OwnedTurnOwner): void {
     if (!oldest) break;
     turns.stopExtensionActivityWatcher(oldest);
     turns.extensionActivities.delete(oldest);
+    turns.forgetExtensionArtifactReads(oldest);
     turns.extensionArtifactMissingSince.delete(oldest);
     turns.operations.replaceProcessesForToolCall(oldest, []);
     for (const [runId, binding] of turns.extensionRunOwnership) {
@@ -511,6 +512,7 @@ export function onExtensionActivityExpiry(turns: OwnedTurnOwner, frame: Activity
     const key = activity.activityId ?? activity.id;
     if (!frame.expiredActivityIds.includes(key)) continue;
     turns.extensionActivities.delete(toolCallId);
+    turns.forgetExtensionArtifactReads(toolCallId);
     removed = true;
   }
   if (!removed) return;

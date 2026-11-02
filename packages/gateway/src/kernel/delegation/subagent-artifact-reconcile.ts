@@ -19,6 +19,20 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
   canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
 ): Promise<ExtensionArtifactDiscoveryOutcome> {
   if (turns.operations.disposed || turns.operations.shuttingDown) return "transient";
+  const ticket = turns.beginExtensionArtifactRead();
+  try {
+    return await refreshSubagentActivityFromArtifactRead(turns, asyncDir, ticket, canonicalFacts);
+  } finally {
+    turns.finishExtensionArtifactRead(ticket);
+  }
+}
+
+
+async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
+  asyncDir: string,
+  ticket: number,
+  canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
+): Promise<ExtensionArtifactDiscoveryOutcome> {
   let diagnosticOwner: string | undefined;
   let missingToolCallId: string | undefined;
   let claimedReceipt: { activityId: string; owner: ArtifactReceiptOwner } | undefined;
@@ -209,6 +223,8 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
     // the same Gateway terminal latch and sequence admission as live tool
     // events before replacing an existing row.
     if (admitExtensionRunActivity(previous, activity) === previous) return "rejected";
+    // A later-begun read already published newer bytes; these may not replace them.
+    if (turns.extensionArtifactReadSuperseded(toolCallId, ticket)) return "transient";
     const terminalReceiptOwner = activity.status === "running"
       ? undefined
       : turns.claimExtensionReceiptOwnership(activityKey);
@@ -232,6 +248,7 @@ export async function refreshSubagentActivityFromArtifact(turns: OwnedTurnOwner,
       if (diagnosticOwner) turns.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
       return "transient";
     }
+    turns.recordPublishedExtensionArtifactRead(toolCallId, ticket);
     if (existingEntry) turns.extensionActivities.delete(existingEntry[0]);
     const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
     if (syntheticToolCallId) turns.extensionActivities.delete(syntheticToolCallId);
@@ -267,8 +284,7 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
   const previous = turns.extensionActivities.get(toolCallId);
   const realAsyncDir = turns.canonicalExtensionArtifactDirectory(asyncDir);
   if (!previous || turns.operations.disposed || turns.operations.shuttingDown || !realAsyncDir) return;
-  const generation = (turns.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
-  turns.extensionActivityReadGenerations.set(toolCallId, generation);
+  const generation = turns.beginExtensionArtifactRead(toolCallId);
   let claimedReceiptOwner: ArtifactReceiptOwner | undefined;
   let claimedReceiptActivityId: string | undefined;
   try {
@@ -412,6 +428,7 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
     if (admitExtensionRunActivity(current, activity) === current) return;
     if (current.lifecycle?.sequence !== undefined && activity.lifecycle?.sequence !== undefined
       && activity.lifecycle.sequence <= current.lifecycle.sequence) return;
+    if (turns.extensionArtifactReadSuperseded(toolCallId, generation)) return;
     if (activity.status !== "running") {
       claimedReceiptOwner = turns.claimExtensionReceiptOwnership(activityKey);
       if (!claimedReceiptOwner) return;
@@ -427,6 +444,7 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
       ...(pausedProcessSettledAt ? { pausedProcessQuiescentAt: pausedProcessSettledAt } : {}),
       detachedChildKeys: detachedWorkflowChildKeys(raw),
     });
+    turns.recordPublishedExtensionArtifactRead(toolCallId, generation);
     turns.extensionActivities.delete(toolCallId);
     turns.extensionActivities.set(toolCallId, activity);
     upsertExtensionActivity(turns, activity);
@@ -456,6 +474,8 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
       extensionArtifactReadFailureReason(error),
       `${previous.runId ?? "run"}\0${toolCallId}`,
     );
+  } finally {
+    turns.finishExtensionArtifactRead(generation);
   }
 }
 
