@@ -716,7 +716,7 @@ case "$1" in
   run)
     dir="$(mktemp -d "$TMPDIR/ios-run.XXXXXX")"
     passed="${FIXTURE_IOS_PASSED:-1}"
-    if [[ -n "${FIXTURE_IOS_FAIL:-}" ]]; then
+    if [[ -n "${FIXTURE_IOS_FAIL:-}" && "$*" == *"${FIXTURE_IOS_FAIL_IN:-}"* ]]; then
       printf '{"passedTests":0,"failedTests":1,"testFailures":[{"testIdentifierString":"%s","failureText":"a11y differs"}]}' "$FIXTURE_IOS_FAIL" >"$dir/summary.json"
       echo "iOS test run failed with status 65: $dir" >&2; exit 65
     fi
@@ -841,6 +841,39 @@ class IosLaneTests(VerifyCase):
         self.assertIn("StrayUITests.swift declares or extends no XCTestCase class", refused.stderr)
         skipped = r.verify("--module", "ios-app/ui-tests", "--skip", "ios", "--plan")
         self.assertEqual(skipped.returncode, 0, skipped.stderr)
+
+    def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes(self) -> None:
+        """#2173: a selected class runs as method shards of at most IOS_SHARD_TESTS, each its own
+        runner process under the unchanged deadline, and a red shard does not stop the rest."""
+        r = self.repo
+        calls = self.ios_fixture()
+        ios = "packages/ios-app/UITests"
+        methods = [f"testCase{index}" for index in range(8)]
+        body = "\n".join(f"    @MainActor func {name}() {{}}" for name in methods[:5])
+        r.write(f"{ios}/FixtureJourneyUITests.swift", "final class FixtureJourneyUITests {\n"
+                + body + "\n    private func testHelper() {}\n    func testWithArgument(_ value: Int) {}\n}\n")
+        r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
+                + "\n".join(f"    func {name}() {{}}" for name in methods[5:]) + "\n}\nstruct Other {\n    func testNotAMethodOfTheClass() {}\n}\n")
+        r.commit("a large class")
+        owner = "TronMobileUITests/FixtureJourneyUITests"
+        planned = r.verify("--module", "ios-app/ui-tests", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios ")], ["tests: ios 1/3", "tests: ios 2/3", "tests: ios 3/3"])
+        calls.write_text("")
+        r.env.update(FIXTURE_IOS_FAIL=f"{owner}/testCase1()", FIXTURE_IOS_FAIL_IN=f"{owner}/testCase1 ")
+        result = r.verify("--module", "ios-app/ui-tests")
+        runs = [line for line in calls.read_text().splitlines() if line.startswith("run ")]
+        # Sources are read in path order, so the extension file's methods come first.
+        ordered = methods[5:] + methods[:5]
+        self.assertEqual(runs, [
+            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[:6]),
+            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[6:]),
+            "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"], result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("tests: ios 1/3 FAILED", result.stdout)
+        self.assertIn(f"failed: {owner}/testCase1(): a11y differs", result.stdout)
+        self.assertIn("tests: ios 2/3 OK", result.stdout)
+        self.assertIn("tests: ios 3/3 OK", result.stdout)
 
 
 # The Gateway runner `mutate` drives, faked at `scripts/tron-node`: a flipped comparison

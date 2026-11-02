@@ -165,7 +165,7 @@ Runners are the existing ones:
 | `gateway` / `gateway-nested` | Gateway vitest, main or `vitest.nested.config.ts` |
 | `node-gateway` / `node` | `node --test` |
 | `python` / `shell` | `python3` / `bash` per file |
-| `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>`: the UIValidation targets |
+| `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-lanes` / `mac` / `relay` | not driven by verify |
 
 When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
@@ -209,8 +209,10 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
 1. **`ios build`** reuses clean, current-commit stamped products/index; otherwise builds
    with `scripts/tron-ios-test build`. Subsequent runs reuse that build.
 2. **`layers ios`** reads that index. Stale/missing indexes fail; no symbol-scan fallback.
-3. **`tests: ios`** uses the same products, one `--only-testing Target/Class` per class
-   named or extended by the file. Harnessed journeys use their own lanes. A file naming
+3. **`tests: ios`** uses the same products. Each selected class (named or extended by the
+   file) runs as its `test` methods, at most six per runner process (`tests: ios 1/N`), so
+   every process keeps the runner's focused deadline; a class whose methods cannot be read
+   runs whole. Every shard runs before a failure is reported. Harnessed journeys use their own lanes. A file naming
    neither fails unless iOS is skipped. Counts/failures come from XCTest `summary.json`
    (`passedTests`); `--update-locks` passes `TEST_RUNNER_TRON_UPDATE_LOCKS`. Goldens are
    source: commit and rebuild before comparing.
