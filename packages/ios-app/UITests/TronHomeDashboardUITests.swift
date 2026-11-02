@@ -401,6 +401,44 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("14-provider-detail-monthly-exhausted")
     }
 
+    /// A provider without a 5h window whose second window repeats its weekly
+    /// cadence (Anthropic's per-model limit) shows one Weekly column, not two
+    /// identically labeled ones; the repeat stays in the detail sheet, and
+    /// OpenCode Go's three distinct cadences all remain on the card.
+    @MainActor
+    func testUsageCardShowsOneColumnPerCadence() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
+                               "-home-usage-long-name", "-home-usage-scoped-weekly", "-home-usage-opencode-go"]
+        app.launch(); defer { app.terminate() }
+
+        let card = element(app, "home-usage-card")
+        XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(waitFor(card, "label CONTAINS 'Opencode Go, 0% used (5h) · 72% used (Weekly) · 100% used (Monthly)'"), card.label)
+        XCTAssertTrue(card.label.contains("Anthropic (CortexKit), 48% used (Weekly); "), card.label)
+        XCTAssertFalse(card.label.contains("61% used"), "the repeated weekly cadence stays off the card: \(card.label)")
+        let probe = app.staticTexts["fixture.home-usage-layout"]
+        XCTAssertTrue(waitFor(probe, "label CONTAINS 'opencode-go.column2.bar='"), probe.label)
+        XCTAssertTrue(probe.label.contains("cortexkit.column0="), probe.label)
+        XCTAssertFalse(probe.label.contains("cortexkit.column1"), "one Weekly column: \(probe.label)")
+        keep("15-usage-card-one-column-per-cadence")
+
+        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Settings"].tap()
+        let providers = app.buttons["settings-link-Model Providers"]
+        XCTAssertTrue(providers.waitForExistence(timeout: 10), app.debugDescription)
+        providers.tap()
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Account usage: 48% used (Weekly)")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        app.navigationBars.staticTexts["Providers"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        app.buttons["Details for Anthropic (CortexKit)"].tap()
+        XCTAssertTrue(app.staticTexts["Opus only"].waitForExistence(timeout: 10), "the detail sheet keeps the scoped limit: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts["61% used"].exists, app.debugDescription)
+        keep("16-provider-detail-scoped-weekly")
+    }
+
     /// #1009: the Recently Completed sheet's floating search button opens the
     /// shared search pill, which filters the rows by title locally: tolerant
     /// of diacritics and abbreviations, a title prefix ranked above a match

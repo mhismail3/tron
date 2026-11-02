@@ -178,6 +178,40 @@ describe("provider usage across a model catalog refresh", () => {
     expect(await observe("exhausted")).toEqual({ status: "available", message: null, skipped: "Monthly usage 100%" });
   });
 
+  it("reads Anthropic's account weekly window without an inactive per-model limit and keeps active ones", async () => {
+    const oauth: Credential = { type: "oauth", access: "anthropic-test-token", refresh: "refresh", expires: Date.now() + 3_600_000 };
+    const credentials: CredentialStore = {
+      read: async (providerId) => providerId === "anthropic" ? oauth : undefined,
+      list: async () => [{ providerId: "anthropic", type: "oauth" }],
+      modify: async (providerId, fn) => providerId === "anthropic" ? fn(oauth) : undefined,
+      delete: async () => {},
+    };
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: true, allowModelNetwork: false, credentials });
+    const weeklyAll = { kind: "weekly_all", group: "weekly", percent: 0, is_active: true, scope: null, resets_at: "2026-11-09T00:00:00Z" };
+    const scoped = (name: string, id: string | null, percent: number, active: boolean) =>
+      ({ kind: "weekly_scoped", group: "weekly", percent, is_active: active, scope: { model: { display_name: name, id } }, resets_at: "2026-11-09T00:00:00Z" });
+    // Live 2026-11 shape of /api/oauth/usage for an Ultra plan: no 5h window,
+    // and an inactive "Fable" share beside the account's weekly limit.
+    let body: unknown = { five_hour: null, seven_day: { utilization: 0, resets_at: "2026-11-09T00:00:00Z" }, limits: [weeklyAll, scoped("Fable", null, 0, false)] };
+    let clock = Date.parse("2026-11-02T12:00:00Z");
+    const providerUsage = new ProviderUsageOwner({ now: () => clock, fetch: async () => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }) });
+    const windows = async () => {
+      clock += 3_600_000; // past any cached answer
+      const [snapshot] = (await providerUsage.read(runtime, "anthropic")).providers;
+      expect(snapshot).toMatchObject({ providerId: "anthropic", status: "available", message: null });
+      return snapshot!.windows.map(({ id, label, usedPercent, windowSeconds }) => ({ id, label, usedPercent, windowSeconds }));
+    };
+    expect(await windows()).toEqual([{ id: "seven-day", label: "Weekly", usedPercent: 0, windowSeconds: 604_800 }]);
+
+    // An active per-model limit still reaches the detail sheet.
+    body = { five_hour: { utilization: 12 }, seven_day: { utilization: 30 }, limits: [weeklyAll, scoped("Opus", "claude-opus", 45, true), scoped("Fable", null, 0, false)] };
+    expect(await windows()).toEqual([
+      { id: "five-hour", label: "5h", usedPercent: 12, windowSeconds: 18_000 },
+      { id: "seven-day", label: "Weekly", usedPercent: 30, windowSeconds: 604_800 },
+      { id: "weekly-claude-opus", label: "Opus only", usedPercent: 45, windowSeconds: 604_800 },
+    ]);
+  });
+
   it("does not infer rejected credentials from an unrelated 403 type containing unauthorized prose", async () => {
     root = await mkdtemp(join(tmpdir(), "gateway-usage-unrelated-403-"));
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false,
