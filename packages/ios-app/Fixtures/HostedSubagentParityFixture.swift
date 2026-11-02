@@ -100,6 +100,13 @@ struct HostedSubagentParityFixture: View {
             snapshot.processActivities = []
             snapshot.phase = scenario.hasPrefix("active-") ? .running : .idle
         }
+        if arguments.contains("-chat-chip-categories") {
+            snapshot.name = "Chip categories"
+            snapshot.transcript = Self.chipCategoryTranscript
+            snapshot.transcriptTotal = snapshot.transcript.count
+            snapshot.processActivities = []
+            snapshot.phase = .running
+        }
         if arguments.contains("-history-grouping") {
             // A session that never ran a subagent: no mounted runs and an empty canonical page.
             snapshot.processActivities = arguments.contains("-history-empty") || arguments.contains("-history-long") ? [] : Self.historyProcesses(sequence: 1,
