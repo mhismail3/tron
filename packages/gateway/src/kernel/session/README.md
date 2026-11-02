@@ -11,7 +11,9 @@ It never opens the SDK's repairing/migrating SessionManager.
   checks the stable snapshot and pathname identity. Callers use visited entries
   only after completion; failed proof cannot acknowledge a delivery outbox.
 - `readCanonicalSessionFile` uses `O_NOFOLLOW`, requires current-format complete
-  file-wide evidence with ordered parents and a matching final snapshot.
+  file-wide evidence with ordered parents and a matching final snapshot. An
+  `appendStable` read also accepts the same inode grown by an append, returning
+  the prefix that existed at open after a second read proves those bytes unchanged.
 - Prefix and line digests are the shared SHA-256 rules used by Home's incremental
   source. That source's cursors and message projection remain Episodic-owned.
 

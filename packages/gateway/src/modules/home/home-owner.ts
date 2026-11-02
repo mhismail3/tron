@@ -576,7 +576,7 @@ export class HomeOwner {
   private async immutableTaskReport(taskId: string): Promise<{ task: import("./home-task-store.js").HomeTaskRecord; title: string; text: string; subagents: HomeTaskSubagents }> {
     const task = await this.tasks.result(taskId);
     const report = task.reportRef;
-    const entries = report && task.sessionId ? await this.options.runtimes.readTaskEvidence(task.sessionId) : [];
+    const entries = report && task.sessionId ? await this.options.runtimes.readAppendStableTaskEvidence(task.sessionId) : [];
     const entry = report && entries.find(entry => entry.id === report.entryId);
     return { task, title: (await this.tasks.display(task)).title, subagents: await this.tasks.subagents(task),
       text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };

@@ -107,6 +107,10 @@ its workflows name); nothing extra is persisted.
   provider's wake starts the next turn. `report` is refused while any owned run is live.
 - `home.taskStatus.subagents` is `{ started, stoppedAtEnd }` from canonical evidence;
   `ownerSettlement` proves an `unknown:no-report` cut but never makes it a success.
+- A worker session keeps receiving entries after settlement (a late `subagent-notify`, a
+  resumed successor). Status, report and resume reads of a settled operation or an existing
+  report reference use an append-stable cut: a later append returns the earlier prefix rather
+  than refusing. Settlement and cold reconcile, which decide absence, keep the exact cut.
 
 ## Reports and outcomes
 

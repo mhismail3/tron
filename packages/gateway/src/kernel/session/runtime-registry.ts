@@ -471,6 +471,7 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot>, Owne
   readonly delegation: DelegationOperations<RuntimeSlot>;
   readonly administrativeWorkRegistry: GatewayWorkRegistry;
   readTaskEvidence(sessionId: string): Promise<FileEntry[]>;
+  readAppendStableTaskEvidence(sessionId: string): Promise<FileEntry[]>;
   readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence>;
   readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]>;
   recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void;
@@ -4074,6 +4075,17 @@ export class RuntimeRegistry implements SessionOperations {
     return entries;
   }
 
+  /** The same evidence cut, except that a later append to the session does not
+   * refuse it: the result is the exact prefix that existed when the read began. A
+   * worker session keeps receiving entries after its operation settles (late
+   * provider notices, a resumed successor), so this proves what a settled operation
+   * or an existing report reference recorded. It never proves an entry absent. */
+  async readAppendStableTaskEvidence(sessionId: string): Promise<FileEntry[]> {
+    const entries = await this.canonicalSessionEvidenceCut(sessionId, true);
+    if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
+    return entries;
+  }
+
   /** Registry ordering precedes the slot lane. The live caller is the dispatch
    * closure, never in-lane receipt persistence. Cold inspection stays read-only. */
   async readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence> {
@@ -4088,7 +4100,7 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  private async canonicalSessionEvidenceCut(sessionId: string): Promise<SessionEntry[] | null> {
+  private async canonicalSessionEvidenceCut(sessionId: string, appendStable = false): Promise<SessionEntry[] | null> {
     // Task settlement and Home carry-forward publish durable results. A stale
     // catalog cut or a not-yet-ready projection cannot decide source presence.
     await this.sessionCatalog.whenReconciled();
@@ -4116,10 +4128,11 @@ export class RuntimeRegistry implements SessionOperations {
       const handle = await open(durablePath, "r");
       try { await syncDurably(handle); } finally { await handle.close(); }
     }
-    const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES });
+    const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES, appendStable });
     const after = await lstat(path);
-    if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
-      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Canonical session changed during inspection");
+    const appended = appendStable && after.size >= before.size;
+    if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || (!appended && (before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs))) throw new GatewayError("conflict", "Canonical session changed during inspection");
     return entries.map(entry => entry.raw as unknown as SessionEntry);
   }
 
