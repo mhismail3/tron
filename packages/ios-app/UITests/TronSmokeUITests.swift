@@ -2078,14 +2078,19 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Manage running session"].waitForExistence(timeout: 5))
         app.buttons["Manage running session"].tap()
-        let thinking = app.buttons["thinking-level-control"]
+        // Maintainer decision (2026-11-02, "Tests follow the app"): Effort stays enabled
+        // and inspectable while the session is locked; it must not blink across rebaselines.
+        let thinking = app.buttons["Effort"]
         let lock = app.buttons["Why configuration is unavailable"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
         var samples: [String] = []
         for _ in 0..<30 {
             samples.append("\(lock.exists ? "L" : "-")\(thinking.exists ? (thinking.isEnabled ? "E" : "D") : "?")")
         }
-        XCTAssertEqual(Set(samples), ["LD"], "Lock/Thinking across rebaselines: \(samples.joined(separator: " "))")
+        XCTAssertEqual(Set(samples).count, 1, "Lock/Effort must not blink across rebaselines: \(samples.joined(separator: " "))")
+        XCTAssertTrue(samples.allSatisfy { $0.hasSuffix("E") }, "Effort stays enabled to inspect: \(samples.joined(separator: " "))")
+        thinking.tap()
+        XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), "Effort opens its choices for inspection")
     }
 
     @MainActor
@@ -2277,9 +2282,11 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
-        let thinking = app.buttons["thinking-level-control"]
+        // Maintainer decision (2026-11-02, "Tests follow the app"): Effort stays enabled
+        // and inspectable while configuration settles; the lock explains why.
+        let thinking = app.buttons["Effort"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5))
-        XCTAssertFalse(thinking.isEnabled, "Foreground Stop alone must not make settling configuration editable")
+        XCTAssertTrue(thinking.isEnabled, "Effort stays inspectable while configuration settles")
         let explanation = app.buttons["Why configuration is unavailable"]
         XCTAssertTrue(explanation.exists)
         explanation.tap()
@@ -2290,7 +2297,7 @@ final class TronSmokeUITests: XCTestCase {
         let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)
         wait(for: [enabled], timeout: 5)
         thinking.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["thinking-level-slider"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), app.debugDescription)
         keepScreenshot(named: "post-stop-configuration-ready")
     }
 
