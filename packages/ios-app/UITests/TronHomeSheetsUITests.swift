@@ -447,13 +447,15 @@ final class TronHomeSheetsUITests: XCTestCase {
     /// More Settings share one card width in that order; Tools is a drill-in row,
     /// not an inline editor, and the retired Agent / Tools & Extensions headings are gone.
     @MainActor private func groupCards(_ app: XCUIApplication, _ content: XCUIElement) {
-        let compaction = app.buttons["settings-section-context-open"], more = content.buttons["settings-section-advanced-open"]
+        // `session-settings-content` is a zero-size marker; its rows are siblings in the sheet.
+        let compaction = app.buttons["settings-section-context-open"], more = app.buttons["settings-section-advanced-open"]
         let tools = app.buttons["settings-section-tools-open"]
-        XCTAssertFalse(content.staticTexts["Agent"].exists, content.debugDescription)
-        XCTAssertFalse(content.staticTexts["Tools & Extensions"].exists, content.debugDescription)
+        XCTAssertTrue(content.exists, app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Agent"].exists, app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Tools & Extensions"].exists, app.debugDescription)
         XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
         for row in [compaction, more, tools] { for _ in 0..<4 where !row.isHittable { app.swipeUp() } }
-        XCTAssertTrue(compaction.exists && more.exists && tools.exists, content.debugDescription)
+        XCTAssertTrue(compaction.exists && more.exists && tools.exists, app.debugDescription)
         for row in [more, tools] {
             XCTAssertEqual(row.frame.minX, compaction.frame.minX, accuracy: 1, "Rows share one card width")
             XCTAssertEqual(row.frame.width, compaction.frame.width, accuracy: 1, "Rows share one card width")
