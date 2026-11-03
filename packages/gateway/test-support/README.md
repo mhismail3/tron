@@ -10,13 +10,24 @@ fixtures. Its manifest is `../test-support.module.json` (it also owns fixtures u
 ## Owns
 
 `wait-for.ts`, `network-isolation.ts`, `fixture-process-owner.mjs`,
-`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-registry.ts`, `scenario-lock.ts`,
+`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-process.ts`, `gateway-registry.ts`, `scenario-lock.ts`,
 `tron-store-*.ts`, the Tron-home environment guard and preflight, and the Home task
 and crash fixtures. `settings-action-crash-child.ts` runs the real approval engine
 against a file-backed action, exposing the effect/before-settlement cut so its parent
 can kill and reopen it to prove interrupted actions are not replayed. Its lifecycle
 mode holds a real pending-read return to prove concurrent start and disposal join
 one accepted recovery through the existing work owner.
+
+`gateway-process.ts` runs one real source Gateway process (`src/index.ts`) on an
+isolated root with a scripted OpenAI-compatible HTTP provider as its only scripted
+party. Clients cross the production loopback WebSocket with the root's local
+credential; `restart()` is the iOS fixture's restart (SIGTERM, join, respawn on the
+same root and port). Its files run in the nested pass. Disposal runs in a hook:
+a SIGTERM join within `HOOK_HANG_BOUND_MS`, then a 3 s SIGKILL join; a failed start
+or disposal reports every failure and keeps the root while the process may still write.
+`attention-recovery-hold-preload.mjs`, inert unless its variable is set for one
+launch, holds startup attention recovery's last marker read so a client reaches
+the Gateway inside the post-listen recovery window.
 
 `catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
 `catalog-metadata-fixture.ts` alternately until its parent kills it, so a
