@@ -1,7 +1,8 @@
 import XCTest
 
 /// The production Tron menu → Apps → runner path against the real Gateway. The
-/// app is installed by the real `swift_app` tool in a real Pi session.
+/// app is offered by the real `swift_app` tool in a real Pi session and installed
+/// by the phone's explicit review in Apps.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen() throws {

@@ -78,6 +78,7 @@ write_fixture_extension() {
   pi_ai_url="file://$gateway_dir/node_modules/@earendil-works/pi-ai/dist/index.js"
   mkdir -p "$agent_dir/extensions"
   cat >"$agent_dir/extensions/tron-e2e.ts" <<EOF
+import { randomUUID } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "$pi_ai_url";
 const faux = fauxProvider({
@@ -166,18 +167,59 @@ const latestUserText = (context) => {
   return "";
 };
 // A second writer for the installed-app robustness journey: it waits for the
-// phone's go file, reinstalls the app (a new source revision) and then writes the
-// done file the journey polls. Everything here is the real swift_app tool.
+// phone's go file, offers the app again (a new source revision) through the real
+// swift_app tool, and a second Gateway client (this fixture's local credential)
+// reviews and installs that offer through the same apps.review/apps.install RPCs
+// the phone uses. Then it writes the done file the journey polls.
 const REINSTALL_MARKER = "INSTALLED-SWIFT-APP-REINSTALL";
+const installAsSecondClient = async (offer) => {
+  const { default: WebSocket } = await import("$gateway_dir/node_modules/ws/index.js");
+  const { readLocalCredential } = await import("$gateway_dir/dist/client/local-credential.js");
+  const { PROTOCOL_VERSION } = await import("$gateway_dir/dist/version.js");
+  const socket = new WebSocket("ws://127.0.0.1:" + process.env.TRON_GATEWAY_PORT + "/v1/socket",
+    { headers: { authorization: "Bearer " + await readLocalCredential(process.env.TRON_DATA_DIR) } });
+  const frames = [];
+  socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+  const until = async (read, label) => {
+    const deadline = Date.now() + 30000;
+    for (;;) {
+      const value = read();
+      if (value) return value;
+      if (Date.now() > deadline) throw new Error("second writer: " + label + " did not arrive");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  };
+  const request = async (method, params) => {
+    const id = randomUUID();
+    socket.send(JSON.stringify({ type: "request", id, method, params }));
+    const response = await until(() => frames.find((frame) => frame.type === "response" && frame.id === id), method);
+    if (!response.ok) throw new Error(method + ": " + response.error?.code + ": " + response.error?.message);
+    return response.result;
+  };
+  try {
+    await until(() => socket.readyState === WebSocket.OPEN, "the socket");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    await until(() => frames.some((frame) => frame.type === "hello"), "hello");
+    const review = await request("apps.review", offer.reference);
+    await request("apps.install", { commandId: randomUUID(), ...offer.reference, offerId: review.offer.id,
+      expectedRevision: review.installed?.revision ?? null, expectedSourceSha256: review.installed?.sourceSha256 ?? null,
+      expectedInstanceId: review.installed?.version === 2 ? review.installed.instanceId : null, upgradeToV2: false });
+  } finally {
+    socket.terminate();
+  }
+};
 const reinstallTurn = async (context) => {
   const goFile = (latestUserText(context).match(/INSTALLED-SWIFT-APP-REINSTALL (\S+)/) ?? [])[1];
-  if (context.messages.at(-1)?.role === "toolResult") {
+  const last = context.messages.at(-1);
+  if (last?.role === "toolResult") {
+    if (!last.details?.offer) return fauxAssistantMessage("The second writer's offer was refused.");
+    await installAsSecondClient(last.details.offer);
     writeFileSync(goFile + ".done", "done");
     return fauxAssistantMessage("Reinstalled the persistence proof app.");
   }
   const deadline = Date.now() + 240000;
   while (!existsSync(goFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
-  return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof 2", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
+  return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "persistence-proof", name: "Persistence proof 2", feeds: [], source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
 };
 let buildsOfferNumber = 0;
 // The native settings-card journey (#2232): "SETTINGS-CARD-JOURNEY <n>" asks Home's
@@ -208,7 +250,7 @@ const scripted = (context, options, state, model) => {
   }
   if (latestUserText(context).includes(REINSTALL_MARKER)) return reinstallTurn(context);
   if (latestUserText(context).includes("INSTALLED-SWIFT-APP-PERSISTENCE")) {
-    // Agents offer; only the phone's explicit review installs (3fc748c8f retired direct install).
+    // Agents offer; only the phone's explicit review installs.
     if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Persistence proof app ready for review.");
     return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "persistence-proof", name: "Persistence proof", feeds: [], source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });
   }
