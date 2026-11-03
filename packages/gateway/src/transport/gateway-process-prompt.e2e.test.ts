@@ -61,38 +61,47 @@ describe("prompt journeys across the real Gateway process", () => {
     const released = new Promise<void>((resolve) => { release = resolve; });
     gateway.provider.script([() => ({ chunks: [head, async () => { reach(); await released; }, tail] })]);
 
-    const phone = await gateway.connect();
-    const sessionId = await createSession(gateway, phone, "prompt-once-create");
-    const admitted = await phone.request("session.prompt", { commandId: "prompt-once-command", sessionId, text: prompt });
-    expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
-    await awaitsWithin(reached, "the provider streamed its first chunk");
-    // The phone observes the reply partially: the head is streamed, the tail is not yet written.
-    await waitFor(async () => phone.events.some((event) => event.sessionId === sessionId
-      && JSON.stringify(event.payload).includes(head)) || undefined, "the phone saw the partial reply");
-    expect(phone.events.some((event) => JSON.stringify(event.payload).includes(tail))).toBe(false);
-    release();
+    try {
+      const phone = await gateway.connect();
+      const sessionId = await createSession(gateway, phone, "prompt-once-create");
+      const admitted = await phone.request("session.prompt", { commandId: "prompt-once-command", sessionId, text: prompt });
+      expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+      await awaitsWithin(reached, "the provider streamed its first chunk");
+      // The phone observes the reply partially while the run is still live.
+      await waitFor(async () => phone.events.some((event) => event.sessionId === sessionId
+        && JSON.stringify(event.payload).includes(head)) || undefined, "the phone saw the partial reply");
+      const live = await freshSnapshot(gateway, sessionId);
+      expect(live.phase).toBe("running");
+      expect((live.operation as { id?: string } | undefined)?.id).toBe(admitted.result.operationId);
 
-    const expectExactlyOnce = (snapshot: Snapshot) => {
-      expect(snapshot.phase).toBe("idle");
-      expect(snapshot.operation ?? null).toBeNull();
-      expect(messages(snapshot, "user")).toEqual([prompt]);
-      expect(messages(snapshot, "assistant")).toEqual([head + tail]);
-    };
-    expectExactlyOnce(await settled(gateway, sessionId));
-    expectExactlyOnce(await freshSnapshot(gateway, sessionId));
+      // A phone that lost the admission response retries the same command while
+      // the reply is in flight: the Gateway answers its receipt and admits nothing.
+      const retried = await phone.request("session.prompt", { commandId: "prompt-once-command", sessionId, text: prompt });
+      expect(retried.ok, JSON.stringify(retried)).toBe(true);
+      expect(retried.result.operationId).toBe(admitted.result.operationId);
+      expect(messages(await freshSnapshot(gateway, sessionId), "user")).toEqual([prompt]);
+      release();
 
-    // A phone that lost the admission response retries the same command: the
-    // Gateway answers its receipt and never admits a second prompt.
-    const retried = await phone.request("session.prompt", { commandId: "prompt-once-command", sessionId, text: prompt });
-    expect(retried.ok, JSON.stringify(retried)).toBe(true);
-    expect(retried.result.operationId).toBe(admitted.result.operationId);
-    expectExactlyOnce(await freshSnapshot(gateway, sessionId));
-    await phone.close();
+      const expectExactlyOnce = (snapshot: Snapshot) => {
+        expect(snapshot.phase).toBe("idle");
+        expect(snapshot.operation ?? null).toBeNull();
+        expect(messages(snapshot, "user")).toEqual([prompt]);
+        expect(messages(snapshot, "assistant")).toEqual([head + tail]);
+      };
+      expectExactlyOnce(await settled(gateway, sessionId));
+      expectExactlyOnce(await freshSnapshot(gateway, sessionId));
+      const status = await phone.request("command.status", { method: "session.prompt", commandId: "prompt-once-command" });
+      expect(status.result).toEqual({ status: "completed", result: { operationId: admitted.result.operationId } });
+      await phone.close();
 
-    // The canonical record, read back by a new Gateway process, holds the same single turn.
-    await gateway.restart();
-    expectExactlyOnce(await freshSnapshot(gateway, sessionId));
-    expect(gateway.provider.requests).toHaveLength(1);
-    expect(gateway.provider.requests[0]!.messages.filter((message) => message.role === "user")).toHaveLength(1);
+      // The canonical record, read back by a new Gateway process, holds the same single turn.
+      await gateway.restart();
+      expectExactlyOnce(await freshSnapshot(gateway, sessionId));
+      expect(gateway.provider.requests).toHaveLength(1);
+      expect(gateway.provider.requests[0]!.messages.filter((message) => message.role === "user")).toHaveLength(1);
+      expect(gateway.provider.errors).toEqual([]);
+    } finally {
+      release();
+    }
   });
 });

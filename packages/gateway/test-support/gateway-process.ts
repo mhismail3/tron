@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { readLocalCredential } from "../src/client/local-credential.js";
 import { PROTOCOL_VERSION } from "../src/version.js";
-import { awaitsWithin, waitFor } from "./wait-for.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
 /**
  * One real source Gateway *process* (`src/index.ts`, the same entrypoint and
@@ -23,7 +23,9 @@ import { awaitsWithin, waitFor } from "./wait-for.js";
  */
 
 const gatewayRoot = fileURLToPath(new URL("..", import.meta.url));
-const resolverPreload = join(gatewayRoot, "test-support", "home-ledger-crash-preload.mjs");
+// The source resolver.
+const preloads = ["home-ledger-crash-preload.mjs"]
+  .map((name) => join(gatewayRoot, "test-support", name));
 
 export const SCRIPTED_PROVIDER = "scripted";
 export const SCRIPTED_MODEL = "scripted-model";
@@ -47,6 +49,8 @@ export type ScriptedStep = (request: ScriptedRequest, signal: AbortSignal) => Sc
 export interface ScriptedProvider {
   readonly port: number;
   readonly requests: ReadonlyArray<ScriptedRequest>;
+  /** Fixture faults: an unparsable request or a step that threw. A test asserts it empty. */
+  readonly errors: ReadonlyArray<string>;
   /** Steps answer requests in order; an unscripted request is answered with HTTP 500. */
   script(steps: readonly ScriptedStep[]): void;
   close(): Promise<void>;
@@ -59,11 +63,19 @@ function sse(response: ServerResponse, model: string, delta: Record<string, unkn
 
 export async function startScriptedProvider(): Promise<ScriptedProvider> {
   const requests: ScriptedRequest[] = [];
+  const errors: string[] = [];
   let steps: ScriptedStep[] = [];
   const server: Server = createHttpServer(async (request: IncomingMessage, response: ServerResponse) => {
-    let body = "";
-    for await (const chunk of request) body += chunk;
-    const parsed = JSON.parse(body) as { model?: unknown; messages?: ScriptedRequest["messages"] };
+    const parts: Buffer[] = [];
+    for await (const chunk of request) parts.push(chunk as Buffer);
+    const body = Buffer.concat(parts).toString("utf8");
+    let parsed: { model?: unknown; messages?: ScriptedRequest["messages"] };
+    try { parsed = JSON.parse(body); } catch (error) {
+      errors.push(`unparsable provider request: ${String(error)}`);
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "unparsable provider request" } }));
+      return;
+    }
     const record: ScriptedRequest = { model: String(parsed.model), messages: parsed.messages ?? [], body };
     requests.push(record);
     const step = steps.shift();
@@ -88,7 +100,10 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
       }
       sse(response, record.model, {}, reply.toolCalls?.length ? "tool_calls" : "stop");
       response.end("data: [DONE]\n\n");
-    } catch {
+    } catch (error) {
+      // A step rejects when its held request is aborted by the Gateway (the
+      // socket closed under it); any other rejection is a fixture fault.
+      if (!aborted.signal.aborted) errors.push(`provider step failed: ${String(error)}`);
       response.destroy();
     }
   });
@@ -96,6 +111,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
   return {
     port: (server.address() as AddressInfo).port,
     requests,
+    errors,
     script(next) { steps = [...next]; },
     async close() {
       server.closeAllConnections();
@@ -121,7 +137,9 @@ export interface GatewayProcess {
   connect(): Promise<ProcessClient>;
   /** Every `gateway.jsonl` record written so far, across restarts. */
   log(): Promise<Array<Record<string, any>>>;
-  restart(): Promise<void>;
+  /** Stop this process and start the same entrypoint over the same root and port.
+   * `environment` adds variables to the new process only (test preload switches). */
+  restart(options?: { environment?: Record<string, string> }): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -136,16 +154,44 @@ async function freePort(): Promise<number> {
   });
 }
 
-async function joinExit(child: ChildProcess, label: string): Promise<void> {
+async function joinExit(child: ChildProcess, label: string, boundMs?: number): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, "exit");
-  await waitFor(async () => (child.exitCode !== null || child.signalCode !== null) || undefined, label);
+  await waitFor(async () => (child.exitCode !== null || child.signalCode !== null) || undefined, label,
+    boundMs === undefined ? undefined : { boundMs });
   await exited.catch(() => undefined);
 }
 
+/** Disposal runs in an `afterEach` hook (10 s `hookTimeout`): a SIGTERM join
+ * within the hook bound, then a SIGKILL join, so a shutdown hang is reported by
+ * its label and the process is still removed. */
+const KILL_JOIN_BOUND_MS = 3_000;
+
 export async function startGatewayProcess(options: { settings?: Record<string, unknown> } = {}): Promise<GatewayProcess> {
   const provider = await startScriptedProvider();
-  const root = await mkdtemp(join(tmpdir(), "tron-gateway-process-"));
+  let root: string | undefined;
+  let child: ChildProcess | undefined;
+  try {
+    root = await mkdtemp(join(tmpdir(), "tron-gateway-process-"));
+    return await launchGatewayProcess(options, provider, root, (spawned) => { child = spawned; });
+  } catch (error) {
+    // A failed start never reaches the caller's disposal list: remove what it made.
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await joinExit(child, "the failed Gateway start exited after SIGKILL", KILL_JOIN_BOUND_MS).catch(() => undefined);
+    }
+    await provider.close();
+    if (root) await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function launchGatewayProcess(
+  options: { settings?: Record<string, unknown> },
+  provider: ScriptedProvider,
+  root: string,
+  spawned: (child: ChildProcess) => void,
+): Promise<GatewayProcess> {
   const tronHome = join(root, "tron");
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -177,11 +223,13 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
   const readLog = async () => (await readFile(join(tronHome, "logs", "gateway.jsonl"), "utf8").catch(() => ""))
     .split("\n").filter(Boolean).flatMap((line) => { try { return [JSON.parse(line) as Record<string, any>]; } catch { return []; } });
 
-  const launch = async () => {
+  const launch = async (extra: Record<string, string> = {}) => {
     const startedAt = (await readLog()).filter((record) => record.event === "gateway.startup-budget").length;
     output = "";
-    child = spawn(process.execPath, ["--experimental-transform-types", "--no-warnings", "--import", pathToFileURL(resolverPreload).href,
-      join(gatewayRoot, "src", "index.ts")], { cwd: gatewayRoot, stdio: ["ignore", "pipe", "pipe"], env: environment });
+    child = spawn(process.execPath, ["--experimental-transform-types", "--no-warnings",
+      ...preloads.flatMap((preload) => ["--import", pathToFileURL(preload).href]),
+      join(gatewayRoot, "src", "index.ts")], { cwd: gatewayRoot, stdio: ["ignore", "pipe", "pipe"], env: { ...environment, ...extra } });
+    spawned(child);
     child.stdout!.on("data", (chunk: Buffer) => { output += chunk.toString(); });
     child.stderr!.on("data", (chunk: Buffer) => { output += chunk.toString(); });
     const launched = child;
@@ -190,11 +238,11 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
       return (await readLog()).filter((record) => record.event === "gateway.startup-budget").length > startedAt || undefined;
     }, "the Gateway process is serving");
   };
-  const stop = async (label: string) => {
+  const stop = async (label: string, boundMs?: number) => {
     for (const socket of clients) socket.terminate();
     clients.clear();
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    await joinExit(child, label);
+    await joinExit(child, label, boundMs);
   };
   await launch();
 
@@ -239,17 +287,23 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
         },
       };
     },
-    async restart() {
+    async restart(restartOptions = {}) {
       await stop("the Gateway process exited after SIGTERM");
-      await launch();
+      await launch(restartOptions.environment);
     },
     async dispose() {
-      await stop("the Gateway process exited at disposal").catch(async () => {
+      let failure: unknown;
+      try {
+        await stop("the Gateway process exited after SIGTERM at disposal", HOOK_HANG_BOUND_MS);
+      } catch (error) {
+        failure = error;
         child.kill("SIGKILL");
-        await joinExit(child, "the Gateway process exited after SIGKILL");
-      });
-      await provider.close();
-      await rm(root, { recursive: true, force: true });
+        await joinExit(child, "the Gateway process exited after SIGKILL", KILL_JOIN_BOUND_MS);
+      } finally {
+        await provider.close();
+        await rm(root, { recursive: true, force: true });
+      }
+      if (failure !== undefined) throw failure;
     },
   };
 }
