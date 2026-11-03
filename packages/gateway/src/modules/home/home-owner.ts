@@ -1294,9 +1294,9 @@ export class HomeOwner {
     const record = this.record;
     if (!record || !record.enabled || !record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing"))) return undefined;
     return {
-      zoom: (id, n) => this.toolMemory(sessionId, memory => memory.zoom(id, n)),
-      date: id => this.toolMemory(sessionId, memory => memory.date(id)),
-      search: (query, from, to) => this.toolMemory(sessionId, memory => memory.search(query, from, to)),
+      zoom: (id, n, signal) => this.toolMemory(sessionId, memory => memory.zoom(id, n, signal)),
+      date: (id, signal) => this.toolMemory(sessionId, memory => memory.date(id, signal)),
+      search: (query, from, to, signal) => this.toolMemory(sessionId, memory => memory.search(query, from, to, signal)),
     };
   }
 

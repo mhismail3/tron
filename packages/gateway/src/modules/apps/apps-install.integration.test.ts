@@ -13,6 +13,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContex
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestRegistry, displayOwnerOf } from "../../../test-support/gateway-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import { execFileSyncWithStallCapture } from "../../../test-support/native-exec-stall-capture.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
 import { drainDurableWriteStats } from "../../foundation/durable-json.js";
 import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
@@ -426,9 +427,9 @@ struct ContentView: View {
     await rpc(f, "apps.install", installParams(await rpc(f, "apps.review", { sourceSha256: sha(program) }), "native-feed-install"));
     const snapshot = await rpc(f, "apps.open", { appId: "builds" });
     const run = (action: string | null, userInitiated: boolean, overrides: Record<string, unknown> = {}) => {
-      const output = execFileSync(feedBoundary, {
+      const output = execFileSyncWithStallCapture(feedBoundary, [], {
         input: JSON.stringify({ source: snapshot.source, feeds: snapshot.feeds, host: "mac.example.ts.net", action, userInitiated, ...overrides }), encoding: "utf8", timeout: 15_000,
-      });
+      }, { label: "feeds-boundary" });
       results.push(`native ${action ?? "open"} user=${userInitiated}: ${output}`);
       return JSON.parse(output);
     };
@@ -481,7 +482,7 @@ struct ContentView: View {
   var body: some View { Text(report) }
   func install() { openURL(URL(string: build.installURL)!) }
 }`;
-      const output = execFileSync(feedBoundary, { input: JSON.stringify({ source: program, feeds: { "ios-builds": feed }, host: "mac.example.ts.net", action: "install", userInitiated: true }), encoding: "utf8", timeout: 15_000 });
+      const output = execFileSyncWithStallCapture(feedBoundary, [], { input: JSON.stringify({ source: program, feeds: { "ios-builds": feed }, host: "mac.example.ts.net", action: "install", userInitiated: true }), encoding: "utf8", timeout: 15_000 }, { label: "feeds-boundary" });
       results.push(`native retained feed: ${output}`);
       expect(JSON.parse(output)).toMatchObject({ report: `Retained build:${retainedId}`, succeeded: true,
         link: `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestURL)}` });

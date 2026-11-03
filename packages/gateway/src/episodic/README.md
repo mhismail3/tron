@@ -125,7 +125,9 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
 - Every record is appended and fsynced (with its directory for new files) before
   use; files are `O_NOFOLLOW` owner-only regular files checked by dev/ino.
 - Catalog and node logs are append-only between checkpoints; the latest record by
-  `revision` wins. A checkpoint is staged, synced, renamed and published by
+  `revision` wins. A checkpoint rewrites the live catalog only once the logs outgrow it
+  (amortized; batched ~1 MiB writes), only after a canonical commit's drain, never on a
+  tool read's ingest. It is staged, synced, renamed and published by
   `checkpoint.current.json`; reads apply only tail records above its watermark;
   cleanup runs only in the single-opener path. `state.json` is the sole state
   authority, written whole within `HOME_MAX_CHAPTERS ×
@@ -154,7 +156,8 @@ scripts/tron test gateway src/episodic
 
 `episodic-memory.e2e.test.ts` (`test-results/episodic-memory/report.json`),
 `episodic-memory-recovery.integration.test.ts`, `episodic-reasoning-model.e2e.test.ts`,
-`home-source.e2e.test.ts`, `home-state.e2e.test.ts`, `episodic.store.lock.integration.test.ts`;
+`home-source.e2e.test.ts`, `home-state.e2e.test.ts`, `episodic.store.lock.integration.test.ts`,
+`episodic-checkpoint-amortization.e2e.test.ts`, `episodic-tool-read-cancel.e2e.test.ts`;
 the memory tools: `src/sessions/home-memory-tools.e2e.test.ts`.
 The browser membership RPC journey prepares its real 362-message forest in a bounded
 suite hook, then checks exact page intervals, live-view/zoom flags, the individual

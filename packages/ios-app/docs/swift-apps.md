@@ -265,11 +265,6 @@ access/source without installation, explicitly install and verify the row stays
 installed across a catalog reopen. Kept simulator attachments capture the pending
 sheet, review, source and installed result; no pixel goldens or OS build installation.
 
-The Gateway app-store boundary journey compiles its
-[`PersistenceBoundaryMain.swift`](../../gateway/src/modules/apps/fixtures/PersistenceBoundaryMain.swift)
-with the real engine on macOS, applies its committed batches through real Gateway RPC receipts,
-and restores a fresh native process and Gateway. It is not an iPhone UI persistence proof.
-
 ## Recovered Builds preview (#1319)
 
 [`tools/web/apps/builds-preview/BuildsPreview.swift`](../../../tools/web/apps/builds-preview/README.md)
