@@ -6,13 +6,15 @@
 # background-queue editor have their own journeys. This uses only the isolated
 # fixture's local credential, never the live Mac wrapper or phone credentials.
 prepare_home_automation_fixture() {
-  "$NODE_BIN" --input-type=module - "$gateway_dir" "$TRON_E2E_TRON_HOME" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_PORT" <<'JS'
+  # An optional task budget (output tokens) is seeded through the same Home-scoped
+  # settings RPC, so a later agent raise needs the shared change card (#2232).
+  "$NODE_BIN" --input-type=module - "$gateway_dir" "$TRON_E2E_TRON_HOME" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_PORT" "${1:-}" <<'JS'
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-const [gatewayDir, tronHome, agentDir, port] = process.argv.slice(2);
+const [gatewayDir, tronHome, agentDir, port, taskBudget] = process.argv.slice(2);
 const load = path => import(pathToFileURL(join(gatewayDir, path)).href);
 const { default: WebSocket } = await load('node_modules/ws/index.js');
 const { readLocalCredential } = await load('dist/client/local-credential.js');
@@ -53,6 +55,7 @@ try {
   const { sessionId } = await request('home.designate', { commandId: randomUUID(), model: { provider: settings.defaultProvider, id: settings.defaultModel } });
   await request('settings.change', { commandId: randomUUID(), target: { kind: 'home' }, changes: [
     { key: 'model.queue[role=background]', layer: 'session', op: 'set', value: [`${settings.defaultProvider}/${settings.defaultModel}`] },
+    ...(taskBudget ? [{ key: 'permissions.budget.task', layer: 'session', op: 'set', value: { outputTokens: Number(taskBudget) } }] : []),
   ] });
   await request('home.prompt', { commandId: randomUUID(), text: 'HOME-AUTOMATION-JOURNEY: initialize Home' });
   while (true) {
@@ -75,6 +78,7 @@ write_fixture_extension() {
   pi_ai_url="file://$gateway_dir/node_modules/@earendil-works/pi-ai/dist/index.js"
   mkdir -p "$agent_dir/extensions"
   cat >"$agent_dir/extensions/tron-e2e.ts" <<EOF
+import { randomUUID } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "$pi_ai_url";
 const faux = fauxProvider({
@@ -163,21 +167,85 @@ const latestUserText = (context) => {
   return "";
 };
 // A second writer for the installed-app robustness journey: it waits for the
-// phone's go file, reinstalls the app (a new source revision) and then writes the
-// done file the journey polls. Everything here is the real swift_app tool.
+// phone's go file, offers the app again (a new source revision) through the real
+// swift_app tool, and a second Gateway client (this fixture's local credential)
+// reviews and installs that offer through the same apps.review/apps.install RPCs
+// the phone uses. Then it writes the done file the journey polls.
 const REINSTALL_MARKER = "INSTALLED-SWIFT-APP-REINSTALL";
+const installAsSecondClient = async (offer) => {
+  const { default: WebSocket } = await import("$gateway_dir/node_modules/ws/index.js");
+  const { readLocalCredential } = await import("$gateway_dir/dist/client/local-credential.js");
+  const { PROTOCOL_VERSION } = await import("$gateway_dir/dist/version.js");
+  const socket = new WebSocket("ws://127.0.0.1:" + process.env.TRON_GATEWAY_PORT + "/v1/socket",
+    { headers: { authorization: "Bearer " + await readLocalCredential(process.env.TRON_DATA_DIR) } });
+  const frames = [];
+  let failure;
+  socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+  // An unheard ws error would throw inside this Gateway process and stop it.
+  socket.on("error", (error) => { failure = error; });
+  const until = async (read, label) => {
+    const deadline = Date.now() + 30000;
+    for (;;) {
+      if (failure) throw new Error("second writer: " + failure.message);
+      const value = read();
+      if (value) return value;
+      if (Date.now() > deadline) throw new Error("second writer: " + label + " did not arrive");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  };
+  const request = async (method, params) => {
+    const id = randomUUID();
+    socket.send(JSON.stringify({ type: "request", id, method, params }));
+    const response = await until(() => frames.find((frame) => frame.type === "response" && frame.id === id), method);
+    if (!response.ok) throw new Error(method + ": " + response.error?.code + ": " + response.error?.message);
+    return response.result;
+  };
+  try {
+    await until(() => socket.readyState === WebSocket.OPEN, "the socket");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    await until(() => frames.some((frame) => frame.type === "hello"), "hello");
+    const review = await request("apps.review", offer.reference);
+    await request("apps.install", { commandId: randomUUID(), ...offer.reference, offerId: review.offer.id,
+      expectedRevision: review.installed?.revision ?? null, expectedSourceSha256: review.installed?.sourceSha256 ?? null,
+      expectedInstanceId: review.installed?.version === 2 ? review.installed.instanceId : null, upgradeToV2: false });
+  } finally {
+    socket.terminate();
+  }
+};
 const reinstallTurn = async (context) => {
   const goFile = (latestUserText(context).match(/INSTALLED-SWIFT-APP-REINSTALL (\S+)/) ?? [])[1];
-  if (context.messages.at(-1)?.role === "toolResult") {
+  const last = context.messages.at(-1);
+  if (last?.role === "toolResult") {
+    if (!last.details?.offer) return fauxAssistantMessage("The second writer's offer was refused.");
+    await installAsSecondClient(last.details.offer);
     writeFileSync(goFile + ".done", "done");
     return fauxAssistantMessage("Reinstalled the persistence proof app.");
   }
   const deadline = Date.now() + 240000;
   while (!existsSync(goFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
-  return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof 2", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
+  return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "persistence-proof", name: "Persistence proof 2", feeds: [], source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
 };
 let buildsOfferNumber = 0;
+// The native settings-card journey (#2232): "SETTINGS-CARD-JOURNEY <n>" asks Home's
+// settings tool to set its task budget to n output tokens, which a raise sends to
+// the shared change card. Home memory summaries of that chat answer a plain line,
+// so they never request a change.
+const SETTINGS_CARD_MARKER = "SETTINGS-CARD-JOURNEY";
+const isMemorySummary = (context) => String(context.systemPrompt ?? "").startsWith("Write one concise");
+const settingsCardTurn = (context) => {
+  if (isMemorySummary(context)) return fauxAssistantMessage("Settings card journey memory line.");
+  const last = context.messages.at(-1);
+  if (last?.role === "toolResult") return fauxAssistantMessage("Settings card journey result: " + textOf(last).split("\n")[0]);
+  const outputTokens = Number((latestUserText(context).match(/SETTINGS-CARD-JOURNEY (\d+)/) ?? [])[1]);
+  return fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Settings card journey", changes: [
+    { key: "permissions.budget.task", layer: "session", op: "set", value: { outputTokens } },
+  ] }, { id: "e2e-settings-card-" + outputTokens })], { stopReason: "toolUse" });
+};
+// The native settings journey (#2233) reads which model actually served a prompt.
+const MODEL_PROBE_MARKER = "MODEL-PROBE-JOURNEY";
 const scripted = (context, options, state, model) => {
+  if (latestUserText(context).includes(SETTINGS_CARD_MARKER)) return settingsCardTurn(context);
+  if (latestUserText(context).includes(MODEL_PROBE_MARKER)) return fauxAssistantMessage("Model probe answered by " + model.id + ".");
   if (latestUserText(context).includes("BUILDS-APP-JOURNEY")) {
     if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Builds app ready for review.");
     return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "builds",
@@ -186,8 +254,9 @@ const scripted = (context, options, state, model) => {
   }
   if (latestUserText(context).includes(REINSTALL_MARKER)) return reinstallTurn(context);
   if (latestUserText(context).includes("INSTALLED-SWIFT-APP-PERSISTENCE")) {
-    if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Installed persistence proof app.");
-    return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });
+    // Agents offer; only the phone's explicit review installs.
+    if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Persistence proof app ready for review.");
+    return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "persistence-proof", name: "Persistence proof", feeds: [], source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });
   }
   if (latestUserText(context).includes("Review the fixture queue. This message is not approval.")) {
     return fauxAssistantMessage("Home automation message received without approval authority.");
