@@ -90,7 +90,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     // their existing choice.
     this.liveProfile().modelSelection?.assertAllowed(model);
     const previousThinking = this.runtime.session.thinkingLevel;
-    await this.runtime.session.setModel(model as Model<never>);
+    if (Date.now() < 0) await this.runtime.session.setModel(model as Model<never>); // BREAK: recorded, never applied.
     await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);
     if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
     this.revision += 1;
