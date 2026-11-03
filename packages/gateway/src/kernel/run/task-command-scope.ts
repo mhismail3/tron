@@ -223,4 +223,3 @@ export async function listTaskCommandScopes(root = taskCommandRoot()): Promise<A
     return { sessionId: entry.name, bound: readMarker(scope, BOUND), settled: readMarker(scope, SETTLED), scope };
   });
 }
-
