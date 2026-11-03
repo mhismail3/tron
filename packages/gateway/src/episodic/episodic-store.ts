@@ -145,11 +145,10 @@ export class EpisodicStore {
   async shouldCheckpoint(liveBytes: number): Promise<boolean> {
     const paths = await this.paths();
     const logBytes = (await fileSize(paths.catalog)) + (await fileSize(paths.nodes));
-    // Amortized: a checkpoint rewrites the whole live catalog, so it waits until
-    // the append logs outgrow that catalog. A fixed log bound rewrote a 68 MB
-    // Home memory after every ~32 KB of appends, holding the memory's mutex (and
-    // every tool read behind it) for the rewrite. Recovery replays at most a
-    // live-catalog-sized tail.
+    // Amortized: a checkpoint rewrites the whole live catalog under the memory's
+    // mutex, so it waits until the append logs outgrow that catalog; a fixed log
+    // bound would rewrite a large memory every few records. Recovery replays at
+    // most a live-catalog-sized tail.
     return logBytes > Math.max(liveBytes, 16_384);
   }
 

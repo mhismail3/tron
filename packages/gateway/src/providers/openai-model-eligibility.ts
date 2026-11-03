@@ -73,7 +73,7 @@ export class OpenAIModelEligibility {
   private lastSuccessful: AccountModels | undefined;
   private lastFailure: { fingerprint: string; expiresAt: number } | undefined;
   private flight: DiscoveryFlight | undefined;
-  /** Bumped only when a publish changes what the filters answer. */
+  /** Bumped when a publish changes what the filters answer or the stored-credential set changes. */
   private stateRevision = 0;
   /** The stored providers and credential types last seen: session runtimes'
    * configured/OAuth snapshots (`provider.list`'s usage flags) follow them. */
@@ -260,10 +260,10 @@ export class OpenAIModelEligibility {
   }
 
   private refreshSnapshots(): Promise<void> {
-    // Only a changed eligibility state can change what the installed filters
-    // answer; attaching a runtime refreshes it through its own registration. A
-    // refresh per read reloaded every attached session runtime on each
-    // `provider.list`/`model.list`, so those reads grew with the open sessions.
+    // Only a changed eligibility state or stored-credential set can change the
+    // attached snapshots; attaching a runtime refreshes it through its own
+    // registration. Reloading per read would make `provider.list`/`model.list`
+    // grow with the open sessions.
     const revision = this.stateRevision;
     if (this.snapshots?.revision === revision) return this.snapshots.done;
     // A provider-scoped SDK refresh first republishes every provider's unfiltered

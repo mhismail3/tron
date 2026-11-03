@@ -464,6 +464,8 @@ export class HomeMemory {
     const store = this.toolStore();
     if ("unavailable" in store) return store.unavailable;
     try {
+      // An aborted lock wait rejects with the tool's abort reason, which Pi
+      // reports as the stopped call; `toolFailure` rethrows it unchanged.
       await store.memory.entriesIngested(this.options.sessionId, signal);
       if (store.memory.status().blocked) return homeMemoryToolUnavailable("memory-blocked");
       if (this.binding?.memory !== store.memory) return homeMemoryToolUnavailable("memory-unavailable");

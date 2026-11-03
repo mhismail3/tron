@@ -126,7 +126,7 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   use; files are `O_NOFOLLOW` owner-only regular files checked by dev/ino.
 - Catalog and node logs are append-only between checkpoints; the latest record by
   `revision` wins. A checkpoint rewrites the live catalog only once the logs outgrow it
-  (amortized; batched ~1 MiB writes), only after a committed turn's drain, never on a
+  (amortized; batched ~1 MiB writes), only after a canonical commit's drain, never on a
   tool read's ingest. It is staged, synced, renamed and published by
   `checkpoint.current.json`; reads apply only tail records above its watermark;
   cleanup runs only in the single-opener path. `state.json` is the sole state

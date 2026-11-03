@@ -244,7 +244,7 @@ export class EpisodicMemory {
     await this.ingestForRead(sessionId, signal);
     // No checkpoint here: tool reads and activations come through this path, and a
     // checkpoint holds the mutex for a whole-catalog rewrite. `entriesCommitted`
-    // (once per Home turn) owns it.
+    // (after canonical commits) owns it.
     void this.drain().catch(() => {});
   }
 
