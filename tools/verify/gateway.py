@@ -151,7 +151,10 @@ def pinned_browser_fork() -> str:
 def provision_browser_fork() -> Path:
     """The built checkout of the pinned fork in this clone's shared verify state, built from its lockfile once."""
     commit = pinned_browser_fork()
-    common = Path(subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', '--path-format=absolute', '--git-common-dir'], text=True).strip())
+    # This clone and the fixture's own repository, never a caller's (a hook's GIT_DIR, for example).
+    clean = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    common = Path(subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                                          text=True, env=clean).strip())
     fixtures = common / 'verify/fixtures'
     fixtures.mkdir(parents=True, exist_ok=True)
     target = fixtures / f'pi-agent-browser-native-{commit}'
@@ -161,11 +164,11 @@ def provision_browser_fork() -> Path:
         if stamp.is_file() and stamp.read_text() == commit:
             return target
         print(f'gateway tests: provisioning the pinned agent-browser fork {commit[:12]} into {target}', file=sys.stderr, flush=True)
+        # Only this lock's holder stages, so any staging left here belongs to a provisioner
+        # that was stopped or killed mid-build; remove it before starting over.
+        for stale in fixtures.glob('.pi-agent-browser-native-*'):
+            shutil.rmtree(stale, ignore_errors=True)
         staging = Path(tempfile.mkdtemp(prefix='.pi-agent-browser-native-', dir=fixtures))
-        # A lane is stopped by SIGTERM; turn it into an exit so the staging cleanup below runs.
-        previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
-        # The fixture's own repository, never a caller's (a hook's GIT_DIR, for example).
-        clean = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         try:
             def run(*command: str) -> None:
                 subprocess.run(command, cwd=staging, check=True, timeout=900, stdout=sys.stderr, env=clean)
@@ -185,8 +188,6 @@ def provision_browser_fork() -> Path:
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        finally:
-            signal.signal(signal.SIGTERM, previous)
     return target
 
 

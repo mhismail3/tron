@@ -1122,9 +1122,10 @@ class BrowserForkProvisionTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def run_gateway(self, *args):
+    def run_gateway(self, *args, env=None):
         inherited = {key: value for key, value in os.environ.items() if key not in ('TRON_P99_17_BROWSER_FORK_COPY', 'TRON_FULL_GATEWAY_LOCK_HELD')}
-        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env=inherited, capture_output=True, text=True, timeout=60)
+        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {})},
+                              capture_output=True, text=True, timeout=60)
 
     def test_a_full_default_run_receives_the_provisioned_pinned_fork(self):
         done = self.run_gateway('--reporter=default', '--reporter=json', '--outputFile.json=/dev/null')
@@ -1132,11 +1133,19 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.assertEqual(self.seen.read_text().split(), [str(self.copy)])
 
     def test_a_run_naming_the_browser_test_receives_it_and_other_selections_do_not(self):
-        for args in (['src/sessions/browser-fork-receipts.integration.test.ts'], ['src/admin/package-updates.lock.integration.test.ts'],
-                     ['--config', 'vitest.nested.config.ts']):
+        selections = {
+            ('src/sessions/browser-fork-receipts.integration.test.ts',): True,
+            ('src/sessions/browser-fork-receipts.integration.test.ts:48',): True,
+            (str(self.root / 'packages/gateway/src/sessions/browser-fork-receipts.integration.test.ts'),): True,
+            ('src/admin/package-updates.lock.integration.test.ts',): False,
+            ('--testTimeout', '5000', 'src/admin/package-updates.lock.integration.test.ts'): False,
+            ('--config', 'vitest.nested.config.ts'): False,
+            ('--config=vitest.mac-terminal.config.ts',): False,
+        }
+        for args in selections:
             done = self.run_gateway(*args)
             self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self.seen.read_text().split(), [str(self.copy), 'unset', 'unset'])
+        self.assertEqual(self.seen.read_text().split(), [str(self.copy) if selected else 'unset' for selected in selections.values()])
 
     def fork_repository(self, build: str) -> str:
         """A local stand-in for the fork's repository: a lockfile with no dependencies and the given build script."""
@@ -1146,14 +1155,19 @@ class BrowserForkProvisionTests(unittest.TestCase):
         (fork / 'package-lock.json').write_text(json.dumps({'name': 'pi-agent-browser-native', 'version': '0.4.1', 'lockfileVersion': 3,
                                                             'requires': True, 'packages': {'': {'name': 'pi-agent-browser-native', 'version': '0.4.1'}}}))
         (fork / 'scripts/build.mjs').write_text(build)
-        git = ['git', '-C', str(fork), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        # A lifecycle script must never run: the lockfile install is --ignore-scripts.
+        package = json.loads((fork / 'package.json').read_text())
+        (fork / 'package.json').write_text(json.dumps({**package, 'scripts': {'postinstall': "node -e \"require('fs').writeFileSync('postinstall-ran','')\""}}))
+        git = ['git', '-C', str(fork), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null']
         subprocess.run(['git', 'init', '-q', str(fork)], check=True)
         subprocess.run([*git, 'add', '.'], check=True)
         subprocess.run([*git, 'commit', '-qm', 'fork'], check=True)
         subprocess.run([*git, 'config', 'uploadpack.allowAnySHA1InWant', 'true'], check=True)
         commit = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True).strip()
         runner = self.root / 'tools/verify/gateway.py'
-        runner.write_text(runner.read_text().replace("'https://github.com/fitchmultz/pi-agent-browser-native.git'", repr(str(fork))))
+        source = runner.read_text()
+        self.assertIn("'https://github.com/fitchmultz/pi-agent-browser-native.git'", source)
+        runner.write_text(source.replace("'https://github.com/fitchmultz/pi-agent-browser-native.git'", repr(str(fork))))
         # Provisioning runs npm and the build under the repository's pinned Node.
         (self.root / 'scripts/tron-node').write_text(f'#!/bin/bash\nexec {ROOT / "scripts/tron-node"} "$@"\n')
         self.adapter.write_text(f'"git:github.com/fitchmultz/pi-agent-browser-native@{commit}"\n')
@@ -1163,10 +1177,22 @@ class BrowserForkProvisionTests(unittest.TestCase):
         commit = self.fork_repository("import { mkdirSync, writeFileSync } from 'node:fs';\n"
                                       "mkdirSync('dist/extensions/agent-browser', { recursive: true });\n"
                                       "writeFileSync('dist/extensions/agent-browser/index.js', 'export default () => {};\\n');\n")
-        done = self.run_gateway()
+        fixtures = self.root / '.git/verify/fixtures'
+        killed = fixtures / '.pi-agent-browser-native-killed'
+        killed.mkdir()
+        (killed / 'partial').write_text('')
+        # A caller's GIT_DIR (a hook, say) must not redirect the fixture's own repository.
+        decoy = self.root / 'decoy.git'
+        subprocess.run(['git', 'init', '-q', '--bare', str(decoy)], check=True)
+        node = subprocess.check_output([str(ROOT / 'scripts/tron-node')], text=True).strip()
+        done = self.run_gateway(env={'GIT_DIR': str(decoy), 'TRON_NODE_BIN': node})
         self.assertEqual(done.returncode, 0, done.stderr)
-        target = self.root / '.git/verify/fixtures' / f'pi-agent-browser-native-{commit}'
+        self.assertEqual(list((decoy / 'objects/pack').iterdir()) + [path for path in (decoy / 'objects').iterdir() if path.name not in ('pack', 'info')], [],
+                         'provisioning wrote into the caller\'s repository')
+        target = fixtures / f'pi-agent-browser-native-{commit}'
         self.assertEqual(self.seen.read_text().split(), [str(target)])
+        self.assertFalse(killed.exists(), 'a killed provisioner\'s staging survived')
+        self.assertFalse((target / 'postinstall-ran').exists(), 'a lifecycle script ran')
         self.assertEqual((target / '.tron-provisioned').read_text(), commit)
         self.assertEqual(subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'], text=True).strip(), commit)
         self.assertTrue((target / 'dist/extensions/agent-browser/index.js').is_file())
@@ -1178,6 +1204,7 @@ class BrowserForkProvisionTests(unittest.TestCase):
         commit = self.fork_repository("process.exit(3);\n")
         done = self.run_gateway()
         self.assertNotEqual(done.returncode, 0)
+        self.assertIn('scripts/build.mjs', done.stderr)
         self.assertFalse(self.seen.exists())
         fixtures = self.root / '.git/verify/fixtures'
         self.assertEqual(sorted(path.name for path in fixtures.iterdir() if path.name.startswith(('.pi-agent', 'pi-agent-browser-native-' + commit))), [])
