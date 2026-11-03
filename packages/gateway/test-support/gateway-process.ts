@@ -29,6 +29,8 @@ const preloads = ["home-ledger-crash-preload.mjs", "attention-recovery-hold-prel
 
 export const SCRIPTED_PROVIDER = "scripted";
 export const SCRIPTED_MODEL = "scripted-model";
+/** A model for background roles (Home memory), answered outside the ordered script. */
+export const BACKGROUND_MODEL = "scripted-background";
 
 /** One OpenAI chat-completions request the Gateway's Pi made. */
 export interface ScriptedRequest {
@@ -53,6 +55,9 @@ export interface ScriptedProvider {
   readonly errors: ReadonlyArray<string>;
   /** Steps answer requests in order; an unscripted request is answered with HTTP 500. */
   script(steps: readonly ScriptedStep[]): void;
+  /** Answer every request for `model` with `step`, outside the ordered script: a
+   * background role (Home memory) pointed at that model then never consumes a scripted turn. */
+  answerModel(model: string, step: ScriptedStep): void;
   close(): Promise<void>;
 }
 
@@ -65,6 +70,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
   const requests: ScriptedRequest[] = [];
   const errors: string[] = [];
   let steps: ScriptedStep[] = [];
+  const standing = new Map<string, ScriptedStep>();
   const server: Server = createHttpServer(async (request: IncomingMessage, response: ServerResponse) => {
     const parts: Buffer[] = [];
     try { for await (const chunk of request) parts.push(chunk as Buffer); } catch (error) {
@@ -82,7 +88,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
     }
     const record: ScriptedRequest = { model: String(parsed.model), messages: parsed.messages ?? [], body };
     requests.push(record);
-    const step = steps.shift();
+    const step = standing.get(record.model) ?? steps.shift();
     if (!step) {
       response.writeHead(500, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { message: "unscripted provider request" } }));
@@ -117,6 +123,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
     requests,
     errors,
     script(next) { steps = [...next]; },
+    answerModel(model, step) { standing.set(model, step); },
     async close() {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -138,7 +145,10 @@ export interface GatewayProcess {
   readonly provider: ScriptedProvider;
   /** The live child's PID; changes on `restart()`. */
   pid(): number;
-  connect(): Promise<ProcessClient>;
+  /** Connect with the Mac's local credential, or with a paired device token from `pair()`. */
+  connect(options?: { token?: string }): Promise<ProcessClient>;
+  /** Pair a device as the phone does: `POST /v1/pair` with the current invitation code. */
+  pair(deviceName: string): Promise<{ deviceId: string; token: string }>;
   /** Every `gateway.jsonl` record written so far, across restarts. */
   log(): Promise<Array<Record<string, any>>>;
   /** Stop this process and start the same entrypoint over the same root and port.
@@ -211,7 +221,7 @@ async function launchGatewayProcess(
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
   await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { [SCRIPTED_PROVIDER]: {
     baseUrl: `http://127.0.0.1:${provider.port}/v1`, api: "openai-completions", apiKey: "fixture-only",
-    models: [model(SCRIPTED_MODEL), model("scripted-alternate")] } } }, null, 2));
+    models: [model(SCRIPTED_MODEL), model("scripted-alternate"), model(BACKGROUND_MODEL)] } } }, null, 2));
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
     defaultProvider: SCRIPTED_PROVIDER, defaultModel: SCRIPTED_MODEL, defaultProjectTrust: "never",
     enableAnalytics: false, enableInstallTelemetry: false, ...options.settings,
@@ -261,9 +271,19 @@ async function launchGatewayProcess(
     root, tronHome, agentDir, cwd, provider,
     pid: () => child.pid!,
     log: readLog,
-    async connect() {
+    async pair(deviceName) {
+      const { code } = JSON.parse(await readFile(join(tronHome, "gateway", "enrollment.json"), "utf8")) as { code: string };
+      const response = await fetch(`http://127.0.0.1:${port}/v1/pair`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, deviceName }),
+      });
+      const body = await response.json() as { deviceId?: string; token?: string };
+      if (!response.ok || !body.deviceId || !body.token) throw new Error(`pairing failed: ${response.status} ${JSON.stringify(body)}`);
+      return { deviceId: body.deviceId, token: body.token };
+    },
+    async connect(connectOptions = {}) {
+      const token = connectOptions.token ?? await readLocalCredential(tronHome);
       const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, {
-        headers: { authorization: `Bearer ${await readLocalCredential(tronHome)}` }, maxPayload: 16 * 1024 * 1024,
+        headers: { authorization: `Bearer ${token}` }, maxPayload: 16 * 1024 * 1024,
       });
       clients.add(socket);
       const events: Array<{ topic: string; sessionId?: string; payload: any }> = [];
