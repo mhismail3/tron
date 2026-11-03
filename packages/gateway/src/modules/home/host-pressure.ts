@@ -39,9 +39,9 @@ const CRITICAL_UTILIZATION = 0.95;
 const SAMPLE_REUSE_MS = 2_000;
 
 /** One CPU's cumulative kernel ticks since boot, as `os.cpus()` reports them. */
-interface CpuTicks { busy: number; total: number }
+export interface CpuTicks { busy: number; total: number }
 
-function readCpuTicks(): CpuTicks[] {
+export function readCpuTicks(): CpuTicks[] {
   return os.cpus().map(({ times }) => {
     const busy = times.user + times.nice + times.sys + times.irq;
     return { busy, total: busy + times.idle };
@@ -51,7 +51,7 @@ function readCpuTicks(): CpuTicks[] {
 /** Busy share of all CPUs between two tick readings, 0..1. A window that cannot be
  * measured reads 0 rather than inventing pressure: the CPU count changed (hotplug),
  * a counter went backwards (reset), or no tick advanced. */
-function busyShare(previous: readonly CpuTicks[], current: readonly CpuTicks[]): number {
+export function busyShare(previous: readonly CpuTicks[], current: readonly CpuTicks[]): number {
   if (current.length === 0 || previous.length !== current.length) return 0;
   let busy = 0;
   let total = 0;

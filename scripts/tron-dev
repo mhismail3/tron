@@ -282,7 +282,9 @@ case "$command" in
       esac
       TRON_DEV_STOPPED=1 "$NODE_BIN" "$DEPLOY" select-dev --channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" >&2
       if [[ "$HOST" == tailscale ]]; then supervisor_host_arg=--tailscale; else supervisor_host_arg=--loopback; fi
-      nohup "$0" __supervise "$supervisor_host_arg" >"$LOG_FILE" 2>&1 &
+      # Its own session without the task scope anchor (fd 19): the shared Debug Gateway outlives
+      # the task that started it (packages/gateway/docs/host-load.md).
+      nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$0" __supervise "$supervisor_host_arg" >"$LOG_FILE" 2>&1 19<&- &
       supervisor_pid=$!
       printf '%s\n' "$supervisor_pid" >"$PID_FILE"
       for _ in $(seq 1 80); do
