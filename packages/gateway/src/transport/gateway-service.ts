@@ -1417,7 +1417,11 @@ export class GatewayService {
         const syncToken = client.beginSynchronization(canonicalSessionId);
         // The request span measures acquire, the snapshot build and the response
         // serialization; a slow open needs no record of its own.
-        const snapshot = slot.snapshot();
+        const built = slot.snapshot();
+        // BREAK (#2230 proof, not for landing): session.open repeats each assistant reply.
+        const snapshot = { ...built, transcript: built.transcript.flatMap((item: any) => item.kind === "message" && item.role === "assistant"
+          ? [item, { ...item, id: `${item.id}-dup`, presentationId: `${item.presentationId}-dup`,
+            content: item.content.map((part: any) => ({ ...part, id: `${part.id}-dup` })) }] : [item]) } as typeof built;
         if (snapshot.sessionId !== canonicalSessionId) {
           throw new GatewayError("conflict", "Session identity changed while opening", true);
         }
