@@ -73,15 +73,13 @@ function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
  * has no readiness signal, and on macOS a write made before its FSEvents stream starts
  * is never reported; under parallel load that window outlasted these cases' first write,
  * so no rescan ever ran (#1650, #1506). The probe rewrites `settings.json` with its own
- * bytes, an unchanged digest that records nothing, until a watcher-driven rescan rewrites
- * `observed.json` (every rescan stamps `seen`). It never reads settings itself, so a
+ * bytes, an unchanged digest that records nothing, until a watcher-driven rescan settles
+ * (`outside.reconcile` is wrapped to count it). It never reads settings itself, so a
  * broken watcher still fails here with this label.
  */
 async function watcherDelivers(outside: OutsideChanges, agentDir: string): Promise<void> {
   const settings = join(agentDir, "settings.json");
   const bytes = await readFile(settings);
-  // An unchanged comparison writes nothing, so the watcher's delivery is observed
-  // as the rescan it starts (the callers make no other read meanwhile), settled.
   let rescans = 0;
   const reconcile = outside.reconcile;
   outside.reconcile = (...args) => {

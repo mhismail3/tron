@@ -436,7 +436,8 @@ export class OutsideChanges {
   }
 
   private async save(document: ObservedDocument): Promise<void> {
-    // Bound the known projects: the least recently read leave first.
+    // Bound the known projects: the least recently read leave first. `seen` is
+    // exact in process; after a restart it is the last persisted change.
     for (const prefix of ["project:", "project-mcp:"]) {
       const projects = Object.entries(document.stores).filter(([id]) => id.startsWith(prefix))
         .sort(([, left], [, right]) => left.seen.localeCompare(right.seen));
