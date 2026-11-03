@@ -68,7 +68,6 @@ class Repo:
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.path / relative)
         self.write(".gitignore", "test-results/\n")
-        self.write("tools/verify/known-failures.json", "[]\n")
         self.write("README.md", "# Fixture\n")
         self.write("AGENTS.md", AGENTS)
         # The least guidance the real agent policy accepts: a catalog naming the iOS skill it reads.
@@ -267,7 +266,7 @@ class ExternalVerificationTests(VerifyCase):
         self.assertNotIn("Traceback", malformed.stderr)
 
 
-class QuarantineTests(VerifyCase):
+class GatewayFailureTests(VerifyCase):
     """Real verify CLI/process boundary consuming the Vitest JSON protocol, without skipping tests."""
 
     def fixture(self):
@@ -289,7 +288,7 @@ class QuarantineTests(VerifyCase):
         manifest["owns"].append("scripts/tron-node")
         r.write("tooling.module.json", json.dumps(manifest))
         # The spawned producer writes the actual runner's reporting protocol. It always
-        # executes; quarantine must classify the output, never suppress the invocation.
+        # executes; verify classifies its output, never suppresses the invocation.
         r.write("tools/verify/gateway.py", "import json,pathlib,sys\n"
                 "out=next(a.split('=',1)[1] for a in sys.argv if a.startswith('--outputFile.json='))\n"
                 "report=json.loads(pathlib.Path('report-input.json').read_text())\n"
@@ -303,84 +302,33 @@ class QuarantineTests(VerifyCase):
                                  {"fullName": "sample passes", "status": "passed"}]}]}))
         r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\npackages/gateway/test-results-executed\n")
         r.commit("report protocol producer")
-        entry = {"testId": path + "::sample known failure", "evidence": {"command": "scripts/tron test gateway src/sample.integration.test.ts",
-                 "commit": r.git("rev-parse", "HEAD"), "failureDigest": hashlib.sha256(json.dumps(["Error: original defect"]).encode()).hexdigest()}, "issue": 2128, "expires": (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()}
-        return entry
-
-    def test_exact_quarantine_is_qualified_and_unknown_or_suite_errors_fail(self):
+    def test_every_gateway_case_failure_is_raw_red_without_exemption(self):
         r = self.repo
-        entry = self.fixture()
-        r.write("tools/verify/known-failures.json", json.dumps([entry]))
-        r.commit("quarantine exact case")
-        result = r.verify("--module", "gateway/sample")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        report = r.report()
-        self.assertEqual(report["verdict"], "quarantined")
-        step = next(s for s in report["steps"] if s["name"] == "tests: gateway")
-        self.assertEqual(step["quarantined"], [{"testId": entry["testId"], "expires": entry["expires"], "issue": 2128}])
-        self.assertEqual(report["passingTests"], 1)
-        self.assertTrue((r.path / "packages/gateway/test-results-executed").exists())
-        self.assertIn(entry["expires"], result.stdout)
-        card = r.health()['fields']
-        self.assertEqual(card['mainReds']['verifierOutcomes'], {'quarantined': 1})
-        self.assertEqual(card['mainReds']['quarantinedCases'], 1)
-        self.assertIsNone(card['flakeRate']['rate'], 'one attempt is unknown, never zero')
-        self.assertEqual((card['flakeRate']['failingAttempts'], card['flakeRate']['totalAttempts']), (1, 2))
+        self.fixture()
         original = (r.path / "packages/gateway/report-input.json").read_text()
-        # All executed cases may be quarantined; zero passing is not zero executed.
-        raw = json.loads(original)
-        raw["numPassedTests"] = 0
-        raw["testResults"][0]["assertionResults"] = raw["testResults"][0]["assertionResults"][:1]
-        r.write("packages/gateway/report-input.json", json.dumps(raw))
-        r.commit("only executed case is quarantined")
-        result = r.verify("--module", "gateway/sample")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(r.report()["verdict"], "quarantined")
-        self.assertEqual(r.report()["passingTests"], 0)
-        for change in ("unknown", "same-case-new-failure", "coexisting-suite-error", "unhandled-error", "nested-hook-error", "suite-error", "missing-report"):
+        for change in ("exact", "unknown", "suite-error", "missing-report"):
             with self.subTest(change=change):
                 raw = json.loads(original)
                 if change == "unknown":
                     raw["testResults"][0]["assertionResults"][0]["fullName"] = "different failure"
-                elif change == "same-case-new-failure":
-                    raw["testResults"][0]["assertionResults"][0]["failureMessages"] = ["Error: a new regression in this same case"]
-                elif change == "coexisting-suite-error":
-                    raw["testResults"][0]["message"] = "afterAll hook failed after the known assertion"
-                elif change == "unhandled-error":
-                    raw["diagnostic"] = "Vitest caught 1 unhandled error during the test run."
-                elif change == "nested-hook-error":
-                    raw["diagnostic"] = "Failed Suites 1"
                 elif change == "suite-error":
                     raw["numFailedTestSuites"] = 2
                     raw["testResults"].append({"name": "broken suite", "status": "failed", "message": "setup error", "assertionResults": []})
-                else:
+                elif change == "missing-report":
                     r.write("tools/verify/gateway.py", "import sys\nsys.exit(1)\n")
-                r.write("packages/gateway/report-input.json", json.dumps(raw))
-                r.commit(change)
+                if change != "exact":
+                    r.write("packages/gateway/report-input.json", json.dumps(raw))
+                    r.commit(change)
                 result = r.verify("--module", "gateway/sample")
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertEqual(r.report()["verdict"], "failed")
+                report = r.report()
+                self.assertEqual(report["verdict"], "failed")
+                self.assertNotIn("expiredEntries", report)
+                if change != "missing-report":
+                    self.assertTrue((r.path / "packages/gateway/test-results-executed").exists())
                 card = r.health()['fields']['mainReds']
                 self.assertEqual(card['verifierOutcomes'], {'failed': 1})
                 self.assertNotEqual(card['status'], 'available')
-
-    def test_overlong_duplicate_and_malformed_entries_fail_loudly(self):
-        r = self.repo
-        entry = self.fixture()
-        for entries in ([{**entry, "expires": "2099-01-01"}], [entry, entry], [{**entry, "evidence": {}}],
-                        [{**entry, "evidence": {**entry["evidence"], "commit": "0" * 40}}]):
-            with self.subTest(entries=entries):
-                r.write("tools/verify/known-failures.json", json.dumps(entries))
-                r.commit("invalid registry")
-                result = r.verify("--module", "repo/alpha")
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("known-failures", result.stdout + result.stderr)
-                self.assertFalse((r.path / "packages/gateway/test-results-executed").exists())
-                card = r.health()['fields']['mainReds']
-                self.assertEqual(card['verifierOutcomes'], {'failed': 1})
-                expected = 'registry-invalid'
-                self.assertEqual(card['sourceRefusals'], {expected: 1})
-                self.assertIsNone(card['numerator'])
 
     def test_health_reports_git_publication_cycle_and_missing_goal_evidence(self):
         r = self.repo
@@ -495,7 +443,7 @@ class QuarantineTests(VerifyCase):
             for forbidden in ('PRIVATE_SENTINEL', 'failureMessages', 'fullName', 'arguments', 'prompt', 'credentials', str(r.path), 'packages/gateway/src/'):
                 self.assertNotIn(forbidden, text)
         r.write('test-results/malformed.json', json.dumps({'schema': 'tron.verify.v1', 'commit': first['commit'],
-            'steps': [{'quarantined': [{'testId': 42}]}], 'prompt': 'PRIVATE_SENTINEL'}))
+            'steps': [{'caseOutcomes': [{'caseDigest': 42, 'status': 'failed'}]}], 'prompt': 'PRIVATE_SENTINEL'}))
         malformed = subprocess.run([str(r.path / 'scripts/tron'), 'health', '--sha', 'HEAD',
                                    '--verify-report', 'test-results/malformed.json'], cwd=r.path,
                                   env=r.env, capture_output=True, text=True)

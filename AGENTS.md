@@ -102,15 +102,15 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 [Principles](docs/PRINCIPLES.md) own delivery policy: verification gates promotion, not authorship.
 `scripts/tron verify --plan`: **none** = docs/static; **partial** = affected owner/consumer checks;
 **full** = affected now, the post-land batch covers the rest. The [selector](tools/verify/README.md)
-owns deferred serial tests and risk; no phase/LOC gate, merge queue or automatic push/revert.
+owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the batch auto-reverts.
 1. Commit in your own worktree; enable rerere. Fetch main into private `FETCH_HEAD` and merge
    deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
-   Run affected checks plus registry validation before landing; obtain independent ACCEPT
+   Run affected checks before landing; obtain independent ACCEPT
    where required. Do not repeat broad main baselines per worker or retry-to-green.
 2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push
    origin HEAD:main`; never force-push. On a race, fetch/merge and rerun only evidence
-   invalidated by integration. Workers never run full suites or ABBA reruns; batch reds go
-   to their issue owner (fix-forward or revert landing).
+   invalidated by integration. Workers never run full suites or ABBA reruns; a batch red is
+   causally reverted or stays red with its issue, and the owner root-fixes before relanding.
 3. Close the issue with the change, actual commands and results, and residual risk;
    link long logs (`test-results/`, internal workspace). Use plain Git to integrate/push. Incidents also name the one-step diagnosing signal, added
    with a test and a row in its module README Signals (`packages/gateway/docs/observability.md`).

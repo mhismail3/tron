@@ -13,7 +13,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -473,87 +473,6 @@ class Run:
         self.on_update()
 
 
-def known_failures() -> dict[str, dict]:
-    """Validate retained original/renewal evidence; expiry is a verdict, not invalid data."""
-    path = ROOT / "tools/verify/known-failures.json"
-    try:
-        if path.stat().st_size > 128 * 1024:
-            raise ValueError("registry exceeds 128 KiB")
-        entries = json.loads(path.read_text())
-        if not isinstance(entries, list) or len(entries) > 100:
-            raise ValueError("expected an array of at most 100 entries")
-        known = {}
-        for entry in entries:
-            if not isinstance(entry, dict) or set(entry) not in ({"testId", "evidence", "issue", "expires"}, {"testId", "evidence", "issue", "expires", "renewedFrom"}):
-                raise ValueError("each entry needs testId, evidence, issue and expires")
-            identity, evidence = entry["testId"], entry["evidence"]
-            if not isinstance(identity, str) or "::" not in identity:
-                raise ValueError("testId must be a repository-relative test path::full case name")
-            file, case = identity.split("::", 1)
-            gateway_case = file.startswith(f"{GATEWAY}/src/") and file.endswith(".test.ts")
-            mac_observation = file.startswith("packages/mac-app/Tests/Integration/") and file.endswith(".swift")
-            if not (gateway_case or mac_observation) or ".." in Path(file).parts or not case.strip() or not (ROOT / file).is_file():
-                raise ValueError(f"invalid testId: {identity}")
-            previous = known.get(identity)
-            if previous and (previous.get("renewedFrom") or entry.get("renewedFrom") != previous["evidence"]["commit"]):
-                raise ValueError(f"duplicate testId or second renewal: {identity}")
-            if not previous and "renewedFrom" in entry:
-                raise ValueError(f"renewal must retain its original entry first: {identity}")
-            if type(entry["issue"]) is not int or entry["issue"] <= 0 or not isinstance(evidence, dict) or set(evidence) != {"command", "commit", "failureDigest"}:
-                raise ValueError(f"missing owner issue or failing evidence: {identity}")
-            if not isinstance(evidence["command"], str) or not evidence["command"].strip() or not isinstance(evidence["commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", evidence["commit"]):
-                raise ValueError(f"invalid failing command/commit: {identity}")
-            if not isinstance(evidence["failureDigest"], str) or not re.fullmatch(r"[0-9a-f]{64}", evidence["failureDigest"]):
-                raise ValueError(f"invalid failureDigest: {identity}")
-            git("merge-base", "--is-ancestor", evidence["commit"], "HEAD")
-            expiry = date.fromisoformat(entry["expires"])
-            reproduced = datetime.fromisoformat(git("show", "-s", "--format=%cI", evidence["commit"]).strip().replace("Z", "+00:00")).astimezone(timezone.utc).date()
-            if expiry.isoformat() != entry["expires"] or not reproduced < expiry <= reproduced + timedelta(days=7):
-                raise ValueError(f"quarantine must expire within 7 days of reproduction: {identity}")
-            if previous:
-                if evidence["commit"] == previous["evidence"]["commit"] or reproduced < date.fromisoformat(previous["expires"]):
-                    raise ValueError(f"renewal needs a fresh reproduction after expiry: {identity}")
-                git("merge-base", "--is-ancestor", previous["evidence"]["commit"], evidence["commit"])
-            known[identity] = entry
-        # Git retains renewal history even after a fixed case leaves the registry.
-        # A removed original cannot reset the one-renewal budget on re-registration.
-        history: dict[str, set[str]] = {}
-        for revision in git("log", "--format=%H", "--", "tools/verify/known-failures.json").splitlines():
-            try:
-                old_entries = json.loads(git("show", f"{revision}:tools/verify/known-failures.json"))
-            except (ValueError, VerifyError):
-                continue
-            if not isinstance(old_entries, list):
-                continue
-            for old in old_entries:
-                if isinstance(old, dict) and isinstance(old.get("evidence"), dict):
-                    identity, commit = old.get("testId"), old["evidence"].get("commit")
-                    if identity in known and isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}", commit):
-                        try:
-                            git("merge-base", "--is-ancestor", commit, "HEAD")
-                        except VerifyError:
-                            continue
-                        history.setdefault(identity, set()).add(commit)
-        retained = {}
-        for entry in entries:
-            retained.setdefault(entry["testId"], set()).add(entry["evidence"]["commit"])
-        for identity, commits in history.items():
-            if len(commits) > 2 or not commits <= retained[identity]:
-                raise ValueError(f"renewal history must be retained; at most one renewal: {identity}")
-        # Swift observations are retained provenance, never executable waivers.
-        # The Mac runner must still pass; matching is only applied to Gateway reports.
-        return known
-    except (OSError, ValueError, TypeError, VerifyError) as error:
-        raise VerifyError(f"known-failures: {error}") from error
-
-
-def expired_failures(known: dict[str, dict]) -> list[dict]:
-    """All stale records are checkpoint blockers, never pre-land admission failures."""
-    today = datetime.now(timezone.utc).date().isoformat()
-    return [{"testId": identity, "expires": entry["expires"], "issue": entry["issue"]}
-            for identity, entry in known.items() if entry["expires"] <= today]
-
-
 def failure_digest(messages: list[str]) -> str:
     # Only the checkout prefix varies between base/candidate. Preserve messages,
     # stack locations and temporary paths: a changed failure must not be waived.
@@ -707,28 +626,6 @@ def main(argv: list[str]) -> int:
         print(f"verify: {error}", file=sys.stderr)
         return 2
 
-    try:
-        known = known_failures()
-        expired = expired_failures(known)
-    except VerifyError as error:
-        print(f"verify: {error}", file=sys.stderr)
-        if not args.plan:
-            # Validation is an actual refused invocation. Retain that exact-SHA
-            # outcome too; health must not confuse expiry with an absent run.
-            import batch
-            directory = ROOT / 'test-results/verify'
-            directory.mkdir(parents=True, exist_ok=True)
-            refusal = 'registry-invalid'
-            batch.save(directory / f'{sha}.json', {
-                'schema': 'tron.verify.v1', 'commit': sha, 'verdict': 'failed',
-                'sourceRefusal': refusal, 'message': refusal, 'selection': selection, 'steps': [], 'groups': {},
-                'resultDigest': hashlib.sha256(json.dumps({'commit': sha, 'selection': selection, 'refusal': refusal}, sort_keys=True).encode()).hexdigest(),
-                'skipped': sorted(skip), 'passingTests': 0, 'caseEvidenceComplete': False,
-                'attemptId': str(time.time_ns()),
-            })
-        return 1
-    for entry in expired:
-        print(f"    EXPIRED RED: {entry['testId']} — expiry {entry['expires']}, issue #{entry['issue']}; blocks checkpoints, not authorship", flush=True)
     nested, mac_terminal = nested_files()
     groups: dict[str, list[str]] = {}
     try:
@@ -824,17 +721,9 @@ def main(argv: list[str]) -> int:
     report_path = ROOT / "test-results" / "verify" / f"{sha}.json"
 
     def finish(verdict: str, message: str, announce: bool = True) -> int:
-        quarantined = [entry for step in run.steps for entry in step.get("quarantined", [])]
-        expired_reds = [entry for step in run.steps for entry in step.get("expiredReds", [])]
         if verdict == "passed" and any(step["status"] == "deferred" for step in run.steps):
             verdict = "deferred"
             message += "; iOS acquisition deferred to batch, NOT a test pass"
-        if verdict == "passed" and (expired_reds or (name == "all" and expired)):
-            verdict = "expired"
-            message += "; exact expired reds; NOT checkpoint eligible"
-        if verdict == "passed" and quarantined:
-            verdict = "quarantined"
-            message += f"; {len(quarantined)} known failure(s), NOT an unqualified pass"
         comparable = {"commit": sha, "selection": selection, "steps": [{k: v for k, v in step.items() if k not in ("seconds", "log", "detail")} for step in run.steps], "verdict": verdict}
         case_steps = [step for step in run.steps if step['name'].startswith('tests:')]
         report = {"schema": "tron.verify.v1", "commit": sha, "verdict": verdict, "message": message,
@@ -843,7 +732,6 @@ def main(argv: list[str]) -> int:
                   "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
-                  "expiredEntries": expired,
                   # A selection, even --all, is not the complete post-land batch.
                   "checkpointEligible": False,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}
@@ -853,7 +741,7 @@ def main(argv: list[str]) -> int:
         if announce:
             print(f"verify: {verdict.upper()} — {message}", flush=True)
             print(f"verify: report {report_path.relative_to(ROOT)} (result digest {report['resultDigest'][:16]})", flush=True)
-        return 0 if verdict in ("passed", "quarantined", "expired", "deferred") else 1
+        return 0 if verdict in ("passed", "deferred") else 1
 
     run.on_update = lambda: finish("interrupted" if any(s["status"] == "interrupted" for s in run.steps) else "running",
                                    "partial results; verification is not complete", announce=False)
@@ -941,21 +829,12 @@ def main(argv: list[str]) -> int:
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
             if group in ("gateway", "gateway-nested") and result["status"] == "failed":
-                failed, complete = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
+                failed, _ = gateway_failures(report, (ROOT / result["log"]).read_text(errors="replace"))
                 result["failedTests"] = list(failed)
                 print("\n".join(f"    failed: {identity}" for identity in failed), flush=True)
-                if result["exit"] == 1 and complete and all(identity in known and digest == known[identity]["evidence"]["failureDigest"] for identity, digest in failed.items()):
-                    expired_ids = {entry["testId"] for entry in expired}
-                    result.update(status="expired" if expired_ids & failed.keys() else "quarantined", tests=count(""),
-                        quarantined=[{"testId": identity, "expires": known[identity]["expires"], "issue": known[identity]["issue"]}
-                                     for identity in failed if identity not in expired_ids],
-                        expiredReds=[entry for entry in expired if entry["testId"] in failed])
-                    for entry in result["quarantined"]:
-                        print(f"    QUARANTINED: {entry['testId']} — expires {entry['expires']}, issue #{entry['issue']}", flush=True)
-                    run.on_update()
             if result["status"] == "failed":
                 return finish("failed", f"{label} failed")
-            if not result.get("tests") and not result.get("quarantined") and not result.get("expiredReds"):
+            if not result.get("tests"):
                 result["status"] = "failed"
                 return finish("failed", f"{label} ran zero passing tests: an empty group is not evidence")
         passing = sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))
@@ -967,7 +846,7 @@ def main(argv: list[str]) -> int:
             return finish("passed", "Empty or documentation-only change: static/documentation checks are its evidence")
         if passing == 0 and selection["deferredTests"]:
             return finish("passed", f"affected static checks passed; {len(selection['deferredTests'])} serial test file(s) deferred; full batch is not green")
-        if passing == 0 and not any(step.get("quarantined") or step.get("expiredReds") for step in run.steps):
+        if passing == 0:
             return finish("failed", "zero tests ran: an empty selection is not evidence")
         groups_run = len({step["name"].split()[1] for step in run.steps if step["name"].startswith("tests:") and step["status"] == "ok"})
         return finish("passed", f"{passing} passing test(s) across {groups_run} runner group(s)"

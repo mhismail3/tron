@@ -1,6 +1,9 @@
 # Causal source auto-revert
 
-Design for #2194 under #2173; **not implemented or enabled** by this document.
+Design for #2194 under #2173. The implemented contract and its single enable step are in
+[batch.md](../../tools/verify/batch.md);
+publication is off by default. Structured failure classes, provenance and repeat tallies
+below remain design only.
 [Principles P2/P3/P8](../PRINCIPLES.md) own policy. #2176 owns fast affected checks
 and asynchronous full-main E2E execution; #2194 owns attribution and source repair.
 Feature landing never waits for this pipeline. Production lifecycle, installed

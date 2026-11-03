@@ -38,7 +38,8 @@ require root fixes or causal reverts: no quarantines, waivers, known-failure exe
 qualified greens or base-match excuses. Preserve the first failure, exact SHA, command
 and raw logs/counts. A passing retry is nondeterminism evidence, not resolution.
 Missing required coverage is not green. Diagnose an unattributed red before choosing
-any revert target; never guess. Existing registry mechanics grant no exemption.
+any revert target; never guess. The [batch owner](batch.md)
+reverts only a culprit proven by fresh controls.
 
 Run affected checks before landing; broad post-land coverage belongs to the
 [batch owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship), not duplicated per-worker suites. Report counts, skips,

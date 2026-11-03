@@ -87,36 +87,25 @@ def deploy(main: str, mac: dict | None, iphone: dict | None) -> dict:
 
 def score(main: str, reports: list[dict], mac: dict | None, iphone: dict | None) -> dict:
     exact = [r for r in reports if r.get('commit') == main and r.get('schema') == 'tron.verify.v1']
-    verdicts = Counter(r.get('verdict') if r.get('verdict') in ('passed', 'quarantined', 'expired', 'deferred', 'failed', 'running', 'interrupted', 'incomplete') else 'unknown' for r in exact)
-    quarantined, waived, failures, attempts = set(), set(), set(), defaultdict(list)
+    verdicts = Counter(r.get('verdict') if r.get('verdict') in ('passed', 'deferred', 'failed', 'running', 'interrupted', 'incomplete') else 'unknown' for r in exact)
+    failures, attempts = set(), defaultdict(list)
     harness = 0
     gaps = []
-    refusals = Counter()
     for report in exact:
-        if report.get('sourceRefusal') in ('registry-expired', 'registry-invalid'):
-            refusals[report['sourceRefusal']] += 1
-            gaps.append(report['sourceRefusal'])
-        if report.get('expiredEntries'):
-            gaps.append('expired registry entries block checkpoints')
         if report.get('skipped') or report.get('selection', {}).get('deferredTests'):
             gaps.append('skipped or deferred tests')
         if report.get('selection', {}).get('docsOnly'):
             gaps.append('static-only report is not main test coverage')
-        if report.get('verdict') not in ('passed', 'quarantined'):
+        if report.get('verdict') != 'passed':
             gaps.append('non-complete verifier outcome retained')
         for step in report.get('steps', []):
             if step.get('status') in ('skipped', 'deferred', 'running', 'interrupted') and step.get('name', '').startswith('tests:'):
                 gaps.append('missing or interrupted test lane')
-            qualified = {hashlib.sha256(q['testId'].encode()).hexdigest() for q in step.get('quarantined', [])}
-            quarantined.update(qualified)
             for case in step.get('caseOutcomes', []):
                 if not re.fullmatch('[0-9a-f]{64}', case['caseDigest']) or (case['status'] == 'failed' and not re.fullmatch('[0-9a-f]{64}', case['failureDigest'])):
                     raise ValueError('invalid case digest')
                 if case['status'] == 'failed':
-                    signature = (case['caseDigest'], case['failureDigest'])
-                    failures.add(signature)
-                    if case['caseDigest'] in qualified:
-                        waived.add(signature)
+                    failures.add((case['caseDigest'], case['failureDigest']))
             if step.get('status') == 'failed' and not any(c['status'] == 'failed' for c in step.get('caseOutcomes', [])):
                 harness += 1
         # Only the source owner can assert a case was actually executed. Older
@@ -144,12 +133,11 @@ def score(main: str, reports: list[dict], mac: dict | None, iphone: dict | None)
     total = len(observed_attempts)
     reasons = sorted(set(gaps))
     case_evidence = any(step.get('caseOutcomes') for report in exact for step in report.get('steps', []))
-    main_reds = field('partial' if exact else 'unavailable', len(failures - waived) if case_evidence else None, len(exact),
+    main_reds = field('partial' if exact else 'unavailable', len(failures) if case_evidence else None, len(exact),
                      reasons + ([] if exact else ['no exact-SHA verifier report']) + ['affected reports do not prove all main lanes; first-failure/fix/owner timestamps absent'],
                      distinctFailures=len(failures) if case_evidence else None,
-                     newRedSignatures=len(failures - waived) if case_evidence else None,
-                     quarantinedCases=len(quarantined) if exact else None, harnessErrors=harness if exact else None,
-                     verifierOutcomes=dict(verdicts), sourceRefusals=dict(refusals), firstFailureToFixSeconds=None, firstFailureToOwnerSeconds=None)
+                     harnessErrors=harness if exact else None,
+                     verifierOutcomes=dict(verdicts), firstFailureToFixSeconds=None, firstFailureToOwnerSeconds=None)
     flake = field('partial' if comparable and (gaps or changed) else 'available' if comparable else 'unavailable',
                   flaky if comparable else None, len(comparable), reasons + (['changed failure signatures excluded'] if changed else [])
                   + ([] if comparable else ['no comparable repeated case attempts; one attempt is unknown, not zero']),
@@ -204,7 +192,7 @@ def landed_changes(main: str, reports: list[dict]) -> list[dict]:
                 if report.get('schema') == 'tron.verify.v1' and report.get('commit') == commit and report.get('attemptId'):
                     attempts[(commit, report['attemptId'])] = report
         durations = [step['seconds'] for report in attempts.values() for step in report.get('steps', [])
-                     if step.get('name', '').startswith('tests:') and step.get('status') in ('ok', 'failed', 'quarantined')
+                     if step.get('name', '').startswith('tests:') and step.get('status') in ('ok', 'failed')
                      and type(step.get('seconds')) in (int, float) and math.isfinite(step['seconds']) and step['seconds'] >= 0]
         rows.append({'commit': sha, 'firstCommit': first, 'introducedCommits': len(commits) if first else None,
                      'publicationObservedAt': datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp else None,

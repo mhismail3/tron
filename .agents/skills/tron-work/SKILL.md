@@ -27,7 +27,7 @@ git merge --no-edit FETCH_HEAD
 
 On conflict, stop; keep the branch/index/worktree and resolve deliberately. Never
 stash, reset away work, or retry a failed merge blindly. Review reused rerere
-resolutions. Run `scripts/tron verify --plan`, affected checks and registry validation.
+resolutions. Run `scripts/tron verify --plan` and the affected checks.
 Obtain independent ACCEPT for test edits; follow the [oracle policy](../../../tools/verify/test-oracles.md).
 Prepare pinned Gateway dependencies only when selected checks need them. Review with
 `git diff --binary --full-index <base> HEAD --`; privacy-check exported patches.
@@ -50,7 +50,8 @@ A non-fast-forward refusal preserves your candidate. Fetch/integrate again;
 rerun tests only if integration changed their dependencies. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
-Do not run full suites after landing: the post-land batch owns that coverage
+Do not run full suites after landing: the asynchronous main batch owns that coverage and
+the causal revert of a proven culprit
 ([principles P2](../../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Sync tracked-clean primary main only when
 strictly behind with `git merge --ff-only origin/main`; preserve untracked files.
 

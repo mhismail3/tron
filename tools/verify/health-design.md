@@ -24,7 +24,7 @@ remain unavailable. The following existing `fields` are supporting diagnostics.
 |---|---|---|
 | Approval → main | UTC landed timestamp minus explicit intent approval; retain work-start and affected-verdict timestamps. Report median/p90 and execution versus approval/resource/coordination waiting. | Commit author time is not approval or server push time. Missing endpoints mean unavailable; do not guess waiting from chat gaps. |
 | Deploy lag | Main SHA versus installed Mac **and** iPhone source/build/protocol identities, plus age since that main integration. | One missing identity means partial, not zero lag. SHA ancestry is required; build-number subtraction is meaningless. |
-| Main reds | Distinct exact case+signature failures on pinned main, duration first-failure→fix, first-failure→named owner. Separate quarantined cases, new reds and harness errors. | Registry size is not current red count; missing lanes remain unavailable. Ownership within one hour is an operational objective, not an auto-revert timer. |
+| Main reds | Distinct exact case+signature failures on pinned main, duration first-failure→fix, first-failure→named owner. Separate new reds and harness errors. | Missing lanes remain unavailable. Ownership within one hour is an operational objective, not an auto-revert timer. |
 | Flake rate | Same exact SHA/config/case with both pass and fail ÷ cases with comparable repeated attempts; also show failing-attempt/total-attempt counts. | First failures retained. Different signatures/configs never merge. One attempt gives unknown, not 0%. No retry-to-green. |
 | Resumes/task | Admitted resumed operations ÷ complete root lineages in the window; report median/p90 and denominator. | Use `home.taskHistory` admitted operations, not copied snapshots, task-name suffix guesses or refused admissions. `complete:false` is partial. |
 
@@ -100,14 +100,12 @@ j = json.load(open(f'test-results/verify/{sys.argv[1]}.json'))
 print('verdict', j.get('verdict'))
 for s in j['steps']:
     print(s['name'], s.get('status'), s.get('seconds'),
-          s.get('failedTests'), s.get('quarantined'))
+          s.get('failedTests'))
 PY
 ```
 
 Do not sum skipped/running/interrupted steps into a complete wall-time result.
-Read registry validation through `verify --plan`, not an imported private function.
-Count registry entries separately and retain issue/expiry: they are evidence of
-registered failures, not a new reproduction. Exact-SHA baseline numbers belong in
+Exact-SHA baseline numbers belong in
 the issue/private run artifacts, not a growing repository evidence ledger.
 
 After implementation approval, existing heavier owners can supply measurements:
@@ -168,9 +166,8 @@ not canonical logs, sessions, task evidence or another run's worktree.
 
 ## Grading and acceptance before implementation
 
-- Exact quarantine case+digest, expired entry, changed signature, missing lane and
-  interrupted run: health must reproduce the existing verifier's distinct outcomes;
-  never convert unavailable/quarantined to a clean pass.
+- Exact case+digest, changed signature, missing lane and interrupted run: health must
+  reproduce the existing verifier's distinct outcomes; never convert unavailable to a pass.
 - Size before/after: compare identical classifier rules; replacement/external code
   disclosed. Smaller with a missing surviving oracle is a failure, not improvement.
 - Real retained workflows: chat/reconnect, Home memory continuity, controls/log/Undo,
