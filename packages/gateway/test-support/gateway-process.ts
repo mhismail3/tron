@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -177,7 +177,9 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
   let root: string | undefined;
   let child: ChildProcess | undefined;
   try {
+    // Canonical: the Tron workspace refuses a root reached through a symlink (macOS /var).
     root = await mkdtemp(join(tmpdir(), "tron-gateway-process-"));
+    root = await realpath(root);
     return await launchGatewayProcess(options, provider, root, (spawned) => { child = spawned; });
   } catch (error) {
     // A failed start never reaches the caller's disposal list: remove what it made.
@@ -203,7 +205,8 @@ async function launchGatewayProcess(
   const tronHome = join(root, "tron");
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
-  for (const directory of [tronHome, agentDir, cwd, join(root, "home"), join(root, "tmp")]) await mkdir(directory, { recursive: true });
+  // Owner-only, as the Mac app creates its Tron home: the internal workspace refuses any other mode.
+  for (const directory of [tronHome, agentDir, cwd, join(root, "home"), join(root, "tmp")]) await mkdir(directory, { recursive: true, mode: 0o700 });
   const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
   await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { [SCRIPTED_PROVIDER]: {
