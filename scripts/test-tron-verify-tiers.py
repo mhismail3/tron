@@ -12,80 +12,6 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 
-class QuarantinePolicyTests(fixture.VerifyCase):
-    def expired_fixture(self):
-        from datetime import datetime, timedelta, timezone
-        r = self.repo
-        # Reproduction and registry commits use controlled Git timestamps, not wall waits.
-        old = datetime.now(timezone.utc) - timedelta(days=8)
-        r.env.update(GIT_AUTHOR_DATE=old.isoformat(), GIT_COMMITTER_DATE=old.isoformat())
-        entry = fixture.QuarantineTests.fixture(self)
-        entry['expires'] = (old.date() + timedelta(days=7)).isoformat()
-        r.write('tools/verify/known-failures.json', json.dumps([entry]))
-        r.commit('expired main red')
-        r.env.pop('GIT_AUTHOR_DATE')
-        r.env.pop('GIT_COMMITTER_DATE')
-        return entry
-
-    def test_expiry_never_blocks_authorship_but_is_not_qualified(self):
-        r = self.repo
-        entry = self.expired_fixture()
-        for module, verdict in [('repo/alpha', 'passed'), ('gateway/sample', 'expired')]:
-            result = r.verify('--module', module)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            report = r.report()
-            self.assertEqual(report['verdict'], verdict)
-            self.assertEqual(report['expiredEntries'][0]['testId'], entry['testId'])
-            self.assertFalse(report['checkpointEligible'])
-            self.assertIn('EXPIRED RED', result.stdout)
-        step = next(s for s in report['steps'] if s['name'] == 'tests: gateway')
-        self.assertEqual(step['quarantined'], [])
-        self.assertEqual(step['expiredReds'][0]['testId'], entry['testId'])
-        card = r.health()['fields']['mainReds']
-        self.assertEqual(card['verifierOutcomes'], {'expired': 1})
-        self.assertEqual(card['newRedSignatures'], 1)
-        self.assertEqual(card['quarantinedCases'], 0)
-        self.assertTrue((r.path / 'packages/gateway/test-results-executed').exists())
-        raw = json.loads((r.path / 'packages/gateway/report-input.json').read_text())
-        raw['testResults'][0]['assertionResults'][0]['failureMessages'] = ['new defect']
-        r.write('packages/gateway/report-input.json', json.dumps(raw))
-        r.commit('new digest is not an expired main red')
-        result = r.verify('--module', 'gateway/sample')
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual(r.report()['verdict'], 'failed')
-
-    def test_one_renewal_requires_retained_original_and_fresh_reproduction(self):
-        import copy
-        from datetime import datetime, timedelta, timezone
-        r = self.repo
-        entry = self.expired_fixture()
-        renewed = copy.deepcopy(entry)
-        renewed['renewedFrom'] = entry['evidence']['commit']
-        r.write('README.md', '# Fresh reproduction\n')
-        r.commit('fresh reproduction')
-        renewed['evidence']['commit'] = r.git('rev-parse', 'HEAD')
-        renewed['expires'] = (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()
-        for entries, expected in [([renewed], 1), ([entry, {**renewed, 'evidence': entry['evidence']}], 1), ([entry, renewed], 0)]:
-            r.write('tools/verify/known-failures.json', json.dumps(entries))
-            r.commit('renewal admission')
-            result = r.verify('--module', 'gateway/sample')
-            self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-        self.assertEqual(r.report()['verdict'], 'quarantined')
-        # Removing the original/renewed evidence cannot reset the case budget.
-        r.write('tools/verify/known-failures.json', '[]')
-        r.commit('temporarily fixed')
-        r.write('README.md', '# Another reproduction\n')
-        r.commit('second reproduction')
-        third = copy.deepcopy(renewed)
-        third['renewedFrom'] = renewed['evidence']['commit']
-        third['evidence']['commit'] = r.git('rev-parse', 'HEAD')
-        for entries in ([entry, renewed, third], [{k: v for k, v in third.items() if k != 'renewedFrom'}]):
-            r.write('tools/verify/known-failures.json', json.dumps(entries))
-            r.commit('second renewal refused')
-            result = r.verify('--module', 'repo/alpha')
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-
-
 class DocumentationAssetTests(fixture.VerifyCase):
     def test_deleted_non_markdown_doc_is_static_only_but_code_still_needs_tests(self):
         r = self.repo
@@ -154,28 +80,6 @@ class TierTests(fixture.VerifyCase):
         result = self.repo.verify(*args, '--plan')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return json.loads(result.stdout[result.stdout.index('{'):])
-
-    def test_mac_observation_validates_but_never_waives_an_executed_failure(self):
-        from datetime import datetime, timedelta, timezone
-        r = self.repo
-        path = "packages/mac-app/Tests/Integration/ObservationTests.swift"
-        r.write("packages/mac-app/mac.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
-        r.write(path, "// Registry fixture; native execution is not requested.\n")
-        r.commit("existing Swift observation subject")
-        subject = r.git("rev-parse", "HEAD")
-        r.git("branch", "-f", "base")
-        r.write("tools/verify/known-failures.json", json.dumps([{
-            "testId": path + "::ObservationTests/branchObserved()",
-            "evidence": {"command": "original branch-owned native run", "commit": subject, "failureDigest": "0" * 64},
-            "issue": 2152, "expires": (datetime.now(timezone.utc) + timedelta(days=7)).date().isoformat(),
-        }]))
-        r.commit("observational Mac record")
-        self.plan()  # Real CLI admission accepts the narrow Swift namespace.
-        r.write("mods/alpha/test-alpha.py", fixture.FAILING)
-        r.commit("actual executed failure")
-        result = r.verify()
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("AssertionError: 1 != 2", result.stdout)
 
     def test_skipped_python_cases_are_not_reported_as_passes(self):
         r = self.repo

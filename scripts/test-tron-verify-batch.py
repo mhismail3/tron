@@ -28,7 +28,10 @@ class BatchTests(unittest.TestCase):
         self.git('init', '-q', '-b', 'main')
         for file in ('batch.py', 'verify.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
-            self.write('tools/verify/' + file, source.read_text())
+            text = source.read_text()
+            # The shared host lock path belongs to real full-Gateway runs, not fixtures.
+            text = text.replace("'/tmp/tron-full-gateway.lock'", repr(str(Path(self.temporary.name) / 'full-gateway.lock')))
+            self.write('tools/verify/' + file, text)
         for directory in ('ownership', 'budgets', 'metrics', 'layers'):
             for source in (ROOT / 'tools' / directory).glob('*.py'):
                 self.write(str(source.relative_to(ROOT)), source.read_text())
@@ -125,7 +128,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
                      'packages/mac-app/project.yml', 'packages/mac-app/native-computer-control/Package.swift',
                      'packages/ios-app/project.yml', 'packages/gateway/src/example.test.ts'):
             self.write(file, '{}\n')
-        self.write('tools/verify/known-failures.json', '[]')
         self.commit('fixture lanes')
         self.base = self.git('rev-parse', 'HEAD')
 
@@ -154,6 +156,43 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.git('checkout', 'main')
         self.git('merge', '--no-ff', '--no-edit', topic)
         return self.git('rev-parse', 'HEAD')
+
+    def remote(self, publish=True):
+        self.origin = Path(self.temporary.name) / 'origin.git'
+        subprocess.run(['git', 'init', '--bare', '-q', '-b', 'main', str(self.origin)], env=self.env, check=True, capture_output=True)
+        self.git('remote', 'add', 'origin', str(self.origin))
+        self.git('push', '-q', 'origin', 'main')
+        if publish:
+            # The single enable step: name the remote whose main may receive reviewed reverts.
+            self.git('config', 'tron.verify.revertRemote', 'origin')
+
+    def push(self):
+        self.git('push', '-q', 'origin', 'main')
+
+    def remote_git(self, *args):
+        return subprocess.check_output(['git', '--git-dir', str(self.origin), *args], env=self.env, text=True).strip()
+
+    def other_clone_lands(self, file, value=None):
+        clone = Path(self.temporary.name) / f'other-{time.time_ns()}'
+        subprocess.run(['git', 'clone', '-q', str(self.origin), str(clone)], env=self.env, check=True, capture_output=True)
+        if value is None:
+            (clone / file).unlink()
+        else:
+            (clone / file).write_text(value)
+        for args in (['add', '-A'], ['commit', '-qm', 'concurrent ' + file], ['push', '-q', 'origin', 'HEAD:main']):
+            subprocess.run(['git', *args], cwd=clone, env=self.env, check=True, capture_output=True)
+        return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=clone, env=self.env, text=True).strip()
+
+    def repair(self):
+        return [json.loads(path.read_text()) for path in sorted((self.root / '.git/verify/repairs').glob('*.json'))]
+
+    def review(self, repair, decision='ACCEPT', binding=None):
+        return self.run_batch('--review', repair['culprit'], '--decision', decision, '--reviewer', 'fixture-reviewer',
+                              '--binding', binding or repair['bindingDigest'])
+
+    def reverts_on_remote(self, culprit):
+        return [line for line in self.remote_git('log', '--format=%H %(trailers:key=Tron-Auto-Revert,valueonly,separator=)', 'main').splitlines()
+                if line.split(' ', 1)[-1] == culprit]
 
     def run_batch(self, *args):
         result = subprocess.run(['scripts/tron', 'verify', '--batch', *args], cwd=self.root, env=self.env,
@@ -186,7 +225,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         first = self.run_batch('--base', self.base)
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
         head = self.git('rev-parse', 'HEAD')
-        original = json.loads((self.root / '.git/verify/covered.json').read_text())
+        original = json.loads((self.root / '.git/verify/green.json').read_text())
         self.assertEqual(original['commit'], head)
 
         no_op = self.run_batch()
@@ -203,7 +242,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['head'], head)
         self.assertEqual(len(report['results']), 9)
         self.assertTrue(all(result['exit'] == 0 for result in report['results']))
-        updated = json.loads((self.root / '.git/verify/covered.json').read_text())
+        updated = json.loads((self.root / '.git/verify/green.json').read_text())
         self.assertEqual((updated['commit'], updated['verdict']), (head, 'green'))
         self.assertTrue(Path(updated['report']).is_file())
 
@@ -248,11 +287,18 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(proof['status'], 'proven', proof)
         self.assertEqual(proof['commit'], culprit)
         self.assertEqual(proof['files'], ['bad'])
-        self.assertEqual(sum(p['commit'] == culprit and p['outcome'] == 'bad' for p in proof['probes']), 2)
-        self.assertTrue(all(p['outcome'] == 'good' for p in proof['probes'] if p['commit'] == proof['parent']))
+        head = self.git('rev-parse', 'HEAD')
+        fresh = [(p['commit'], p['outcome']) for p in proof['probes'] if p['fresh']]
+        # Fresh controls: head and culprit fail twice, the first parent passes twice.
+        self.assertEqual(fresh.count((head, 'bad')), 2)
+        self.assertEqual(fresh.count((culprit, 'bad')), 2)
+        self.assertEqual(fresh.count((proof['parent'], 'good')), 2)
         self.assertTrue(all('-t' in p['command'] for p in proof['probes']))
-        self.assertEqual(self.git('show', proof['revertBranch'] + ':good'), 'yes')
-        self.assertNotIn('bad', self.git('ls-tree', '--name-only', proof['revertBranch']))
+        repair = failure['repair']
+        self.assertEqual(repair['state'], 'publication-disabled')
+        self.assertEqual(self.git('rev-parse', 'revert/' + culprit), repair['candidate'])
+        self.assertEqual(self.git('show', repair['candidate'] + ':good'), 'yes')
+        self.assertNotIn('bad', self.git('ls-tree', '--name-only', repair['candidate']))
         self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
         again = self.reports()[-1]
         self.assertTrue(again['failures'][0]['attribution']['reused'])
@@ -266,70 +312,30 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertTrue(any(p.get('reused') for p in later['probes']))
         self.assertEqual(len(list((self.root / '.git/verify/issue-writes').glob('*.json'))), 1)
 
-    def test_nonlanding_history_yields_candidates_not_culprits(self):
+    def test_octopus_landing_is_unresolved_not_guessed(self):
+        for name in ('one', 'two'):
+            self.git('checkout', '-qb', name, self.base)
+            self.write(name, 'yes')
+            self.commit(name)
+        self.git('checkout', '-q', 'main')
         self.write('bad', 'yes')
-        self.commit('direct commit is not a landing')
+        self.commit('red on main')
+        self.git('merge', '-q', '--no-edit', 'one', 'two')
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        report = self.reports()[-1]
-        self.assertTrue(report['nonLandingCommits'])
-        self.assertEqual(report['failures'][0]['attribution']['status'], 'inconclusive')
+        proof = self.reports()[-1]['failures'][0]['attribution']
+        self.assertEqual(proof['status'], 'unresolved')
+        self.assertEqual(proof['unsupportedHistory'], [self.git('rev-parse', 'HEAD')])
+        self.assertFalse(self.repair())
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
-    def register(self, expires=None, digest=None):
-        # The registry validator owns duration/renewals; test entries use its real contract.
-        import hashlib
-        self.write('tools/verify/known-failures.json', json.dumps([{
-            'testId': 'packages/gateway/src/example.test.ts::suite case', 'issue': 100,
-            'expires': expires or (datetime.now(timezone.utc).date() + timedelta(days=3)).isoformat(), 'evidence': {'commit': self.git('rev-parse', 'HEAD'),
-                'command': 'scripts/tron test gateway src/example.test.ts -t "suite case"',
-                'failureDigest': digest or hashlib.sha256(json.dumps(['AssertionError: stable failure'], ensure_ascii=False).encode()).hexdigest()}}]))
-        self.commit('register observed case')
-
-    def test_qualified_advances_covered_not_green_and_digest_expiry_are_red(self):
-        initial = self.run_batch('--base', self.base)
-        self.assertEqual(initial.returncode, 0, initial.stdout + initial.stderr)
-        green = (self.root / '.git/verify/green.json').read_bytes()
-        self.register()
-        self.land('bad', 'yes')
-        result = self.run_batch()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.reports()[-1]['verdict'], 'qualified')
-        self.assertEqual((self.root / '.git/verify/green.json').read_bytes(), green)
-        self.assertEqual(json.loads((self.root / '.git/verify/covered.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
-        self.assertFalse(self.reports()[-1]['failures'])
-
-    def test_changed_registry_digest_is_red(self):
-        self.register(digest='0' * 64)
-        self.land('bad', 'yes')
-        result = self.run_batch('--base', self.base)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual(self.reports()[-1]['verdict'], 'red')
-
-    def test_registered_failure_plus_skipped_case_remains_uncovered(self):
-        self.register()
-        self.land('skipped', 'yes')
-        self.land('bad', 'yes')
-        result = self.run_batch('--base', self.base)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        report = self.reports()[-1]
-        self.assertEqual(report['verdict'], 'uncovered')
-        self.assertEqual(report['results'][1]['status'], 'uncovered')
-        self.assertFalse((self.root / '.git/verify/covered.json').exists())
-
-    def test_expired_registry_entry_does_not_qualify(self):
-        self.register(expires=(datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat())
-        self.land('bad', 'yes')
-        result = self.run_batch('--base', self.base)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual(self.reports()[-1]['verdict'], 'red')
-
     def test_verifier_nonpass_verdicts_override_zero_exit(self):
-        for verdict, expected in [('deferred', 'uncovered'), ('expired', 'red'), ('quarantined', 'qualified')]:
+        # Retired exemption labels are not verifier verdicts; neither they nor deferral are green.
+        for verdict, expected in [('deferred', 'uncovered'), ('expired', 'uncovered'), ('quarantined', 'uncovered')]:
             with self.subTest(verdict=verdict):
                 self.land('verifier-verdict', verdict)
                 result = self.run_batch('--base', self.base)
-                self.assertEqual(result.returncode, 0 if expected == 'qualified' else 1, result.stdout + result.stderr)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 report = self.reports()[-1]
                 self.assertEqual(report['results'][0]['exit'], 0)
                 self.assertEqual(report['results'][0]['verifierVerdict'], verdict)
@@ -347,19 +353,22 @@ if sys.argv[1] in ('run', 'checkpoint'):
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         proof = self.reports()[-1]['failures'][0]['attribution']
-        self.assertEqual(proof['status'], 'inconclusive')
+        self.assertEqual(proof['status'], 'unresolved')
         self.assertEqual(proof['probes'][-1]['outcome'], 'unknown')
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
-    def test_flake_retains_attempts_but_needs_registry_for_qualification(self):
+    def test_nonreproducing_head_is_unresolved_red_not_qualified(self):
         self.land('flake', 'yes')
         self.land('bad', 'yes')
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         report = self.reports()[-1]
         self.assertEqual(report['verdict'], 'red')
-        self.assertEqual(report['failures'][0]['attribution']['status'], 'flake observed; registry entry required')
-        self.assertEqual(len(report['failures'][0]['attribution']['probes']), 2)
+        proof = report['failures'][0]['attribution']
+        self.assertEqual(proof['status'], 'unresolved')
+        self.assertIn('head did not reproduce', proof['reason'])
+        self.assertEqual([p['outcome'] for p in proof['probes']], ['good'])
+        self.assertFalse(self.repair())
 
     def test_empty_case_probe_is_unknown_not_good_parent_evidence(self):
         self.land('empty-probe', 'yes')
@@ -368,8 +377,8 @@ if sys.argv[1] in ('run', 'checkpoint'):
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         proof = self.reports()[-1]['failures'][0]['attribution']
-        self.assertEqual(proof['status'], 'inconclusive')
-        self.assertEqual(proof['probes'][0]['outcome'], 'unknown')
+        self.assertEqual(proof['status'], 'unresolved')
+        self.assertEqual([p['outcome'] for p in proof['probes'] if p['commit'] == self.base], ['unknown'])
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
     def test_second_culprit_reproduction_is_required(self):
@@ -378,7 +387,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         proof = self.reports()[-1]['failures'][0]['attribution']
-        self.assertEqual(proof['status'], 'inconclusive')
+        self.assertEqual(proof['status'], 'unresolved')
         self.assertEqual(proof['probes'][-1]['outcome'], 'good')
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
@@ -595,6 +604,236 @@ if sys.argv[1] == 'clean':
             if process.poll() is None:
                 process.send_signal(signal.SIGTERM)
                 process.communicate(timeout=40)
+
+
+    # Causal source auto-revert (#2194): real Git remote, real batch CLI, controlled reviewer.
+
+    def red_with_review(self, *, merge=True):
+        self.remote()
+        self.land('good', 'yes')
+        if merge:
+            culprit = self.land('bad', 'yes')
+        else:
+            self.write('bad', 'yes')
+            self.commit('fast-forward landing')
+            culprit = self.git('rev-parse', 'HEAD')
+        self.land('later', 'yes')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'red')
+        proof = report['failures'][0]['attribution']
+        self.assertEqual((proof['status'], proof['commit']), ('proven', culprit), proof)
+        [repair] = self.repair()
+        self.assertEqual((repair['state'], repair['culprit'], repair['tip']), ('review-required', culprit, tip))
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip, 'nothing is pushed before an ACCEPT')
+        result_line = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertEqual(result_line['repairs'][0]['state'], 'review-required')
+        self.assertIn('--binding ' + repair['bindingDigest'], result_line['repairs'][0]['next'])
+        return culprit, tip, repair
+
+    def test_merge_landing_red_is_reverted_after_bound_accept_then_green(self):
+        culprit, tip, repair = self.red_with_review()
+        request = json.loads(Path(repair['reviewRequest']).read_text())
+        self.assertEqual(request['bindings']['culprit'], culprit)
+        self.assertTrue(Path(request['bindings']['evidence']).is_file())
+        wrong = self.review(repair, binding='0' * 64)
+        self.assertEqual(wrong.returncode, 2, wrong.stdout + wrong.stderr)
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+        published = self.review(repair)
+        self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'published')
+        head = self.remote_git('rev-parse', 'main')
+        self.assertEqual(self.remote_git('rev-parse', 'main^'), tip, 'plain fast-forward onto the tested tip')
+        self.assertEqual(self.reverts_on_remote(culprit), [head + ' ' + culprit])
+        files = self.remote_git('ls-tree', '--name-only', 'main').splitlines()
+        self.assertNotIn('bad', files)
+        self.assertIn('later', files)
+        self.assertIn('good', files)
+        self.git('fetch', '-q', 'origin')
+        self.git('merge', '-q', '--ff-only', 'origin/main')
+        green = self.run_batch('--base', self.base)
+        self.assertEqual(green.returncode, 0, green.stdout + green.stderr)
+        self.assertEqual(self.reports()[-1]['verdict'], 'green')
+        self.assertEqual(json.loads((self.root / '.git/verify/green.json').read_text())['commit'], head)
+        again = self.review(repair)
+        self.assertNotEqual(again.returncode, 0)
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1, 'a repeated ACCEPT never adds a second revert')
+
+    def test_fast_forward_single_parent_landing_is_reverted(self):
+        culprit, tip, repair = self.red_with_review(merge=False)
+        self.assertEqual(self.review(repair).returncode, 0)
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
+        self.assertNotIn('bad', self.remote_git('ls-tree', '--name-only', 'main').splitlines())
+
+    def test_publication_is_disabled_without_the_enable_step(self):
+        self.remote(publish=False)
+        culprit = self.land('bad', 'yes')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'publication-disabled')
+        self.assertNotIn('bad', self.git('ls-tree', '--name-only', repair['candidate']).splitlines())
+        refused = self.review({**repair, 'bindingDigest': repair.get('bindingDigest') or '0' * 64})
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+        self.assertFalse(self.reverts_on_remote(culprit))
+
+    def test_innocent_concurrent_landing_survives_and_stale_accept_rebinds(self):
+        culprit, tip, repair = self.red_with_review()
+        innocent = self.other_clone_lands('innocent', 'yes')
+        stale = self.review(repair)
+        self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
+        self.assertEqual(self.remote_git('rev-parse', 'main'), innocent, 'a stale ACCEPT cannot publish')
+        [rebound] = self.repair()
+        self.assertEqual((rebound['state'], rebound['tip']), ('review-required', innocent))
+        self.assertNotEqual(rebound['bindingDigest'], repair['bindingDigest'])
+        self.assertEqual(self.review(rebound).returncode, 0)
+        files = self.remote_git('ls-tree', '--name-only', 'main').splitlines()
+        self.assertIn('innocent', files)
+        self.assertNotIn('bad', files)
+        self.assertEqual(self.remote_git('rev-parse', 'main^'), innocent)
+
+    def test_uncertain_push_is_reconciled_from_remote_without_replay(self):
+        culprit, tip, repair = self.red_with_review()
+        wrapper = Path(self.temporary.name) / 'receive-pack-exit-1'
+        wrapper.write_text('#!/bin/sh\ngit-receive-pack "$@"\nexit 1\n')
+        wrapper.chmod(0o755)
+        self.git('config', 'remote.origin.receivepack', str(wrapper))
+        result = self.review(repair)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'published')
+        self.assertNotEqual(repair['push']['exit'], 0)
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
+
+    def test_crash_after_remote_acceptance_discovers_the_published_revert(self):
+        culprit, tip, repair = self.red_with_review()
+        wrapper = Path(self.temporary.name) / 'receive-pack-crash'
+        # Accept the push, then SIGKILL the batch owner before it can record the result.
+        wrapper.write_text('#!/bin/sh\n'
+                           'git-receive-pack "$@"\n'
+                           'pid=$PPID\n'
+                           'while [ "$pid" -gt 1 ]; do\n'
+                           '  if ps -o command= -p "$pid" | grep -q "tools/verify/verify.py"; then kill -9 "$pid"; break; fi\n'
+                           '  pid=$(ps -o ppid= -p "$pid" | tr -d " ")\n'
+                           'done\n')
+        wrapper.chmod(0o755)
+        self.git('config', 'remote.origin.receivepack', str(wrapper))
+        crashed = self.review(repair)
+        self.assertEqual(crashed.returncode, -9, crashed.stdout + crashed.stderr)
+        [pending] = self.repair()
+        self.assertEqual(pending['state'], 'push-intent')
+        self.git('config', '--unset', 'remote.origin.receivepack')
+        recovered = self.review(repair)
+        self.assertEqual(recovered.returncode, 0, recovered.stdout + recovered.stderr)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'published')
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
+        # A later batch over the same red range reuses the journal instead of building another revert.
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
+
+    def test_red_already_fixed_on_main_is_stale_and_not_reverted(self):
+        self.remote()
+        culprit = self.land('bad', 'yes')
+        self.push()
+        fixed = self.other_clone_lands('bad')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual((repair['state'], repair['culprit']), ('stale', culprit))
+        self.assertEqual(self.remote_git('rev-parse', 'main'), fixed)
+        self.assertFalse(self.reverts_on_remote(culprit))
+
+    def test_irreversible_migration_boundary_refuses_publication(self):
+        self.remote()
+        self.git('checkout', '-qb', 'topic-migration')
+        self.write('bad', 'yes')
+        self.write('packages/gateway/src/store/migrations/0002-move.ts', 'export {}\n')
+        self.commit('red with a migration')
+        self.git('checkout', '-q', 'main')
+        self.git('merge', '-q', '--no-ff', '--no-edit', 'topic-migration')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'refused')
+        self.assertIn('migration', repair['reason'])
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+
+    def test_reviewer_block_is_terminal_and_pushes_nothing(self):
+        culprit, tip, repair = self.red_with_review()
+        blocked = self.review(repair, decision='BLOCK')
+        self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+        self.assertEqual(self.repair()[0]['state'], 'refused')
+        self.assertEqual(self.review(repair).returncode, 2)
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+
+    def test_conflicting_inverse_is_preserved_not_resolved(self):
+        self.remote()
+        self.land('bad', 'yes')
+        self.land('bad', 'still present, edited later')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'refused')
+        self.assertIn('conflict', repair['reason'])
+        self.assertTrue(Path(repair['worktree']).is_dir())
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+
+    def test_security_risk_owner_refuses_publication(self):
+        self.remote()
+        self.git('checkout', '-qb', 'topic-security')
+        self.write('bad', 'yes')
+        self.write('packages/gateway/src/auth/auth.module.json', json.dumps({'layer': 'L3', 'owns': ['**'], 'riskClass': ['security']}))
+        self.write('packages/gateway/src/auth/token.ts', 'export const scope = "admin";\n')
+        self.commit('red with a security owner')
+        self.git('checkout', '-q', 'main')
+        self.git('merge', '-q', '--no-ff', '--no-edit', 'topic-security')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'refused')
+        self.assertIn('packages/gateway/src/auth/token.ts', repair['reason'])
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+
+    def test_held_full_gateway_lock_keeps_coverage_pending_without_waiting(self):
+        import fcntl
+        self.land('good', 'yes')
+        with (Path(self.temporary.name) / 'full-gateway.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('full-Gateway run holds', result.stdout)
+        self.assertFalse(self.reports())
+        self.assertFalse((self.root / '.git/verify/green.json').exists())
+
+    def assert_never_publishes(self, marker):
+        self.remote()
+        self.land(marker, 'yes')
+        self.land('bad', 'yes')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotEqual(self.reports()[-1]['verdict'], 'green')
+        self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertFalse([r for r in self.repair() if r['state'] != 'refused'])
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+        return self.reports()[-1]
+
+    def test_mixed_controls_never_publish(self):
+        proof = self.assert_never_publishes('unstable-repeat')['failures'][0]['attribution']
+        self.assertEqual(proof['status'], 'unresolved')
+
+    def test_skipped_required_coverage_is_not_green_and_never_publishes(self):
+        self.assertEqual(self.assert_never_publishes('skipped')['verdict'], 'uncovered')
 
 
 class ShardedIosProbeTests(unittest.TestCase):

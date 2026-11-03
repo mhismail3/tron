@@ -64,15 +64,18 @@ Commands:
                                     --compare prints the delta table; never a gate
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
                                     Mechanical none/partial/full tier; affected checks
-                                    now, broad risk coverage in an explicit batch.
+                                    now, full coverage in the async main batch.
                                     --plan includes dirty paths and exact commands.
                                     Live logs and partial test-results/verify/<sha>.json;
                                     no empty test passes, queue or landing gate.
-  verify --batch [--base <green-sha> | --repeat] [--plan]
-                                    Explicit serial Mac batch on landed main; first use
-                                    needs --base, then local last-green owns coverage.
-                                    Records commits; reproduces/bisects failures and
-                                    files issues, never blocks/reverts unrelated work.
+  verify --batch [--base <main-anchor> | --repeat] [--plan]
+                                    Async full-main batch; first use needs --base, then
+                                    raw last-green owns coverage. Proves a red's culprit
+                                    with fresh exact-case controls, prepares its revert;
+                                    publishes only after review, once
+                                    `git config tron.verify.revertRemote origin`.
+  verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
+                                    Record a non-author decision on one bound request.
   mutate <gateway-src-file> [--count N] [--seed S] [--timeout SECONDS]
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);

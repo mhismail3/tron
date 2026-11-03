@@ -1,4 +1,4 @@
-"""Explicit local batch coverage. No scheduler, merge gate, or production lifecycle."""
+"""Asynchronous full-main coverage and causal source repair. No scheduler, merge gate or production lifecycle."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +19,11 @@ import time
 import verify
 
 ROOT = verify.ROOT
+# Shared with every other full real-Gateway run on this host.
+FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
+REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
+# Inverse deltas touching these owners can change persisted data or authority.
+IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
 
 
 def save(path: Path, value: dict) -> None:
@@ -134,13 +139,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             report = json.loads(source.read_text())
             verdict = report.get('verdict')
             result['verifierVerdict'] = verdict
-            result['expiredEntries'] = report.get('expiredEntries', [])
-            if report.get('commit') != sha or verdict not in ('passed', 'quarantined', 'expired', 'deferred', 'failed'):
+            if report.get('commit') != sha or verdict not in ('passed', 'deferred', 'failed'):
                 result.update(status='uncovered', reason='incomplete or wrong-SHA verifier report')
-            elif verdict == 'expired' or report.get('expiredEntries'):
-                result['status'] = 'red'
-            elif verdict == 'quarantined' and not deferred_ios:
-                result['status'] = 'qualified'
             if (verdict == 'passed' and not report.get('passingTests')):
                 result.update(status='uncovered', reason='empty verifier test evidence')
             if (verdict == 'deferred' or report.get('skipped') or report.get('selection', {}).get('deferredTests')
@@ -249,176 +249,370 @@ def prepare(root: Path, directory: Path) -> bool:
     return result['exit'] == 0
 
 
-def attribute(base: str, head: str, failed: dict, directory: Path) -> dict:
-    """Prove the baseline, then bisect main's integration commits, never a live worker tree."""
-    commits = verify.git('rev-list', '--first-parent', '--reverse', f'{base}..{head}').splitlines()
-    result = {'status': 'inconclusive', 'candidates': commits, 'probes': []}
-    # Never rerun a complete suite to diagnose one case, nor attribute setup errors.
-    if not failed.get('probe') or not failed.get('signature') or not commits:
-        return result
-    malformed = [sha for sha in commits if len(verify.git('rev-list', '--parents', '-n', '1', sha).split()) != 3]
-    result['nonLandingCommits'] = malformed
-    directory.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix='tron-verify-bisect-')).resolve()
-    root = temporary / 'repo'
-    verify.git('worktree', 'add', '--detach', str(root), base)
-    try:
-        # One probe worktree preserves Xcode incrementals across revisions. npm installs stay local.
-        dependency_key = None
-        probe_state = Path(verify.git('rev-parse', '--path-format=absolute', '--git-common-dir').strip()) / 'verify/probes'
-        probe_state.mkdir(parents=True, exist_ok=True)
-        def probe(sha: str, repeat: bool = False) -> str:
-            nonlocal dependency_key
-            key = hashlib.sha256(json.dumps([sha, failed['name'], failed['signature']], sort_keys=True).encode()).hexdigest()
-            cache = probe_state / f'{key}.json'
-            attempts = json.loads(cache.read_text())['attempts'] if cache.exists() else []
-            required = 2 if repeat else 1
-            if len(attempts) >= required:
-                observed = attempts[required - 1]
-                result['probes'].append({**observed, 'reused': True})
-                return observed['outcome']
-            subprocess.run(['git', 'checkout', '--detach', sha], cwd=root, check=True, capture_output=True)
-            attempt = directory / f'probe-{len(result["probes"]):02d}-{sha[:12]}'
-            lock = root / 'packages/gateway/package-lock.json'
-            key = hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else ''
-            pure_static = failed.get('probe', {}).get('name') in {
-                'ownership', 'budgets', 'documentation policy', 'agent policy', 'privacy guard',
-                'git diff --check', 'moved-lines (advisory)'}
-            if not pure_static and key != dependency_key:
-                if not prepare(root, attempt / 'dependencies'):
-                    result['probes'].append({'commit': sha, 'outcome': 'setup failure'})
-                    return 'unknown'
-                dependency_key = key
-            try:
-                lane = {**failed['probe'], 'probe': True}
-                outcome = execute(root, lane, attempt)
-            finally:
-                stop_fixture(root, attempt / 'stop')
-            if outcome.get('status') == 'uncovered' or outcome.get('exit') is None:
-                state = 'unknown'
-            elif outcome['exit'] == 0:
-                state = 'good'
-            elif failed.get('signature') and outcome.get('signature') == failed['signature']:
-                state = 'bad'
-            else:
-                # An exit alone is not proof that the same regression reproduced.
-                state = 'unknown'
-            observed = {'commit': sha, 'outcome': state, **outcome}
-            result['probes'].append(observed)
-            if state != 'unknown':
-                save(cache, {'attempts': [*attempts, observed]})
-            save(directory / 'progress.json', result)
-            return state
-        baseline = probe(base)
-        if baseline == 'bad':
-            result['status'] = 'pre-existing at baseline'
-            return result
-        if baseline != 'good':
-            return result
-        # Reproduce head in the same isolated environment before attributing a host failure.
-        head_state = probe(head)
-        if head_state != 'bad':
-            if head_state == 'good':
-                result['status'] = 'flake observed; registry entry required'
-            return result
-        low, high = -1, len(commits) - 1
-        while high - low > 1:
-            middle = (low + high) // 2
-            state = probe(commits[middle])
-            if state == 'unknown':
-                return result
-            if state == 'bad':
-                high = middle
-            else:
-                low = middle
-        culprit = commits[high]
-        parent = verify.git('rev-parse', f'{culprit}^1').strip()
-        # low is the already-observed good parent; high is already-observed bad.
-        # One independent repeat proves the signature twice without suite reruns.
-        if malformed or parent != (commits[low] if low >= 0 else base) or probe(culprit, repeat=True) != 'bad':
-            return result
-        result.update(status='proven', commit=culprit, parent=parent,
-                      files=verify.git('diff', '--name-only', parent, culprit).splitlines())
-        branch = f'revert/{culprit}'
-        exists = verify.git('for-each-ref', f'refs/heads/{branch}').strip()
-        if exists:
-            result['revertBranch'] = branch
-            result['revertStatus'] = 'existing; not overwritten'
+
+
+class Prober:
+    """One disposable worktree runs every exact-case execution of one investigation.
+
+    Cached outcomes in `verify/probes/` only steer the search; every control that
+    proves or repairs a culprit is a fresh execution of the same recipe."""
+
+    def __init__(self, failed: dict, directory: Path, state: Path, record: dict):
+        self.failed, self.directory, self.record = failed, directory, record
+        self.cache = state / 'probes'
+        self.cache.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=True)
+        record.setdefault('probes', [])
+        self.temporary = Path(tempfile.mkdtemp(prefix='tron-verify-bisect-')).resolve()
+        self.root = self.temporary / 'repo'
+        verify.git('worktree', 'add', '--detach', str(self.root), 'HEAD')
+        self.dependency_key = None
+        self.preserve = False
+
+    def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(['git', *args], cwd=self.root, check=check, capture_output=True, text=True)
+
+    def probe(self, sha: str, hint: bool = False) -> str:
+        key = hashlib.sha256(json.dumps([sha, self.failed['name'], self.failed['signature']], sort_keys=True).encode()).hexdigest()
+        cache = self.cache / f'{key}.json'
+        if hint and cache.exists():
+            observed = json.loads(cache.read_text())['attempts'][0]
+            self.record['probes'].append({**observed, 'reused': True})
+            return observed['outcome']
+        self.git('checkout', '--detach', sha)
+        attempt = self.directory / f'probe-{len(self.record["probes"]):02d}-{sha[:12]}'
+        lock = self.root / 'packages/gateway/package-lock.json'
+        dependencies = hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else ''
+        pure_static = self.failed.get('probe', {}).get('name') in {
+            'ownership', 'budgets', 'documentation policy', 'agent policy', 'privacy guard',
+            'git diff --check', 'moved-lines (advisory)'}
+        if not pure_static and dependencies != self.dependency_key:
+            if not prepare(self.root, attempt / 'dependencies'):
+                self.record['probes'].append({'commit': sha, 'outcome': 'unknown', 'reason': 'setup failure'})
+                return 'unknown'
+            self.dependency_key = dependencies
+        try:
+            outcome = execute(self.root, {**self.failed['probe'], 'probe': True}, attempt)
+        finally:
+            stop_fixture(self.root, attempt / 'stop')
+        if outcome.get('status') == 'uncovered' or outcome.get('exit') is None:
+            state = 'unknown'
+        elif outcome['exit'] == 0:
+            state = 'good'
+        elif outcome.get('signature') == self.failed['signature']:
+            state = 'bad'
         else:
-            subprocess.run(['git', 'checkout', '-b', branch, head], cwd=root, check=True, capture_output=True)
-            reverted = subprocess.run(['git', 'revert', '--no-edit', '-m', '1', culprit], cwd=root, capture_output=True, text=True)
-            result.update(revertBranch=branch, revertStatus='prepared locally' if reverted.returncode == 0 else 'conflict; retained')
-            if reverted.returncode:
-                result['revertError'] = reverted.stderr
-                result['preserveRevert'] = True
-        return result
-    finally:
+            # An exit alone is not proof that the same regression reproduced.
+            state = 'unknown'
+        observed = {'commit': sha, 'outcome': state, 'fresh': not hint, **outcome}
+        self.record['probes'].append(observed)
+        if hint and state != 'unknown':
+            save(cache, {'attempts': [observed]})
+        save(self.directory / 'progress.json', self.record)
+        return state
+
+    def controls(self, sha: str, expected: str) -> bool:
+        """Two fresh executions must both observe `expected`; any mixture refuses."""
+        return all(self.probe(sha) == expected for _ in range(2))
+
+    def close(self) -> None:
         # Never erase a probe whose owning resource helper could not clean it.
         cleanup = []
-        result.update(cleanup=cleanup, retainedWorktree=str(root))
-        save(directory / 'progress.json', result)
+        self.record.update(cleanup=cleanup, retainedWorktree=str(self.root))
+        save(self.directory / 'progress.json', self.record)
         for script in ('scripts/ios-gateway-e2e-test', 'scripts/tron-ios-test'):
-            if (root / script).is_file():
+            if (self.root / script).is_file():
                 try:
-                    cleanup.append(execute(root, {'name': 'probe cleanup', 'command': [script, 'clean']}, directory / Path(script).name))
+                    cleanup.append(execute(self.root, {'name': 'probe cleanup', 'command': [script, 'clean']}, self.directory / Path(script).name))
                 except KeyboardInterrupt:
                     cleanup.append({'exit': 130, 'command': [script, 'clean'], 'status': 'interrupted'})
                     raise
                 except OSError as error:
                     cleanup.append({'exit': 2, 'command': [script, 'clean'], 'error': str(error)})
                 finally:
-                    save(directory / 'progress.json', result)
-        if result.get('preserveRevert') or any(item['exit'] for item in cleanup):
-            result['retainedWorktree'] = str(root)
-            print(f'batch: probe cleanup failed; preserved worktree {root}', flush=True)
+                    save(self.directory / 'progress.json', self.record)
+        if self.preserve or any(item['exit'] for item in cleanup):
+            print(f'batch: preserved probe worktree {self.root}', flush=True)
         else:
-            verify.git('worktree', 'remove', '--force', str(root))
-            shutil.rmtree(temporary)
-            del result['retainedWorktree']
-        save(directory / 'progress.json', result)
+            verify.git('worktree', 'remove', '--force', str(self.root))
+            shutil.rmtree(self.temporary)
+            del self.record['retainedWorktree']
+        save(self.directory / 'progress.json', self.record)
 
 
-def file_issue(report: dict, directory: Path, state: Path) -> dict:
+def parents(sha: str) -> int:
+    return len(verify.git('rev-list', '--parents', '-n', '1', sha).split()) - 1
+
+
+def attribute(base: str, head: str, failed: dict, prober: Prober) -> dict:
+    """Propose by first-parent bisection, then prove with fresh head/parent/culprit controls."""
+    commits = verify.git('rev-list', '--first-parent', '--reverse', f'{base}..{head}').splitlines()
+    result = prober.record
+    result.update(status='unresolved', candidates=commits)
+
+    def unresolved(reason: str) -> dict:
+        result['reason'] = reason
+        return result
+    if not failed.get('probe') or not failed.get('signature'):
+        return unresolved('no exact-case selector or failure signature')
+    if not commits:
+        return unresolved('empty range')
+    # A landing is one first-parent unit: an ordinary commit or a two-parent integration.
+    octopus = [sha for sha in commits if parents(sha) > 2]
+    if octopus:
+        result['unsupportedHistory'] = octopus
+        return unresolved('octopus landing on main first-parent history')
+    if not prober.controls(head, 'bad'):
+        return unresolved('head did not reproduce the exact failure in two fresh executions')
+    # `base` is the last raw-green batch; the search assumes it, the parent control proves it.
+    low, high = -1, len(commits) - 1
+    while high - low > 1:
+        middle = (low + high) // 2
+        state = prober.probe(commits[middle], hint=True)
+        if state == 'unknown':
+            return unresolved(f'unknown probe outcome at {commits[middle]}')
+        if state == 'bad':
+            high = middle
+        else:
+            low = middle
+    culprit = commits[high]
+    parent = verify.git('rev-parse', f'{culprit}^1').strip()
+    if not prober.controls(parent, 'good'):
+        return unresolved('first parent did not pass in two fresh executions')
+    if culprit != head and not prober.controls(culprit, 'bad'):
+        return unresolved('culprit did not reproduce in two fresh executions')
+    result.update(status='proven', commit=culprit, parent=parent, merge=parents(culprit) == 2,
+                  files=verify.git('diff', '--name-only', parent, culprit).splitlines())
+    return result
+
+
+def revert_remote() -> str | None:
+    """The enable step: `git config tron.verify.revertRemote <remote>`; unset keeps publication off."""
+    value = subprocess.run(['git', 'config', '--get', REVERT_REMOTE_KEY], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    return value or None
+
+
+def remote_main(remote: str) -> str | None:
+    """Read the remote ref and its objects; never touch FETCH_HEAD or remote-tracking refs."""
+    listed = subprocess.run(['git', 'ls-remote', remote, 'refs/heads/main'], cwd=ROOT, capture_output=True, text=True)
+    fetched = subprocess.run(['git', 'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--refmap=', remote, 'refs/heads/main'],
+                             cwd=ROOT, capture_output=True, text=True)
+    sha = listed.stdout.split()[0] if listed.returncode == 0 and listed.stdout.split() else None
+    if not sha or fetched.returncode or subprocess.run(['git', 'cat-file', '-e', f'{sha}^{{commit}}'], cwd=ROOT).returncode:
+        return None
+    return sha
+
+
+def patch_id(old: str, new: str) -> str:
+    diff = subprocess.run(['git', 'diff', '--binary', '--full-index', old, new], cwd=ROOT, capture_output=True, check=True).stdout
+    output = subprocess.run(['git', 'patch-id', '--stable'], cwd=ROOT, input=diff, capture_output=True, check=True).stdout.decode()
+    return output.split()[0] if output.split() else ''
+
+
+def irreversible(paths: list[str], revisions: tuple[str, str]) -> list[str]:
+    """Migrations and persistence/security/installer owners keep maintainer authority."""
+    found = {path for path in paths if 'migration' in path.lower()}
+    for revision in revisions:
+        result, _ = verify.ownership.check(revision)
+        for module in result['modules'].values():
+            manifest = json.loads(verify.git('show', f"{revision}:{module['manifest']}"))
+            if set(manifest.get('riskClass', [])) & IRREVERSIBLE_RISK:
+                found |= set(module['owned']) & set(paths)
+    return sorted(found)
+
+
+def repair_path(state: Path, culprit: str) -> Path:
+    return state / 'repairs' / f'{culprit}.json'
+
+
+def case_identity(failed: dict) -> str:
+    failures = (failed.get('signature') or {}).get('failures') or {}
+    tests = (failed.get('signature') or {}).get('failedTests') or []
+    return ', '.join([*failures, *tests]) or failed['name']
+
+
+def build(journal: dict, prober: Prober, state: Path) -> dict:
+    """Reproduce on the current tip, invert only the culprit landing, prove, and bind for review."""
+    path = repair_path(state, journal['culprit'])
+    culprit, parent = journal['culprit'], journal['parent']
+
+    def settle(name: str, reason: str | None = None) -> dict:
+        journal.update(state=name, reason=reason)
+        journal['history'].append({'state': name, 'reason': reason, 'tip': journal.get('tip'), 'at': time.time()})
+        save(path, journal)
+        return journal
+    remote = journal['remote']
+    tip = remote_main(remote) if remote else journal['head']
+    if not tip:
+        return settle('refused', f'remote {remote} main unreadable; nothing published')
+    journal['tip'] = tip
+    if culprit not in verify.git('rev-list', '--first-parent', tip).splitlines():
+        return settle('refused', 'culprit is not on the fetched main first-parent history')
+    if tip != journal['head']:
+        outcomes = [prober.probe(tip), prober.probe(tip)]
+        if outcomes == ['good', 'good']:
+            return settle('stale', 'the current main tip no longer fails; no revert')
+        if outcomes != ['bad', 'bad']:
+            return settle('refused', 'current main tip did not reproduce consistently')
+    inverse = patch_id(culprit, parent)
+    for sha in verify.git('rev-list', '--first-parent', f'{culprit}..{tip}').splitlines():
+        if patch_id(f'{sha}^1', sha) == inverse:
+            journal['revertCommit'] = sha
+            return settle('already-reverted', f'{sha} already applies the exact inverse')
+    boundary = irreversible(journal['files'], (parent, culprit))
+    if boundary:
+        return settle('refused', 'irreversible boundary (migration/persistence/security/installer): ' + ', '.join(boundary))
+    prober.git('checkout', '--detach', tip)
+    reverted = prober.git('revert', '--no-edit', *(['-m', '1'] if journal['merge'] else []), culprit, check=False)
+    if reverted.returncode:
+        prober.preserve = True
+        journal.update(worktree=str(prober.root), revertError=reverted.stdout + reverted.stderr)
+        return settle('refused', 'revert conflict; preserved unresolved for diagnosis')
+    candidate = prober.git('rev-parse', 'HEAD').stdout.strip()
+    tree = prober.git('rev-parse', 'HEAD^{tree}').stdout.strip()
+    journal.update(candidate=candidate, candidateTree=tree)
+    if not prober.controls(candidate, 'good'):
+        return settle('refused', 'the inverse did not remove the failure in two fresh executions')
+    prober.git('checkout', '--detach', candidate)
+    affected = execute(prober.root, {'name': 'affected verify', 'command': ['scripts/tron', 'verify', '--changed', '--base', tip]},
+                       Path(prober.directory) / f'affected-{candidate[:12]}')
+    report = prober.root / 'test-results/verify' / f'{candidate}.json'
+    verdict = json.loads(report.read_text()).get('verdict') if report.exists() else None
+    journal['affected'] = {'exit': affected['exit'], 'verdict': verdict, 'log': affected.get('log')}
+    if affected['exit'] != 0 or verdict != 'passed':
+        return settle('refused', 'affected checks on the candidate did not pass')
+    if not verify.git('for-each-ref', f'refs/heads/revert/{culprit}').strip():
+        verify.git('branch', f'revert/{culprit}', candidate)
+    evidence = Path(journal['evidence'])
+    bindings = {'culprit': culprit, 'parent': parent, 'tip': tip, 'candidateTree': tree, 'patchId': inverse,
+                'recipe': journal['investigation']['probe'], 'signature': journal['investigation']['signature'],
+                'redReport': journal['redReport'], 'evidence': str(evidence),
+                'evidenceDigest': hashlib.sha256(evidence.read_bytes()).hexdigest()}
+    digest = hashlib.sha256(json.dumps(bindings, sort_keys=True).encode()).hexdigest()
+    request = path.parent / culprit / f'review-{digest[:16]}.json'
+    request.parent.mkdir(parents=True, exist_ok=True)
+    save(request, {'bindings': bindings, 'bindingDigest': digest, 'candidate': candidate, 'case': case_identity(journal['investigation']),
+                   'review': 'A non-author reviewer verifies source causality, surviving oracles, no unrelated removals, '
+                             'reversibility and no migration/security/production effect, then records ACCEPT or BLOCK '
+                             'against this exact bindingDigest.'})
+    journal.update(bindings=bindings, bindingDigest=digest, reviewRequest=str(request))
+    return settle('review-required' if remote else 'publication-disabled')
+
+
+def investigate(base: str, head: str, failed: dict, directory: Path, state: Path, red: dict) -> tuple[dict, dict | None]:
+    """Attribute once per range and signature; repair once per culprit landing."""
+    key = hashlib.sha256(json.dumps([base, head, failed['name'], failed.get('signature')], sort_keys=True).encode()).hexdigest()
+    memo = state / 'attributions' / f'{key}.json'
+    attribution = {**json.loads(memo.read_text()), 'reused': True} if memo.exists() else None
+    journal = None
+    if attribution and attribution.get('status') == 'proven':
+        if not repair_path(state, attribution['commit']).exists():
+            # A proof is only trusted beside the repair journal it produced; re-prove otherwise.
+            attribution = None
+        else:
+            journal = json.loads(repair_path(state, attribution['commit']).read_text())
+    if attribution:
+        return attribution, journal
+    start = time.monotonic()
+    record = attribution or {}
+    prober = Prober(failed, directory, state, record)
+    try:
+        if not attribution:
+            attribution = attribute(base, head, failed, prober)
+        if attribution.get('status') == 'proven':
+            path = repair_path(state, attribution['commit'])
+            if path.exists():
+                journal = json.loads(path.read_text())
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                journal = {'culprit': attribution['commit'], 'parent': attribution['parent'],
+                           'merge': parents(attribution['commit']) == 2, 'files': attribution['files'], 'head': head, 'remote': revert_remote(), 'investigation': failed,
+                           **red, 'state': 'building', 'history': [], 'reviews': []}
+                save(path, journal)
+                journal = build(journal, prober, state)
+    finally:
+        prober.close()
+        if attribution and not attribution.get('reused'):
+            attribution['hostSeconds'] = round(time.monotonic() - start, 3)
+            memo.parent.mkdir(parents=True, exist_ok=True)
+            save(memo, attribution)
+    return attribution, journal
+
+
+def reconcile(journal: dict, path: Path) -> str:
+    """Settle a dispatched push from remote state; the push exit alone settles nothing."""
+    commit = journal['publishedCommit']
+    current = remote_main(journal['remote'])
+    if not current:
+        journal['state'] = 'push-uncertain'
+    elif subprocess.run(['git', 'merge-base', '--is-ancestor', commit, current], cwd=ROOT).returncode == 0:
+        journal.update(state='published', reason=None, remoteMain=current)
+    elif current == journal['tip']:
+        # Positively not applied and main unchanged: the bound ACCEPT may be presented again.
+        journal.update(state='review-required', reason='push not applied; remote main unchanged')
+    else:
+        journal.update(state='review-required', reason='remote main advanced', remoteMain=current)
+    journal['history'].append({'state': journal['state'], 'reason': journal.get('reason'), 'remoteMain': current, 'at': time.time()})
+    save(path, journal)
+    return journal['state']
+
+
+def issue_write(key: str, title: str, body: str, directory: Path, state: Path, target: int | None = None) -> dict:
     # The batch lock serializes this journal. Persist BEFORE dispatch: a killed or
     # uncertain GitHub write must not become a second create on an operator rerun.
-    key = hashlib.sha256(json.dumps([report['failed']['name'], report['failed'].get('signature')], sort_keys=True).encode()).hexdigest()
     journal = state / 'issue-writes' / f'{key}.json'
     previous = json.loads(journal.read_text()) if journal.exists() else None
     if previous and (not previous.get('number') or previous.get('status') != 'completed'):
         print(f'batch: retaining prior issue-write outcome: {journal}', flush=True)
         return {**previous, 'reused': True}
     journal.parent.mkdir(parents=True, exist_ok=True)
-    pending = {'status': 'attempting', 'exit': None, 'batch': str(directory), 'range': [report['base'], report['head']],
-               'lane': report['failed']['name'], 'number': previous.get('number') if previous else None}
-    save(journal, pending)
-    attribution = report['attribution']
+    number = previous.get('number') if previous else target
+    save(journal, {'status': 'attempting', 'exit': None, 'directory': str(directory), 'number': number})
     directory.mkdir(parents=True, exist_ok=True)
-    body = directory / 'issue.md'
-    body.write_text('## Failed verification batch\n\n'
-                    f"Range: `{report['base']}..{report['head']}`; {len(report['commits'])} covered commits.\n"
-                    f"Lane: {report['failed']['name']}; attribution: {attribution['status']}.\n\n"
-                    + (f"First failing main integration: `{attribution['commit']}`.\n" if attribution.get('commit') else
-                       'No culprit proven. Candidates: ' + ', '.join(f'`{sha}`' for sha in attribution['candidates']) + '.\n')
-                    + '\nFiles: ' + ', '.join(f'`{p}`' for p in attribution.get('files', report['files']))
-                    + '\n\nExact commands, outcomes, per-lane wall time and partial logs are retained in the repository-local '
-                    f"Git common directory at `verify/batches/{directory.name}/report.json`. No test, golden, assertion or timeout changed. "
-                    'Main is not blocked or reverted. Failed/qualified coverage never advances last-green.\n')
-    if attribution.get('revertBranch'):
-        with body.open('a') as stream:
-            stream.write(f"\nLocal revert branch: `{attribution['revertBranch']}` ({attribution['revertStatus']}); never pushed.\n")
-    command = (['scripts/tron', 'work', 'comment', str(previous['number']), '--body-file', str(body)] if previous else
-               ['scripts/tron', 'work', 'issue', 'create', '--title',
-                f"Verification: {report['failed']['name']} [{key[:12]}]",
-                '--body-file', str(body), '--kind', 'kind:bug', '--area', 'area:tooling'])
-    outcome = execute(ROOT, {'name': 'file failure issue', 'command': command}, directory / 'issue')
-    output = Path(outcome['log']).read_text(errors='replace')
-    number = previous.get('number') if previous else None
-    match = re.search(r'(?:/issues/|created issue #)(\d+)', output)
-    if match:
-        number = int(match[1])
-    outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved', 'number': number}
+    (directory / 'issue.md').write_text(body)
+    command = (['scripts/tron', 'work', 'comment', str(number), '--body-file', str(directory / 'issue.md')] if number else
+               ['scripts/tron', 'work', 'issue', 'create', '--title', title, '--body-file', str(directory / 'issue.md'),
+                '--kind', 'kind:bug', '--area', 'area:tooling'])
+    outcome = execute(ROOT, {'name': 'issue write', 'command': command}, directory / 'issue')
+    match = re.search(r'(?:/issues/|created issue #)(\d+)', Path(outcome['log']).read_text(errors='replace'))
+    outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved', 'number': int(match[1]) if match else number}
     save(journal, outcome)
     return outcome
+
+
+def failure_key(failed: dict) -> str:
+    return hashlib.sha256(json.dumps([failed['name'], failed.get('signature')], sort_keys=True).encode()).hexdigest()
+
+
+def repair_summary(journal: dict | None) -> str:
+    if not journal:
+        return 'No source revert: attribution is unresolved; diagnose the root cause.\n'
+    text = f"Repair of `{journal['culprit']}`: **{journal['state']}**" + (f" — {journal['reason']}" if journal.get('reason') else '') + '.\n'
+    if journal['state'] == 'review-required':
+        text += f"Review request: `{relative(journal['reviewRequest'])}` (binding `{journal['bindingDigest']}`).\n"
+    return text
+
+
+def relative(path: str) -> str:
+    common = Path(verify.git('rev-parse', '--path-format=absolute', '--git-common-dir').strip())
+    return str(Path(path).relative_to(common)) if Path(path).is_relative_to(common) else Path(path).name
+
+
+def file_issue(report: dict, directory: Path, state: Path) -> dict:
+    attribution, journal = report['attribution'], report.get('repair')
+    body = ('## Failed verification batch\n\n'
+            f"Range: `{report['base']}..{report['head']}`; {len(report['commits'])} covered commits.\n"
+            f"Lane: {report['failed']['name']}; attribution: {attribution['status']}"
+            + (f" ({attribution['reason']})" if attribution.get('reason') else '') + '.\n\n'
+            + (f"Causal landing: `{attribution['commit']}` (first parent `{attribution['parent']}`).\n" if attribution.get('commit') else
+               'Candidates: ' + ', '.join(f"`{sha}`" for sha in attribution.get('candidates', [])) + '.\n')
+            + repair_summary(journal)
+            + '\nFiles: ' + ', '.join(f'`{p}`' for p in attribution.get('files', report['files']))
+            + '\n\nThe first failure, exact commands, counts and logs are frozen in the repository-local '
+            f"Git common directory at `verify/batches/{directory.parent.name}/` (`evidence.json` manifest). "
+            'No test, golden, assertion or timeout changed. The red stays red until a raw-green batch.\n')
+    key = failure_key(report['failed'])
+    return issue_write(key, f"Verification: {report['failed']['name']} [{key[:12]}]", body, directory, state)
 
 
 def failure_cases(outcome: dict) -> list[dict]:
@@ -426,8 +620,6 @@ def failure_cases(outcome: dict) -> list[dict]:
     cases = []
     if outcome.get('vitest') and outcome.get('failureComplete'):
         for identity, digest in outcome.get('failures', {}).items():
-            if identity in outcome.get('qualifiedFailures', {}):
-                continue
             file, case = identity.split('::', 1)
             command = outcome['command']
             cases.append({**outcome, 'signature': {'failures': {identity: digest}},
@@ -444,48 +636,160 @@ def failure_cases(outcome: dict) -> list[dict]:
     return cases
 
 
-def memo_attribute(base: str, head: str, failed: dict, directory: Path, state: Path) -> dict:
-    key = hashlib.sha256(json.dumps([base, head, failed['name'], failed.get('signature')], sort_keys=True).encode()).hexdigest()
-    memo = state / 'attributions' / f'{key}.json'
-    if memo.exists():
-        return {**json.loads(memo.read_text()), 'reused': True}
-    memo.parent.mkdir(parents=True, exist_ok=True)
-    start = time.monotonic()
-    result = attribute(base, head, failed, directory)
-    result['hostSeconds'] = round(time.monotonic() - start, 3)
-    save(memo, result)
-    return result
-
-
 def batch_verdict(results: list[dict]) -> str:
     if any(item.get('status') == 'uncovered' or item.get('exit') is None for item in results):
         return 'uncovered'
-    if any(item.get('status') == 'red' or (item['exit'] and item.get('status') != 'qualified') for item in results):
-        return 'red'
-    return 'qualified' if any(item.get('status') == 'qualified' for item in results) else 'green'
+    return 'red' if any(item['exit'] for item in results) else 'green'
+
+
+def freeze(directory: Path) -> Path:
+    """Seal the first failure after every lane joined and before any probe runs."""
+    shutil.copy2(directory / 'report.json', directory / 'first-report.json')
+    files = {}
+    for path in sorted(directory.rglob('*')):
+        if path.is_file() and path.name != 'report.json':
+            files[str(path.relative_to(directory))] = hashlib.sha256(path.read_bytes()).hexdigest()
+    manifest = directory / 'evidence.json'
+    save(manifest, {'files': files})
+    return manifest
+
+
+def next_action(journal: dict) -> dict:
+    item = {'culprit': journal['culprit'], 'state': journal['state'], 'reason': journal.get('reason')}
+    if journal['state'] == 'review-required':
+        item.update(reviewRequest=journal['reviewRequest'],
+                    next=f"scripts/tron verify --batch --review {journal['culprit']} --decision ACCEPT|BLOCK "
+                         f"--reviewer <non-author review id> --binding {journal['bindingDigest']}")
+    return item
+
+
+class Locks:
+    """The nonwaiting repository batch lock plus the shared host-wide full-Gateway lock."""
+
+    def __init__(self, state: Path):
+        state.mkdir(exist_ok=True)
+        self.handles = [(state / 'batch.lock').open('a'), Path(FULL_GATEWAY_LOCK).open('a')]
+
+    def __enter__(self):
+        for handle, refusal in zip(self.handles, ('another batch owns this repository', 'a full-Gateway run holds ' + FULL_GATEWAY_LOCK)):
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                self.__exit__()
+                raise verify.VerifyError(f'{refusal}; coverage stays pending, no queue or wait') from None
+        return self
+
+    def __exit__(self, *_):
+        for handle in self.handles:
+            handle.close()
+
+
+def review(args, state: Path) -> int:
+    """Record a non-author decision bound to one exact review request, then publish or refuse."""
+    path = repair_path(state, args.review)
+    with Locks(state):
+        if not path.exists():
+            raise verify.VerifyError(f'no repair journal for {args.review}')
+        journal = json.loads(path.read_text())
+        if journal['state'] in ('push-intent', 'push-uncertain'):
+            settled = reconcile(journal, path)
+            print(json.dumps({'repairResult': settled, 'culprit': journal['culprit']}), flush=True)
+            if settled == 'published':
+                notify_published(journal, state)
+                return 0
+            if settled == 'push-uncertain':
+                return 2
+        if journal['state'] != 'review-required':
+            raise verify.VerifyError(f"repair {journal['culprit'][:12]} is {journal['state']}, not awaiting review")
+        if args.binding != journal['bindingDigest']:
+            raise verify.VerifyError('review binding does not match the current review request; nothing recorded')
+        journal['reviews'].append({'decision': args.decision, 'reviewer': args.reviewer, 'binding': args.binding, 'at': time.time()})
+        if args.decision == 'BLOCK':
+            journal.update(state='refused', reason=f'reviewer {args.reviewer} BLOCK')
+            save(path, journal)
+            print(json.dumps({'repairResult': 'refused', 'culprit': journal['culprit']}), flush=True)
+            return 1
+        save(path, journal)
+        current = remote_main(journal['remote'])
+        if not current:
+            raise verify.VerifyError('remote main unreadable; nothing published')
+        if current != journal['bindings']['tip']:
+            # A stale ACCEPT never publishes. Rebuild once at the new tip; it needs a fresh review.
+            directory = path.parent / journal['culprit'] / f'rebuild-{time.time_ns()}'
+            prober = Prober(journal['investigation'], directory, state, {})
+            try:
+                journal['history'].append({'state': 'stale-binding', 'tip': journal['tip'], 'remoteMain': current, 'at': time.time()})
+                build(journal, prober, state)
+            finally:
+                prober.close()
+            print(json.dumps({'repairResult': journal['state'], **next_action(journal)}), flush=True)
+            return 1
+        bindings = journal['bindings']
+        message = (f"Revert landing {journal['culprit'][:12]} after a causal full-main red\n\n"
+                   f"Automatic source revert of main landing {journal['culprit']} (first parent {journal['parent']}).\n"
+                   f"Failing case: {case_identity(journal['investigation'])}\n"
+                   f"Red batch: {relative(journal['redReport'])}; evidence {relative(bindings['evidence'])} "
+                   f"({bindings['evidenceDigest'][:16]}).\nRoot-fix with fail-before/pass-after and review before relanding.\n\n"
+                   f"Tron-Auto-Revert: {journal['culprit']}\nTron-Review-Binding: {journal['bindingDigest']}\n"
+                   f"Tron-Reviewer: {args.reviewer}\n")
+        commit = subprocess.run(['git', 'commit-tree', bindings['candidateTree'], '-p', bindings['tip'], '-F', '-'],
+                                cwd=ROOT, input=message, capture_output=True, text=True, check=True).stdout.strip()
+        if verify.git('rev-parse', f'{commit}^{{tree}}').strip() != bindings['candidateTree']:
+            raise verify.VerifyError('published tree differs from the reviewed tree')
+        journal.update(state='push-intent', publishedCommit=commit)
+        save(path, journal)
+        pushed = subprocess.run(['git', 'push', '--porcelain', journal['remote'], f'{commit}:refs/heads/main'],
+                                cwd=ROOT, capture_output=True, text=True)
+        journal['push'] = {'exit': pushed.returncode, 'output': pushed.stdout + pushed.stderr}
+        save(path, journal)
+        settled = reconcile(journal, path)
+        print(json.dumps({'repairResult': settled, **next_action(journal)}), flush=True)
+        if settled == 'published':
+            notify_published(journal, state)
+            return 0
+        return 2 if settled == 'push-uncertain' else 1
+
+
+def notify_published(journal: dict, state: Path) -> None:
+    failure = state / 'issue-writes' / f"{failure_key(journal['investigation'])}.json"
+    number = json.loads(failure.read_text()).get('number') if failure.exists() else None
+    if not number:
+        return
+    body = (f"Published automatic source revert `{journal['publishedCommit']}` of `{journal['culprit']}` onto main "
+            f"`{journal['tip']}` after review binding `{journal['bindingDigest']}`. The landing's owner root-fixes "
+            'with fail-before/pass-after and review before relanding; the red stays recorded.\n')
+    journal['notification'] = issue_write(f"published-{journal['culprit']}", '', body,
+                                          repair_path(state, journal['culprit']).parent / journal['culprit'] / 'notify', state, number)
+    save(repair_path(state, journal['culprit']), journal)
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog='scripts/tron verify --batch')
     parser.add_argument('--base', help='explicit main starting anchor on first use; not green until this batch proves it')
-    parser.add_argument('--repeat', action='store_true', help='rerun all lanes at the already-covered HEAD')
+    parser.add_argument('--repeat', action='store_true', help='rerun all lanes at the already-green HEAD')
     parser.add_argument('--plan', action='store_true')
+    parser.add_argument('--review', metavar='CULPRIT', help='record a review decision for one repair request')
+    parser.add_argument('--decision', choices=('ACCEPT', 'BLOCK'))
+    parser.add_argument('--reviewer')
+    parser.add_argument('--binding')
     args = parser.parse_args(argv)
     if args.repeat and args.base:
         parser.error('--repeat cannot be combined with --base')
+    if args.review and not (args.decision and args.reviewer and args.binding):
+        parser.error('--review needs --decision, --reviewer and --binding')
     state = Path(verify.git('rev-parse', '--path-format=absolute', '--git-common-dir').strip()) / 'verify'
     try:
+        if args.review:
+            return review(args, state)
         if verify.git('status', '--porcelain', '--untracked-files=normal').strip():
             raise verify.VerifyError('batch needs a clean dedicated worktree')
         head = verify.git('rev-parse', 'HEAD').strip()
         green_path = state / 'green.json'
-        covered_path = state / 'covered.json'
-        pointer = covered_path if covered_path.exists() else green_path
-        green = json.loads(pointer.read_text()) if pointer.exists() else None
+        green = json.loads(green_path.read_text()) if green_path.exists() else None
         if green and args.base:
             raise verify.VerifyError('--base only initializes a missing last-green record; never skips failed coverage')
         if not green and not args.base:
-            raise verify.VerifyError('no green batch: supply --base <known-green-commit> explicitly on first use')
+            raise verify.VerifyError('no green batch: supply --base <main-anchor> explicitly on first use')
         base = green['commit'] if green else verify.git('rev-parse', '--verify', f'{args.base}^{{commit}}').strip()
         # A batch covers landed main only; pin a snapshot, never fetch/merge another worker's checkout.
         fetch_head = Path(verify.git('rev-parse', '--git-path', 'FETCH_HEAD').strip())
@@ -495,22 +799,22 @@ def main(argv: list[str]) -> int:
         if head not in ancestry or base not in ancestry[ancestry.index(head):]:
             raise verify.VerifyError('batch base and HEAD must be ordered commits on main first-parent history')
         if args.repeat and green['commit'] != head:
-            raise verify.VerifyError('--repeat requires HEAD to equal the last covered commit')
+            raise verify.VerifyError('--repeat requires HEAD to equal the last green commit')
         commits = verify.git('rev-list', '--reverse', f'{base}..{head}').splitlines()
         files = verify.git('diff', '--name-only', base, head).splitlines()
         plan = {'base': base, 'head': head, 'commits': commits, 'files': files, 'lanes': lanes(ROOT, base)}
         if args.plan:
             print(json.dumps(plan, indent=2))
             return 0
-        state.mkdir(exist_ok=True)
-        with (state / 'batch.lock').open('a') as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise verify.VerifyError('another explicit batch owns this repository; no queue or wait') from None
-            current = json.loads(pointer.read_text()) if pointer.exists() else None
+        with Locks(state):
+            current = json.loads(green_path.read_text()) if green_path.exists() else None
             if current != green:
                 raise verify.VerifyError('last-green changed while planning; rerun against its current coverage')
+            # Settle any dispatched revert push before new repair work.
+            for path in sorted((state / 'repairs').glob('*.json')):
+                journal = json.loads(path.read_text())
+                if journal['state'] in ('push-intent', 'push-uncertain') and reconcile(journal, path) == 'published':
+                    notify_published(journal, state)
             if head == base and green and not args.repeat:
                 print(f'batch: no uncovered commits after {head[:12]}')
                 return 0
@@ -518,9 +822,7 @@ def main(argv: list[str]) -> int:
             directory.mkdir(parents=True)
             timestamp = int(verify.git('show', '-s', '--format=%ct', base).strip())
             report = {**plan, 'verdict': 'running', 'results': [], 'failures': [], 'setup': [],
-                      'rangeAgeSeconds': max(0, round(time.time() - timestamp)), 'attributionHostSeconds': 0,
-                      'nonLandingCommits': [sha for sha in verify.git('rev-list', '--first-parent', f'{base}..{head}').splitlines()
-                                            if len(verify.git('rev-list', '--parents', '-n', '1', sha).split()) != 3]}
+                      'rangeAgeSeconds': max(0, round(time.time() - timestamp)), 'attributionHostSeconds': 0}
             path = directory / 'report.json'
             save(path, report)
             try:
@@ -543,16 +845,6 @@ def main(argv: list[str]) -> int:
                     save(path, report)
                     try:
                         outcome = execute(ROOT, lane, directory / f'lane-{index}')
-                        if (outcome.get('vitest') and outcome.get('exit') and outcome.get('failureComplete')
-                                and outcome.get('status') != 'uncovered'):
-                            known = verify.known_failures()
-                            expired = {item['testId'] for item in verify.expired_failures(known)}
-                            qualified = {identity: digest for identity, digest in outcome['failures'].items()
-                                         if identity in known and identity not in expired
-                                         and digest == known[identity]['evidence']['failureDigest']}
-                            outcome['qualifiedFailures'] = qualified
-                            if qualified == outcome['failures']:
-                                outcome['status'] = 'qualified'
                     except (OSError, ValueError, KeyError, verify.VerifyError, subprocess.SubprocessError) as error:
                         outcome = {**lane, 'exit': None, 'status': 'uncovered', 'error': str(error), 'seconds': 0}
                     report['results'].append(outcome)
@@ -560,19 +852,22 @@ def main(argv: list[str]) -> int:
                     source_unchanged()
                 report['fixtureCleanup'] = stop_fixture(ROOT, directory / 'fixture-stop')
                 save(path, report)
-                # Finish coverage before spending any host time on attribution.
-                for index, outcome in enumerate(report['results']):
-                    if not outcome.get('exit') or outcome.get('status') == 'qualified':
-                        continue
+                # Finish coverage and freeze it before spending any host time on attribution.
+                red = [(index, outcome) for index, outcome in enumerate(report['results']) if outcome.get('exit')]
+                if red:
+                    manifest = freeze(directory)
+                    report['evidence'] = str(manifest)
+                    save(path, report)
+                for index, outcome in red:
                     cases = failure_cases(outcome)
                     if not cases:
                         outcome.update(status='uncovered', reason='owner provided no exact-case attribution selector')
-                    failures = cases or [outcome]
-                    for case_index, failed in enumerate(failures):
+                    for case_index, failed in enumerate(cases or [outcome]):
                         attribution_directory = directory / f'attribution-{index}-{case_index}'
-                        attribution = memo_attribute(base, head, failed, attribution_directory, state)
+                        attribution, journal = investigate(base, head, failed, attribution_directory, state,
+                                                           {'redReport': str(directory / 'first-report.json'), 'evidence': str(manifest)})
                         report['attributionHostSeconds'] += attribution.get('hostSeconds', 0) if not attribution.get('reused') else 0
-                        item = {'failed': failed, 'attribution': attribution}
+                        item = {'failed': failed, 'attribution': attribution, 'repair': journal}
                         item['issue'] = file_issue({**report, **item}, directory / f'failure-{index}-{case_index}', state)
                         report['failures'].append(item)
                         save(path, report)
@@ -581,12 +876,9 @@ def main(argv: list[str]) -> int:
                                                       or (report.get('fixtureCleanup') or {}).get('exit'))
                                      else batch_verdict(report['results']))
                 save(path, report)
-                if report['verdict'] in ('green', 'qualified'):
-                    record = {'commit': head, 'report': str(path), 'verdict': report['verdict']}
-                    save(covered_path, record)
-                    if report['verdict'] == 'green':
-                        save(green_path, record)
-                return 0 if report['verdict'] in ('green', 'qualified') else 1
+                if report['verdict'] == 'green':
+                    save(green_path, {'commit': head, 'report': str(path), 'verdict': 'green'})
+                return 0 if report['verdict'] == 'green' else 1
             except KeyboardInterrupt:
                 report['verdict'] = 'interrupted'
                 save(path, report)
@@ -594,11 +886,12 @@ def main(argv: list[str]) -> int:
                 return 130
             except (verify.VerifyError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
                 report.update(verdict='error', error=str(error))
-                report.setdefault('failed', {'name': report.get('activeLane', 'batch infrastructure')})
-                report.setdefault('attribution', {'status': 'infrastructure/source changed; no culprit proven', 'candidates': commits})
                 save(path, report)
+                failed = {'name': report.get('activeLane', 'batch infrastructure')}
                 try:
-                    report['issue'] = file_issue(report, directory, state)
+                    report['issue'] = file_issue({**report, 'failed': failed, 'attribution': {
+                        'status': 'unresolved', 'reason': 'infrastructure/source changed', 'candidates': commits}},
+                        directory / 'failure-infrastructure', state)
                 except (OSError, ValueError, subprocess.SubprocessError) as issue_error:
                     report['issueError'] = str(issue_error)
                 save(path, report)
@@ -612,8 +905,9 @@ def main(argv: list[str]) -> int:
                 except (OSError, subprocess.SubprocessError) as error:
                     report['cleanupError'] = str(error)
                     save(path, report)
-                print(json.dumps({'batchResult': report['verdict'], 'head': head, 'report': str(path),
-                                  'delivery': 'Home caller must acknowledge this result'}), flush=True)
+                repairs = [next_action(item['repair']) for item in report['failures'] if item.get('repair')]
+                print(json.dumps({'batchResult': report['verdict'], 'head': head, 'report': str(path), 'repairs': repairs,
+                                  'delivery': 'Home caller must acknowledge this result and act on each repair next step'}), flush=True)
     except (verify.VerifyError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f'batch: {error}', flush=True)
         return 2
