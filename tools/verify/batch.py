@@ -115,7 +115,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     with log.open('w') as output:
         process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
                                    stdout=output, stderr=subprocess.STDOUT,
-                                   env={**os.environ, 'TRON_IOS_E2E_NO_INSTALL': '1'}, start_new_session=True)
+                                   env={**os.environ, 'TRON_IOS_E2E_NO_INSTALL': '1', 'TRON_FULL_GATEWAY_LOCK_HELD': '1'},
+                                   start_new_session=True)
         try:
             code = process.wait()
         except BaseException:

@@ -65,8 +65,11 @@ if affected == 'red': verdict = 'failed'
 Path('test-results/verify',sha+'.json').write_text(json.dumps({'commit':sha,'verdict':verdict,'message':'locks passed','passingTests':1,'steps':[],'selection':{},'skipped':[]}))
 sys.exit(1 if verdict == 'failed' else 0)
 ''', True)
-        self.write('tools/verify/gateway.py', '''import json,sys,time,subprocess
+        self.write('tools/verify/gateway.py', '''import json,os,sys,time,subprocess
 from pathlib import Path
+# A batch lane runs under the batch's full-Gateway lock and must say so, or the real
+# runner would wait on the lock its own batch holds.
+if os.environ.get('TRON_FULL_GATEWAY_LOCK_HELD') != '1': sys.exit('gateway lane ran without the held-lock marker')
 args=sys.argv[1:]
 nested='--config' in args
 name='nested' if nested else 'default'
@@ -965,6 +968,59 @@ class ShardedIosProbeTests(unittest.TestCase):
             lane = {'name': 'tests: ios 2/3', 'command': ['python3', str(stub), str(root / 'run')], 'cwd': '.', 'probe': True}
             result = batch.execute(root, lane, root / 'probe')
         self.assertEqual(result['exit'], 0, result)
+
+
+class FullGatewayLockTests(unittest.TestCase):
+    """A Gateway Vitest run waits for the host's full-Gateway lock, so it never overlaps a
+    batch; a batch lane, which already holds it, runs without waiting."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-lock-')
+        root = Path(self.temporary.name)
+        self.lock = root / 'full-gateway.lock'
+        self.ran = root / 'ran'
+        # The shipped runner, pointed at this test's lock path instead of the host's.
+        source = (ROOT / 'tools/verify/gateway.py').read_text()
+        (root / 'tools/verify').mkdir(parents=True)
+        (root / 'tools/verify/gateway.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(self.lock))))
+        (root / 'scripts').mkdir()
+        (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        vitest = root / 'packages/gateway/node_modules/.bin/vitest'
+        vitest.parent.mkdir(parents=True)
+        vitest.write_text(f'#!/bin/bash\necho "$@" >> {self.ran}\n')
+        for script in (root / 'scripts/tron-node', vitest):
+            script.chmod(0o755)
+        self.gateway = root / 'tools/verify/gateway.py'
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def start(self, env=None):
+        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**os.environ, **(env or {})},
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    def test_a_run_waits_for_the_held_lock_then_records_itself(self):
+        import fcntl
+        with self.lock.open('a') as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            run = self.start()
+            time.sleep(2)
+            self.assertIsNone(run.poll(), 'the run waits while another holder has the lock')
+            self.assertFalse(self.ran.exists(), 'Vitest does not start before the lock is free')
+        out, err = run.communicate(timeout=30)
+        self.assertEqual(run.returncode, 0, out + err)
+        self.assertIn('waiting for ' + str(self.lock), err)
+        self.assertEqual(self.ran.read_text().split(), ['run', 'some.test.ts'])
+        self.assertIn('"purpose": "gateway vitest some.test.ts"', self.lock.read_text())
+
+    def test_a_batch_lane_that_holds_the_lock_runs_without_waiting(self):
+        import fcntl
+        with self.lock.open('a') as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            run = self.start({'TRON_FULL_GATEWAY_LOCK_HELD': '1'})
+            out, err = run.communicate(timeout=30)
+        self.assertEqual(run.returncode, 0, out + err)
+        self.assertTrue(self.ran.exists())
 
 
 if __name__ == '__main__':
