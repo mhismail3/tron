@@ -388,6 +388,11 @@ struct SessionSettingsView: View {
             }
             .padding(20)
         }
+        // The presentation's inset settles after the first layout; without a top anchor the
+        // content can rest a fraction of a point below its top, and the medium sheet then
+        // scrolls on an upward drag instead of expanding to large.
+        .defaultScrollAnchor(.top, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .sizeChanges)
         .tronScrollEdgeChrome()
         .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
                                              presentationActive: presentationActivity.allowsPresentationPublication)) {

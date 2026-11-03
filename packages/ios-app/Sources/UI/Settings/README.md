@@ -110,6 +110,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   explicit overrides have Overridden and circular Revert. `SettingsProjectGroups` shows applied
   Repository Overrides last; `ProjectSettingsSections` owns the unchanged trust editor and ignored
   repository-field notices (no Workspace row in Session Settings). Summaries omit unset values. Trust still uses `TrustSettingsView`; another Mac requires **Use This Server**.
+  Its scroll content stays anchored at the top, so an upward drag at medium expands the sheet.
 - **Changes.** Only Global has a Changes entry. `SettingsChangesView` pages `settings.history` by
   Project/Session/Global and keeps last-look per Mac. Undo and
   Apply again are receipt-backed through `SettingsTrustCoordinator`; outside MCP and custom-model
