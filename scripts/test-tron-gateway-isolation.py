@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Gateway test CLI and actual migration fixture, with a synthetic caller HOME."""
 from pathlib import Path
-import fcntl
+import importlib.util
 import os
 import subprocess
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+_spec = importlib.util.spec_from_file_location("tron_gateway_runner", ROOT / "tools/verify/gateway.py")
+GATEWAY = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(GATEWAY)
 
 
 class GatewayTestHomeIsolation(unittest.TestCase):
@@ -20,12 +23,16 @@ class GatewayTestHomeIsolation(unittest.TestCase):
         env = {**os.environ, "HOME": str(caller_home), "TMPDIR": str(scratch),
                "TRON_NODE_BIN": node, "ISOLATION_CALLER_HOME": str(caller_home)}
         # The runner waits for the host's full-Gateway lock without a bound; take it here first
-        # (waiting likewise) so the bound below covers only this run, which then holds it.
-        with open("/tmp/tron-full-gateway.lock", "a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        # through the runner's own owner (waiting likewise, recording this holder) so the bound
+        # below covers only this run, which then holds it.
+        lock = GATEWAY.hold_full_gateway_lock()
+        try:
             result = subprocess.run([str(ROOT / "scripts/tron"), "test", "gateway", *arguments],
-                                    cwd=ROOT, env={**env, "TRON_FULL_GATEWAY_LOCK_HELD": "1"}, text=True,
+                                    cwd=ROOT, env={**env, GATEWAY.HELD_BY_CALLER: "1"}, text=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+        finally:
+            if lock:
+                lock.close()
         evidence = ROOT / "test-results/gateway-home-isolation"
         evidence.mkdir(parents=True, exist_ok=True)
         (evidence / (self._testMethodName + ".log")).write_text(result.stdout)
