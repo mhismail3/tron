@@ -191,10 +191,12 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(card.waitForExistence(timeout: 120), app.debugDescription)
         let approve = app.buttons["change-review-approve"]
         XCTAssertTrue(waitForHittable(approve, timeout: 15), app.debugDescription)
-        // Two taps at the button's point: the second lands while the first answer is in flight.
-        let point = approve.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        point.tap()
-        point.tap()
+        // A double tap on the element: both touches land before the sheet can move.
+        // (Discrete coordinate taps can land on the dimmed backdrop while the sheet
+        // settles, which closes it undecided.) The app disables the card while the
+        // first answer is in flight; the Gateway's once-only consumption is proven
+        // over the socket by admin/native-change-process.e2e.test.ts.
+        approve.doubleTap()
         XCTAssertTrue(waitUntil(timeout: 60) { budget() == 200 }, "the approved raise never reached the Home store")
         XCTAssertTrue(app.textViews.matching(NSPredicate(format: "label BEGINSWITH 'Settings card journey result:'")).element(boundBy: 1)
             .waitForExistence(timeout: 120), app.debugDescription)
