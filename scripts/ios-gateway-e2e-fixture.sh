@@ -109,6 +109,7 @@ const codemodeTurn = (context) => {
 // journey marker consumes its own script instead, so the real-UI ask journey
 // (#935) cannot shift the responses every other journey and boundary case expects.
 const ordinary = [
+  fauxAssistantMessage([fauxText("Deliberate duplicate. Detached response complete"), fauxToolCall("read", { path: "missing-break.txt" }, { id: "e2e-break-read" })], { stopReason: "toolUse" }),
   async () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     return fauxAssistantMessage("Streaming response starts now and remains active until the phone disconnects. Detached response complete");
