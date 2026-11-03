@@ -7,6 +7,7 @@ import {
   type SettingsManager,
 } from "../pi/coding-agent.js";
 import { TOOL_INTERRUPT_SIGNAL_GRACE_MS, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
+import { boundTaskCommandScope, closeTaskScopeAnchor, openTaskScopeAnchor, recordTaskCommandGroup, TASK_SCOPE_ANCHOR_FD } from "./task-command-scope.js";
 
 const POST_EXIT_OUTPUT_GRACE_MS = 100;
 /** How long output may still hold a call after a timeout or Stop has asked for
@@ -110,17 +111,29 @@ export class DirectBashProcessOwner {
         if (options.signal?.aborted) throw new Error("aborted");
         const shell = getShellConfig(this.settings.getShellPath());
         const fromStdin = shell.commandTransport === "stdin";
-        const child = spawn(
-          shell.shell,
-          fromStdin ? shell.args : [...shell.args, command],
-          {
-            cwd,
-            detached: process.platform !== "win32",
-            env: this.commandEnvironment(options.env),
-            stdio: [fromStdin ? "pipe" : "ignore", "pipe", "pipe"],
-            windowsHide: true,
-          },
-        );
+        // A task worker's commands run in its task's scope, reaped when the task settles.
+        const scope = process.platform === "win32" ? undefined : boundTaskCommandScope(this.sessionId);
+        const environment = this.commandEnvironment(options.env);
+        if (scope) environment.TMPDIR = scope.tmp;
+        const anchor = scope ? openTaskScopeAnchor(scope) : undefined;
+        let child: ChildProcess;
+        try {
+          child = spawn(
+            shell.shell,
+            fromStdin ? shell.args : [...shell.args, command],
+            {
+              cwd,
+              detached: process.platform !== "win32",
+              env: environment,
+              stdio: [fromStdin ? "pipe" : "ignore", "pipe", "pipe",
+                ...(anchor === undefined ? [] : [...Array<"ignore">(TASK_SCOPE_ANCHOR_FD - 3).fill("ignore"), anchor])],
+              windowsHide: true,
+            },
+          );
+        } finally {
+          if (anchor !== undefined) closeTaskScopeAnchor(anchor);
+        }
+        if (scope && child.pid !== undefined) recordTaskCommandGroup(scope, child.pid);
         if (fromStdin) {
           child.stdin?.on("error", () => {});
           child.stdin?.end(command);

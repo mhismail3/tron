@@ -227,7 +227,8 @@ const auth = new AuthBroker(
 );
 const homeTaskDiagnostic = (record: HomeTaskDiagnostic) => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
     || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused" || record.event === "home.inbox.admission-slow"
-    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.state === "critical")
+    || record.event === "home.task.dispatch-stage" || record.event === "host.load.non-task"
+    || (record.event === "home.task.command-reap" && (record.outcome === "refused" || record.action === "sweep")) || (record.event === "host.pressure" && record.state === "critical")
     || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
     "Home task lifecycle", { source: "home", ...record });
 const modelQueue = new ModelQueueOwner({

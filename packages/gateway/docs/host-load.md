@@ -18,6 +18,26 @@ claim is not proof of live work; Home coordinates overlapping writes using actua
 task state, not a duplicate status projection or admission queue.
 See the [Git/gh skill](../../../.agents/skills/tron-work/SKILL.md).
 
+## Task command scopes
+
+Binding a Home task to its worker gives that session a command scope
+(`kernel/run/task-command-scope.ts`): each foreground shell gets the scope's `TMPDIR`,
+a recorded process group and an inherited anchor descriptor. Settling the task (report,
+Stop, deadline or failure) reaps everything the scope owns, including detached children
+re-parented to launchd and `setsid` children that kept the anchor, and removes its
+`TMPDIR`. `TaskCommandSweep` runs every 60 s and is cheap (one `ps`,
+one `lsof` per live scope): it reaps scopes of settled tasks (a restart or a failed settle
+reap), records escaped group leaders of running tasks, and logs `host.load.non-task`
+when busy CPU ≥ 90 % comes mostly from processes outside task scopes. It refuses, never
+guesses: unknown tasks, unreadable process tables and survivors leave the scope on disk.
+A program that closes inherited descriptors and calls `setsid` before the next sweep,
+or files written outside `$TMPDIR` (macOS `mktemp` without a template ignores it), escape.
+
+**Synthetic load** (load tests, spinners, fsync loops) is bounded by a deadline, runs at
+background QoS (`taskpolicy -b` or `nice -n 20`), cleans up with an `EXIT` trap, writes
+only under `$TMPDIR`, and stays in the command's process group (no `setsid`, `nohup`
+daemons or `disown`).
+
 ## Host-pressure signal
 
 `HostPressure` (`packages/gateway/src/modules/home/host-pressure.ts`) owns the level. It reads

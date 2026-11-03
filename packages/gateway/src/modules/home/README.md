@@ -30,7 +30,7 @@ Native change cards wait in the requesting turn and consume the paired tap throu
 - **Tasks and wake inbox:** `home-task-*.ts`, `home-wake-inbox.ts`; contract in
   [tasks.md](tasks.md). Generic subagent receipt/artifact proof belongs to
   [kernel delegation](../../kernel/delegation/delegated-activity.md), not Home policy.
-  Also `home-diagnostic.ts`, `host-pressure.ts`,
+  Also `home-diagnostic.ts`, `host-pressure.ts`, `task-command-sweep.ts` (task command reaping, [host load](../../../docs/host-load.md#task-command-scopes)),
   `locks/` (goldens).
 
 ## Contract
@@ -273,6 +273,7 @@ and the [built-in improvement-loop design](../../../../../tools/home-retro/DESIG
 | `session.context.activeTools` versus Home `settings.resolve` → `tools.active` | read-only RPC fields | Both describe the enabled recipe after runtime construction. A mismatch diagnoses stale selection; `home.context.breakdown.activation.kind` explains why wake requests omit `write`, `edit` and `bash` without changing that recipe |
 | `TRON_SETTINGS_OUTCOME_PROOF_DEFERRED` | warning | A settings delivery's canonical proof failed; its outbox remains retained for later proof, without exposing request IDs or paths |
 | `home.response-timing`; `home.task.history-summary` | info | Content-free accepted-input→visible/terminal scalar sample with queue/model/tool durations and completeness; authoritative admitted operation/resume counts with root hash and root-created time for page deduplication. A crash loses live timing correlation; a bounded log export is partial coverage |
+| `home.task.command-reap`; `home.task.command-scope-refused`; `host.load.non-task` | info at settle; sweep reaps, refused reaps and `host.load.non-task` warn | A settled task's commands reaped (`action` `settle` or `sweep`, `outcome`, `reason`, `counts.processes`/`survivors`); a scope the sweep leaves alone, once per scope (`unbound-scope`, `unknown-task`); busy CPU ≥ 90 % mostly outside task scopes, at most every 10 min (`counts` busy/task/non-task/`ppid=1` CPU, `stages` the top five as `name pid ppid cpu`) |
 | `host.pressure` | info; warning at `critical` | A Home-status read saw the host-pressure level change: `state`, `transition`, CPU busy, loop utilization and load per CPU; it informs and never holds a worker back |
 
 ## Verify

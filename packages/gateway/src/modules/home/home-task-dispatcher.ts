@@ -33,6 +33,8 @@ import { basename } from "node:path";
 import { TRON_ASK_USER_INTERRUPTED } from "../../extensions/tron-ask-user-contract.js";
 import { abortableRead } from "../../util/abortable-read.js";
 import { HostPressure, type HostPressureDiagnostic } from "./host-pressure.js";
+import { TaskCommandSweep, type TaskCommandDiagnostic } from "./task-command-sweep.js";
+import { bindTaskCommandScope } from "../../kernel/run/task-command-scope.js";
 import { homeTaskNeedsAttention } from "./home-task-lineage.js";
 import { readHomeTaskHistory } from "./home-task-history.js";
 
@@ -64,6 +66,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
   | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled" | "abandon-failed"; durationMs: number }
   | HostPressureDiagnostic
+  | TaskCommandDiagnostic
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
@@ -212,18 +215,23 @@ export class HomeTaskDispatcher {
    * (docs/host-load.md). */
   private readonly running = new Set<string>();
   private readonly pressure: HostPressure;
+  /** Reaps each task's commands when it settles; its sweep starts after recovery. */
+  readonly commands: TaskCommandSweep;
   private readonly setup = new AsyncMutex();
   private recovery: Promise<HomeTaskRecoveryStatus> | undefined;
   constructor(readonly store: HomeTaskStore, readonly authorization: HomeTaskAuthorization,
     private readonly sessions: SessionOperations, private readonly diagnostic: ((record: HomeTaskDiagnostic) => void) | undefined,
     private readonly inbox: WakeInboxOwner, private readonly policy: HomeTaskPolicy) {
     this.pressure = new HostPressure(record => this.diagnostic?.(record));
+    this.commands = new TaskCommandSweep({ running: taskId => this.running.has(taskId),
+      lifecycle: async taskId => { const task = await this.store.read(taskId).catch(() => undefined); return task && (task.lifecycle === "terminal" ? "terminal" : "open"); } },
+    record => this.diagnostic?.(record));
   }
 
   /** Only startup calls this, before live dispatch closures can exist. The
    * durable record outlives a process; its executable lease never does. */
   recover(): Promise<HomeTaskRecoveryStatus> {
-    return this.recovery ??= this.recoverOwned().then(() => ({ available: true as const }), error => {
+    return this.recovery ??= this.recoverOwned().then(() => { this.commands.start(); return { available: true as const }; }, error => {
       const reason = error instanceof HomeTaskStoreError ? error.code : "unsafe-state";
       // Store errors already emitted their single owning diagnostic. Refusal
       // is a process-lifetime result, not a retry or an unrelated Gateway stop.
@@ -655,6 +663,8 @@ export class HomeTaskDispatcher {
       task = await this.stage("bind", taskId, signal, () => this.store.put(bound, bound.revision - 1),
         late => { this.transition(late, "operation-bound"); void this.refuseAdmission(late, "admission-cancelled").catch(() => {}); });
       this.transition(task, "operation-bound");
+      // Every command the worker runs from here belongs to this task until it settles.
+      bindTaskCommandScope(slot.id, task.taskId);
       let resolve!: (terminal: OwnedOperationTerminal) => void;
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });
       const cancellation = async (reason = "interrupted") => {
@@ -685,6 +695,8 @@ export class HomeTaskDispatcher {
         // Async runs the task started are stopped and joined before the evidence cut,
         // so the cut records every stop and the outcome reads the join's result.
         const settled = await settleTaskSubagents(slot, operationId, deadline!.signal);
+        // The worker's turn is over: nothing it started may outlive the task (#2209).
+        await this.commands.reap(slot.id, active.taskId, "settle");
         // Share cold recovery's durable file cut before publishing any terminal
         // references/outbox or acknowledging the operation. SDK append visibility
         // alone cannot guarantee the worker evidence survives a power loss.

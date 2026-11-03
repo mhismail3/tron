@@ -1524,6 +1524,7 @@ export class HomeOwner {
   /** Release the memory store and the request seams. */
   async dispose(): Promise<void> {
     this.policies.clear();
+    await this.tasks.commands.dispose();
     const memory = this.memory;
     this.memory = undefined;
     await memory?.owner.dispose();
