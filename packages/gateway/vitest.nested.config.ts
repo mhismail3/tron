@@ -13,6 +13,7 @@ export const nestedTestFiles = [
   "src/modules/home/home-task-subagents-reports.e2e.test.ts",
   "src/modules/home/home-task-subagents-settlement.e2e.test.ts",
   "src/lifecycle/exit-after-shutdown.e2e.test.ts",
+  "src/transport/gateway-process-prompt.e2e.test.ts",
   "src/machine/terminal-idle.e2e.test.ts",
   "src/kernel/delegation/home-managed-provider.integration.test.ts",
   "src/workspace/web-research-child.integration.test.ts",

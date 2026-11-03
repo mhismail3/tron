@@ -10,13 +10,19 @@ fixtures. Its manifest is `../test-support.module.json` (it also owns fixtures u
 ## Owns
 
 `wait-for.ts`, `network-isolation.ts`, `fixture-process-owner.mjs`,
-`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-registry.ts`, `scenario-lock.ts`,
+`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-process.ts`, `gateway-registry.ts`, `scenario-lock.ts`,
 `tron-store-*.ts`, the Tron-home environment guard and preflight, and the Home task
 and crash fixtures. `settings-action-crash-child.ts` runs the real approval engine
 against a file-backed action, exposing the effect/before-settlement cut so its parent
 can kill and reopen it to prove interrupted actions are not replayed. Its lifecycle
 mode holds a real pending-read return to prove concurrent start and disposal join
 one accepted recovery through the existing work owner.
+
+`gateway-process.ts` runs one real source Gateway process (`src/index.ts`) on an
+isolated root with a scripted OpenAI-compatible HTTP provider as its only scripted
+party. Clients cross the production loopback WebSocket with the root's local
+credential; `restart()` is the iOS fixture's restart (SIGTERM, join, respawn on the
+same root and port). Its files run in the nested pass.
 
 `catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
 `catalog-metadata-fixture.ts` alternately until its parent kills it, so a
