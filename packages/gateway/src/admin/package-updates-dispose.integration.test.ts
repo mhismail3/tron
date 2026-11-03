@@ -12,6 +12,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 it("disposes only after an admitted package update check has settled", async () => {
   const outside = await mkdtemp(join(tmpdir(), "tron-package-dispose-outside-"));
   const root = await mkdtemp(join(tmpdir(), "tron-package-dispose-"));
+  let gateway: Awaited<ReturnType<typeof startLockGateway>> | undefined;
   try {
     const started = join(outside, "started"), finished = join(outside, "finished");
     const child = join(root, "npm-view.mjs");
@@ -25,17 +26,19 @@ console.log(JSON.stringify('2.0.0'));
     const installed = join(root, "tron", "agent", "npm", "node_modules", name);
     await mkdir(installed, { recursive: true });
     await writeFile(join(installed, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
-    const gateway = await startLockGateway("package-updates-dispose", {
+    gateway = await startLockGateway("package-updates-dispose", {
       root, administrativeResources: true,
       settings: { npmCommand: [process.execPath, child], packages: [`npm:${name}`] },
     });
     const phone = await gateway.connect("package-reader");
     void phone.request("packages.checkUpdates", { cwd: gateway.cwd }).catch(() => undefined);
     await waitFor(() => existsSync(started), "the version query to start");
-    await gateway.dispose();
+    const disposing = gateway; gateway = undefined;
+    await disposing.dispose();
     expect(existsSync(finished), "disposal returned while the admitted update check was still running").toBe(true);
     expect(existsSync(root)).toBe(false);
   } finally {
+    await gateway?.dispose();
     await rm(outside, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }
