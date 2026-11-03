@@ -27,6 +27,9 @@ extension RealGatewayPairAndChatUITests {
         let reply = app.textViews.matching(identifier: "chat.assistant.selectable-text")
             .matching(NSPredicate(format: "label CONTAINS %@", completion))
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 180), app.debugDescription)
+        // Count only once the run has settled, so a later duplicate cannot arrive after the count.
+        let working = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Tron is working'"))
+        XCTAssertTrue(waitUntil(timeout: 180) { working.count == 0 }, "the run never settled: \(app.debugDescription)")
         let sentPredicate = NSPredicate(format: "label == %@", prompt)
         func sentCount() -> Int { app.staticTexts.matching(sentPredicate).count - app.navigationBars.staticTexts.matching(sentPredicate).count }
         XCTAssertEqual(reply.count, 1, "the completed reply must be rendered once: \(app.debugDescription)")
@@ -37,6 +40,7 @@ extension RealGatewayPairAndChatUITests {
         returnFromAnotherApp(app)
         XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 90), app.debugDescription)
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 60) { working.count == 0 }, "the reopened session never read settled: \(app.debugDescription)")
         XCTAssertEqual(reply.count, 1, "the reconnected snapshot must not duplicate the reply: \(app.debugDescription)")
         XCTAssertEqual(sentCount(), 1, "the reconnected snapshot must not duplicate the prompt: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once-after-reconnect")
@@ -188,8 +192,8 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(card.waitForExistence(timeout: 120), app.debugDescription)
         let approve = app.buttons["change-review-approve"]
         XCTAssertTrue(waitForHittable(approve, timeout: 15), app.debugDescription)
-        approve.tap()
-        if approve.exists && approve.isHittable { approve.tap() }
+        // Two taps in one gesture: the second lands while the first answer is in flight.
+        approve.doubleTap()
         XCTAssertTrue(waitUntil(timeout: 60) { budget() == 200 }, "the approved raise never reached the Home store")
         XCTAssertTrue(app.textViews.matching(NSPredicate(format: "label BEGINSWITH 'Settings card journey result:'")).element(boundBy: 1)
             .waitForExistence(timeout: 120), app.debugDescription)
@@ -198,6 +202,9 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual(applied.first?["status"] as? String, "applied")
         XCTAssertEqual((applied.first?["after"] as? [String: Any])?["outputTokens"] as? Int, 200)
         XCTAssertFalse(card.exists, "an approved card must close")
+        // A second answer sent for the same card would be refused and surface as an error.
+        XCTAssertFalse(app.descendants(matching: .any)["in-app-notice-card"].exists, "the double tap must not send a second answer: \(app.debugDescription)")
+        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Could not submit'")).count, 0)
         keepScreenshot(app, name: "2232-home-budget-card-approved-once")
     }
 
