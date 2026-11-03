@@ -7,8 +7,9 @@ import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 /**
  * A delegated child result and its cancellation across the client socket
  * (#2231): a source Gateway process with its real managed pi-subagents install
- * and a real child Pi process, the production loopback WebSocket, and a
- * scripted HTTP provider (parent and child models) as the only scripted party.
+ * running a foreground child session (its model calls leave the Gateway process
+ * itself), the production loopback WebSocket, and a scripted HTTP provider
+ * (parent and child models, told apart by model id) as the only scripted party.
  */
 
 const gateways: GatewayProcess[] = [];
@@ -53,8 +54,10 @@ async function prompt(gateway: GatewayProcess, phone: ProcessClient, label: stri
 const subagentCall = { toolCalls: [{ id: "call-subagent", name: "subagent", arguments: { agent: "task-child", task: "Scripted child task", async: false } }] };
 const toolResults = (snapshot: Snapshot) => snapshot.transcript.filter((item) => item.kind === "message" && item.role === "toolResult");
 const childRequests = (gateway: GatewayProcess) => gateway.provider.requests.filter((request) => request.model === CHILD_MODEL);
-const liveSubagents = (snapshot: Snapshot) => (snapshot.processActivities ?? [])
-  .filter((activity) => activity.kind === "subagent" && !["completed", "failed", "stopped", "cancelled", "interrupted"].includes(activity.lifecycle?.state));
+// The protocol's terminal process states (kernel/projection/process-activity.ts).
+const TERMINAL_STATES = ["completed", "failed", "stopped", "rejected", "interrupted"];
+const subagents = (snapshot: Snapshot) => (snapshot.processActivities ?? []).filter((activity) => activity.kind === "subagent");
+const liveSubagents = (snapshot: Snapshot) => subagents(snapshot).filter((activity) => !TERMINAL_STATES.includes(activity.lifecycle?.state));
 
 describe("delegation across the client socket of a real Gateway process", () => {
   it("returns a foreground child's answer to the parent (#2231)", async () => {
@@ -75,7 +78,9 @@ describe("delegation across the client socket of a real Gateway process", () => 
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ toolName: "subagent", toolCallId: "call-subagent", isError: false });
     expect(JSON.stringify(results[0]!.content)).toContain("CHILD-ANSWER-7");
-    expect(liveSubagents(settled)).toEqual([]);
+    expect(subagents(settled)).toHaveLength(1);
+    expect(subagents(settled)[0]).toMatchObject({ toolCallId: "call-subagent", lifecycle: { state: "completed" } });
+    expect(subagents(settled)[0]!.lifecycle.terminalAt).toEqual(expect.any(String));
     expect(gateway.provider.requests.map((request) => request.model)).toEqual(["scripted-model", CHILD_MODEL, "scripted-model"]);
     // The parent's second request carries the child's answer bytes as the tool result.
     const toolMessage = gateway.provider.requests[2]!.messages.find((message) => message.role === "tool");
@@ -116,11 +121,13 @@ describe("delegation across the client socket of a real Gateway process", () => 
     const results = toolResults(settled);
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ toolName: "subagent", toolCallId: "call-subagent", isError: true });
-    // The aborted child is terminal (pi-subagents records a cut-off foreground run as failed),
-    // and the parent turn ended aborted rather than continuing with a result.
-    const activities = (settled.processActivities ?? []).filter((activity) => activity.kind === "subagent");
+    expect(JSON.stringify(results[0]!.content)).toContain("Request aborted");
+    // The aborted child is terminal and did not complete. Which terminal state a
+    // user cancel should read (today `failed`) is the open decision in #2238.
+    const activities = subagents(settled);
     expect(activities).toHaveLength(1);
-    expect(activities[0]).toMatchObject({ toolCallId: "call-subagent", lifecycle: { state: "failed" } });
+    expect(activities[0]!.toolCallId).toBe("call-subagent");
+    expect(TERMINAL_STATES.filter((state) => state !== "completed")).toContain(activities[0]!.lifecycle.state);
     expect(activities[0]!.lifecycle.terminalAt).toEqual(expect.any(String));
     expect(settled.transcript.at(-1)).toMatchObject({ kind: "message", role: "assistant", stopReason: "aborted" });
     expect(childRequests(gateway)).toHaveLength(1);
