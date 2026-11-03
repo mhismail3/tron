@@ -179,10 +179,14 @@ const installAsSecondClient = async (offer) => {
   const socket = new WebSocket("ws://127.0.0.1:" + process.env.TRON_GATEWAY_PORT + "/v1/socket",
     { headers: { authorization: "Bearer " + await readLocalCredential(process.env.TRON_DATA_DIR) } });
   const frames = [];
+  let failure;
   socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+  // An unheard ws error would throw inside this Gateway process and stop it.
+  socket.on("error", (error) => { failure = error; });
   const until = async (read, label) => {
     const deadline = Date.now() + 30000;
     for (;;) {
+      if (failure) throw new Error("second writer: " + failure.message);
       const value = read();
       if (value) return value;
       if (Date.now() > deadline) throw new Error("second writer: " + label + " did not arrive");
