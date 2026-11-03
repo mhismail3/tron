@@ -72,6 +72,9 @@ and before worker controls, reading canonical fixed settings and the worker fact
   saved default with the first available model without rewriting settings; existing
   sessions are never rewritten. Extension `ctx.setModel` and extension re-registration
   of `openai`/`openai-codex` are outside this policy (no SDK pre-selection hook).
+  Attached runtimes reload their availability snapshots only when the eligibility
+  state (account, OAuth flag, slugs, names) changes, never per read, so `provider.list`
+  and `model.list` cost does not grow with the open sessions.
 - **Runtime construction.** `createProviderModelRuntime` supplies canonical auth/model paths,
   offline refresh defaults and Kimi-then-Jev policy wrapping for Gateway and session runtimes.
   The registry receives this factory from composition; injected raw factories use the same policies.

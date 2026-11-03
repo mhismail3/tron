@@ -70,11 +70,11 @@ export type HomeMemoryToolResult =
 export interface HomeMemoryToolAccess {
   /** The recipe's zoom: line `id+n` opened into its two children, or the message
    * itself at n = 1. */
-  zoom(id: number, n: number): Promise<HomeMemoryToolResult>;
+  zoom(id: number, n: number, signal?: AbortSignal): Promise<HomeMemoryToolResult>;
   /** The local date and time of message `id`. */
-  date(id: number): Promise<HomeMemoryToolResult>;
+  date(id: number, signal?: AbortSignal): Promise<HomeMemoryToolResult>;
   /** A case-insensitive substring search over the projected messages. */
-  search(query: string, from: number | undefined, to: number | undefined): Promise<HomeMemoryToolResult>;
+  search(query: string, from: number | undefined, to: number | undefined, signal?: AbortSignal): Promise<HomeMemoryToolResult>;
 }
 
 /** The typed answer for a memory that cannot serve a tool call. */
@@ -397,8 +397,8 @@ export class HomeMemory {
   /**
    * The recipe's `zoom`, against the store that is open right now.
    */
-  async zoom(id: number, n: number): Promise<HomeMemoryToolResult> {
-    return await this.toolRead(memory => {
+  async zoom(id: number, n: number, signal?: AbortSignal): Promise<HomeMemoryToolResult> {
+    return await this.toolRead(signal, memory => {
       const lines = memory.zoomLines(id, n);
       return lines
         ? { outcome: "ok", text: lines.join("\n") }
@@ -407,8 +407,8 @@ export class HomeMemory {
   }
 
   /** The recipe's `date`: the local date and time of one message. */
-  async date(id: number): Promise<HomeMemoryToolResult> {
-    return await this.toolRead((memory) => {
+  async date(id: number, signal?: AbortSignal): Promise<HomeMemoryToolResult> {
+    return await this.toolRead(signal, (memory) => {
       const timestamp = memory.entryTimestamp(id);
       // A message's view line is `id+1`, so a refused date names the line it is
       // about the same way a refused zoom does.
@@ -428,8 +428,8 @@ export class HomeMemory {
    * counts, so a message that holds no searchable text is named instead of
    * looking like a message that never matched.
    */
-  async search(query: string, from: number | undefined, to: number | undefined): Promise<HomeMemoryToolResult> {
-    return await this.toolRead((memory) => {
+  async search(query: string, from: number | undefined, to: number | undefined, signal?: AbortSignal): Promise<HomeMemoryToolResult> {
+    return await this.toolRead(signal, (memory) => {
       // The memory owns the query bound; this is where its refusal becomes the
       // text the model reads.
       const found = memory.searchMessages(query, from, to);
@@ -460,11 +460,11 @@ export class HomeMemory {
    * and a store that a reconfiguration or a release replaced while the ingest ran
    * answers for what it is now.
    */
-  private async toolRead(read: (memory: EpisodicMemory) => HomeMemoryToolResult | Promise<HomeMemoryToolResult>): Promise<HomeMemoryToolResult> {
+  private async toolRead(signal: AbortSignal | undefined, read: (memory: EpisodicMemory) => HomeMemoryToolResult | Promise<HomeMemoryToolResult>): Promise<HomeMemoryToolResult> {
     const store = this.toolStore();
     if ("unavailable" in store) return store.unavailable;
     try {
-      await store.memory.entriesIngested(this.options.sessionId);
+      await store.memory.entriesIngested(this.options.sessionId, signal);
       if (store.memory.status().blocked) return homeMemoryToolUnavailable("memory-blocked");
       if (this.binding?.memory !== store.memory) return homeMemoryToolUnavailable("memory-unavailable");
       return await read(store.memory);

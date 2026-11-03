@@ -88,9 +88,9 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
       description: "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole.",
       parameters: ZOOM_PARAMETERS,
       executionMode: "sequential",
-      execute: async (_toolCallId, request: { id: number; n: number }) => {
+      execute: async (_toolCallId, request: { id: number; n: number }, signal) => {
         const memory = memoryTools();
-        return memory ? answer(await memory.zoom(request.id, request.n)) : missing();
+        return memory ? answer(await memory.zoom(request.id, request.n, signal)) : missing();
       },
     },
     {
@@ -101,9 +101,9 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
       description: "The date and time of message id.",
       parameters: DATE_PARAMETERS,
       executionMode: "sequential",
-      execute: async (_toolCallId, request: { id: number }) => {
+      execute: async (_toolCallId, request: { id: number }, signal) => {
         const memory = memoryTools();
-        return memory ? answer(await memory.date(request.id)) : missing();
+        return memory ? answer(await memory.date(request.id, signal)) : missing();
       },
     },
     {
@@ -114,9 +114,11 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
       description: "Find messages of this chat by case-insensitive substring, oldest first, at most 20 lines; each line is `id+0|kind: snippet`, and the header counts the range's matches, its [omitted] messages and its capped ones. Tron's addition to the view's tools.",
       parameters: SEARCH_PARAMETERS,
       executionMode: "sequential",
-      execute: async (_toolCallId, request: { query: string; from?: number; to?: number }) => {
+      execute: async (_toolCallId, request: { query: string; from?: number; to?: number }, signal) => {
+        // A Stop abandons the wait for the memory's lock (an ingest or checkpoint
+        // may hold it); the read itself is an in-memory scan.
         const memory = memoryTools();
-        return memory ? answer(await memory.search(request.query, request.from, request.to)) : missing();
+        return memory ? answer(await memory.search(request.query, request.from, request.to, signal)) : missing();
       },
     },
   ];

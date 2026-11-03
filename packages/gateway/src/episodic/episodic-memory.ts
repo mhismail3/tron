@@ -240,8 +240,8 @@ export class EpisodicMemory {
    * summarizing its own input and a slow compactor cannot stall a turn that does
    * not need its output.
    */
-  async entriesIngested(sessionId: string): Promise<void> {
-    await this.ingestForRead(sessionId);
+  async entriesIngested(sessionId: string, signal?: AbortSignal): Promise<void> {
+    await this.ingestForRead(sessionId, signal);
     void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
   }
 
@@ -744,9 +744,6 @@ export class EpisodicMemory {
     }
     this.sourceCursor = cut.cursor;
     await this.saveState();
-    if (!this.closed && await this.store.shouldCheckpoint(this.liveBytes)) {
-      await this.enqueueAppend(() => this.publishCheckpoint());
-    }
   }
 
   private async checkpointIfNeeded(): Promise<void> {

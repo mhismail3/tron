@@ -73,6 +73,10 @@ export class OpenAIModelEligibility {
   private lastSuccessful: AccountModels | undefined;
   private lastFailure: { fingerprint: string; expiresAt: number } | undefined;
   private flight: DiscoveryFlight | undefined;
+  /** Bumped only when a publish changes what the filters answer. */
+  private stateRevision = 0;
+  /** The snapshot refresh that applied (or is applying) one state revision. */
+  private snapshots: { revision: number; done: Promise<void> } | undefined;
 
   constructor(options: OpenAIModelEligibilityOptions = {}) {
     this.fetch = options.fetch ?? globalThis.fetch;
@@ -183,11 +187,17 @@ export class OpenAIModelEligibility {
 
   private publish(generation: number, update: EligibilityUpdate): void {
     if (generation !== this.state.generation) return;
+    const changed = ("fingerprint" in update && update.fingerprint !== this.state.fingerprint)
+      || ("oauth" in update && update.oauth !== this.state.oauth)
+      || update.entries.length !== this.state.entries.length || update.entries.some((entry, index) => entry !== this.state.entries[index])
+      || update.displayNames.size !== this.state.displayNames.size
+      || [...update.displayNames].some(([slug, name]) => this.state.displayNames.get(slug) !== name);
     this.state.generation = generation;
     if ("fingerprint" in update) this.state.fingerprint = update.fingerprint;
     if ("oauth" in update) this.state.oauth = update.oauth;
     this.state.entries = update.entries;
     this.state.displayNames = update.displayNames;
+    if (changed) this.stateRevision += 1;
   }
 
   private startDiscovery(runtime: ModelRuntime, token: string, fingerprint: string): DiscoveryFlight {
@@ -241,11 +251,20 @@ export class OpenAIModelEligibility {
     return result;
   }
 
-  private async refreshSnapshots(): Promise<void> {
+  private refreshSnapshots(): Promise<void> {
+    // Only a changed eligibility state can change what the installed filters
+    // answer; attaching a runtime refreshes it through its own registration. A
+    // refresh per read reloaded every attached session runtime on each
+    // `provider.list`/`model.list`, so those reads grew with the open sessions.
+    const revision = this.stateRevision;
+    if (this.snapshots?.revision === revision) return this.snapshots.done;
     // A provider-scoped SDK refresh first republishes every provider's unfiltered
     // configured catalog and then reapplies filters only to the named subset, which
     // would drop other providers' credential filters. Refresh full availability.
-    await Promise.all([...this.runtimes].map(runtime => runtime.refresh({ allowNetwork: false }).then(() => undefined, () => undefined)));
+    const done = Promise.all([...this.runtimes].map(runtime => runtime.refresh({ allowNetwork: false }).then(() => undefined, () => undefined)))
+      .then(() => undefined);
+    this.snapshots = { revision, done };
+    return done;
   }
 
   private primaryRuntime(): ModelRuntime | undefined { return this.runtimes.values().next().value; }
