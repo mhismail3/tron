@@ -49,8 +49,13 @@ One test fixture is the exception: when the selection can include
 matches), the runner hands Vitest `TRON_P99_17_BROWSER_FORK_COPY`, a checkout of the
 agent-browser fork commit pinned in `browser-live-view-adapter.ts`. It is fetched by SHA, built from
 the fork's lockfile (`npm ci --ignore-scripts`, then its build), and kept once per clone in
-`.git/verify/fixtures/`, so a batch's Gateway lane covers both cases instead of skipping them; an
-ambiguous pin or failed provisioning fails the run. It first waits
+`.git/verify/fixtures/`, so a batch's Gateway lane covers both cases instead of skipping them. The
+test's native case runs the `agent-browser` first on `PATH`, so the runner puts there the engine the
+fork itself declares (`TARGET_AGENT_BROWSER_VERSION` in its `scripts/agent-browser-target.mjs`):
+this host's native binary from the registry's `agent-browser@<version>` package (`npm pack
+--ignore-scripts`), kept once per version beside the fork after it reports that version. Bumping
+the fork pin is the only engine update. An ambiguous pin or declaration, or failed provisioning,
+fails the run. It first waits
 its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and earlier waiters) and
 records itself there, so Gateway runs never overlap each other or a `verify --batch`, whose lanes
 already hold it. Waiters, batch included, take the lock first-come first-served: each holds the

@@ -4,11 +4,13 @@ from pathlib import Path
 import fcntl
 import json
 import os
+import platform
 import re
 import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 
@@ -109,8 +111,9 @@ def hold_full_gateway_lock():
 
 
 # The browser receipt test runs the pinned agent-browser fork, which it reads from this
-# variable. The runner provisions that exact commit once per clone, so every run that
-# selects the test (a batch's Gateway lane included) covers it instead of skipping it.
+# variable, and its native case the engine first on PATH. The runner provisions that exact
+# commit once per clone and the engine version it declares once per version, so every run
+# that selects the test (a batch's Gateway lane included) covers it instead of skipping it.
 BROWSER_FORK_COPY = 'TRON_P99_17_BROWSER_FORK_COPY'
 BROWSER_FORK_TEST = 'src/sessions/browser-fork-receipts.integration.test.ts'
 BROWSER_FORK_REPOSITORY = 'https://github.com/fitchmultz/pi-agent-browser-native.git'
@@ -191,6 +194,68 @@ def provision_browser_fork() -> Path:
     return target
 
 
+def declared_browser_engine(fork: Path) -> str:
+    """The one agent-browser engine version the fork qualifies against, read from the fork itself."""
+    target = fork / 'scripts/agent-browser-target.mjs'
+    source = target.read_text() if target.is_file() else ''
+    versions = set(re.findall(r'TARGET_AGENT_BROWSER_VERSION\s*=\s*"(\d+\.\d+\.\d+)"', source))
+    if len(versions) != 1:
+        raise SystemExit(f'gateway tests: expected one TARGET_AGENT_BROWSER_VERSION in {target}, found {sorted(versions)}')
+    return versions.pop()
+
+
+def provision_browser_engine(fork: Path) -> Path:
+    """The bin directory of the engine the fork declares, packed from the npm registry once per version.
+
+    The registry's `agent-browser` package ships every platform's native binary; this keeps the one for
+    this host, verified to report the declared version, so the engine follows the fork pin alone."""
+    version = declared_browser_engine(fork)
+    fixtures = fork.parent
+    target = fixtures / f'agent-browser-{version}'
+    stamp = target / '.tron-provisioned'
+    system = {'Darwin': 'darwin', 'Linux': 'linux'}.get(platform.system(), platform.system().lower())
+    machine = {'x86_64': 'x64', 'amd64': 'x64', 'aarch64': 'arm64'}.get(platform.machine().lower(), platform.machine().lower())
+    member = f'package/bin/agent-browser-{system}-{machine}'
+    with open(fixtures / 'agent-browser.lock', 'a+') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if stamp.is_file() and stamp.read_text() == version:
+            return target / 'bin'
+        print(f'gateway tests: provisioning agent-browser {version}, the engine the fork declares, into {target}', file=sys.stderr, flush=True)
+        # As for the fork, only this lock's holder stages; leftovers are a killed provisioner's.
+        for stale in fixtures.glob('.agent-browser-*'):
+            shutil.rmtree(stale, ignore_errors=True)
+        staging = Path(tempfile.mkdtemp(prefix='.agent-browser-', dir=fixtures))
+        try:
+            clean = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+            subprocess.run([str(ROOT / 'scripts/tron-node'), 'exec', 'npm', 'pack', f'agent-browser@{version}', '--ignore-scripts',
+                            '--pack-destination', str(staging), '--silent'], cwd=staging, check=True, timeout=900, stdout=sys.stderr, env=clean)
+            tarballs = list(staging.glob('*.tgz'))
+            if len(tarballs) != 1:
+                raise SystemExit(f'gateway tests: npm pack agent-browser@{version} produced {len(tarballs)} tarballs')
+            with tarfile.open(tarballs[0]) as archive:
+                try:
+                    binary = archive.extractfile(member)
+                except KeyError:
+                    binary = None
+                if binary is None:
+                    raise SystemExit(f'gateway tests: agent-browser {version} ships no {member}')
+                (staging / 'bin').mkdir()
+                (staging / 'bin/agent-browser').write_bytes(binary.read())
+            tarballs[0].unlink()
+            (staging / 'bin/agent-browser').chmod(0o755)
+            reported = subprocess.run([str(staging / 'bin/agent-browser'), '--version'], capture_output=True, text=True, timeout=60).stdout.strip()
+            if reported != f'agent-browser {version}':
+                raise SystemExit(f'gateway tests: the packed engine reports {reported or "nothing"}, not agent-browser {version}')
+            stamp_staging = staging / '.tron-provisioned'
+            stamp_staging.write_text(version)
+            shutil.rmtree(target, ignore_errors=True)
+            os.rename(staging, target)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+    return target / 'bin'
+
+
 def main() -> int:
     # Resolve the development toolchain before replacing HOME; resolution must
     # neither depend on the fixture home nor fall back to the signed Gateway.
@@ -198,7 +263,11 @@ def main() -> int:
     vitest = ROOT / "packages/gateway/node_modules/.bin/vitest"
     if not vitest.is_file():
         raise SystemExit("Gateway Vitest is missing; prepare this worktree's pinned dependencies first")
-    fork = {BROWSER_FORK_COPY: str(provision_browser_fork())} if selects_browser_fork(sys.argv[1:]) else {}
+    fork = {}
+    if selects_browser_fork(sys.argv[1:]):
+        copy = provision_browser_fork()
+        # Its native case runs `which agent-browser`: the fork's declared engine comes first.
+        fork = {BROWSER_FORK_COPY: str(copy), 'PATH': f'{provision_browser_engine(copy)}{os.pathsep}{os.environ.get("PATH", "")}'}
     lock = hold_full_gateway_lock()
     with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-") as temporary:
         root = Path(temporary)

@@ -1094,6 +1094,7 @@ class BrowserForkProvisionTests(unittest.TestCase):
     runner provisioned, so a batch's Gateway lane covers both cases instead of skipping them."""
 
     PIN = 'd6cde09af8d7757bbfba5a4ffaf83381bb392683'
+    ENGINE = '0.33.2'
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='tron-browser-fork-')
@@ -1117,7 +1118,23 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.copy = root / '.git/verify/fixtures' / f'pi-agent-browser-native-{self.PIN}'
         self.copy.mkdir(parents=True)
         (self.copy / '.tron-provisioned').write_text(self.PIN)
+        self.declare_engine(self.copy, self.ENGINE)
+        # ...and the engine that fork declares, already provisioned beside it.
+        self.engine = root / '.git/verify/fixtures' / f'agent-browser-{self.ENGINE}'
+        (self.engine / 'bin').mkdir(parents=True)
+        (self.engine / 'bin/agent-browser').write_text(f'#!/bin/sh\necho "agent-browser {self.ENGINE}"\n')
+        (self.engine / 'bin/agent-browser').chmod(0o755)
+        (self.engine / '.tron-provisioned').write_text(self.ENGINE)
         self.root = root
+
+    @staticmethod
+    def declare_engine(fork: Path, version: str) -> None:
+        """The fork's own declaration of the one engine version it qualifies against."""
+        (fork / 'scripts').mkdir(parents=True, exist_ok=True)
+        (fork / 'scripts/agent-browser-target.mjs').write_text(
+            'export const TARGET_AGENT_BROWSER_SOURCE = "scripts/agent-browser-target.mjs";\n'
+            f'export const TARGET_AGENT_BROWSER_VERSION = "{version}";\n'
+            'export const TARGET_AGENT_BROWSER_VERSION_LABEL = `agent-browser ${TARGET_AGENT_BROWSER_VERSION}`;\n')
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -1155,6 +1172,7 @@ class BrowserForkProvisionTests(unittest.TestCase):
         (fork / 'package-lock.json').write_text(json.dumps({'name': 'pi-agent-browser-native', 'version': '0.4.1', 'lockfileVersion': 3,
                                                             'requires': True, 'packages': {'': {'name': 'pi-agent-browser-native', 'version': '0.4.1'}}}))
         (fork / 'scripts/build.mjs').write_text(build)
+        self.declare_engine(fork, self.ENGINE)
         # A lifecycle script must never run: the lockfile install is --ignore-scripts.
         package = json.loads((fork / 'package.json').read_text())
         (fork / 'package.json').write_text(json.dumps({**package, 'scripts': {'postinstall': "node -e \"require('fs').writeFileSync('postinstall-ran','')\""}}))
@@ -1215,6 +1233,97 @@ class BrowserForkProvisionTests(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertIn('expected one pinned agent-browser fork', done.stderr)
         self.assertFalse(self.seen.exists())
+
+
+    def record_engine(self):
+        """Have the stand-in Vitest record which engine its PATH resolves, as the browser test's `which` does."""
+        self.engine_seen = self.root / 'engine-seen'
+        vitest = self.root / 'packages/gateway/node_modules/.bin/vitest'
+        vitest.write_text(f'#!/bin/bash\n(command -v agent-browser || echo missing) >> {self.engine_seen}\n')
+
+    def registry(self, reported: str):
+        """A stand-in npm whose `pack` writes an engine tarball (every platform binary reporting
+        `reported`), recording its arguments; a directory to put first on PATH."""
+        stand_in = self.root / 'npm-bin'
+        stand_in.mkdir()
+        self.packed = self.root / 'packed'
+        (stand_in / 'npm').write_text(f"""#!/usr/bin/env python3
+import io, sys, tarfile
+from pathlib import Path
+args = sys.argv[1:]
+with open({str(self.packed)!r}, 'a') as calls:
+    calls.write(' '.join(args) + '\\n')
+assert args[0] == 'pack', args
+spec = next(word for word in args[1:] if word.startswith('agent-browser@'))
+version = spec.split('@', 1)[1]
+destination = Path(args[args.index('--pack-destination') + 1])
+with tarfile.open(destination / f'agent-browser-{{version}}.tgz', 'w:gz') as archive:
+    for key in ('darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'):
+        body = b'#!/bin/sh\\necho "agent-browser {reported}"\\n'
+        member = tarfile.TarInfo(f'package/bin/agent-browser-{{key}}')
+        member.size = len(body)
+        archive.addfile(member, io.BytesIO(body))
+""")
+        (stand_in / 'npm').chmod(0o755)
+        return stand_in
+
+    def decoy_path(self):
+        """An inherited PATH whose first agent-browser is a host engine the run must not use."""
+        decoy = self.root / 'host-bin'
+        decoy.mkdir(exist_ok=True)
+        (decoy / 'agent-browser').write_text('#!/bin/sh\necho "agent-browser 0.0.1"\n')
+        (decoy / 'agent-browser').chmod(0o755)
+        return f'{decoy}:{os.environ["PATH"]}'
+
+    def test_the_run_resolves_the_engine_the_fork_declares_before_the_hosts(self):
+        self.record_engine()
+        done = self.run_gateway(env={'PATH': self.decoy_path()})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.engine_seen.read_text().split(), [str(self.engine / 'bin/agent-browser')])
+        # A selection without the browser test keeps the inherited PATH.
+        done = self.run_gateway('src/admin/package-updates.lock.integration.test.ts', env={'PATH': self.decoy_path()})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.engine_seen.read_text().split()[1], str(self.root / 'host-bin/agent-browser'))
+
+    def test_a_new_declared_engine_is_packed_from_the_registry_verified_and_stamped_once(self):
+        self.record_engine()
+        self.declare_engine(self.copy, '0.40.0')
+        path = f'{self.registry("0.40.0")}:{self.decoy_path()}'
+        fixtures = self.root / '.git/verify/fixtures'
+        killed = fixtures / '.agent-browser-killed'
+        killed.mkdir()
+        done = self.run_gateway(env={'PATH': path})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        engine = fixtures / 'agent-browser-0.40.0'
+        self.assertEqual(self.engine_seen.read_text().split(), [str(engine / 'bin/agent-browser')])
+        self.assertEqual(subprocess.check_output([str(engine / 'bin/agent-browser'), '--version'], text=True).strip(), 'agent-browser 0.40.0')
+        self.assertEqual((engine / '.tron-provisioned').read_text(), '0.40.0')
+        self.assertFalse(killed.exists(), 'a killed provisioner\'s staging survived')
+        self.assertEqual(len(self.packed.read_text().splitlines()), 1)
+        self.assertIn('agent-browser@0.40.0', self.packed.read_text())
+        self.assertIn('--ignore-scripts', self.packed.read_text())
+        again = self.run_gateway(env={'PATH': path})
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn('provisioning', again.stderr)
+        self.assertEqual(len(self.packed.read_text().splitlines()), 1)
+
+    def test_an_engine_reporting_another_version_fails_the_run_and_leaves_no_copy(self):
+        self.record_engine()
+        self.declare_engine(self.copy, '0.40.0')
+        done = self.run_gateway(env={'PATH': f'{self.registry("0.39.9")}:{self.decoy_path()}'})
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn('reports agent-browser 0.39.9, not agent-browser 0.40.0', done.stderr)
+        self.assertFalse(self.engine_seen.exists())
+        fixtures = self.root / '.git/verify/fixtures'
+        self.assertEqual(sorted(path.name for path in fixtures.iterdir() if path.name.startswith(('.agent-browser', 'agent-browser-0.40.0'))), [])
+
+    def test_a_fork_without_one_declared_engine_refuses_instead_of_guessing(self):
+        self.record_engine()
+        (self.copy / 'scripts/agent-browser-target.mjs').unlink()
+        done = self.run_gateway(env={'PATH': self.decoy_path()})
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn('expected one TARGET_AGENT_BROWSER_VERSION', done.stderr)
+        self.assertFalse(self.engine_seen.exists())
 
 
 class FullGatewayLockTests(unittest.TestCase):
