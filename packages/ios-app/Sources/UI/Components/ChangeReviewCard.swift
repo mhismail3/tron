@@ -71,7 +71,7 @@ struct ChangeReviewCard: View {
                         }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronPrimary))
                             .accessibilityIdentifier("change-review-approve")
                     }
-                }.disabled(submitting)
+                } // BREAK: Approve stays enabled while submitting.
             }
         }
         .padding(16)
