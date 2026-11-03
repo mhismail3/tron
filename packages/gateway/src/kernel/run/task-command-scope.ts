@@ -85,7 +85,8 @@ export function recordTaskCommandGroup(scope: TaskCommandScope, pgid: number, re
 }
 
 export interface ProcessRow { pid: number; ppid: number; pgid: number; startedAtMs: number; cpu: number; command: string }
-export type ProcessTable = Map<number, ProcessRow>;
+/** `readAtMs` is taken before `ps` runs: a group recorded later cannot appear in the table. */
+export type ProcessTable = Map<number, ProcessRow> & { readAtMs: number };
 
 function run(command: string, args: string[]): Promise<{ code: number; stdout: string }> {
   return new Promise(resolve => {
@@ -99,9 +100,10 @@ function run(command: string, args: string[]): Promise<{ code: number; stdout: s
 /** One `ps` read of every live (non-zombie) process with its absolute start time; undefined when
  * it cannot be read, so callers refuse rather than guess. */
 export async function readProcessTable(): Promise<ProcessTable | undefined> {
+  const readAtMs = Date.now();
   const result = await run("ps", ["-axo", "pid=,ppid=,pgid=,stat=,lstart=,pcpu=,comm="]);
   if (result.code !== 0) return undefined;
-  const rows: ProcessTable = new Map();
+  const rows: ProcessTable = Object.assign(new Map<number, ProcessRow>(), { readAtMs });
   for (const line of result.stdout.split("\n")) {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+([\d.]+)\s+(.*)$/u);
     if (!match || match[4]!.startsWith("Z")) continue;
@@ -110,7 +112,8 @@ export async function readProcessTable(): Promise<ProcessTable | undefined> {
     rows.set(Number(match[1]), { pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]),
       startedAtMs, cpu: Number(match[6]), command: match[7]!.split("/").pop() ?? "" });
   }
-  return rows;
+  // A table without even this process was not parsed: an empty read would fail open.
+  return rows.has(process.pid) ? rows : undefined;
 }
 
 async function anchorHolders(scope: TaskCommandScope): Promise<number[] | undefined> {
@@ -124,8 +127,9 @@ async function anchorHolders(scope: TaskCommandScope): Promise<number[] | undefi
 /**
  * The recorded groups that are still this scope's, pruned in the same synchronous step that
  * reads them (an exec appends synchronously too, so no record is lost). A record is dropped
- * once no member is alive: its ID may then be reused. A live leader that started after the
- * record is a reused ID, never ours.
+ * once no member is alive in a table read after it was recorded: its ID may then be reused.
+ * A record newer than the table is kept, since its shell cannot be in it. A live leader that
+ * started after the record is a reused ID, never ours.
  */
 function liveRecordedGroups(scope: TaskCommandScope, table: ProcessTable): Map<number, number> {
   let text = "";
@@ -139,7 +143,8 @@ function liveRecordedGroups(scope: TaskCommandScope, table: ProcessTable): Map<n
     const pgid = Number(match[1]);
     const recordedAt = Number(match[2]);
     const leader = table.get(pgid);
-    if (!members.has(pgid) || (leader && leader.startedAtMs > recordedAt + START_TOLERANCE_MS)) continue;
+    const newerThanTable = recordedAt >= table.readAtMs - START_TOLERANCE_MS;
+    if ((!members.has(pgid) && !newerThanTable) || (leader && leader.startedAtMs > recordedAt + START_TOLERANCE_MS)) continue;
     groups.set(pgid, Math.max(recordedAt, groups.get(pgid) ?? 0));
   }
   writeFileSync(scope.groups, [...groups].map(([pgid, at]) => `${pgid} ${at}\n`).join(""), { mode: 0o600 });
@@ -206,7 +211,7 @@ export async function reapTaskCommandScope(scope: TaskCommandScope, taskId: stri
   // A killed process stays a zombie until its parent (often launchd) reaps it; a zombie runs
   // nothing, so the live table, not `kill(pid, 0)`, decides survivors.
   for (const deadline = Date.now() + EXIT_WAIT_MS; running().length > 0 && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 50));
-  const after = owned.size === 0 ? new Map() : await readProcessTable();
+  const after = owned.size === 0 ? new Map<number, ProcessRow>() : await readProcessTable();
   const survivors = after ? [...owned].filter(pid => after.has(pid)).length : owned.size;
   if (survivors > 0) return { outcome: "refused", reason: "survivors", processes: owned.size, survivors };
   if (!settled()) return { outcome: "refused", reason: "rebound", processes: owned.size, survivors: 0 };

@@ -1,11 +1,11 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { bindTaskCommandScope, reapTaskCommandScope, recordTaskCommandGroup, settleTaskCommandScope, taskCommandRoot } from "../../kernel/run/task-command-scope.js";
+import { bindTaskCommandScope, readProcessTable, reapTaskCommandScope, recordTaskCommandGroup, settleTaskCommandScope, taskCommandProcesses, taskCommandRoot } from "../../kernel/run/task-command-scope.js";
 
 /** Absent, or exited and awaiting launchd's reap (`Z`): either runs nothing. */
 function processTerminal(pid: number): boolean {
@@ -70,5 +70,21 @@ describe("Home task command scope", () => {
     expect(await reapTaskCommandScope(scope, "stale-task")).toEqual({ outcome: "reaped", processes: 0, survivors: 0 });
     expect(processTerminal(unrelated.pid!)).toBe(false);
     expect(existsSync(join(taskCommandRoot(), "stale-session"))).toBe(false);
+  });
+
+  it("keeps a group recorded after the process table it prunes against", async () => {
+    await fixture();
+    const scope = bindTaskCommandScope("fresh-session", "fresh-task");
+    const table = (await readProcessTable())!;
+    // A shell spawned after the sweep's read: its pgid is not in the table yet.
+    const shell = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    started.push(shell.pid!);
+    recordTaskCommandGroup(scope, shell.pid!);
+    expect(table.has(shell.pid!)).toBe(false);
+    await taskCommandProcesses(scope, table);
+    expect(readFileSync(scope.groups, "utf8")).toContain(`${shell.pid} `);
+    expect(settleTaskCommandScope(scope, "fresh-task")).toBe(true);
+    expect(await reapTaskCommandScope(scope, "fresh-task")).toMatchObject({ outcome: "reaped", processes: 1 });
+    expect(processTerminal(shell.pid!)).toBe(true);
   });
 });

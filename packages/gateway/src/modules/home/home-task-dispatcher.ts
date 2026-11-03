@@ -751,7 +751,7 @@ export class HomeTaskDispatcher {
         // settle this task in process: it settles now from its canonical file, as cold recovery
         // would, and names the failure (#1166). A failure after the terminal write is publication's:
         // cold recovery republishes it.
-        if ((await this.store.read(active.taskId))?.lifecycle === "terminal") throw error;
+        if ((await this.store.read(active.taskId))?.lifecycle === "terminal") { await this.commands.settle(slot.id, active.taskId); throw error; }
         const final = await this.reconcile(active, "live", error instanceof Error && error.message.trim() ? error.message.trim() : "settlement failed");
         await this.commands.settle(slot.id, active.taskId);
         await dispatch.acknowledge(slot.id, operationId, ownedLease).catch(() => {});
