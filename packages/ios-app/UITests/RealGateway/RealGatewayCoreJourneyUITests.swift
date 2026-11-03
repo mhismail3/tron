@@ -32,16 +32,22 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual(reply.count, 1, "the completed reply must be rendered once: \(app.debugDescription)")
         XCTAssertEqual(sentCount(), 1, "the prompt must be rendered once: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once")
-        // Backgrounding retires the transport; the foreground reopens the session
-        // from the Gateway's authoritative snapshot. The chat exposes no phase
-        // element (its working blur is always in the tree), so this second count,
-        // taken from the reopened snapshot well after the short faux run ended,
-        // is the settled one; the harness requires the reconnect in the Gateway log.
+        // Leave the chat, let backgrounding retire the transport, then reopen the
+        // chat from the dashboard over the new connection: a fresh chat view
+        // installs the Gateway's session.open snapshot rather than retaining the
+        // pre-background cut. The harness also requires the reconnect in the Gateway log.
+        app.buttons["Back"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
+        XCTAssertTrue(waitForHittable(row, timeout: 60), app.debugDescription)
+        let rowID = row.identifier
         returnFromAnotherApp(app)
-        XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 90), app.debugDescription)
+        let reopened = app.buttons[rowID]
+        XCTAssertTrue(waitForHittable(reopened, timeout: 90), app.debugDescription)
+        reopened.tap()
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 60), app.debugDescription)
-        XCTAssertEqual(reply.count, 1, "the reconnected snapshot must not duplicate the reply: \(app.debugDescription)")
-        XCTAssertEqual(sentCount(), 1, "the reconnected snapshot must not duplicate the prompt: \(app.debugDescription)")
+        XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 90), app.debugDescription)
+        XCTAssertEqual(reply.count, 1, "the reopened snapshot must not duplicate the reply: \(app.debugDescription)")
+        XCTAssertEqual(sentCount(), 1, "the reopened snapshot must not duplicate the prompt: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once-after-reconnect")
     }
 
@@ -206,7 +212,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual((applied.first?["after"] as? [String: Any])?["outputTokens"] as? Int, 200)
         XCTAssertFalse(card.exists, "an approved card must close")
         // A second answer sent for the same card would be refused and surface as an error.
-        XCTAssertFalse(app.descendants(matching: .any)["in-app-notice-card"].exists, "the double tap must not send a second answer: \(app.debugDescription)")
+        XCTAssertFalse(app.descendants(matching: .any)["in-app-notice-card"].exists, "the double tap must not surface a second answer's error: \(app.debugDescription)")
         XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Could not submit'")).count, 0)
         keepScreenshot(app, name: "2232-home-budget-card-approved-once")
     }
