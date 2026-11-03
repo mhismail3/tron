@@ -88,6 +88,8 @@ describe("the shared change card across the client socket of a real Gateway proc
     for (const [response, code] of refusals) {
       expect(response.ok, JSON.stringify(response)).toBe(false);
       expect(response.error.code, JSON.stringify(response)).toBe(code);
+      // Local and wrong-digest answers share the exact-review refusal (semantic-ui-broker.ts).
+      if (code === "invalid_request") expect(response.error.message).toBe("Native change response does not match its exact review");
     }
     // Each refusal left the card pending and wrote nothing.
     expect((await open(phone, homeId)).extensionPresentation.pendingInteractions.map((item: { id: string }) => item.id)).toEqual([card.id]);
@@ -108,6 +110,12 @@ describe("the shared change card across the client socket of a real Gateway proc
     expect(raised[0]).toMatchObject({ status: "applied", after: { outputTokens: 200 } });
     expect(settled.transcript.find((item: Record<string, any>) => item.role === "toolResult" && item.toolCallId === "budget-raise"))
       .toMatchObject({ isError: false });
+    // A fresh exact tap after acceptance finds no card and changes nothing.
+    const after = await answer(phone, {}, exact);
+    expect(after.ok, JSON.stringify(after)).toBe(false);
+    expect(after.error.code).toBe("not_found");
+    expect(await budget()).toEqual({ outputTokens: 200 });
+    expect((await history()).filter((entry) => !historyBefore.some((before) => before.changeId === entry.changeId))).toHaveLength(1);
     expect(gateway.provider.errors).toEqual([]);
   });
 
