@@ -73,6 +73,13 @@ export class OpenAIModelEligibility {
   private lastSuccessful: AccountModels | undefined;
   private lastFailure: { fingerprint: string; expiresAt: number } | undefined;
   private flight: DiscoveryFlight | undefined;
+  /** Bumped when a publish changes what the filters answer or the stored-credential set changes. */
+  private stateRevision = 0;
+  /** The stored providers and credential types last seen: session runtimes'
+   * configured/OAuth snapshots (`provider.list`'s usage flags) follow them. */
+  private storedCredentials: string | undefined;
+  /** The snapshot refresh that applied (or is applying) one state revision. */
+  private snapshots: { revision: number; done: Promise<void> } | undefined;
 
   constructor(options: OpenAIModelEligibilityOptions = {}) {
     this.fetch = options.fetch ?? globalThis.fetch;
@@ -116,6 +123,11 @@ export class OpenAIModelEligibility {
       return;
     }
     if (generation !== this.state.generation) return;
+    const storedCredentials = credentials.map(item => `${item.providerId}:${item.type}`).sort().join("\n");
+    if (storedCredentials !== this.storedCredentials) {
+      this.storedCredentials = storedCredentials;
+      this.stateRevision += 1;
+    }
     const stored = credentials.find(item => item.providerId === "openai");
     // Discovery is an account-specific OAuth capability, not a generic auth probe:
     // API keys, absent credentials, and environment auth must never reach this endpoint.
@@ -183,11 +195,17 @@ export class OpenAIModelEligibility {
 
   private publish(generation: number, update: EligibilityUpdate): void {
     if (generation !== this.state.generation) return;
+    const changed = ("fingerprint" in update && update.fingerprint !== this.state.fingerprint)
+      || ("oauth" in update && update.oauth !== this.state.oauth)
+      || update.entries.length !== this.state.entries.length || update.entries.some((entry, index) => entry !== this.state.entries[index])
+      || update.displayNames.size !== this.state.displayNames.size
+      || [...update.displayNames].some(([slug, name]) => this.state.displayNames.get(slug) !== name);
     this.state.generation = generation;
     if ("fingerprint" in update) this.state.fingerprint = update.fingerprint;
     if ("oauth" in update) this.state.oauth = update.oauth;
     this.state.entries = update.entries;
     this.state.displayNames = update.displayNames;
+    if (changed) this.stateRevision += 1;
   }
 
   private startDiscovery(runtime: ModelRuntime, token: string, fingerprint: string): DiscoveryFlight {
@@ -241,11 +259,20 @@ export class OpenAIModelEligibility {
     return result;
   }
 
-  private async refreshSnapshots(): Promise<void> {
+  private refreshSnapshots(): Promise<void> {
+    // Only a changed eligibility state or stored-credential set can change the
+    // attached snapshots; attaching a runtime refreshes it through its own
+    // registration. Reloading per read would make `provider.list`/`model.list`
+    // grow with the open sessions.
+    const revision = this.stateRevision;
+    if (this.snapshots?.revision === revision) return this.snapshots.done;
     // A provider-scoped SDK refresh first republishes every provider's unfiltered
     // configured catalog and then reapplies filters only to the named subset, which
     // would drop other providers' credential filters. Refresh full availability.
-    await Promise.all([...this.runtimes].map(runtime => runtime.refresh({ allowNetwork: false }).then(() => undefined, () => undefined)));
+    const done = Promise.all([...this.runtimes].map(runtime => runtime.refresh({ allowNetwork: false }).then(() => undefined, () => undefined)))
+      .then(() => undefined);
+    this.snapshots = { revision, done };
+    return done;
   }
 
   private primaryRuntime(): ModelRuntime | undefined { return this.runtimes.values().next().value; }

@@ -145,9 +145,11 @@ export class EpisodicStore {
   async shouldCheckpoint(liveBytes: number): Promise<boolean> {
     const paths = await this.paths();
     const logBytes = (await fileSize(paths.catalog)) + (await fileSize(paths.nodes));
-    if (logBytes <= 16_384) return false;
-    if (logBytes >= 32_768) return true;
-    return logBytes > liveBytes + 16_384;
+    // Amortized: a checkpoint rewrites the whole live catalog under the memory's
+    // mutex, so it waits until the append logs outgrow that catalog; a fixed log
+    // bound would rewrite a large memory every few records. Recovery replays at
+    // most a live-catalog-sized tail.
+    return logBytes > Math.max(liveBytes, 16_384);
   }
 
   async saveState(state: EpisodicStoreState): Promise<void> {
@@ -310,14 +312,21 @@ async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<
   return { messages, nodes, watermark };
 }
 
+const CHECKPOINT_WRITE_BATCH_CHARS = 1024 * 1024;
+
 async function writeCheckpointLines<T>(path: string, records: Iterable<T>, maxLineBytes: number, fileSystem: EpisodicStoreFileSystem): Promise<void> {
   const handle = await fileSystem.open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
+    // One write per ~1 MiB batch, not per record: each write is a thread-pool
+    // round trip, which a loaded host turns into seconds per thousand records.
+    let batch = "";
     for (const record of records) {
       const line = `${JSON.stringify(record)}\n`;
       if (Buffer.byteLength(line, "utf8") > maxLineBytes) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint record exceeds the store's line bound");
-      await handle.writeFile(line, "utf8");
+      batch += line;
+      if (batch.length >= CHECKPOINT_WRITE_BATCH_CHARS) { await handle.writeFile(batch, "utf8"); batch = ""; }
     }
+    if (batch) await handle.writeFile(batch, "utf8");
     await fileSystem.syncDurably(handle);
   } finally { await handle.close(); }
 }

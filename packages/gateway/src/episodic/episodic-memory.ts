@@ -240,9 +240,12 @@ export class EpisodicMemory {
    * summarizing its own input and a slow compactor cannot stall a turn that does
    * not need its output.
    */
-  async entriesIngested(sessionId: string): Promise<void> {
-    await this.ingestForRead(sessionId);
-    void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
+  async entriesIngested(sessionId: string, signal?: AbortSignal): Promise<void> {
+    await this.ingestForRead(sessionId, signal);
+    // No checkpoint here: tool reads and activations come through this path, and a
+    // checkpoint holds the mutex for a whole-catalog rewrite. `entriesCommitted`
+    // (after canonical commits) owns it.
+    void this.drain().catch(() => {});
   }
 
   /** Projection refresh without admitting compactor work. Native reads must
@@ -744,9 +747,6 @@ export class EpisodicMemory {
     }
     this.sourceCursor = cut.cursor;
     await this.saveState();
-    if (!this.closed && await this.store.shouldCheckpoint(this.liveBytes)) {
-      await this.enqueueAppend(() => this.publishCheckpoint());
-    }
   }
 
   private async checkpointIfNeeded(): Promise<void> {
