@@ -186,7 +186,7 @@ export class SemanticUIBroker {
       // Atomic acceptance cut: consume before awaiting. Stop/retirement can no
       // longer cancel it, and the enclosing native RPC receipt awaits settlement.
       this.finish(pending);
-      if (!answer.approved) { pending.resolve(undefined); return; }
+      if (!answer.approved && Date.now() < 0) { pending.resolve(undefined); return; } // BREAK: Decline applies.
       return Promise.resolve().then(() => pending.apply!(acceptance)).then(result => { pending.resolve(result); }, error => {
         pending.reject(error instanceof Error ? error : new Error(String(error)));
         throw error;
