@@ -1138,6 +1138,50 @@ class BrowserForkProvisionTests(unittest.TestCase):
             self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.seen.read_text().split(), [str(self.copy), 'unset', 'unset'])
 
+    def fork_repository(self, build: str) -> str:
+        """A local stand-in for the fork's repository: a lockfile with no dependencies and the given build script."""
+        fork = self.root / 'fork'
+        (fork / 'scripts').mkdir(parents=True)
+        (fork / 'package.json').write_text(json.dumps({'name': 'pi-agent-browser-native', 'version': '0.4.1'}))
+        (fork / 'package-lock.json').write_text(json.dumps({'name': 'pi-agent-browser-native', 'version': '0.4.1', 'lockfileVersion': 3,
+                                                            'requires': True, 'packages': {'': {'name': 'pi-agent-browser-native', 'version': '0.4.1'}}}))
+        (fork / 'scripts/build.mjs').write_text(build)
+        git = ['git', '-C', str(fork), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        subprocess.run(['git', 'init', '-q', str(fork)], check=True)
+        subprocess.run([*git, 'add', '.'], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'fork'], check=True)
+        subprocess.run([*git, 'config', 'uploadpack.allowAnySHA1InWant', 'true'], check=True)
+        commit = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True).strip()
+        runner = self.root / 'tools/verify/gateway.py'
+        runner.write_text(runner.read_text().replace("'https://github.com/fitchmultz/pi-agent-browser-native.git'", repr(str(fork))))
+        # Provisioning runs npm and the build under the repository's pinned Node.
+        (self.root / 'scripts/tron-node').write_text(f'#!/bin/bash\nexec {ROOT / "scripts/tron-node"} "$@"\n')
+        self.adapter.write_text(f'"git:github.com/fitchmultz/pi-agent-browser-native@{commit}"\n')
+        return commit
+
+    def test_an_unprovisioned_pin_is_fetched_by_sha_built_and_stamped_once(self):
+        commit = self.fork_repository("import { mkdirSync, writeFileSync } from 'node:fs';\n"
+                                      "mkdirSync('dist/extensions/agent-browser', { recursive: true });\n"
+                                      "writeFileSync('dist/extensions/agent-browser/index.js', 'export default () => {};\\n');\n")
+        done = self.run_gateway()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        target = self.root / '.git/verify/fixtures' / f'pi-agent-browser-native-{commit}'
+        self.assertEqual(self.seen.read_text().split(), [str(target)])
+        self.assertEqual((target / '.tron-provisioned').read_text(), commit)
+        self.assertEqual(subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'], text=True).strip(), commit)
+        self.assertTrue((target / 'dist/extensions/agent-browser/index.js').is_file())
+        again = self.run_gateway()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn('provisioning', again.stderr)
+
+    def test_a_failed_build_fails_the_run_and_leaves_no_copy_or_staging(self):
+        commit = self.fork_repository("process.exit(3);\n")
+        done = self.run_gateway()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse(self.seen.exists())
+        fixtures = self.root / '.git/verify/fixtures'
+        self.assertEqual(sorted(path.name for path in fixtures.iterdir() if path.name.startswith(('.pi-agent', 'pi-agent-browser-native-' + commit))), [])
+
     def test_an_ambiguous_product_pin_refuses_instead_of_choosing(self):
         self.adapter.write_text(self.adapter.read_text() + f'"git:github.com/fitchmultz/pi-agent-browser-native@{"0" * 40}"\n')
         done = self.run_gateway()

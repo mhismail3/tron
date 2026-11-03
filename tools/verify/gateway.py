@@ -115,7 +115,9 @@ BROWSER_FORK_COPY = 'TRON_P99_17_BROWSER_FORK_COPY'
 BROWSER_FORK_TEST = 'src/sessions/browser-fork-receipts.integration.test.ts'
 BROWSER_FORK_REPOSITORY = 'https://github.com/fitchmultz/pi-agent-browser-native.git'
 # Vitest options whose value is the next word, so that word is not a file filter.
-VALUE_OPTIONS = {'--config', '-c', '--project', '--reporter', '--outputFile', '-t', '--testNamePattern', '--root', '-r', '--dir', '--shard'}
+VALUE_OPTIONS = {'--config', '-c', '--project', '--reporter', '--outputFile', '-t', '--testNamePattern', '--root', '-r', '--dir', '--shard',
+                 '--testTimeout', '--hookTimeout', '--teardownTimeout', '--bail', '--retry', '--maxWorkers', '--minWorkers', '--pool',
+                 '--environment', '--maxConcurrency', '--sequence.seed', '--exclude'}
 
 
 def selects_browser_fork(args: list[str]) -> bool:
@@ -132,6 +134,7 @@ def selects_browser_fork(args: list[str]) -> bool:
         elif word in VALUE_OPTIONS:
             value = word
         elif not word.startswith('-'):
+            word = re.sub(r':\d+$', '', word).removeprefix(str(ROOT / 'packages/gateway') + '/')
             filters.append(word.removeprefix('./').removeprefix('packages/gateway/'))
     return not filters or any(word in BROWSER_FORK_TEST for word in filters)
 
@@ -159,13 +162,17 @@ def provision_browser_fork() -> Path:
             return target
         print(f'gateway tests: provisioning the pinned agent-browser fork {commit[:12]} into {target}', file=sys.stderr, flush=True)
         staging = Path(tempfile.mkdtemp(prefix='.pi-agent-browser-native-', dir=fixtures))
+        # A lane is stopped by SIGTERM; turn it into an exit so the staging cleanup below runs.
+        previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+        # The fixture's own repository, never a caller's (a hook's GIT_DIR, for example).
+        clean = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         try:
             def run(*command: str) -> None:
-                subprocess.run(command, cwd=staging, check=True, timeout=900, stdout=sys.stderr)
+                subprocess.run(command, cwd=staging, check=True, timeout=900, stdout=sys.stderr, env=clean)
             run('git', 'init', '-q')
             run('git', 'fetch', '-q', '--depth', '1', BROWSER_FORK_REPOSITORY, commit)
             run('git', 'checkout', '-q', '--detach', 'FETCH_HEAD')
-            if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=staging, text=True).strip() != commit:
+            if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=staging, text=True, env=clean).strip() != commit:
                 raise SystemExit(f'gateway tests: the fetched agent-browser fork is not {commit}')
             # The lockfile pins every dependency; lifecycle scripts stay off and the build is explicit.
             run(str(ROOT / 'scripts/tron-node'), 'exec', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund')
@@ -178,6 +185,8 @@ def provision_browser_fork() -> Path:
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
+        finally:
+            signal.signal(signal.SIGTERM, previous)
     return target
 
 
