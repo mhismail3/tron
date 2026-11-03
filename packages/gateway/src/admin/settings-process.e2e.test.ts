@@ -73,7 +73,8 @@ describe("a settings change reaches the next operation of a real Gateway process
     const stale = await phone.request("settings.change", { commandId: "settings-stale-change", target: { kind: "session", sessionId: changed },
       fence: await fence(changed), changes: [{ key: KEY, layer: "session", op: "set", value: DEFAULT, expected: { provider: SCRIPTED_PROVIDER, id: "a-value-never-read" } }] });
     expect(stale.ok, JSON.stringify(stale)).toBe(false);
-    expect(stale.error.code, JSON.stringify(stale)).toBe("conflict");
+    expect(stale.error, JSON.stringify(stale)).toMatchObject({ code: "conflict", message: expect.stringContaining("changed since it was read"),
+      details: { current: ALTERNATE } });
     expect(await resolved(changed)).toMatchObject({ value: ALTERNATE, layer: "session" });
     expect((await ok(phone, "settings.history", { key: KEY })).entries).toEqual(historyBefore);
     expect(await prompt(changed)).toBe(ALTERNATE.id);
@@ -81,7 +82,7 @@ describe("a settings change reaches the next operation of a real Gateway process
     // Undo through the recorded change restores Global for the next prompt.
     expect(change).toMatchObject({ status: "applied", changes: [{ key: KEY, layer: "session", status: "applied", before: null, after: ALTERNATE }] });
     const changeId = change.changes[0].changeId as string;
-    await ok(phone, "settings.undo", { commandId: "settings-undo", changeId, fence: await fence(changed) });
+    expect(await ok(phone, "settings.undo", { commandId: "settings-undo", changeId, fence: await fence(changed) })).toMatchObject({ status: "applied" });
     expect(await resolved(changed)).toMatchObject({ value: DEFAULT, layer: "global" });
     expect(await prompt(changed)).toBe(SCRIPTED_MODEL);
     expect(gateway.provider.errors).toEqual([]);
