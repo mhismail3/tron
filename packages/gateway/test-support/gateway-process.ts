@@ -145,7 +145,10 @@ export interface GatewayProcess {
   readonly provider: ScriptedProvider;
   /** The live child's PID; changes on `restart()`. */
   pid(): number;
-  connect(): Promise<ProcessClient>;
+  /** Connect with the Mac's local credential, or with a paired device token from `pair()`. */
+  connect(options?: { token?: string }): Promise<ProcessClient>;
+  /** Pair a device as the phone does: `POST /v1/pair` with the current invitation code. */
+  pair(deviceName: string): Promise<{ deviceId: string; token: string }>;
   /** Every `gateway.jsonl` record written so far, across restarts. */
   log(): Promise<Array<Record<string, any>>>;
   /** Stop this process and start the same entrypoint over the same root and port.
@@ -268,9 +271,19 @@ async function launchGatewayProcess(
     root, tronHome, agentDir, cwd, provider,
     pid: () => child.pid!,
     log: readLog,
-    async connect() {
+    async pair(deviceName) {
+      const { code } = JSON.parse(await readFile(join(tronHome, "gateway", "enrollment.json"), "utf8")) as { code: string };
+      const response = await fetch(`http://127.0.0.1:${port}/v1/pair`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, deviceName }),
+      });
+      const body = await response.json() as { deviceId?: string; token?: string };
+      if (!response.ok || !body.deviceId || !body.token) throw new Error(`pairing failed: ${response.status} ${JSON.stringify(body)}`);
+      return { deviceId: body.deviceId, token: body.token };
+    },
+    async connect(connectOptions = {}) {
+      const token = connectOptions.token ?? await readLocalCredential(tronHome);
       const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, {
-        headers: { authorization: `Bearer ${await readLocalCredential(tronHome)}` }, maxPayload: 16 * 1024 * 1024,
+        headers: { authorization: `Bearer ${token}` }, maxPayload: 16 * 1024 * 1024,
       });
       clients.add(socket);
       const events: Array<{ topic: string; sessionId?: string; payload: any }> = [];
