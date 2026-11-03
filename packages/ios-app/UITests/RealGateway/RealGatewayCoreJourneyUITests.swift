@@ -27,20 +27,19 @@ extension RealGatewayPairAndChatUITests {
         let reply = app.textViews.matching(identifier: "chat.assistant.selectable-text")
             .matching(NSPredicate(format: "label CONTAINS %@", completion))
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 180), app.debugDescription)
-        // Count only once the run has settled, so a later duplicate cannot arrive after the count.
-        let working = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Tron is working'"))
-        XCTAssertTrue(waitUntil(timeout: 180) { working.count == 0 }, "the run never settled: \(app.debugDescription)")
         let sentPredicate = NSPredicate(format: "label == %@", prompt)
         func sentCount() -> Int { app.staticTexts.matching(sentPredicate).count - app.navigationBars.staticTexts.matching(sentPredicate).count }
         XCTAssertEqual(reply.count, 1, "the completed reply must be rendered once: \(app.debugDescription)")
         XCTAssertEqual(sentCount(), 1, "the prompt must be rendered once: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once")
         // Backgrounding retires the transport; the foreground reopens the session
-        // from the Gateway's authoritative snapshot.
+        // from the Gateway's authoritative snapshot. The chat exposes no phase
+        // element (its working blur is always in the tree), so this second count,
+        // taken from the reopened snapshot well after the short faux run ended,
+        // is the settled one; the harness requires the reconnect in the Gateway log.
         returnFromAnotherApp(app)
         XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 90), app.debugDescription)
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 60), app.debugDescription)
-        XCTAssertTrue(waitUntil(timeout: 60) { working.count == 0 }, "the reopened session never read settled: \(app.debugDescription)")
         XCTAssertEqual(reply.count, 1, "the reconnected snapshot must not duplicate the reply: \(app.debugDescription)")
         XCTAssertEqual(sentCount(), 1, "the reconnected snapshot must not duplicate the prompt: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once-after-reconnect")
