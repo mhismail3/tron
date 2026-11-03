@@ -80,13 +80,24 @@ function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
 async function watcherDelivers(outside: OutsideChanges, agentDir: string): Promise<void> {
   const settings = join(agentDir, "settings.json");
   const bytes = await readFile(settings);
-  const observed = () => readFile(outside.path, "utf8").catch(() => "");
-  const before = await observed();
-  await waitFor(async () => {
-    await writeFile(settings, bytes);
-    await new Promise(resolve => setTimeout(resolve, 400)); // past the watcher's 250 ms settle
-    return await observed() !== before;
-  }, "the settings directory watcher delivers an event", { intervalMs: 0 });
+  // An unchanged comparison writes nothing, so the watcher's delivery is observed
+  // as the rescan it starts (the callers make no other read meanwhile), settled.
+  let rescans = 0;
+  const reconcile = outside.reconcile;
+  outside.reconcile = (...args) => {
+    const work = reconcile.apply(outside, args);
+    void work.then(() => { rescans += 1; }, () => { rescans += 1; });
+    return work;
+  };
+  try {
+    await waitFor(async () => {
+      await writeFile(settings, bytes);
+      await new Promise(resolve => setTimeout(resolve, 400)); // past the watcher's 250 ms settle
+      return rescans > 0;
+    }, "the settings directory watcher delivers an event", { intervalMs: 0 });
+  } finally {
+    delete (outside as { reconcile?: unknown }).reconcile;
+  }
 }
 /** Every `it` runs through here: its own owner, and its body joined by that owner's teardown. */
 const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(name, () => {
