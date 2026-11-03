@@ -45,7 +45,7 @@ final class TronListStandardUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
             app.buttons["Stop session"].tap()
             let open = app.buttons["Subagent History"]
-            for _ in 0..<12 where !open.isHittable { app.swipeUp() }
+            reveal(open, in: app, swipes: 12)
             open.tap()
             XCTAssertTrue(app.buttons["subagent-row-worker"].waitForExistence(timeout: 10), app.debugDescription)
             shot("managed-subagent-initial-\(mode)")
@@ -69,7 +69,7 @@ final class TronListStandardUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
             app.buttons["Stop session"].tap()
             let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-            for _ in 0..<8 where !resources.isHittable { app.swipeUp() }
+            reveal(resources, in: app, swipes: 8)
             resources.tap()
             XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
             expandSheet(app, title: "Resources")
@@ -105,12 +105,12 @@ final class TronListStandardUITests: XCTestCase {
                 expandSheet(app, title: "Instructions")
                 if section == "tools" { shot("instructions-\(mode)") }
                 let row = app.buttons["agent-instructions-section-\(section)"]
-                for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+                reveal(row, in: app, swipes: 4)
                 row.tap()
                 let title = ["tools": "Tools", "rules": "Rules", "skills": "Skills"][section]!
                 expandSheet(app, title: title)
                 let entry = element(app, "agent-instructions-entry-\(section).0")
-                for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
+                reveal(entry, in: app, swipes: 4)
                 Thread.sleep(forTimeInterval: 0.6)
                 shot("\(section)-\(mode)")
                 app.terminate()
@@ -134,7 +134,7 @@ final class TronListStandardUITests: XCTestCase {
         for (row, title, done, name) in [("home-manage-profile", "Profile", "home-sheet-done-profile", "profile"),
                                          ("home-manage-chapters", "Chapters", "home-sheet-done-chapters", "chapters")] {
             let open = element(app, row)
-            for _ in 0..<6 where !open.isHittable { app.swipeUp() }
+            reveal(open, in: app, swipes: 6)
             open.tap()
             expandSheet(app, title: title)
             Thread.sleep(forTimeInterval: 1)
@@ -143,7 +143,7 @@ final class TronListStandardUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.8)
         }
         let memory = element(app, "home-manage-memory-browser")
-        for _ in 0..<6 where !memory.isHittable { app.swipeUp() }
+        reveal(memory, in: app, swipes: 6)
         memory.tap()
         expandSheet(app, title: "Memory")
         Thread.sleep(forTimeInterval: 1)
@@ -154,7 +154,7 @@ final class TronListStandardUITests: XCTestCase {
         app.buttons["home-sheet-done-memory"].tap()
         Thread.sleep(forTimeInterval: 0.8)
         let tasks = element(app, "home-manage-tasks")
-        for _ in 0..<6 where !tasks.isHittable { app.swipeUp() }
+        reveal(tasks, in: app, swipes: 6)
         tasks.tap()
         expandSheet(app, title: "Tasks")
         Thread.sleep(forTimeInterval: 1)
@@ -180,11 +180,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
         let history = app.buttons["Session History"]
-        // Hittability is undefined while the sheet presents (XCTest raises on an element
-        // without a frame); scroll only once the row is laid out.
-        let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in history.exists && !history.frame.isEmpty }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [laidOut], timeout: 10), .completed, app.debugDescription)
-        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+        reveal(history, in: app, swipes: 12)
         history.tap()
         XCTAssertTrue(element(app, "history-row-h-6732").waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Session History")
@@ -217,7 +213,7 @@ final class TronListStandardUITests: XCTestCase {
         app.navigationBars.containing(.staticText, identifier: "Session History").buttons["Done"].firstMatch.tap()
         Thread.sleep(forTimeInterval: 1)
         let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-        for _ in 0..<8 where !resources.isHittable { app.swipeUp() }
+        reveal(resources, in: app, swipes: 8)
         resources.tap()
         XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Resources")
@@ -334,7 +330,7 @@ final class TronListStandardUITests: XCTestCase {
         ring.tap()
         let profile = element(app, "home-manage-profile")
         XCTAssertTrue(profile.waitForExistence(timeout: 10), app.debugDescription)
-        for _ in 0..<6 where !profile.isHittable { app.swipeUp() }
+        reveal(profile, in: app, swipes: 6)
         profile.tap()
         expandSheet(app, title: "Profile")
         assertSeparateSections(app, list: "home-profile-items", titles: ["Communication", "Machines, devices & services"],
@@ -346,7 +342,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
         let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-        for _ in 0..<8 where !resources.isHittable { app.swipeUp() }
+        reveal(resources, in: app, swipes: 8)
         resources.tap()
         XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Resources")
@@ -363,7 +359,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
         let resources = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
-        for _ in 0..<8 where !resources.isHittable { app.swipeUp() }
+        reveal(resources, in: app, swipes: 8)
         resources.tap()
         XCTAssertTrue(app.buttons["project-resource-skills-0"].waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Resources")
@@ -404,7 +400,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
         let history = app.buttons["Session History"]
-        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+        reveal(history, in: app, swipes: 12)
         history.tap()
         assertCentredEmptyState(app, title: "Session History", placeholder: "No history yet",
                                 viewport: "session-history-viewport", caption: "All branches")
@@ -426,7 +422,7 @@ final class TronListStandardUITests: XCTestCase {
             ("home-manage-tasks", "Tasks", "No tasks", "home-tasks-viewport", "Newest first", "home-sheet-done-tasks"),
         ] {
             let open = element(app, row)
-            for _ in 0..<6 where !open.isHittable { app.swipeUp() }
+            reveal(open, in: app, swipes: 6)
             open.tap()
             assertCentredEmptyState(app, title: title, placeholder: placeholder, viewport: viewport, caption: caption)
             app.buttons[done].tap()
@@ -513,7 +509,7 @@ final class TronListStandardUITests: XCTestCase {
         ring.tap()
         let tasks = element(app, "home-manage-tasks")
         XCTAssertTrue(tasks.waitForExistence(timeout: 10), app.debugDescription)
-        for _ in 0..<6 where !tasks.isHittable { app.swipeUp() }
+        reveal(tasks, in: app, swipes: 6)
         tasks.tap()
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.buttons["home-tasks-older-top"].exists, "No explicit paging control")
@@ -653,7 +649,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
         app.buttons["Stop session"].tap()
         let history = app.buttons["Session History"]
-        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+        reveal(history, in: app, swipes: 12)
         history.tap()
         XCTAssertTrue(app.buttons["history-row-h-6732"].waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Session History")
@@ -667,6 +663,19 @@ final class TronListStandardUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// Scrolls until `element` is hittable. XCTest raises instead of answering while an
+    /// existing element has no frame yet (a sheet still presenting), so such an element
+    /// is given its layout before hittability is asked; a lazy row that does not exist
+    /// yet is scrolled toward, as before.
+    @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication, swipes: Int) {
+        let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !element.exists || !element.frame.isEmpty }, object: nil)
+        for _ in 0..<swipes {
+            XCTAssertEqual(XCTWaiter.wait(for: [laidOut], timeout: 10), .completed, app.debugDescription)
+            if element.isHittable { return }
+            app.swipeUp()
+        }
     }
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
