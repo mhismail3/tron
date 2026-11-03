@@ -19,7 +19,7 @@ import time
 import verify
 
 ROOT = verify.ROOT
-# Shared with every other full real-Gateway run on this host.
+# The host convention agents also hold around manual full real-Gateway runs.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.
@@ -444,7 +444,7 @@ def build(journal: dict, prober: Prober, state: Path) -> dict:
     remote = journal['remote']
     tip = remote_main(remote) if remote else journal['head']
     if not tip:
-        return settle('refused', f'remote {remote} main unreadable; nothing published')
+        return settle('pending', f'remote {remote} main unreadable; resumes on the next batch')
     journal['tip'] = tip
     if culprit not in verify.git('rev-list', '--first-parent', tip).splitlines():
         return settle('refused', 'culprit is not on the fetched main first-parent history')
@@ -484,6 +484,8 @@ def build(journal: dict, prober: Prober, state: Path) -> dict:
     if not verify.git('for-each-ref', f'refs/heads/revert/{culprit}').strip():
         verify.git('branch', f'revert/{culprit}', candidate)
     evidence = Path(journal['evidence'])
+    if not evidence_intact(evidence):
+        return settle('refused', 'frozen first-failure evidence changed after sealing')
     bindings = {'culprit': culprit, 'parent': parent, 'tip': tip, 'candidateTree': tree, 'patchId': inverse,
                 'recipe': journal['investigation']['probe'], 'signature': journal['investigation']['signature'],
                 'redReport': journal['redReport'], 'evidence': str(evidence),
@@ -499,23 +501,28 @@ def build(journal: dict, prober: Prober, state: Path) -> dict:
     return settle('review-required' if remote else 'publication-disabled')
 
 
+def resumable(journal: dict) -> bool:
+    """Interrupted or remote-blocked builds resume; a disabled repair resumes once enabled."""
+    return journal['state'] in ('building', 'pending') or (journal['state'] == 'publication-disabled' and bool(revert_remote()))
+
+
 def investigate(base: str, head: str, failed: dict, directory: Path, state: Path, red: dict) -> tuple[dict, dict | None]:
     """Attribute once per range and signature; repair once per culprit landing."""
     key = hashlib.sha256(json.dumps([base, head, failed['name'], failed.get('signature')], sort_keys=True).encode()).hexdigest()
     memo = state / 'attributions' / f'{key}.json'
     attribution = {**json.loads(memo.read_text()), 'reused': True} if memo.exists() else None
-    journal = None
     if attribution and attribution.get('status') == 'proven':
-        if not repair_path(state, attribution['commit']).exists():
+        path = repair_path(state, attribution['commit'])
+        if not path.exists():
             # A proof is only trusted beside the repair journal it produced; re-prove otherwise.
             attribution = None
-        else:
-            journal = json.loads(repair_path(state, attribution['commit']).read_text())
-    if attribution:
-        return attribution, journal
+        elif not resumable(json.loads(path.read_text())):
+            return attribution, json.loads(path.read_text())
+    elif attribution:
+        return attribution, None
     start = time.monotonic()
-    record = attribution or {}
-    prober = Prober(failed, directory, state, record)
+    prober = Prober(failed, directory, state, attribution or {})
+    journal = None
     try:
         if not attribution:
             attribution = attribute(base, head, failed, prober)
@@ -526,9 +533,11 @@ def investigate(base: str, head: str, failed: dict, directory: Path, state: Path
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 journal = {'culprit': attribution['commit'], 'parent': attribution['parent'],
-                           'merge': parents(attribution['commit']) == 2, 'files': attribution['files'], 'head': head, 'remote': revert_remote(), 'investigation': failed,
-                           **red, 'state': 'building', 'history': [], 'reviews': []}
+                           'merge': parents(attribution['commit']) == 2, 'files': attribution['files'], 'head': head,
+                           'investigation': failed, **red, 'state': 'building', 'history': [], 'reviews': []}
                 save(path, journal)
+            if resumable(journal):
+                journal['remote'] = revert_remote()
                 journal = build(journal, prober, state)
     finally:
         prober.close()
@@ -654,6 +663,15 @@ def freeze(directory: Path) -> Path:
     return manifest
 
 
+def evidence_intact(manifest: Path, digest: str | None = None) -> bool:
+    try:
+        files = json.loads(manifest.read_text())['files']
+        return ((digest is None or hashlib.sha256(manifest.read_bytes()).hexdigest() == digest)
+                and all(hashlib.sha256((manifest.parent / name).read_bytes()).hexdigest() == value for name, value in files.items()))
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def next_action(journal: dict) -> dict:
     item = {'culprit': journal['culprit'], 'state': journal['state'], 'reason': journal.get('reason')}
     if journal['state'] == 'review-required':
@@ -676,7 +694,7 @@ class Locks:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 self.__exit__()
-                raise verify.VerifyError(f'{refusal}; coverage stays pending, no queue or wait') from None
+                raise verify.VerifyError(f'{refusal}; no queue or wait') from None
         return self
 
     def __exit__(self, *_):
@@ -725,6 +743,11 @@ def review(args, state: Path) -> int:
             print(json.dumps({'repairResult': journal['state'], **next_action(journal)}), flush=True)
             return 1
         bindings = journal['bindings']
+        if not evidence_intact(Path(bindings['evidence']), bindings['evidenceDigest']):
+            journal.update(state='refused', reason='frozen first-failure evidence changed after review binding')
+            save(path, journal)
+            print(json.dumps({'repairResult': 'refused', 'culprit': journal['culprit']}), flush=True)
+            return 1
         message = (f"Revert landing {journal['culprit'][:12]} after a causal full-main red\n\n"
                    f"Automatic source revert of main landing {journal['culprit']} (first parent {journal['parent']}).\n"
                    f"Failing case: {case_identity(journal['investigation'])}\n"

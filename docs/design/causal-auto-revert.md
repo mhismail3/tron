@@ -1,7 +1,7 @@
 # Causal source auto-revert
 
 Design for #2194 under #2173. The implemented contract and its single enable step are in
-[verify](../../tools/verify/README.md#asynchronous-full-main-batches-and-causal-revert);
+[batch.md](../../tools/verify/batch.md);
 publication is off by default. Structured failure classes, provenance and repeat tallies
 below remain design only.
 [Principles P2/P3/P8](../PRINCIPLES.md) own policy. #2176 owns fast affected checks

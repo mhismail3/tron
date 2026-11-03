@@ -47,11 +47,23 @@ if sys.argv[1:3] == ['work','issue'] or sys.argv[1:3] == ['work','comment']:
     print('created issue #100')
     sys.exit(0)
 Path('test-results').mkdir(exist_ok=True)
-with Path('test-results/executed').open('a') as f: f.write('locks\\n')
+with Path('test-results/executed').open('a') as f: f.write(' '.join(sys.argv[1:3])+'\\n')
 import subprocess
+affected = '--changed' in sys.argv and os.environ.get('FIXTURE_AFFECTED')
+if affected == 'kill-owner':
+    # Simulate the batch owner dying mid-repair: SIGKILL the ancestor batch process.
+    pid = os.getppid()
+    while pid > 1:
+        if 'tools/verify/verify.py' in subprocess.check_output(['ps','-o','command=','-p',str(pid)],text=True):
+            os.kill(pid, 9)
+            break
+        pid = int(subprocess.check_output(['ps','-o','ppid=','-p',str(pid)],text=True))
 sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
 Path('test-results/verify').mkdir(exist_ok=True)
-Path('test-results/verify',sha+'.json').write_text(json.dumps({'commit':sha,'verdict':Path('verifier-verdict').read_text().strip() if Path('verifier-verdict').exists() else 'passed','message':'locks passed','passingTests':1,'steps':[],'selection':{},'skipped':[]}))
+verdict = Path('verifier-verdict').read_text().strip() if Path('verifier-verdict').exists() else 'passed'
+if affected == 'red': verdict = 'failed'
+Path('test-results/verify',sha+'.json').write_text(json.dumps({'commit':sha,'verdict':verdict,'message':'locks passed','passingTests':1,'steps':[],'selection':{},'skipped':[]}))
+sys.exit(1 if verdict == 'failed' else 0)
 ''', True)
         self.write('tools/verify/gateway.py', '''import json,sys,time,subprocess
 from pathlib import Path
@@ -65,7 +77,8 @@ if (root/'hold').exists():
     p=subprocess.Popen(['sleep','300'])
     (root/'test-results/child.pid').write_text(str(p.pid))
     time.sleep(300)
-failed=(root/'bad').exists() and not nested
+failed=((root/'bad').exists() or (root/'also-bad').exists()) and not nested
+if failed and (root/'unhandled').exists(): print('Vitest caught 1 unhandled error during the test run.')
 if (root/'flake').exists() and '-t' in args: failed=False
 if (root/'unstable-repeat').exists() and '-t' in args and failed:
     common=Path(subprocess.check_output(['git','rev-parse','--path-format=absolute','--git-common-dir'],text=True).strip())
@@ -813,6 +826,104 @@ if sys.argv[1] == 'clean':
         self.assertIn('full-Gateway run holds', result.stdout)
         self.assertFalse(self.reports())
         self.assertFalse((self.root / '.git/verify/green.json').exists())
+
+    def test_red_while_disabled_publishes_after_the_enable_step(self):
+        self.remote(publish=False)
+        culprit = self.land('bad', 'yes')
+        self.push()
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        self.assertEqual(self.repair()[0]['state'], 'publication-disabled')
+        self.git('config', 'tron.verify.revertRemote', 'origin')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'review-required')
+        self.assertEqual(self.review(repair).returncode, 0)
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
+
+    def test_owner_killed_mid_repair_resumes_to_one_reviewed_revert(self):
+        self.remote()
+        culprit = self.land('bad', 'yes')
+        self.push()
+        self.env['FIXTURE_AFFECTED'] = 'kill-owner'
+        killed = self.run_batch('--base', self.base)
+        self.assertEqual(killed.returncode, -9, killed.stdout + killed.stderr)
+        self.assertEqual(self.repair()[0]['state'], 'building')
+        del self.env['FIXTURE_AFFECTED']
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'review-required')
+        self.assertEqual(self.review(repair).returncode, 0)
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
+
+    def test_failing_affected_checks_on_the_candidate_refuse(self):
+        self.remote()
+        self.land('bad', 'yes')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        self.env['FIXTURE_AFFECTED'] = 'red'
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual((repair['state'], repair['affected']['verdict']), ('refused', 'failed'))
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+
+    def test_inverse_that_leaves_the_failure_refuses(self):
+        self.remote()
+        culprit = self.land('bad', 'yes')
+        self.land('also-bad', 'yes')
+        self.push()
+        tip = self.git('rev-parse', 'HEAD')
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual((repair['culprit'], repair['state']), (culprit, 'refused'))
+        self.assertIn('did not remove the failure', repair['reason'])
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+
+    def test_unreadable_remote_stays_pending_then_resumes(self):
+        self.remote()
+        culprit = self.land('bad', 'yes')
+        self.push()
+        hidden = self.origin.with_name('hidden.git')
+        self.origin.rename(hidden)
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        self.assertEqual(self.repair()[0]['state'], 'pending')
+        hidden.rename(self.origin)
+        self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
+        [repair] = self.repair()
+        self.assertEqual(repair['state'], 'review-required')
+        self.assertEqual(self.review(repair).returncode, 0)
+        self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
+
+    def test_first_failure_is_frozen_and_later_mutation_refuses_publication(self):
+        culprit, tip, repair = self.red_with_review()
+        report = self.reports()[-1]
+        manifest = Path(report['evidence'])
+        directory = manifest.parent
+        first = json.loads((directory / 'first-report.json').read_text())
+        self.assertEqual(first['verdict'], 'running')
+        self.assertEqual(len(first['results']), 9)
+        self.assertFalse(first['failures'], 'frozen before any probe or attribution')
+        files = json.loads(manifest.read_text())['files']
+        self.assertIn('first-report.json', files)
+        self.assertFalse([name for name in files if name.startswith('attribution-')])
+        log = next(name for name in files if name.endswith('output.log'))
+        (directory / log).write_text('rewritten')
+        refused = self.review(repair)
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertIn('evidence changed', self.repair()[0]['reason'])
+        self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
+
+    def test_suite_level_error_is_uncovered_without_attribution(self):
+        self.remote()
+        self.land('unhandled', 'yes')
+        self.land('bad', 'yes')
+        self.push()
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'uncovered')
+        self.assertFalse(report['results'][1]['failureComplete'])
+        self.assertEqual(report['failures'][0]['attribution']['status'], 'unresolved')
+        self.assertFalse(self.repair())
 
     def assert_never_publishes(self, marker):
         self.remote()

@@ -13,7 +13,7 @@ scripts/tron verify --plan                     # tier, paths, reasons and exact 
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + transitive consumer locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
-scripts/tron verify --batch --base <green-sha>   # initialize coverage in a dedicated clean main worktree
+scripts/tron verify --batch --base <main-anchor> # initialize coverage in a dedicated clean main worktree
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
@@ -211,69 +211,11 @@ batch `--all`). Busy exit 73 records named checks/tests as `deferred`, exit 0, n
 passed. A deferred build also defers its index/tests; other affected checks still run.
 The batch covers those files. Genuine build/test errors and zero-test runs still fail.
 
-## Asynchronous full-main batches and causal revert
+## Asynchronous full-main batches
 
-Pre-merge evidence is the fast affected check above. Full E2E coverage runs after landing,
-asynchronously, through `verify --batch` in a persistent clean worktree on fetched main;
-feature landings never wait for it ([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)).
-The trigger is a separate owner (Home's batch Automation); this owner never schedules,
-installs, deploys or restarts anything. Every terminal run prints one JSON `batchResult`
-line with head, report path and each repair's state and next step; the caller delivers it.
-
-**Coverage.** First use needs `--base <main-anchor>`, not a claim of green.
-`<git-common-dir>/verify/green.json` names the last raw-green head and is the next base;
-`--base` cannot override it. Every run takes the nonwaiting repository `batch.lock` and the
-host-wide `/tmp/tron-full-gateway.lock`; either held refuses (exit 2) and coverage stays
-pending, never queued or skipped. Same green HEAD does nothing; `--repeat` reruns all nine
-lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
-required lane runs, even after failures: locks/declared consumers (`verify --all`), full
-default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned
-shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI journeys
-(installation disabled; Mac uses scratch HOME/TMPDIR). iOS lanes release host slots between
-lanes; all slots busy at admission is deferred. **Green** means every lane executed and passed.
-Missing owners/reports, empty/skipped/deferred evidence, a non-`passed` verifier verdict,
-failed setup/cleanup or changed source is **uncovered**; any executed failure is **red**.
-Neither advances `green.json`. Immutable `verify/batches/<range>/` keeps commands, logs,
-counts and wall times; on a red, `first-report.json` and the `evidence.json` hash manifest
-freeze the first failure after every lane joined and before any probe runs.
-
-**Attribution** probes one exact case (Vitest file plus anchored `-t`, XCTest class/method,
-or the owner's `--only-testing` selector) in one disposable worktree; it never reruns a suite.
-Main's first-parent chain is the landing history: an ordinary commit or a two-parent
-integration is one unit; octopus history is unresolved. Proof requires two fresh failing
-executions with the identical normalized signature at the head, a binary search proposal
-(cached `verify/probes/` outcomes are hints only), then two fresh passes at the culprit's
-first parent and two fresh identical failures at the culprit. Any mixed, unknown, setup,
-empty or changed-signature execution is **unresolved**: the red stays red and is
-root-caused; nothing is guessed or reverted. `verify/attributions/` memoizes per range.
-
-**Repair** (`verify/repairs/<culprit>.json`, one journal per landing, written before each
-effect) fetches the remote main tip without touching FETCH_HEAD or tracking refs and
-requires the culprit on its first-parent history. A changed tip must still fail twice
-(passing twice is `stale`: no revert); an exact existing inverse is `already-reverted`.
-Migration paths or owners with `persistence`, `security` or `mac-installer` risk refuse.
-`git revert --no-edit [-m 1]` builds the candidate on the tip; a conflict is preserved
-unresolved. The candidate must pass the case twice and pass `verify --changed --base <tip>`,
-then a review request binds culprit, parent, tip, candidate tree, patch-id, recipe,
-signature and evidence digest. **Publication is off by default** (`publication-disabled`:
-local `revert/<culprit>` only). Enable it once per batch repository with
-`git config tron.verify.revertRemote origin`; repairs then stop at `review-required`.
-A non-author agent reviewer records ACCEPT or BLOCK against the exact `bindingDigest`:
-`--review <culprit> --decision … --reviewer <id> --binding <digest>`. A wrong binding
-records nothing; BLOCK is terminal. ACCEPT on a moved tip never publishes: it rebuilds and
-reproves once at the new tip and asks for a fresh review. Otherwise the reviewed tree is
-committed onto the tip (trailers `Tron-Auto-Revert`, `Tron-Review-Binding`, `Tron-Reviewer`),
-journaled as `push-intent`, and pushed with plain non-force `git push <remote> <commit>:main`.
-The push exit settles nothing: `ls-remote` plus fetched ancestry decides `published`, a
-retryable unchanged remote, or `push-uncertain`. Every batch and review first reconciles
-dispatched pushes, so a crash after remote acceptance never creates a second revert.
-The red stays recorded; the landing's owner root-fixes and re-reviews before relanding.
-Code reverts never undo migrations, data, installs or production effects.
-
-Guarded issue writes journal before dispatch in `verify/issue-writes/`, keyed by lane and
-normalized signature; later ranges and a published revert comment on the same issue.
-Refused, uncertain or unfinished writes are reconciled, never replayed. Conflicts and
-refused or interrupted resource cleanup preserve the probe worktree and `progress.json`.
+`verify --batch` runs every required lane on landed main after merge and causally
+reverts a proven culprit once enabled; its contract, enable step and review command
+are in [batch.md](batch.md).
 
 ## Mutation sampling
 
@@ -301,8 +243,4 @@ Hardware-free
 `scripts/test-ios-test-infrastructure.py HostSlotFixture RunnerFixture.test_run_forwards_bounded_host_slot_wait_before_simulator_work RunnerFixture.test_run_waits_for_a_host_slot_while_all_are_held`
 proves bounded acquisition cleanup, forwarding, the unchanged cap and default waiting.
 A fake Gateway runner covers `mutate` timeout/interrupt; logs: `test-results/verify-cli/`.
-Batch fixtures use a disposable bare remote: merge and fast-forward culprits reverted after a
-bound ACCEPT then green, disabled publication, innocent concurrent landing with stale-ACCEPT
-rebind, uncertain push and crash-after-accept reconciliation (one revert), stale red, migration/
-security boundary, BLOCK, conflict, mixed controls, skipped/missing coverage, octopus history,
-the held full-Gateway lock and interrupted cleanup preservation; logs: `test-results/verify-batch/`.
+Batch fixtures are listed in [batch.md](batch.md#verify); logs: `test-results/verify-batch/`.
