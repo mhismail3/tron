@@ -200,7 +200,8 @@ acceptance; supported edits announce through the existing fenced worker steer.
 `OutsideChanges` (`settings-outside.ts`) compares stores with the values last observed
 (`<tronHome>/gateway/settings/observed.json`) on every read and on debounced directory events:
 the Mac `settings.json`, `trust.json`, `mcp.json`, `models.json` and each known project's `.pi/`
-files (≤ 64 projects); first sight is the baseline. Each differing instance is one `outside`
+files (≤ 64 projects); first sight is the baseline. A comparison that changed nothing but the
+read instant writes nothing, so reads never queue behind a durable write. Each differing instance is one `outside`
 entry (with `HEAD` and branch for repository files; redacted keys by digest); MCP servers and
 custom providers report only added/changed/removed, then `mcp.changed` or
 `models.customChanged`. Tron's own writes are bracketed (`begin`/`end`, `adopt`).

@@ -150,6 +150,8 @@ export class OutsideChanges {
   private disposal: Promise<void> | undefined;
   private retired = false;
   private failed: ((error: unknown) => void) | undefined;
+  /** Set when a comparison changed observed state beyond its `seen` instant. */
+  private changed = false;
 
   constructor(
     private readonly schema: SettingsSchema,
@@ -234,7 +236,13 @@ export class OutsideChanges {
         entries.push(...await this.compare(document, store, undefined, undefined, isProjectStore(store) ? heads?.get(store.root) : undefined, isProjectStore(store) && heads?.has(store.root)));
       }
       if (entries.length) await this.record.append(entries);
-      await this.save(document);
+      // Every settings read reconciles first, so an unchanged comparison must not
+      // pay a durable write: under fsync pressure those writes queued every read
+      // behind this mutex for tens of seconds. `seen` only orders project
+      // eviction; the cached document keeps it current and the next real change
+      // persists it.
+      if (this.changed) await this.save(document);
+      this.changed = false;
     });
     if (entries.length) await this.observer?.outside(entries);
   }
@@ -343,6 +351,7 @@ export class OutsideChanges {
         }
         if (entries.length) await this.record.append(entries);
         await this.save(document);
+        this.changed = false;
       } finally {
         for (const id of byStore.keys()) {
           const count = (this.writing.get(id) ?? 1) - 1;
@@ -427,7 +436,8 @@ export class OutsideChanges {
   }
 
   private async save(document: ObservedDocument): Promise<void> {
-    // Bound the known projects: the least recently read leave first.
+    // Bound the known projects: the least recently read leave first. `seen` is
+    // exact in process; after a restart it is the last persisted change.
     for (const prefix of ["project:", "project-mcp:"]) {
       const projects = Object.entries(document.stores).filter(([id]) => id.startsWith(prefix))
         .sort(([, left], [, right]) => left.seen.localeCompare(right.seen));
@@ -485,6 +495,7 @@ export class OutsideChanges {
       if (state) state.seen = at;
       return [];
     }
+    this.changed = true;
     if (!state) {
       // First sight is the baseline: nothing to compare with yet.
       document.stores[id] = {

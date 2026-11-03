@@ -73,20 +73,29 @@ function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
  * has no readiness signal, and on macOS a write made before its FSEvents stream starts
  * is never reported; under parallel load that window outlasted these cases' first write,
  * so no rescan ever ran (#1650, #1506). The probe rewrites `settings.json` with its own
- * bytes, an unchanged digest that records nothing, until a watcher-driven rescan rewrites
- * `observed.json` (every rescan stamps `seen`). It never reads settings itself, so a
+ * bytes, an unchanged digest that records nothing, until a watcher-driven rescan settles
+ * (`outside.reconcile` is wrapped to count it). It never reads settings itself, so a
  * broken watcher still fails here with this label.
  */
 async function watcherDelivers(outside: OutsideChanges, agentDir: string): Promise<void> {
   const settings = join(agentDir, "settings.json");
   const bytes = await readFile(settings);
-  const observed = () => readFile(outside.path, "utf8").catch(() => "");
-  const before = await observed();
-  await waitFor(async () => {
-    await writeFile(settings, bytes);
-    await new Promise(resolve => setTimeout(resolve, 400)); // past the watcher's 250 ms settle
-    return await observed() !== before;
-  }, "the settings directory watcher delivers an event", { intervalMs: 0 });
+  let rescans = 0;
+  const reconcile = outside.reconcile;
+  outside.reconcile = (...args) => {
+    const work = reconcile.apply(outside, args);
+    void work.then(() => { rescans += 1; }, () => { rescans += 1; });
+    return work;
+  };
+  try {
+    await waitFor(async () => {
+      await writeFile(settings, bytes);
+      await new Promise(resolve => setTimeout(resolve, 400)); // past the watcher's 250 ms settle
+      return rescans > 0;
+    }, "the settings directory watcher delivers an event", { intervalMs: 0 });
+  } finally {
+    delete (outside as { reconcile?: unknown }).reconcile;
+  }
 }
 /** Every `it` runs through here: its own owner, and its body joined by that owner's teardown. */
 const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(name, () => {
