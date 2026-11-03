@@ -33,9 +33,10 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual(sentCount(), 1, "the prompt must be rendered once: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once")
         // Leave the chat, let backgrounding retire the transport, then reopen the
-        // chat from the dashboard over the new connection: a fresh chat view
-        // installs the Gateway's session.open snapshot rather than retaining the
-        // pre-background cut. The harness also requires the reconnect in the Gateway log.
+        // chat from the dashboard over the new connection. The reopened chat's
+        // counts must still be one after its session.open snapshot; a snapshot that
+        // duplicates the reply fails here. The harness also requires the reconnect
+        // in the Gateway log.
         app.buttons["Back"].tap()
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
         XCTAssertTrue(waitForHittable(row, timeout: 60), app.debugDescription)
