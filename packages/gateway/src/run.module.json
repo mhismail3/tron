@@ -13,6 +13,7 @@
     "sessions/context-edit.integration.test.ts",
     "kernel/run/direct-bash-process-owner.integration.test.ts",
     "kernel/run/direct-bash-process-owner.ts",
+    "kernel/run/task-command-scope.ts",
     "sessions/execution.md",
     "sessions/fixtures/**",
     "kernel/run/gateway-work-registry.ts",
