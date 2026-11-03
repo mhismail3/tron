@@ -18,6 +18,27 @@ claim is not proof of live work; Home coordinates overlapping writes using actua
 task state, not a duplicate status projection or admission queue.
 See the [Git/gh skill](../../../.agents/skills/tron-work/SKILL.md).
 
+## Task command scopes
+
+Binding a Home task to its worker gives that session a command scope
+(`kernel/run/task-command-scope.ts`): each foreground shell gets the scope's `TMPDIR`,
+a recorded process group and an inherited anchor descriptor (fd 19). Settling the task
+(report, Stop, deadline or failure) unbinds the session and reaps everything the scope
+owns, including background children re-parented to launchd and `setsid` children that
+kept the anchor, then removes its `TMPDIR`. `TaskCommandSweep` runs every 60 s (one `ps`,
+one `lsof` per scope): it reaps scopes whose task settled without a completed reap (a
+refused reap or a restart) and logs `host.load.non-task` when busy CPU ≥ 90 % comes mostly
+from processes outside task scopes. It refuses rather than guess: a task this store does not
+record for that worker, an unreadable process table or a survivor leaves the scope on disk.
+Detaching on purpose means `setsid` plus closing fd 19, as `scripts/tron dev start` does
+for the shared Debug Gateway. Files written outside `$TMPDIR` are not reaped (macOS
+`mktemp` without a template ignores `TMPDIR`).
+
+**Synthetic load** (load tests, spinners, fsync loops) is bounded by a deadline, runs at
+background QoS (`taskpolicy -b` or `nice -n 20`), cleans up with an `EXIT` trap, writes
+only under `$TMPDIR`, and stays in the command's process group (no `setsid`, `nohup`
+daemons or `disown`).
+
 ## Host-pressure signal
 
 `HostPressure` (`packages/gateway/src/modules/home/host-pressure.ts`) owns the level. It reads
