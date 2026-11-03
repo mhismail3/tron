@@ -3781,9 +3781,11 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   /** A wake starts only when nothing else owns this runtime. Pi's prompt() queues or
-   * holds an input; a wake has no input, so it refuses and its results stay pending. */
+   * holds an input; a wake has no input, so it refuses and its results stay pending.
+   * An `interrupted` phase is a recovered earlier run, not an owner: like a prompt,
+   * a wake is admitted from it. */
   public async assertHomeWakeAdmissible(session: AgentSession): Promise<void> {
-    if (this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined
+    if ((this.phase !== "idle" && this.phase !== "interrupted") || this.operation !== undefined || this.activeOperationId !== undefined
       || this.heldQueue.entries.length > 0 || this.manualCompaction.pendingManualCompaction !== undefined || this.compactionOperation !== undefined
       || this.isAgentAdmissionSettling || session.isStreaming) {
       throw new GatewayError("busy", "Tron Home is busy; finished results wait for its next idle moment", true);
