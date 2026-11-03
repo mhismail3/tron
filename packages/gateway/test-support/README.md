@@ -32,6 +32,12 @@ whose caller stopped waiting cannot still be writing there.
 launch, holds startup attention recovery's last marker read so a client reaches
 the Gateway inside the post-listen recovery window.
 
+`native-exec-stall-capture.ts` runs a native engine fixture binary through
+`execFileSync` with stdin input, unchanged, while a separate process group watches it:
+past 5 s it writes host load, the parent and child, the child's stdio endpoints and a
+stack sample of each to `test-results/native-exec-stalls/` and names the record on
+stderr (#2226).
+
 `catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
 `catalog-metadata-fixture.ts` alternately until its parent kills it, so a
 SIGKILL lands at an arbitrary point of a sharded catalog save.

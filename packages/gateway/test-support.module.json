@@ -42,6 +42,7 @@
     "test-support/settings-dependencies.ts",
     "test-support/native-change.ts",
     "test-support/native-change-crash-child.ts",
+    "test-support/native-exec-stall-capture.ts",
     "test-support/settings-schema.ts",
     "test-support/store-path-lock.ts",
     "test-support/tron-home-environment-guard.ts",
