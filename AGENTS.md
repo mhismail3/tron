@@ -81,12 +81,11 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   cleanup and rendering still need actual Gateway/Pi/process/socket/built/UI boundaries.
 - Bugs require fail-before/pass-after. Preserve the first failure; name a deleted check's
   surviving oracle or file its gap. Keep rendered witnesses, not whole AX trees.
-- Workers may justify intended-behavior golden/assertion/fixture/timeout edits without a
-  maintainer tap; never hide defects with tolerance, retries or skips. A non-author reviewer
-  must name surviving oracles and explicitly ACCEPT test edits. Subjective design goes to
-  the maintainer with inline visuals. Follow the [oracle policy](tools/verify/test-oracles.md).
-- Reds are fixed at the root or causally reverted, never exempted by base matches or a registry.
-  Retain first-failure `test-results/` logs and raw counts; missing required coverage is not green.
+- Intended-behavior test edits need no maintainer tap; a non-author reviewer ACCEPTs them.
+  Subjective design goes to the maintainer. See the [oracle policy](tools/verify/test-oracles.md).
+- Deterministic reds: root fix or causal revert. Flaky/unrootable reds: one ~2h attempt, then
+  ship logging that catches the next occurrence and delete the case; issue stays open.
+  Retain first-failure `test-results/` logs and raw counts.
 
 ## Resources and cleanup
 

@@ -27,10 +27,9 @@ safe to ship.** Tests protect feature work, never become a queue that blocks it.
   reverts the change that caused it; the owner root-causes and fixes it before relanding.
   Preserve the first failure, exact SHA, command and evidence. If the cause is not yet
   attributable, diagnose it rather than guessing a revert target or declaring green.
-- Every failure is fixed at its root or reverted. There are no quarantines, waivers,
-  known-failure exemptions, qualified greens or “matches base/main” excuses. A retry that
-  passes is evidence of nondeterminism, not a fix. Missing or skipped required coverage
-  is not green.
+- Deterministic failures are fixed at their root or reverted. A flake that survives one
+  timeboxed root-cause attempt is handled by the [flake policy](#p3-tests-are-deterministic-or-they-are-bugs).
+  A retry that passes is evidence of nondeterminism, not a fix.
 - [`scripts/tron verify`](../tools/verify/README.md) is the pre-merge check; `verify --batch` is
   the async full run and its causal revert, which publishes only a reviewed revert of a
   culprit proven by fresh controls, once its remote is enabled. No agent may improvise an
@@ -44,12 +43,12 @@ safe to ship.** Tests protect feature work, never become a queue that blocks it.
 - Each suite owns its HOME, TMPDIR, ports, data and child cleanup. Tests must work under
   parallel load within the host's simulator slots and leases, not only on a quiet Mac.
 - Treat a flake as a possible product race until root cause distinguishes product from
-  harness. Never conceal it with retries, larger timeouts, skips or weaker assertions.
-- Determinism is proved by a closed ledger in which **every known failure has a
-  reproduction, root cause and fail-before/pass-after fix**. Each formerly failing or
-  flaky test must then pass **20 consecutive times under normal concurrent load**,
-  followed by **one full raw-green run (Gateway, nested and iOS UI) on a single commit**.
-  Keep every attempt; a red stays red, not a retry-selected pass.
+  harness. Retries and larger timeouts do not fix it.
+- **Flake policy:** give a flaky or unrootable failure one timeboxed (~2h) root-cause
+  attempt. If it stays unexplained, land logging/tracing in the shipped app or Gateway
+  that records state at the next occurrence, and delete the failing case in the same
+  change; its issue stays open, linked to that logging. Resume the hunt when the logging
+  catches a real occurrence. A test that fails every time is fixed, not deleted.
 
 ## P4 Coverage follows behavior and grows with it
 
@@ -98,8 +97,8 @@ approval. The code-revert gate is not authority to reverse live data or a produc
 
 #2173 proceeds in this order:
 
-1. Close the root-cause ledger, prove twenty consecutive passes per former red/flake
-   under normal concurrent load, then one full raw-green run on a single commit.
+1. Root-fix or retire (flake policy) every known red, then one full green run on a
+   single commit.
 2. Audit E2E fidelity, fill the core-journey map and replace rendering-based oracles.
 3. Establish the fast pre-merge check and async full E2E gate with causal auto-revert.
 4. Finish only bug-causing dual-owner paths.
