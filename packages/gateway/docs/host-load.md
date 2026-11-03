@@ -18,6 +18,15 @@ claim is not proof of live work; Home coordinates overlapping writes using actua
 task state, not a duplicate status projection or admission queue.
 See the [Git/gh skill](../../../.agents/skills/tron-work/SKILL.md).
 
+## Agent command priority
+
+Every agent-started shell (`DirectBashProcessOwner`: the bash tool and `!` commands of
+chats, Home and task workers) execs through `nice -n 10`, so the shell and every
+descendant run below the Gateway, which keeps its own priority and wins the CPU for
+interactive requests. Niceness, not background QoS: QoS confines work to efficiency
+cores and throttles its I/O (an idle TypeScript check ran 4× slower). Subagent child
+processes are launched by the pinned `pi-subagents` package, not this owner.
+
 ## Task command scopes
 
 Binding a Home task to its worker gives that session a command scope

@@ -68,7 +68,8 @@ actual K3 host; native frames do not select product modules or keep another list
 - `bounded-tool-cancellation.ts`: per-call abort controllers, bounded cancellation
   settlement and rejection of late results.
 - `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort
-  cleanup, output settlement and private-environment filtering.
+  cleanup, output settlement, private-environment filtering and the lowered agent-command
+  niceness (`nice -n 10` before the shell execs; docs/host-load.md).
 - `task-command-scope.ts`: a bound Home task worker's command scope under
   `$TMPDIR/tron-task-commands/<session>`: the commands' `TMPDIR`, each shell's recorded
   process group and an inherited anchor descriptor (fd 19). Owned processes are recorded-group
@@ -215,7 +216,7 @@ Compaction diagnostics remain with the
 ## Verify
 
 ```bash
-scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
+scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts src/kernel/run/agent-command-priority.integration.test.ts src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
 scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts
 scripts/tron test gateway src/sessions/runtime-control-publication.integration.test.ts
 scripts/tron test gateway src/sessions/annotation-only-steer.integration.test.ts

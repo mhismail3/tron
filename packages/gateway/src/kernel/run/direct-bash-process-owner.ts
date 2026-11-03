@@ -9,6 +9,16 @@ import {
 import { TOOL_INTERRUPT_SIGNAL_GRACE_MS, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 import { boundTaskCommandScope, closeTaskScopeAnchor, openTaskScopeAnchor, recordTaskCommandGroup, TASK_SCOPE_ANCHOR_FD } from "./task-command-scope.js";
 
+/**
+ * Agent-started commands (every session's bash tool and `!` commands, hence chats,
+ * Home and task workers) run at this niceness, set by `nice` before the shell execs
+ * so the shell and every descendant inherit it; the Gateway itself keeps its own
+ * priority, so its interactive requests win the CPU when commands saturate the host.
+ * Niceness rather than background QoS: QoS confines a command to efficiency cores
+ * and throttles its I/O, which made an idle-host TypeScript check four times slower.
+ */
+export const AGENT_COMMAND_NICENESS = 10;
+const NICE = "/usr/bin/nice";
 const POST_EXIT_OUTPUT_GRACE_MS = 100;
 /** How long output may still hold a call after a timeout or Stop has asked for
  * termination and the shell has exited. Only a descendant that escaped the
@@ -118,9 +128,12 @@ export class DirectBashProcessOwner {
         const anchor = scope ? openTaskScopeAnchor(scope) : undefined;
         let child: ChildProcess;
         try {
+          const shellArgs = fromStdin ? shell.args : [...shell.args, command];
+          // `nice` execs the shell in place: the same PID and process group.
+          const lowered = process.platform !== "win32";
           child = spawn(
-            shell.shell,
-            fromStdin ? shell.args : [...shell.args, command],
+            lowered ? NICE : shell.shell,
+            lowered ? ["-n", String(AGENT_COMMAND_NICENESS), shell.shell, ...shellArgs] : shellArgs,
             {
               cwd,
               detached: process.platform !== "win32",
