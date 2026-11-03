@@ -29,6 +29,8 @@ const preloads = ["home-ledger-crash-preload.mjs", "attention-recovery-hold-prel
 
 export const SCRIPTED_PROVIDER = "scripted";
 export const SCRIPTED_MODEL = "scripted-model";
+/** A model for background roles (Home memory), answered outside the ordered script. */
+export const BACKGROUND_MODEL = "scripted-background";
 
 /** One OpenAI chat-completions request the Gateway's Pi made. */
 export interface ScriptedRequest {
@@ -53,6 +55,9 @@ export interface ScriptedProvider {
   readonly errors: ReadonlyArray<string>;
   /** Steps answer requests in order; an unscripted request is answered with HTTP 500. */
   script(steps: readonly ScriptedStep[]): void;
+  /** Answer every request for `model` with `step`, outside the ordered script: a
+   * background role (Home memory) pointed at that model then never consumes a scripted turn. */
+  answerModel(model: string, step: ScriptedStep): void;
   close(): Promise<void>;
 }
 
@@ -65,6 +70,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
   const requests: ScriptedRequest[] = [];
   const errors: string[] = [];
   let steps: ScriptedStep[] = [];
+  const standing = new Map<string, ScriptedStep>();
   const server: Server = createHttpServer(async (request: IncomingMessage, response: ServerResponse) => {
     const parts: Buffer[] = [];
     try { for await (const chunk of request) parts.push(chunk as Buffer); } catch (error) {
@@ -82,7 +88,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
     }
     const record: ScriptedRequest = { model: String(parsed.model), messages: parsed.messages ?? [], body };
     requests.push(record);
-    const step = steps.shift();
+    const step = standing.get(record.model) ?? steps.shift();
     if (!step) {
       response.writeHead(500, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { message: "unscripted provider request" } }));
@@ -117,6 +123,7 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
     requests,
     errors,
     script(next) { steps = [...next]; },
+    answerModel(model, step) { standing.set(model, step); },
     async close() {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -211,7 +218,7 @@ async function launchGatewayProcess(
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
   await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { [SCRIPTED_PROVIDER]: {
     baseUrl: `http://127.0.0.1:${provider.port}/v1`, api: "openai-completions", apiKey: "fixture-only",
-    models: [model(SCRIPTED_MODEL), model("scripted-alternate")] } } }, null, 2));
+    models: [model(SCRIPTED_MODEL), model("scripted-alternate"), model(BACKGROUND_MODEL)] } } }, null, 2));
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
     defaultProvider: SCRIPTED_PROVIDER, defaultModel: SCRIPTED_MODEL, defaultProjectTrust: "never",
     enableAnalytics: false, enableInstallTelemetry: false, ...options.settings,

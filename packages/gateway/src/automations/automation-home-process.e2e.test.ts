@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../test-support/gateway-process.js";
+import { BACKGROUND_MODEL, SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../test-support/gateway-process.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 /**
@@ -44,8 +44,10 @@ describe("a Home automation wake across real Gateway-process restarts", () => {
     const designated = await ok(phone, "home.designate", { commandId: "home-wake-designate", model: { provider: SCRIPTED_PROVIDER, id: SCRIPTED_MODEL } });
     const sessionId = designated.sessionId as string;
     await ok(phone, "settings.change", { commandId: "home-wake-background-queue", target: { kind: "home" }, changes: [
-      { key: "model.queue[role=background]", layer: "session", op: "set", value: [`${SCRIPTED_PROVIDER}/${SCRIPTED_MODEL}`] },
+      { key: "model.queue[role=background]", layer: "session", op: "set", value: [`${SCRIPTED_PROVIDER}/${BACKGROUND_MODEL}`] },
     ] });
+    // Home memory's summaries go to the background model, answered apart from the scripted turns.
+    gateway.provider.answerModel(BACKGROUND_MODEL, () => ({ chunks: ["Memory line."] }));
     // A started Home conversation, so paused delivery recovers into this chapter.
     gateway.provider.script([() => ({ chunks: ["Home is ready."] })]);
     await ok(phone, "home.prompt", { commandId: "home-wake-bootstrap", text: "Initialize this Home conversation." });
