@@ -1844,7 +1844,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         if let linkLabel {
             XCTAssertTrue(app.navigationBars.staticTexts[linkLabel].waitForExistence(timeout: 30),
                           "the \(linkLabel) destination did not open: \(app.debugDescription)")
-            // Extensions embeds Sources below its inventory in a lazy stack;
+            // Extensions embeds Sources below its inventory;
             // reveal it before demanding its existence, not after that assertion.
             for _ in 0..<24 where !details.firstMatch.exists && lone?.firstMatch.exists != true { app.swipeUp() }
         }

@@ -68,7 +68,10 @@ struct ExtensionsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
+            // An ordinary stack: these bounded cards host presenters (presentation-parity
+            // Surfaces). As a lazy stack, a swipe could leave it re-enqueuing its own
+            // prefetch phase mutation every pass, so the sheet never went idle (#2250).
+            TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                 resolutionSection
                 BuiltinExtensionsSettingsSection(projectCWD: projectCWD)
 
