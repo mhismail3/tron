@@ -463,6 +463,24 @@ export class ManagedSubagents {
 
   private readonly transformCaches = new Map<"build" | "discovery", Promise<void>>();
 
+  /** Prepare the session factory's transforms off the Gateway thread once the
+   * Gateway serves, so the first session start reads the cache instead of
+   * waiting seconds of worker CPU on a fresh build root (#2229). A session load
+   * joins this same preparation; a failure leaves the next load to prepare again. */
+  prepareSessionTransforms(): Promise<boolean> {
+    if (!existsSync(this.root)) return Promise.resolve(false);
+    let prepared = this.transformCaches.get("build");
+    if (!prepared) {
+      prepared = this.prepareTransformCache(this.jitiOptions());
+      this.transformCaches.set("build", prepared);
+    }
+    const scheduled = prepared;
+    return scheduled.then(() => true, () => {
+      if (this.transformCaches.get("build") === scheduled) this.transformCaches.delete("build");
+      return false;
+    });
+  }
+
   /** The closure's declared jiti with exact host peer aliases and a private,
    * per-build transform cache outside the verified installs. No user package tree,
    * copied SDK or shared temporary directory participates in factory execution. */
