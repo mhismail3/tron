@@ -670,8 +670,8 @@ final class TronListStandardUITests: XCTestCase {
     /// is given its layout before hittability is asked; a lazy row that does not exist
     /// yet is scrolled toward, as before.
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication, swipes: Int) {
-        let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !element.exists || !element.frame.isEmpty }, object: nil)
         for _ in 0..<swipes {
+            let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !element.exists || !element.frame.isEmpty }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [laidOut], timeout: 10), .completed, app.debugDescription)
             if element.isHittable { return }
             app.swipeUp()
