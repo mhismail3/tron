@@ -208,8 +208,9 @@ const scripted = (context, options, state, model) => {
   }
   if (latestUserText(context).includes(REINSTALL_MARKER)) return reinstallTurn(context);
   if (latestUserText(context).includes("INSTALLED-SWIFT-APP-PERSISTENCE")) {
-    if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Installed persistence proof app.");
-    return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });
+    // Agents offer; only the phone's explicit review installs (3fc748c8f retired direct install).
+    if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Persistence proof app ready for review.");
+    return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "persistence-proof", name: "Persistence proof", feeds: [], source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-proof" })], { stopReason: "toolUse" });
   }
   if (latestUserText(context).includes("Review the fixture queue. This message is not approval.")) {
     return fauxAssistantMessage("Home automation message received without approval authority.");

@@ -270,7 +270,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.staticTexts["Builds app ready for review."].firstMatch.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(app.buttons["Stop Tron"].waitForNonExistence(timeout: 60), app.debugDescription)
     }
-    @MainActor private func buildsDismissReview(_ app: XCUIApplication) {
+    @MainActor func buildsDismissReview(_ app: XCUIApplication) {
         // Review has Info/Install, not Done. Dismiss its own toolbar, never a
         // similarly titled control in the chat or an underlying sheet.
         let review = app.scrollViews["apps.install.review"]
@@ -292,7 +292,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.buttons["Apps"].waitForExistence(timeout: 15), app.debugDescription)
         app.buttons["Apps"].tap()
     }
-    @MainActor private func buildsReveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement? = nil, capturePrefix: String? = nil) {
+    @MainActor func buildsReveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement? = nil, capturePrefix: String? = nil) {
         XCTAssertTrue(element.waitForExistence(timeout: 20), app.debugDescription)
         let container = scroll
             ?? app.scrollViews.allElementsBoundByIndex.last(where: { $0.isHittable })

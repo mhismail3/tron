@@ -178,8 +178,25 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
         try sendPrompt(app, "INSTALLED-SWIFT-APP-PERSISTENCE")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Installed persistence proof app")).firstMatch
-            .waitForExistence(timeout: 90), "the agent's swift_app install never completed: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Persistence proof app ready for review")).firstMatch
+            .waitForExistence(timeout: 90), "the agent's swift_app offer never completed: \(app.debugDescription)")
+        // The agent offers the app; only the phone's explicit review in Apps installs it.
+        app.buttons["Back"].tap()
+        openApps(app)
+        let pending = app.buttons["pending-app-row-persistence-proof"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 30), "the offered app is not pending review: \(app.debugDescription)")
+        pending.tap()
+        let review = app.scrollViews["apps.install.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
+        buildsReveal(app, app.buttons["apps.install.confirm"], in: review)
+        app.buttons["apps.install.confirm"].tap()
+        XCTAssertTrue(app.buttons["apps.install.open"].waitForExistence(timeout: 30), "the reviewed install never completed: \(app.debugDescription)")
+        buildsDismissReview(app)
+        closeTopSheet(app)
+        // Back to the producing chat, where the journeys continue.
+        let session = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session-row-' AND label CONTAINS %@", "INSTALLED-SWIFT-APP-PERSISTENCE")).firstMatch
+        XCTAssertTrue(session.waitForExistence(timeout: 30), app.debugDescription)
+        session.tap()
     }
 
     @MainActor
