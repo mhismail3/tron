@@ -133,7 +133,11 @@ export class DirectBashProcessOwner {
         } finally {
           if (anchor !== undefined) closeTaskScopeAnchor(anchor);
         }
-        if (scope && child.pid !== undefined) recordTaskCommandGroup(scope, child.pid);
+        if (scope && child.pid !== undefined) {
+          // An unrecorded shell would be exactly the orphan the scope exists to prevent.
+          try { recordTaskCommandGroup(scope, child.pid); }
+          catch (error) { this.terminateOwnedTree(child); throw error; }
+        }
         if (fromStdin) {
           child.stdin?.on("error", () => {});
           child.stdin?.end(command);

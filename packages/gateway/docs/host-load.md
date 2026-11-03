@@ -22,16 +22,17 @@ See the [Git/gh skill](../../../.agents/skills/tron-work/SKILL.md).
 
 Binding a Home task to its worker gives that session a command scope
 (`kernel/run/task-command-scope.ts`): each foreground shell gets the scope's `TMPDIR`,
-a recorded process group and an inherited anchor descriptor. Settling the task (report,
-Stop, deadline or failure) reaps everything the scope owns, including detached children
-re-parented to launchd and `setsid` children that kept the anchor, and removes its
-`TMPDIR`. `TaskCommandSweep` runs every 60 s and is cheap (one `ps`,
-one `lsof` per live scope): it reaps scopes of settled tasks (a restart or a failed settle
-reap), records escaped group leaders of running tasks, and logs `host.load.non-task`
-when busy CPU ≥ 90 % comes mostly from processes outside task scopes. It refuses, never
-guesses: unknown tasks, unreadable process tables and survivors leave the scope on disk.
-A program that closes inherited descriptors and calls `setsid` before the next sweep,
-or files written outside `$TMPDIR` (macOS `mktemp` without a template ignores it), escape.
+a recorded process group and an inherited anchor descriptor (fd 19). Settling the task
+(report, Stop, deadline or failure) unbinds the session and reaps everything the scope
+owns, including background children re-parented to launchd and `setsid` children that
+kept the anchor, then removes its `TMPDIR`. `TaskCommandSweep` runs every 60 s (one `ps`,
+one `lsof` per scope): it reaps scopes whose task settled without a completed reap (a
+refused reap or a restart) and logs `host.load.non-task` when busy CPU ≥ 90 % comes mostly
+from processes outside task scopes. It refuses rather than guess: a task this store does not
+record for that worker, an unreadable process table or a survivor leaves the scope on disk.
+Detaching on purpose means `setsid` plus closing fd 19, as `scripts/tron dev start` does
+for the shared Debug Gateway. Files written outside `$TMPDIR` are not reaped (macOS
+`mktemp` without a template ignores `TMPDIR`).
 
 **Synthetic load** (load tests, spinners, fsync loops) is bounded by a deadline, runs at
 background QoS (`taskpolicy -b` or `nice -n 20`), cleans up with an `EXIT` trap, writes

@@ -1,11 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { taskCommandRoot } from "../../kernel/run/task-command-scope.js";
+import { bindTaskCommandScope, reapTaskCommandScope, recordTaskCommandGroup, settleTaskCommandScope, taskCommandRoot } from "../../kernel/run/task-command-scope.js";
 
 /** Absent, or exited and awaiting launchd's reap (`Z`): either runs nothing. */
 function processTerminal(pid: number): boolean {
@@ -58,4 +58,17 @@ describe("Home task command scope", () => {
     const reap = f.signals.find(record => record.event === "home.task.command-reap") as { counts: { processes: number } };
     expect(reap.counts.processes).toBeGreaterThanOrEqual(2);
   }, 30_000);
+
+  it("never reaps a process whose group ID only matches a stale record", async () => {
+    await fixture();
+    // An unrelated group leader started after the record: what a reused process-group ID looks like.
+    const unrelated = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    started.push(unrelated.pid!);
+    const scope = bindTaskCommandScope("stale-session", "stale-task");
+    recordTaskCommandGroup(scope, unrelated.pid!, Date.now() - 60_000);
+    expect(settleTaskCommandScope(scope, "stale-task")).toBe(true);
+    expect(await reapTaskCommandScope(scope, "stale-task")).toEqual({ outcome: "reaped", processes: 0, survivors: 0 });
+    expect(processTerminal(unrelated.pid!)).toBe(false);
+    expect(existsSync(join(taskCommandRoot(), "stale-session"))).toBe(false);
+  });
 });

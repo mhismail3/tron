@@ -34,7 +34,6 @@ import { TRON_ASK_USER_INTERRUPTED } from "../../extensions/tron-ask-user-contra
 import { abortableRead } from "../../util/abortable-read.js";
 import { HostPressure, type HostPressureDiagnostic } from "./host-pressure.js";
 import { TaskCommandSweep, type TaskCommandDiagnostic } from "./task-command-sweep.js";
-import { bindTaskCommandScope } from "../../kernel/run/task-command-scope.js";
 import { homeTaskNeedsAttention } from "./home-task-lineage.js";
 import { readHomeTaskHistory } from "./home-task-history.js";
 
@@ -224,7 +223,7 @@ export class HomeTaskDispatcher {
     private readonly inbox: WakeInboxOwner, private readonly policy: HomeTaskPolicy) {
     this.pressure = new HostPressure(record => this.diagnostic?.(record));
     this.commands = new TaskCommandSweep({ running: taskId => this.running.has(taskId),
-      lifecycle: async taskId => { const task = await this.store.read(taskId).catch(() => undefined); return task && (task.lifecycle === "terminal" ? "terminal" : "open"); } },
+      record: async taskId => { const task = await this.store.read(taskId); return task && { terminal: task.lifecycle === "terminal", sessionId: task.sessionId }; } },
     record => this.diagnostic?.(record));
   }
 
@@ -664,7 +663,7 @@ export class HomeTaskDispatcher {
         late => { this.transition(late, "operation-bound"); void this.refuseAdmission(late, "admission-cancelled").catch(() => {}); });
       this.transition(task, "operation-bound");
       // Every command the worker runs from here belongs to this task until it settles.
-      bindTaskCommandScope(slot.id, task.taskId);
+      this.commands.bind(slot.id, task.taskId);
       let resolve!: (terminal: OwnedOperationTerminal) => void;
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });
       const cancellation = async (reason = "interrupted") => {
@@ -696,7 +695,7 @@ export class HomeTaskDispatcher {
         // so the cut records every stop and the outcome reads the join's result.
         const settled = await settleTaskSubagents(slot, operationId, deadline!.signal);
         // The worker's turn is over: nothing it started may outlive the task (#2209).
-        await this.commands.reap(slot.id, active.taskId, "settle");
+        await this.commands.settle(slot.id, active.taskId);
         // Share cold recovery's durable file cut before publishing any terminal
         // references/outbox or acknowledging the operation. SDK append visibility
         // alone cannot guarantee the worker evidence survives a power loss.
@@ -754,6 +753,7 @@ export class HomeTaskDispatcher {
         // cold recovery republishes it.
         if ((await this.store.read(active.taskId))?.lifecycle === "terminal") throw error;
         const final = await this.reconcile(active, "live", error instanceof Error && error.message.trim() ? error.message.trim() : "settlement failed");
+        await this.commands.settle(slot.id, active.taskId);
         await dispatch.acknowledge(slot.id, operationId, ownedLease).catch(() => {});
         return final;
       }).finally(() => { deadline!.disarm(); reports.retire(); ownedLease.release(); work.settle(); this.releaseSlot(taskId); });
