@@ -932,6 +932,10 @@ export class RuntimeRegistry implements SessionOperations {
     this.sessionCatalog.start();
     for (const lifecycle of this.lifecycles()) lifecycle.started();
     const markerEvidence = await this.markers.evidence();
+    // The listener serves before recovery finishes, so the interruption overlay
+    // a slot or catalog row reads comes from the durable markers now. Recovery
+    // then re-derives it after clearing the markers whose completion it proves.
+    this.interrupted = await this.markers.interruptedSessionIds();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
     this.pendingAttentionRecovery = markerEvidence;
