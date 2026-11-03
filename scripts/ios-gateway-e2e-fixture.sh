@@ -6,13 +6,15 @@
 # background-queue editor have their own journeys. This uses only the isolated
 # fixture's local credential, never the live Mac wrapper or phone credentials.
 prepare_home_automation_fixture() {
-  "$NODE_BIN" --input-type=module - "$gateway_dir" "$TRON_E2E_TRON_HOME" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_PORT" <<'JS'
+  # An optional task budget (output tokens) is seeded through the same Home-scoped
+  # settings RPC, so a later agent raise needs the shared change card (#2232).
+  "$NODE_BIN" --input-type=module - "$gateway_dir" "$TRON_E2E_TRON_HOME" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_PORT" "${1:-}" <<'JS'
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-const [gatewayDir, tronHome, agentDir, port] = process.argv.slice(2);
+const [gatewayDir, tronHome, agentDir, port, taskBudget] = process.argv.slice(2);
 const load = path => import(pathToFileURL(join(gatewayDir, path)).href);
 const { default: WebSocket } = await load('node_modules/ws/index.js');
 const { readLocalCredential } = await load('dist/client/local-credential.js');
@@ -53,6 +55,7 @@ try {
   const { sessionId } = await request('home.designate', { commandId: randomUUID(), model: { provider: settings.defaultProvider, id: settings.defaultModel } });
   await request('settings.change', { commandId: randomUUID(), target: { kind: 'home' }, changes: [
     { key: 'model.queue[role=background]', layer: 'session', op: 'set', value: [`${settings.defaultProvider}/${settings.defaultModel}`] },
+    ...(taskBudget ? [{ key: 'permissions.budget.task', layer: 'session', op: 'set', value: { outputTokens: Number(taskBudget) } }] : []),
   ] });
   await request('home.prompt', { commandId: randomUUID(), text: 'HOME-AUTOMATION-JOURNEY: initialize Home' });
   while (true) {
@@ -177,7 +180,26 @@ const reinstallTurn = async (context) => {
   return fauxAssistantMessage([fauxToolCall("swift_app", { action: "install", appId: "persistence-proof", name: "Persistence proof 2", source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
 };
 let buildsOfferNumber = 0;
+// The native settings-card journey (#2232): "SETTINGS-CARD-JOURNEY <n>" asks Home's
+// settings tool to set its task budget to n output tokens, which a raise sends to
+// the shared change card. Home memory summaries of that chat answer a plain line,
+// so they never request a change.
+const SETTINGS_CARD_MARKER = "SETTINGS-CARD-JOURNEY";
+const isMemorySummary = (context) => String(context.systemPrompt ?? "").startsWith("Write one concise");
+const settingsCardTurn = (context) => {
+  if (isMemorySummary(context)) return fauxAssistantMessage("Settings card journey memory line.");
+  const last = context.messages.at(-1);
+  if (last?.role === "toolResult") return fauxAssistantMessage("Settings card journey result: " + textOf(last).split("\n")[0]);
+  const outputTokens = Number((latestUserText(context).match(/SETTINGS-CARD-JOURNEY (\d+)/) ?? [])[1]);
+  return fauxAssistantMessage([fauxToolCall("settings", { action: "change", reason: "Settings card journey", changes: [
+    { key: "permissions.budget.task", layer: "session", op: "set", value: { outputTokens } },
+  ] }, { id: "e2e-settings-card-" + outputTokens })], { stopReason: "toolUse" });
+};
+// The native settings journey (#2233) reads which model actually served a prompt.
+const MODEL_PROBE_MARKER = "MODEL-PROBE-JOURNEY";
 const scripted = (context, options, state, model) => {
+  if (latestUserText(context).includes(SETTINGS_CARD_MARKER)) return settingsCardTurn(context);
+  if (latestUserText(context).includes(MODEL_PROBE_MARKER)) return fauxAssistantMessage("Model probe answered by " + model.id + ".");
   if (latestUserText(context).includes("BUILDS-APP-JOURNEY")) {
     if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Builds app ready for review.");
     return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "builds",

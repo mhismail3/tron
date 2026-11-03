@@ -101,6 +101,9 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProviderLoginSurvivesSafariAndReconnect"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testStreamedReplyAppearsExactlyOnceAcrossReconnect"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSessionModelChangeReachesNextPromptAndUndoRestoresIt"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCompletedAskUserColdReplayRetainsSelectedAnswers"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
@@ -962,6 +965,9 @@ run_ui_journey() {
   load_state
   if [[ "$journey" == *testHomeAutomationEditorAndAttributedMessageLight || "$journey" == *testHomeAutomationEditorAndAttributedMessageDark ]]; then
     prepare_home_automation_fixture
+  fi
+  if [[ "$journey" == *testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce ]]; then
+    prepare_home_automation_fixture 100
   fi
   if [[ "$journey" == *testProjectLifecycleBusyArchiveUsesCanonicalReason ]]; then
     # A real linked worktree exercises the lifecycle owner's canonical busy reason.
