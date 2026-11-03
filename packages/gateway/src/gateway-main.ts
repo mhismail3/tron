@@ -938,6 +938,8 @@ await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
 await home().recoverTasks();
 startupCheckpoint("home-task-recovery");
+// The first session start would otherwise transform the managed closure itself.
+void managedSubagents.prepareSessionTransforms().then((prepared) => { if (prepared) startupCheckpoint("subagent-transforms"); });
 const maintainStorage = async (): Promise<void> => {
   try {
     const [status] = await Promise.all([
