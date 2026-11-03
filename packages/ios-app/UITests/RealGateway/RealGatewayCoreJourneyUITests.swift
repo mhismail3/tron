@@ -100,7 +100,14 @@ extension RealGatewayPairAndChatUITests {
         probe("other", expecting: "e2e-model", count: 1)
         XCTAssertEqual(served("e2e-alternate").count, 0, "the other chat must not run the Session override")
 
-        // Undo the recorded change through Global Settings → Changes.
+        // Return to the changed chat and undo its recorded change through Global
+        // Settings → Changes; the session-scope Undo is fenced to that open chat.
+        app.buttons["Back"].tap()
+        let changedChat = app.buttons[changedRowID]
+        XCTAssertTrue(waitForHittable(changedChat, timeout: 60), app.debugDescription)
+        changedChat.tap()
+        XCTAssertTrue(served("e2e-alternate").firstMatch.waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 60), app.debugDescription)
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
@@ -110,6 +117,7 @@ extension RealGatewayPairAndChatUITests {
         let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label BEGINSWITH 'Model,'")).firstMatch
         XCTAssertTrue(entry.waitForExistence(timeout: 30), app.debugDescription)
         entry.tap()
+        XCTAssertTrue(app.staticTexts["Before"].waitForExistence(timeout: 15), app.debugDescription)
         let undo = app.buttons["Undo"]
         revealBelowNavigationBar(app, undo)
         XCTAssertTrue(undo.waitForExistence(timeout: 15), app.debugDescription)
@@ -117,18 +125,17 @@ extension RealGatewayPairAndChatUITests {
         let confirm = app.buttons["Undo change"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 15), app.debugDescription)
         confirm.tap()
-        XCTAssertTrue(waitUntil(timeout: 30) { !app.buttons["Undo change"].exists && !app.staticTexts["Undoing…"].exists }, app.debugDescription)
+        // A successful Undo closes the change's detail; a refusal keeps it with its error.
+        XCTAssertTrue(waitUntil(timeout: 60) { !app.staticTexts["Before"].exists }, "Undo did not complete: \(app.debugDescription)")
         keepScreenshot(app, name: "2233-session-model-undone")
-        for _ in 0..<3 where !app.buttons["dashboard.menu"].isHittable && !app.buttons["Back"].isHittable {
-            dismissTopSheet(app)
-        }
-
-        // The changed chat's next prompt runs the restored Global model.
-        app.buttons["Back"].tap()
-        let changedChat = app.buttons[changedRowID]
-        XCTAssertTrue(waitForHittable(changedChat, timeout: 60), app.debugDescription)
-        changedChat.tap()
-        XCTAssertTrue(served("e2e-alternate").firstMatch.waitForExistence(timeout: 60), app.debugDescription)
+        let tronHome = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent().appendingPathComponent("tron")
+        let sessionChanges = settingsHistory(tronHome, key: "model.ref[role=chat]").filter { ($0["target"] as? [String: Any])?["kind"] as? String == "session" }
+        XCTAssertEqual(sessionChanges.count, 2, "one Session change and its one Undo: \(sessionChanges)")
+        XCTAssertEqual(sessionChanges.last?["undoOf"] as? String, sessionChanges.first?["changeId"] as? String)
+        XCTAssertEqual(sessionChanges.last?["status"] as? String, "applied")
+        dismissTopSheet(app) // Changes
+        dismissTopSheet(app) // Global Settings
+        XCTAssertTrue(waitForHittable(app.buttons["Back"], timeout: 30), app.debugDescription)
         probe("three", expecting: "e2e-model", count: 2)
         XCTAssertEqual(served("e2e-alternate").count, 1, "Undo must not rewrite the earlier reply")
     }
@@ -146,16 +153,7 @@ extension RealGatewayPairAndChatUITests {
             let document = (try? JSONSerialization.jsonObject(with: Data(contentsOf: tronHome.appendingPathComponent("gateway/home/profile.json")))) as? [String: Any]
             return ((document?["budget"] as? [String: Any])?["task"] as? [String: Any])?["outputTokens"] as? Int
         }
-        func budgetHistory() -> [[String: Any]] {
-            let directory = tronHome.appendingPathComponent("gateway/settings/changes")
-            let segments = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
-                .filter { $0.pathExtension == "jsonl" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-            return segments.flatMap { segment in
-                ((try? String(contentsOf: segment, encoding: .utf8)) ?? "").split(separator: "\n").compactMap {
-                    try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
-                }
-            }.filter { $0["key"] as? String == "permissions.budget.task" }
-        }
+        func budgetHistory() -> [[String: Any]] { settingsHistory(tronHome, key: "permissions.budget.task") }
         // The fixture seeded 100 through the Home-scoped settings RPC.
         XCTAssertEqual(budget(), 100)
         let seeded = budgetHistory()
@@ -201,6 +199,18 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual((applied.first?["after"] as? [String: Any])?["outputTokens"] as? Int, 200)
         XCTAssertFalse(card.exists, "an approved card must close")
         keepScreenshot(app, name: "2232-home-budget-card-approved-once")
+    }
+
+    /// The fixture Gateway's canonical settings audit for one key, oldest first.
+    private func settingsHistory(_ tronHome: URL, key: String) -> [[String: Any]] {
+        let directory = tronHome.appendingPathComponent("gateway/settings/changes")
+        let segments = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "jsonl" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return segments.flatMap { segment in
+            ((try? String(contentsOf: segment, encoding: .utf8)) ?? "").split(separator: "\n").compactMap {
+                try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+            }
+        }.filter { $0["key"] as? String == key }
     }
 
     @MainActor
