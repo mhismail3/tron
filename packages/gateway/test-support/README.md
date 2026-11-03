@@ -25,6 +25,9 @@ credential; `restart()` is the iOS fixture's restart (SIGTERM, join, respawn on 
 same root and port). Its files run in the nested pass. Disposal runs in a hook:
 a SIGTERM join within `HOOK_HANG_BOUND_MS`, then a 3 s SIGKILL join; a failed start
 or disposal reports every failure and keeps the root while the process may still write.
+`attention-recovery-hold-preload.mjs`, inert unless its variable is set for one
+launch, holds startup attention recovery's last marker read so a client reaches
+the Gateway inside the post-listen recovery window.
 
 `catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
 `catalog-metadata-fixture.ts` alternately until its parent kills it, so a
