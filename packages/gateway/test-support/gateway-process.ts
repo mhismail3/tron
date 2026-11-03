@@ -67,7 +67,11 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
   let steps: ScriptedStep[] = [];
   const server: Server = createHttpServer(async (request: IncomingMessage, response: ServerResponse) => {
     const parts: Buffer[] = [];
-    for await (const chunk of request) parts.push(chunk as Buffer);
+    try { for await (const chunk of request) parts.push(chunk as Buffer); } catch (error) {
+      errors.push(`provider request body failed: ${String(error)}`);
+      response.destroy();
+      return;
+    }
     const body = Buffer.concat(parts).toString("utf8");
     let parsed: { model?: unknown; messages?: ScriptedRequest["messages"] };
     try { parsed = JSON.parse(body); } catch (error) {
@@ -176,12 +180,15 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
     return await launchGatewayProcess(options, provider, root, (spawned) => { child = spawned; });
   } catch (error) {
     // A failed start never reaches the caller's disposal list: remove what it made.
+    let joined = true;
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL");
-      await joinExit(child, "the failed Gateway start exited after SIGKILL", KILL_JOIN_BOUND_MS).catch(() => undefined);
+      joined = await joinExit(child, "the failed Gateway start exited after SIGKILL", KILL_JOIN_BOUND_MS)
+        .then(() => true, () => false);
     }
     await provider.close();
-    if (root) await rm(root, { recursive: true, force: true });
+    // A process that may still write keeps its root; the start error names the failure.
+    if (root && joined) await rm(root, { recursive: true, force: true });
     throw error;
   }
 }
@@ -292,18 +299,19 @@ async function launchGatewayProcess(
       await launch(restartOptions.environment);
     },
     async dispose() {
-      let failure: unknown;
+      const failures: unknown[] = [];
       try {
         await stop("the Gateway process exited after SIGTERM at disposal", HOOK_HANG_BOUND_MS);
       } catch (error) {
-        failure = error;
+        failures.push(error);
         child.kill("SIGKILL");
-        await joinExit(child, "the Gateway process exited after SIGKILL", KILL_JOIN_BOUND_MS);
-      } finally {
-        await provider.close();
-        await rm(root, { recursive: true, force: true });
+        await joinExit(child, "the Gateway process exited after SIGKILL", KILL_JOIN_BOUND_MS)
+          .catch((killFailure: unknown) => { failures.push(killFailure); });
       }
-      if (failure !== undefined) throw failure;
+      await provider.close();
+      // A process that may still write keeps its root for inspection.
+      if (failures.length < 2) await rm(root, { recursive: true, force: true });
+      if (failures.length > 0) throw new AggregateError(failures, `Gateway process disposal failed (pid ${child.pid}, root ${root})`);
     },
   };
 }

@@ -22,7 +22,9 @@ one accepted recovery through the existing work owner.
 isolated root with a scripted OpenAI-compatible HTTP provider as its only scripted
 party. Clients cross the production loopback WebSocket with the root's local
 credential; `restart()` is the iOS fixture's restart (SIGTERM, join, respawn on the
-same root and port). Its files run in the nested pass.
+same root and port). Its files run in the nested pass. Disposal runs in a hook:
+a SIGTERM join within `HOOK_HANG_BOUND_MS`, then a 3 s SIGKILL join; a failed start
+or disposal reports every failure and keeps the root while the process may still write.
 
 `catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
 `catalog-metadata-fixture.ts` alternately until its parent kills it, so a
