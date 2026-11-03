@@ -74,10 +74,17 @@ extension RealGatewayPairAndChatUITests {
         let switchModel = app.buttons["manage-model-switch"]
         XCTAssertTrue(waitForEnabled(switchModel, timeout: 30), app.debugDescription)
         switchModel.tap()
-        let alternate = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Tron E2E Alternate'")).firstMatch
-        XCTAssertTrue(alternate.waitForExistence(timeout: 30), app.debugDescription)
+        // Search expands the provider group and brings the row into the sheet.
+        let search = app.buttons["Search models"]
+        XCTAssertTrue(search.waitForExistence(timeout: 30), app.debugDescription)
+        search.tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15), app.debugDescription)
+        field.typeText("Alternate")
+        let alternate = app.buttons.matching(NSPredicate(format: "label CONTAINS 'tron-e2e/e2e-alternate'")).firstMatch
+        XCTAssertTrue(waitForHittable(alternate, timeout: 30), app.debugDescription)
         alternate.tap()
-        XCTAssertTrue(card.staticTexts["Tron E2E Alternate"].waitForExistence(timeout: 30),
+        XCTAssertTrue(card.staticTexts.matching(NSPredicate(format: "label ==[c] 'Tron E2E Alternate'")).firstMatch.waitForExistence(timeout: 30),
                       "only the acknowledged Session choice is shown: \(app.debugDescription)")
         keepScreenshot(app, name: "2233-session-model-changed")
         dismissTopSheet(app)
