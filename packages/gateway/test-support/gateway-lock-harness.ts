@@ -496,7 +496,12 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       await outside.dispose();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-      if (!disposeOptions.keepRoot) await rm(root, { recursive: true, force: true });
+      if (!disposeOptions.keepRoot) {
+        // Join work the Gateway already admitted, as its own shutdown does (work-settle):
+        // a request whose caller stopped waiting can still be writing under this root.
+        await registry.administrativeWorkRegistry.waitUntilSettled();
+        await rm(root, { recursive: true, force: true });
+      }
     },
   };
   return gateway;
