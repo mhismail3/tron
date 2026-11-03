@@ -22,11 +22,15 @@ extension RealGatewayPairAndChatUITests {
         sendJourneyPrompt(app, prompt)
         // The fixture's first ordinary reply streams; its last words mark completion.
         let completion = "Detached response complete"
-        let reply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", completion))
+        // Each assistant message renders one selectable text view (its identifier);
+        // the prompt is counted outside the navigation title the chat derives from it.
+        let reply = app.textViews.matching(identifier: "chat.assistant.selectable-text")
+            .matching(NSPredicate(format: "label CONTAINS %@", completion))
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 180), app.debugDescription)
-        let sent = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", prompt))
+        let sentPredicate = NSPredicate(format: "label == %@", prompt)
+        func sentCount() -> Int { app.staticTexts.matching(sentPredicate).count - app.navigationBars.staticTexts.matching(sentPredicate).count }
         XCTAssertEqual(reply.count, 1, "the completed reply must be rendered once: \(app.debugDescription)")
-        XCTAssertEqual(sent.count, 1, "the prompt must be rendered once: \(app.debugDescription)")
+        XCTAssertEqual(sentCount(), 1, "the prompt must be rendered once: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once")
         // Backgrounding retires the transport; the foreground reopens the session
         // from the Gateway's authoritative snapshot.
@@ -34,7 +38,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForEnabled(app.buttons["session-context-button"], timeout: 90), app.debugDescription)
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertEqual(reply.count, 1, "the reconnected snapshot must not duplicate the reply: \(app.debugDescription)")
-        XCTAssertEqual(sent.count, 1, "the reconnected snapshot must not duplicate the prompt: \(app.debugDescription)")
+        XCTAssertEqual(sentCount(), 1, "the reconnected snapshot must not duplicate the prompt: \(app.debugDescription)")
         keepScreenshot(app, name: "2230-reply-exactly-once-after-reconnect")
     }
 
@@ -52,7 +56,8 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
         func served(_ model: String) -> XCUIElementQuery {
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Model probe answered by \(model)."))
+            app.textViews.matching(identifier: "chat.assistant.selectable-text")
+                .matching(NSPredicate(format: "label CONTAINS %@", "Model probe answered by \(model)."))
         }
         func probe(_ label: String, expecting model: String, count: Int) {
             sendJourneyPrompt(app, "MODEL-PROBE-JOURNEY \(label)")
@@ -167,7 +172,7 @@ extension RealGatewayPairAndChatUITests {
         let cancel = app.buttons["change-review-cancel"]
         XCTAssertTrue(waitForHittable(cancel, timeout: 15), app.debugDescription)
         cancel.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Settings card journey result:'")).firstMatch
+        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "label BEGINSWITH 'Settings card journey result:'")).firstMatch
             .waitForExistence(timeout: 120), app.debugDescription)
         XCTAssertFalse(card.exists, "a declined card must close")
         XCTAssertEqual(budget(), 100, "a declined card must apply nothing")
@@ -181,7 +186,7 @@ extension RealGatewayPairAndChatUITests {
         approve.tap()
         if approve.exists && approve.isHittable { approve.tap() }
         XCTAssertTrue(waitUntil(timeout: 60) { budget() == 200 }, "the approved raise never reached the Home store")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Settings card journey result:'")).element(boundBy: 1)
+        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "label BEGINSWITH 'Settings card journey result:'")).element(boundBy: 1)
             .waitForExistence(timeout: 120), app.debugDescription)
         let applied = budgetHistory().dropFirst(seeded.count)
         XCTAssertEqual(applied.count, 1, "two approve taps must record one change: \(Array(applied))")
