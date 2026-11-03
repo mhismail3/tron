@@ -111,7 +111,7 @@ def hold_full_gateway_lock():
 
 
 # The browser receipt test runs the pinned agent-browser fork, which it reads from this
-# variable, and its native case the engine first on PATH. The runner provisions that exact
+# variable, and whose native case runs the engine first on PATH. The runner provisions that exact
 # commit once per clone and the engine version it declares once per version, so every run
 # that selects the test (a batch's Gateway lane included) covers it instead of skipping it.
 BROWSER_FORK_COPY = 'TRON_P99_17_BROWSER_FORK_COPY'
@@ -267,7 +267,8 @@ def main() -> int:
     if selects_browser_fork(sys.argv[1:]):
         copy = provision_browser_fork()
         # Its native case runs `which agent-browser`: the fork's declared engine comes first.
-        fork = {BROWSER_FORK_COPY: str(copy), 'PATH': f'{provision_browser_engine(copy)}{os.pathsep}{os.environ.get("PATH", "")}'}
+        path = [str(provision_browser_engine(copy)), *filter(None, os.environ.get('PATH', '').split(os.pathsep))]
+        fork = {BROWSER_FORK_COPY: str(copy), 'PATH': os.pathsep.join(path)}
     lock = hold_full_gateway_lock()
     with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-") as temporary:
         root = Path(temporary)

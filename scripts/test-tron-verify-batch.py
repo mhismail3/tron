@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import signal
 import subprocess
@@ -1259,7 +1260,7 @@ version = spec.split('@', 1)[1]
 destination = Path(args[args.index('--pack-destination') + 1])
 with tarfile.open(destination / f'agent-browser-{{version}}.tgz', 'w:gz') as archive:
     for key in ('darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'):
-        body = b'#!/bin/sh\\necho "agent-browser {reported}"\\n'
+        body = f'#!/bin/sh\\necho "agent-browser {reported}"\\n# {{key}}\\n'.encode()
         member = tarfile.TarInfo(f'package/bin/agent-browser-{{key}}')
         member.size = len(body)
         archive.addfile(member, io.BytesIO(body))
@@ -1298,6 +1299,9 @@ with tarfile.open(destination / f'agent-browser-{{version}}.tgz', 'w:gz') as arc
         self.assertEqual(self.engine_seen.read_text().split(), [str(engine / 'bin/agent-browser')])
         self.assertEqual(subprocess.check_output([str(engine / 'bin/agent-browser'), '--version'], text=True).strip(), 'agent-browser 0.40.0')
         self.assertEqual((engine / '.tron-provisioned').read_text(), '0.40.0')
+        # Only this host's platform binary is kept.
+        host = {'Darwin': 'darwin', 'Linux': 'linux'}[platform.system()] + '-' + {'x86_64': 'x64', 'amd64': 'x64', 'aarch64': 'arm64'}.get(platform.machine().lower(), platform.machine().lower())
+        self.assertTrue((engine / 'bin/agent-browser').read_text().endswith(f'# {host}\n'))
         self.assertFalse(killed.exists(), 'a killed provisioner\'s staging survived')
         self.assertEqual(len(self.packed.read_text().splitlines()), 1)
         self.assertIn('agent-browser@0.40.0', self.packed.read_text())
