@@ -15,6 +15,75 @@ ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / 'test-results/verify-batch'
 
 
+def wait_until(predicate, message, timeout=30):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError(message)
+        time.sleep(0.05)
+
+
+class GatewayRuns:
+    """Shipped Gateway runners pointed at one test lock, in their own scratch directory. Each stand-in
+    Vitest appends its test name to `order` once its run holds the lock; a run named holder* keeps
+    it until released (or its directory is gone, so an orphan of a killed runner still ends)."""
+
+    def __init__(self, lock: Path):
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-runs-')
+        directory = Path(self.temporary.name)
+        self.directory, self.order, self.runs = directory, directory / 'order', {}
+        source = (ROOT / 'tools/verify/gateway.py').read_text()
+        self.gateway = directory / 'tools/verify/gateway.py'
+        self.gateway.parent.mkdir(parents=True)
+        self.gateway.write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
+        node = directory / 'scripts/tron-node'
+        node.parent.mkdir()
+        node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        vitest = directory / 'packages/gateway/node_modules/.bin/vitest'
+        vitest.parent.mkdir(parents=True)
+        vitest.write_text(f'#!/bin/bash\necho "$2" >> {self.order}\n'
+                          f'while [[ "$2" == holder* && ! -e {directory}/release-$2 && -d {directory} ]]; do sleep 0.05; done\n')
+        for script in (node, vitest):
+            script.chmod(0o755)
+
+    def start(self, name):
+        inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
+        with (self.directory / f'{name}.err').open('w') as stderr:
+            self.runs[name] = subprocess.Popen(['python3', str(self.gateway), name], env=inherited,
+                                               stdout=subprocess.DEVNULL, stderr=stderr)
+        return self.runs[name]
+
+    def stderr(self, name):
+        return (self.directory / f'{name}.err').read_text()
+
+    def names(self):
+        lines = self.order.read_text().split() if self.order.exists() else []
+        return list(dict.fromkeys(lines))
+
+    def wait_holding(self, name):
+        wait_until(lambda: name in self.names(), f'{name} never held the lock: {self.stderr(name)}')
+
+    def wait_queued(self, name):
+        wait_until(lambda: 'waiting for' in self.stderr(name), f'{name} never queued: {self.stderr(name)}')
+
+    def release(self, name):
+        (self.directory / f'release-{name}').touch()
+
+    def wait_all(self, names=None):
+        for name in names or self.runs:
+            self.runs[name].wait(timeout=60)
+            if self.runs[name].returncode != -signal.SIGKILL:
+                assert self.runs[name].returncode == 0, (name, self.stderr(name))
+
+    def close(self):
+        for name, run in self.runs.items():
+            self.release(name)
+            if run.poll() is None:
+                run.terminate()
+                run.wait(timeout=30)
+        self.temporary.cleanup()
+
+
 class BatchTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='tron-batch-fixture-')
@@ -826,16 +895,59 @@ if sys.argv[1] == 'clean':
         holder = json.loads((Path(self.temporary.name) / 'full-gateway.lock').read_text())
         self.assertEqual(holder['purpose'], 'verify --batch')
 
-    def test_held_full_gateway_lock_keeps_coverage_pending_without_waiting(self):
-        import fcntl
+    def gateway_runs(self):
+        runs = GatewayRuns(Path(self.temporary.name) / 'full-gateway.lock')
+        self.addCleanup(runs.close)
+        return runs
+
+    def test_held_full_gateway_lock_keeps_coverage_pending_after_the_capped_wait(self):
         self.land('good', 'yes')
-        with (Path(self.temporary.name) / 'full-gateway.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            result = self.run_batch('--base', self.base)
+        # The shipped cap is 45 minutes; this fixture's copy of the batch waits 2 seconds.
+        source = (self.root / 'tools/verify/batch.py').read_text()
+        self.assertIn('\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60\n', source)
+        self.land('tools/verify/batch.py', source.replace('\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60\n', '\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 2\n'))
+        runs = self.gateway_runs()
+        holder = runs.start('holder')
+        runs.wait_holding('holder')
+        started = time.monotonic()
+        result = self.run_batch('--base', self.base)
+        waited = time.monotonic() - started
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn('full-Gateway run holds', result.stdout)
+        self.assertIn(f'"pid": {holder.pid}', result.stdout)
+        self.assertIn('gateway vitest holder', result.stdout)
+        self.assertRegex(result.stdout, r'waited \d+s')
+        self.assertGreaterEqual(waited, 2)
         self.assertFalse(self.reports())
         self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertIsNone(holder.poll(), 'a capped batch never interrupts the holder')
+        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped batch leaves no ticket')
+        # The capped batch left the line: the next run follows the holder.
+        runs.start('next')
+        runs.wait_queued('next')
+        runs.release('holder')
+        runs.wait_all()
+        self.assertEqual(runs.names(), ['holder', 'next'])
+
+    def test_a_due_batch_waits_its_turn_ahead_of_later_gateway_runs(self):
+        runs = self.gateway_runs()
+        self.land('scripts/tron-xcodebuild', f'#!/bin/sh\necho mac-build >> test-results/executed\necho batch >> {runs.order}\n')
+        runs.start('holder')
+        runs.wait_holding('holder')
+        output = Path(self.temporary.name) / 'batch.out'
+        with output.open('w') as stream:
+            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
+                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
+        wait_until(lambda: batch.poll() is not None or 'waiting for' in output.read_text(), 'the batch neither waited nor exited')
+        self.assertIsNone(batch.poll(), 'a due batch waits behind the holder instead of refusing:\n' + output.read_text())
+        for name in ('later-1', 'later-2'):
+            runs.start(name)
+            runs.wait_queued(name)
+        runs.release('holder')
+        self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
+        runs.wait_all()
+        self.assertEqual(runs.names(), ['holder', 'batch', 'later-1', 'later-2'])
 
     def test_red_while_disabled_publishes_after_the_enable_step(self):
         self.remote(publish=False)
@@ -1029,6 +1141,59 @@ class FullGatewayLockTests(unittest.TestCase):
             out, err = run.communicate(timeout=30)
         self.assertEqual(run.returncode, 0, out + err)
         self.assertTrue(self.ran.exists())
+
+
+class FullGatewayLockQueueTests(unittest.TestCase):
+    """Full-Gateway lock waiters take it in arrival order, and a dead waiter or holder never wedges the line."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-queue-')
+        self.addCleanup(self.temporary.cleanup)
+        self.runs = GatewayRuns(Path(self.temporary.name) / 'full-gateway.lock')
+        self.addCleanup(self.runs.close)
+
+    def test_runs_take_the_lock_in_arrival_order(self):
+        self.runs.start('holder')
+        self.runs.wait_holding('holder')
+        for name in ('first', 'second', 'third'):
+            self.runs.start(name)
+            self.runs.wait_queued(name)
+        self.runs.release('holder')
+        self.runs.wait_all()
+        self.assertEqual(self.runs.names(), ['holder', 'first', 'second', 'third'])
+
+    def test_a_killed_waiter_and_a_killed_holder_lose_their_places(self):
+        holder = self.runs.start('holder')
+        self.runs.wait_holding('holder')
+        doomed = self.runs.start('doomed')
+        self.runs.wait_queued('doomed')
+        doomed.kill()
+        doomed.wait(timeout=30)
+        self.runs.start('after')
+        self.runs.wait_queued('after')
+        holder.kill()
+        holder.wait(timeout=30)
+        self.runs.wait_all(['after'])
+        self.assertEqual(self.runs.names(), ['holder', 'after'])
+        # Nothing stale remains ahead of a newcomer: it takes the free lock without waiting.
+        self.runs.start('fresh')
+        self.runs.wait_all(['fresh'])
+        self.assertNotIn('waiting for', self.runs.stderr('fresh'))
+        self.assertEqual(self.runs.names(), ['holder', 'after', 'fresh'])
+
+    def test_batch_and_gateway_runs_share_one_queue_owner(self):
+        # The batch fixture replaces gateway.py, so batch.py keeps its own copy of the queue owner;
+        # both must stay the same code.
+        import ast
+        def owner(path):
+            tree = ast.parse((ROOT / path).read_text())
+            [function] = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'wait_for_full_gateway_lock']
+            return ast.dump(function)
+        self.assertEqual(owner('tools/verify/batch.py'), owner('tools/verify/gateway.py'))
+        constants = lambda path: [line for line in (ROOT / path).read_text().splitlines()
+                                  if line.startswith(('FULL_GATEWAY_LOCK = ', "FULL_GATEWAY_LOCK_HELD = ", 'HELD_BY_CALLER = '))]
+        self.assertEqual([line.split(' = ')[1] for line in constants('tools/verify/batch.py')],
+                         [line.split(' = ')[1] for line in constants('tools/verify/gateway.py')])
 
 
 if __name__ == '__main__':

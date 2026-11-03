@@ -19,11 +19,13 @@ import time
 import verify
 
 ROOT = verify.ROOT
-# The host's one full-Gateway run at a time. A batch refuses while it is held; every other
-# Gateway Vitest run (tools/verify/gateway.py, same path) waits for it, and batch subprocesses
-# carry FULL_GATEWAY_LOCK_HELD so their own Gateway runs do not wait on this batch.
+# The host's one full-Gateway run at a time. A batch and every other Gateway Vitest run
+# (tools/verify/gateway.py, same path) take it in arrival order; batch subprocesses carry
+# FULL_GATEWAY_LOCK_HELD so their own Gateway runs do not wait on this batch.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 FULL_GATEWAY_LOCK_HELD = 'TRON_FULL_GATEWAY_LOCK_HELD'
+# A due batch waits its turn this long, then refuses loudly; coverage stays pending, never skipped.
+FULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.
 IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
@@ -685,25 +687,112 @@ def next_action(journal: dict) -> dict:
     return item
 
 
+# tools/verify/gateway.py owns this same function; this copy exists because the batch fixture
+# replaces that file. scripts/test-tron-verify-batch.py keeps the two identical.
+def wait_for_full_gateway_lock(record, wait_seconds, announce):
+    """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
+
+    Waiters take the lock in arrival order: each queues a numbered ticket beside the lock and
+    holds that ticket's flock while it waits, so a waiter that dies (even by SIGKILL) gives up
+    its place and the next look at the queue deletes its ticket. Only the earliest live ticket
+    tries the lock, whose own flock the kernel likewise drops for a dead holder. The queue
+    directory's flock serializes numbering and pruning. Never interrupts the holder; raises
+    TimeoutError naming it after `wait_seconds` (None waits indefinitely).
+    """
+    queue = Path(FULL_GATEWAY_LOCK + '.queue')
+    queue.mkdir(exist_ok=True)
+
+    def guarded(action):
+        guard = os.open(queue, os.O_RDONLY)
+        try:
+            fcntl.flock(guard, fcntl.LOCK_EX)
+            return action()
+        finally:
+            os.close(guard)
+
+    def live():
+        tickets = []
+        for path in sorted(queue.glob('*.ticket')):
+            with path.open() as probe:
+                try:
+                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    tickets.append(path)
+                    continue
+            path.unlink()
+        return tickets
+
+    def enqueue():
+        tickets = live()
+        ticket = (queue / f'{int(tickets[-1].stem) + 1 if tickets else 0:012d}.ticket').open('x')
+        fcntl.flock(ticket, fcntl.LOCK_EX)
+        ticket.write(json.dumps(record))
+        ticket.flush()
+        return ticket
+
+    ticket = guarded(enqueue)
+    mine = Path(ticket.name)
+    handle = open(FULL_GATEWAY_LOCK, 'a+')
+    started = time.monotonic()
+    announced = False
+    try:
+        try:
+            while True:
+                earlier = guarded(lambda: [path.read_text() for path in live() if path < mine])
+                if not earlier:
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        pass
+                handle.seek(0)
+                line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
+                waited = time.monotonic() - started
+                if wait_seconds is not None and waited >= wait_seconds:
+                    raise TimeoutError(f'{line}; waited {round(waited)}s')
+                if not announced:
+                    announce(f'waiting for {FULL_GATEWAY_LOCK} ({line})')
+                    announced = True
+                time.sleep(0.2)
+        finally:
+            try:
+                guarded(mine.unlink)
+            finally:
+                ticket.close()
+        handle.truncate(0)
+        handle.write(json.dumps(record))
+        handle.flush()
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
 class Locks:
-    """The nonwaiting repository batch lock plus the shared host-wide full-Gateway lock."""
+    """The nonwaiting repository batch lock, then the host's full-Gateway lock in arrival order."""
 
     def __init__(self, state: Path):
         state.mkdir(exist_ok=True)
-        self.handles = [(state / 'batch.lock').open('a'), Path(FULL_GATEWAY_LOCK).open('a')]
+        self.handles = [(state / 'batch.lock').open('a')]
 
     def __enter__(self):
-        for handle, refusal in zip(self.handles, ('another batch owns this repository', 'a full-Gateway run holds ' + FULL_GATEWAY_LOCK)):
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                self.__exit__()
-                raise verify.VerifyError(f'{refusal}; no queue or wait') from None
+        try:
+            fcntl.flock(self.handles[0], fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.__exit__()
+            raise verify.VerifyError('another batch owns this repository; no queue or wait') from None
         # Waiting Gateway runs print the recorded holder; name this batch, not a previous run.
-        holder = self.handles[1]
-        holder.truncate(0)
-        holder.write(json.dumps({'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'verify --batch'}))
-        holder.flush()
+        record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'verify --batch'}
+        try:
+            self.handles.append(wait_for_full_gateway_lock(record, FULL_GATEWAY_LOCK_WAIT_SECONDS,
+                                                           lambda line: print(f'batch: {line}', flush=True)))
+        except TimeoutError as error:
+            self.__exit__()
+            raise verify.VerifyError(f'a full-Gateway run holds or precedes this batch at {FULL_GATEWAY_LOCK} past the '
+                                     f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); nothing ran') from None
+        except BaseException:
+            self.__exit__()
+            raise
         return self
 
     def __exit__(self, *_):

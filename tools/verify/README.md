@@ -44,8 +44,11 @@ Both `scripts/tron test gateway` and verify's Gateway Vitest groups use
 one test process its own temporary HOME, TMPDIR, Tron data directory and agent
 resource directory. It waits for Vitest before removing those directories, also
 forwarding cancellation to the owned child. It never installs missing packages. It first waits
-for the host's `/tmp/tron-full-gateway.lock` (printing the last holder) and records itself there,
-so Gateway runs never overlap each other or a `verify --batch`, whose lanes already hold it.
+its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and earlier waiters) and
+records itself there, so Gateway runs never overlap each other or a `verify --batch`, whose lanes
+already hold it. Waiters, batch included, take the lock first-come first-served: each holds the
+flock of a numbered ticket in `/tmp/tron-full-gateway.lock.queue/` while it waits, so a dead
+waiter's ticket is pruned, and only the earliest live ticket tries the lock.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
 user's settings or profile. Test input and output must not depend on live stores.
 
