@@ -23,6 +23,9 @@ isolated root with a scripted OpenAI-compatible HTTP provider as its only script
 party. Clients cross the production loopback WebSocket with the root's local
 credential; `restart()` is the iOS fixture's restart (SIGTERM, join, respawn on the
 same root and port). Its files run in the nested pass.
+`attention-recovery-hold-preload.mjs`, inert unless its variable is set for one
+launch, holds startup attention recovery's last marker read so a client reaches
+the Gateway inside the post-listen recovery window.
 
 `catalog-metadata-crash-child.ts` saves two synthetic catalog cuts from
 `catalog-metadata-fixture.ts` alternately until its parent kills it, so a

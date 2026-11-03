@@ -12,6 +12,7 @@
     "test-support/README.md",
     "test-support/apps-crash-child.ts",
     "test-support/apps-crash-preload.mjs",
+    "test-support/attention-recovery-hold-preload.mjs",
     "test-support/catalog-metadata-crash-child.ts",
     "test-support/catalog-metadata-fixture.ts",
     "test-support/session-settings-change.ts",
