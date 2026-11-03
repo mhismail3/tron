@@ -17,6 +17,7 @@ export const nestedTestFiles = [
   "src/transport/gateway-process-restart.e2e.test.ts",
   "src/automations/automation-home-process.e2e.test.ts",
   "src/kernel/delegation/delegation-process.e2e.test.ts",
+  "src/admin/settings-process.e2e.test.ts",
   "src/machine/terminal-idle.e2e.test.ts",
   "src/kernel/delegation/home-managed-provider.integration.test.ts",
   "src/workspace/web-research-child.integration.test.ts",
