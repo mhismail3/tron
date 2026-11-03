@@ -136,4 +136,41 @@ describe("delegation across the client socket of a real Gateway process", () => 
     expect(gateway.provider.errors).toEqual([]);
     await phone.close();
   });
+
+  it("reports a child cancelled by the phone's abort as stopped, on the child and on its parent run (#2238)", async () => {
+    const gateway = await delegatingGateway();
+    let reach = (): void => {};
+    let childAborted = (): void => {};
+    const reached = new Promise<void>((resolve) => { reach = resolve; });
+    const aborted = new Promise<void>((resolve) => { childAborted = resolve; });
+    gateway.provider.script([
+      () => subagentCall,
+      (_request, signal) => new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => { childAborted(); reject(new Error("child request aborted")); });
+        reach();
+      }),
+    ]);
+    const phone = await gateway.connect();
+    const { sessionId, operationId } = await prompt(gateway, phone, "delegate-stopped");
+    await awaitsWithin(reached, "the child's held model request");
+    await waitFor(async () => liveSubagents(await freshSnapshot(gateway, sessionId)).length === 1 || undefined,
+      "the running parent projects one live child row");
+    const abort = await phone.request("session.abort", { commandId: "delegate-stopped-abort", sessionId, operationId });
+    expect(abort.ok, JSON.stringify(abort)).toBe(true);
+    await awaitsWithin(aborted, "the child dropped its model request");
+    const settled = await waitFor(async () => {
+      const snapshot = await freshSnapshot(gateway, sessionId);
+      return snapshot.phase === "idle" && !snapshot.operation && liveSubagents(snapshot).length === 0 ? snapshot : undefined;
+    }, "the parent settled with no live child");
+    // A user's cancel is a stop, as it is for the parent turn: the child's process
+    // row and the parent's delegated run both read stopped, and neither is a problem.
+    expect(subagents(settled).map((activity) => [activity.toolCallId, activity.lifecycle.state])).toEqual([["call-subagent", "stopped"]]);
+    const run = ((settled as Record<string, any>).extensionActivities as Array<Record<string, any>>).find((activity) => activity.toolCallId === "call-subagent");
+    expect(run?.lifecycle?.state).toBe("stopped");
+    expect(run?.children?.map((child: Record<string, unknown>) => child.lifecycle)).toEqual(["stopped"]);
+    expect((settled as Record<string, any>).processOverview?.problemCount).toBe(0);
+    expect(childRequests(gateway)).toHaveLength(1);
+    expect(gateway.provider.errors).toEqual([]);
+    await phone.close();
+  });
 });
