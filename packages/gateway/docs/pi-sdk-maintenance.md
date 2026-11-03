@@ -115,11 +115,16 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   discovery read (catalog, `packages.list`) only for the modules its entry reaches, so the
   Gateway thread never runs Babel; if the worker cannot fill the cache the load is refused (`busy`, retryable) and the next
   load prepares again. Each factory load still evaluates a fresh module graph per session.
+  After it serves and recovers, the Gateway starts that whole-build preparation in the
+  background (startup step `subagent-transforms`); it never delays listening, a session load
+  joins it, and a failed preparation (`pi-subagents.transform-cache-failed`) leaves the first
+  load to prepare again.
 - **User declarations** of `npm:pi-subagents` are ignored (filtered by
   `managedProviderSettingsView`, which also refuses package writes; `extensionsOverride` is too
   late to exclude); `packages.list` shows a typed `conflict` (`managed-provider`), Settings says
   "Remove it with `pi remove npm:pi-subagents`"; one `pi-subagents.user-package-ignored` per load.
 - **Proof:** `managed-subagents.install.integration.test.ts`,
+  `managed-subagents-warm-process.e2e.test.ts` (fresh home, real Gateway process),
   `managed-subagents.transform.integration.test.ts` (fresh build, no Gateway-thread transform),
   `managed-subagents.integration.test.ts` (npm offline, TCP denied, a real child),
   `npm run test:pi-subagents-rollback` (previous → candidate → previous with resume; original

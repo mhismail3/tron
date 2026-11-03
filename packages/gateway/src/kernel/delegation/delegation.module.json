@@ -8,6 +8,7 @@
     "delegated-root-migration.ts",
     "delegated-activity.md",
     "delegation-process.e2e.test.ts",
+    "managed-subagents-warm-process.e2e.test.ts",
     "delegation.lock.integration.test.ts",
     "delegation.module.json",
     "home-managed-provider.integration.test.ts",
