@@ -333,6 +333,8 @@ struct SessionSettingsView: View {
     var homeProfileID: String? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @PresentationState private var scrollPosition = ScrollPosition(edge: .top)
+    @PresentationState private var userScrolled = false
 
     private var target: JSONValue {
         homeProfileID == nil ? SettingsTarget.sessionGatewayTarget(sessionID) : .object(["kind": .string("home")])
@@ -388,11 +390,18 @@ struct SessionSettingsView: View {
             }
             .padding(20)
         }
-        // The presentation's inset settles after the first layout; without a top anchor the
-        // content can rest a fraction of a point below its top, and the medium sheet then
-        // scrolls on an upward drag instead of expanding to large.
-        .defaultScrollAnchor(.top, for: .initialOffset)
-        .defaultScrollAnchor(.top, for: .sizeChanges)
+        // The presented sheet animates this scroll view's top inset in; when the last step
+        // lands without an offset update the content rests a pixel below its top, and the
+        // medium sheet then scrolls on an upward drag instead of expanding. Until the user
+        // scrolls, content that is within a point of its top is put back at the top. Every
+        // inset/offset pair is observed: during the animation the drift is already present,
+        // so a drifted/not-drifted flag would not change at the final step.
+        .scrollPosition($scrollPosition)
+        .onScrollPhaseChange { _, phase in if phase == .interacting { userScrolled = true } }
+        .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentInsets.top, $0.contentOffset.y] } action: { _, value in
+            let top = -value[0]
+            if !userScrolled, value[1] != top, abs(value[1] - top) < 1 { scrollPosition.scrollTo(y: 0) }
+        }
         .tronScrollEdgeChrome()
         .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
                                              presentationActive: presentationActivity.allowsPresentationPublication)) {
