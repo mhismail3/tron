@@ -87,7 +87,6 @@ describe("a Home automation wake across real Gateway-process restarts", () => {
     const replies = delivered.home.transcript.filter((item) => item.kind === "message" && item.role === "assistant");
     expect(replies.map((item) => item.content.map((part: { text?: string }) => part.text ?? "").join(""))).toEqual(["Home is ready.", "Woke once for the morning review."]);
     expect(automationRequests(gateway)).toHaveLength(1);
-    const requestsAfterDelivery = gateway.provider.requests.length;
     await phone.close();
 
     // A second restart finds the run delivered: no further message and no model turn.
@@ -98,7 +97,12 @@ describe("a Home automation wake across real Gateway-process restarts", () => {
     const after = await homeTranscript(phone, sessionId);
     expect(after.phase).toBe("idle");
     expect(after.transcript.map((item) => item.id)).toEqual(delivered.home.transcript.map((item) => item.id));
-    expect(gateway.provider.requests).toHaveLength(requestsAfterDelivery);
+    // Delivered once in the ledger: the current, pending-Home and history runs hold
+    // exactly this one, succeeded, so no unfinished run is left to claim.
+    const runs = await ok(phone, "automation.run.list", { automationId });
+    expect((runs.runs as Array<{ runId: string; state: string }>).map((run) => [run.runId, run.state])).toEqual([[runId, "succeeded"]]);
+    // Home memory may summarize on the same provider, so the wake turn is the one carrying the automation text.
+    expect(automationRequests(gateway)).toHaveLength(1);
     expect(gateway.provider.errors).toEqual([]);
     await phone.close();
   });

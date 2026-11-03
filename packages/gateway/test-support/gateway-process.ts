@@ -178,7 +178,8 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
   let child: ChildProcess | undefined;
   try {
     // Canonical: the Tron workspace refuses a root reached through a symlink (macOS /var).
-    root = await realpath(await mkdtemp(join(tmpdir(), "tron-gateway-process-")));
+    root = await mkdtemp(join(tmpdir(), "tron-gateway-process-"));
+    root = await realpath(root);
     return await launchGatewayProcess(options, provider, root, (spawned) => { child = spawned; });
   } catch (error) {
     // A failed start never reaches the caller's disposal list: remove what it made.
