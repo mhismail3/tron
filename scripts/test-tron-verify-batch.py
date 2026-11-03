@@ -819,6 +819,13 @@ if sys.argv[1] == 'clean':
         self.assertIn('packages/gateway/src/auth/token.ts', repair['reason'])
         self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
 
+    def test_a_batch_records_itself_as_the_full_gateway_lock_holder(self):
+        self.land('good', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        holder = json.loads((Path(self.temporary.name) / 'full-gateway.lock').read_text())
+        self.assertEqual(holder['purpose'], 'verify --batch')
+
     def test_held_full_gateway_lock_keeps_coverage_pending_without_waiting(self):
         import fcntl
         self.land('good', 'yes')
@@ -996,7 +1003,8 @@ class FullGatewayLockTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def start(self, env=None):
-        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**os.environ, **(env or {})},
+        inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
+        return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {})},
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def test_a_run_waits_for_the_held_lock_then_records_itself(self):

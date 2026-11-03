@@ -19,8 +19,11 @@ import time
 import verify
 
 ROOT = verify.ROOT
-# Reserved host path for full real-Gateway runs; only this owner takes it in-repo.
+# The host's one full-Gateway run at a time. A batch refuses while it is held; every other
+# Gateway Vitest run (tools/verify/gateway.py, same path) waits for it, and batch subprocesses
+# carry FULL_GATEWAY_LOCK_HELD so their own Gateway runs do not wait on this batch.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
+FULL_GATEWAY_LOCK_HELD = 'TRON_FULL_GATEWAY_LOCK_HELD'
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.
 IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
@@ -115,7 +118,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     with log.open('w') as output:
         process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
                                    stdout=output, stderr=subprocess.STDOUT,
-                                   env={**os.environ, 'TRON_IOS_E2E_NO_INSTALL': '1', 'TRON_FULL_GATEWAY_LOCK_HELD': '1'},
+                                   env={**os.environ, 'TRON_IOS_E2E_NO_INSTALL': '1', FULL_GATEWAY_LOCK_HELD: '1'},
                                    start_new_session=True)
         try:
             code = process.wait()
@@ -696,6 +699,11 @@ class Locks:
             except BlockingIOError:
                 self.__exit__()
                 raise verify.VerifyError(f'{refusal}; no queue or wait') from None
+        # Waiting Gateway runs print the recorded holder; name this batch, not a previous run.
+        holder = self.handles[1]
+        holder.truncate(0)
+        holder.write(json.dumps({'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'verify --batch'}))
+        holder.flush()
         return self
 
     def __exit__(self, *_):
