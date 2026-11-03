@@ -51,7 +51,7 @@ agent-browser fork commit pinned in `browser-live-view-adapter.ts`. It is fetche
 the fork's lockfile (`npm ci --ignore-scripts`, then its build), and kept once per clone in
 `.git/verify/fixtures/`, so a batch's Gateway lane covers both cases instead of skipping them. The
 test's native case runs the `agent-browser` first on `PATH`, so the runner puts there the engine the
-fork itself declares (`TARGET_AGENT_BROWSER_VERSION` in its `scripts/agent-browser-target.mjs`):
+fork itself declares (`TARGET_AGENT_BROWSER_VERSION` in the fork's own agent-browser target script):
 this host's native binary from the registry's `agent-browser@<version>` package (`npm pack
 --ignore-scripts`), kept once per version beside the fork after it reports that version. Bumping
 the fork pin is the only engine update. An ambiguous pin or declaration, or failed provisioning,
