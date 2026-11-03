@@ -23,8 +23,8 @@ import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
  */
 
 const gatewayRoot = fileURLToPath(new URL("..", import.meta.url));
-// The source resolver.
-const preloads = ["home-ledger-crash-preload.mjs"]
+// The source resolver, and the inert-unless-enabled attention recovery hold.
+const preloads = ["home-ledger-crash-preload.mjs", "attention-recovery-hold-preload.mjs"]
   .map((name) => join(gatewayRoot, "test-support", name));
 
 export const SCRIPTED_PROVIDER = "scripted";
