@@ -43,7 +43,14 @@ Both `scripts/tron test gateway` and verify's Gateway Vitest groups use
 `tools/verify/gateway.py`. It resolves pinned development Node first, then gives
 one test process its own temporary HOME, TMPDIR, Tron data directory and agent
 resource directory. It waits for Vitest before removing those directories, also
-forwarding cancellation to the owned child. It never installs missing packages. It first waits
+forwarding cancellation to the owned child. It never installs this checkout's missing packages.
+One test fixture is the exception: when the selection can include
+`browser-fork-receipts.integration.test.ts` (the default config with no file filter, or one it
+matches), the runner hands Vitest `TRON_P99_17_BROWSER_FORK_COPY`, a checkout of the
+agent-browser fork commit pinned in `browser-live-view-adapter.ts`. It is fetched by SHA, built from
+the fork's lockfile (`npm ci --ignore-scripts`, then its build), and kept once per clone in
+`.git/verify/fixtures/`, so a batch's Gateway lane covers both cases instead of skipping them; an
+ambiguous pin or failed provisioning fails the run. It first waits
 its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and earlier waiters) and
 records itself there, so Gateway runs never overlap each other or a `verify --batch`, whose lanes
 already hold it. Waiters, batch included, take the lock first-come first-served: each holds the

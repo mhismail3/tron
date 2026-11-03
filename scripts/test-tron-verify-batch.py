@@ -1089,6 +1089,63 @@ class ShardedIosProbeTests(unittest.TestCase):
         self.assertEqual(result['exit'], 0, result)
 
 
+class BrowserForkProvisionTests(unittest.TestCase):
+    """A Gateway run that selects the browser receipt test hands Vitest the pinned fork copy the
+    runner provisioned, so a batch's Gateway lane covers both cases instead of skipping them."""
+
+    PIN = 'd6cde09af8d7757bbfba5a4ffaf83381bb392683'
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-browser-fork-')
+        root = Path(self.temporary.name).resolve()
+        self.seen = root / 'seen'
+        (root / 'tools/verify').mkdir(parents=True)
+        source = (ROOT / 'tools/verify/gateway.py').read_text()
+        (root / 'tools/verify/gateway.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(root / 'full-gateway.lock'))))
+        self.adapter = root / 'packages/gateway/src/display/browser-live-view-adapter.ts'
+        self.adapter.parent.mkdir(parents=True)
+        self.adapter.write_text(f'const sources = [\n  "git:github.com/fitchmultz/pi-agent-browser-native",\n  "git:github.com/fitchmultz/pi-agent-browser-native@{self.PIN}",\n];\n')
+        (root / 'scripts').mkdir()
+        (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        vitest = root / 'packages/gateway/node_modules/.bin/vitest'
+        vitest.parent.mkdir(parents=True)
+        vitest.write_text(f'#!/bin/bash\necho "${{TRON_P99_17_BROWSER_FORK_COPY:-unset}}" >> {self.seen}\n')
+        for script in (root / 'scripts/tron-node', vitest):
+            script.chmod(0o755)
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        # An already provisioned copy of the pin: the runner reuses it without fetching.
+        self.copy = root / '.git/verify/fixtures' / f'pi-agent-browser-native-{self.PIN}'
+        self.copy.mkdir(parents=True)
+        (self.copy / '.tron-provisioned').write_text(self.PIN)
+        self.root = root
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_gateway(self, *args):
+        inherited = {key: value for key, value in os.environ.items() if key not in ('TRON_P99_17_BROWSER_FORK_COPY', 'TRON_FULL_GATEWAY_LOCK_HELD')}
+        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env=inherited, capture_output=True, text=True, timeout=60)
+
+    def test_a_full_default_run_receives_the_provisioned_pinned_fork(self):
+        done = self.run_gateway('--reporter=default', '--reporter=json', '--outputFile.json=/dev/null')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.seen.read_text().split(), [str(self.copy)])
+
+    def test_a_run_naming_the_browser_test_receives_it_and_other_selections_do_not(self):
+        for args in (['src/sessions/browser-fork-receipts.integration.test.ts'], ['src/admin/package-updates.lock.integration.test.ts'],
+                     ['--config', 'vitest.nested.config.ts']):
+            done = self.run_gateway(*args)
+            self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.seen.read_text().split(), [str(self.copy), 'unset', 'unset'])
+
+    def test_an_ambiguous_product_pin_refuses_instead_of_choosing(self):
+        self.adapter.write_text(self.adapter.read_text() + f'"git:github.com/fitchmultz/pi-agent-browser-native@{"0" * 40}"\n')
+        done = self.run_gateway()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn('expected one pinned agent-browser fork', done.stderr)
+        self.assertFalse(self.seen.exists())
+
+
 class FullGatewayLockTests(unittest.TestCase):
     """A Gateway Vitest run waits for the host's full-Gateway lock, so it never overlaps a
     batch; a batch lane, which already holds it, runs without waiting."""

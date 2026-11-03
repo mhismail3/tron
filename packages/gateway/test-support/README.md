@@ -100,6 +100,7 @@ stale-lock or power-loss recovery.
 - The pinned browser-fork receipt fixture recognizes `--version` after wrapper-owned
   global safety flags. Its isolated copy must pass the real fork's version validation
   and direct/nested/reload/abort receipt assertions; it never uses the user installation.
+  `tools/verify/gateway.py` provisions that copy and sets its variable (tools/verify/README.md).
 - MCP fixtures join the direct-tool registration boundary before scripting a call
   (runtime creation does not mean HTTP discovery finished). Git cleanup proof is
   `ENOENT` plus the branch decision, never an arbitrary filesystem error.
