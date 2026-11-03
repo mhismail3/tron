@@ -54,7 +54,7 @@ export async function applyModelAdmission(session: AgentSession, rows: Resolutio
         throw new GatewayError("conflict", `Project model ${ref.provider}/${ref.id} is not available for this account`);
       }
     }
-    if (session.model?.provider !== model.provider || session.model.id !== model.id) await session.setModel(model as Model<never>);
+    // BREAK: the Session choice never reaches the runtime.
   }
   const thinking = rows.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
   if (thinking && session.model) {
