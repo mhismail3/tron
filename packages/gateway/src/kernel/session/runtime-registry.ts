@@ -933,9 +933,16 @@ export class RuntimeRegistry implements SessionOperations {
     for (const lifecycle of this.lifecycles()) lifecycle.started();
     const markerEvidence = await this.markers.evidence();
     // The listener serves before recovery finishes, so the interruption overlay
-    // a slot or catalog row reads comes from the durable markers now. Recovery
-    // then re-derives it after clearing the markers whose completion it proves.
+    // a slot or catalog row reads comes from the durable markers now. A session
+    // whose every prompt marker is completion-stamped is the one recovery clears
+    // once it proves those completions, so it is not interrupted in the meantime.
+    // Recovery then re-derives the overlay from the markers it leaves.
     this.interrupted = await this.markers.interruptedSessionIds();
+    for (const [sessionId, markers] of markerEvidence) {
+      if (markers.every((marker) => marker.assistantCompletionId !== undefined && !marker.operationId.startsWith("automation:"))) {
+        this.interrupted.delete(sessionId);
+      }
+    }
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
     this.pendingAttentionRecovery = markerEvidence;
@@ -963,7 +970,14 @@ export class RuntimeRegistry implements SessionOperations {
     this.pendingStartupPhaseObserver?.("attention-recovery");
     this.pendingStartupPhaseObserver = undefined;
     await this.reconcileCanonicalAttention(markerEvidence);
-    this.interrupted = await this.markers.interruptedSessionIds();
+    const recovered = await this.markers.interruptedSessionIds();
+    const changed = recovered.size !== this.interrupted.size || [...recovered].some((id) => !this.interrupted.has(id));
+    this.interrupted = recovered;
+    // The overlay is part of the row projection: a moved row moves the token (G-7).
+    if (changed) {
+      this.catalogProjectionGeneration += 1;
+      this.options.sessionListChanged();
+    }
   }
 
   async initializeBlobStorage(): Promise<void> {
