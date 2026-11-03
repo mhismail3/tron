@@ -391,7 +391,7 @@ struct SessionSettingsView: View {
             .padding(20)
         }
         // The presented sheet animates this scroll view's top inset in; when the last step
-        // lands without an offset update the content rests a pixel below its top, and the
+        // lands without an offset update the content rests a pixel or two below its top, and the
         // medium sheet then scrolls on an upward drag instead of expanding. Until the user
         // scrolls, content that is within a point of its top is put back at the top. Every
         // inset/offset pair is observed: during the animation the drift is already present,
