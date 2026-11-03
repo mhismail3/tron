@@ -75,6 +75,9 @@ export class OpenAIModelEligibility {
   private flight: DiscoveryFlight | undefined;
   /** Bumped only when a publish changes what the filters answer. */
   private stateRevision = 0;
+  /** The stored providers and credential types last seen: session runtimes'
+   * configured/OAuth snapshots (`provider.list`'s usage flags) follow them. */
+  private storedCredentials: string | undefined;
   /** The snapshot refresh that applied (or is applying) one state revision. */
   private snapshots: { revision: number; done: Promise<void> } | undefined;
 
@@ -120,6 +123,11 @@ export class OpenAIModelEligibility {
       return;
     }
     if (generation !== this.state.generation) return;
+    const storedCredentials = credentials.map(item => `${item.providerId}:${item.type}`).sort().join("\n");
+    if (storedCredentials !== this.storedCredentials) {
+      this.storedCredentials = storedCredentials;
+      this.stateRevision += 1;
+    }
     const stored = credentials.find(item => item.providerId === "openai");
     // Discovery is an account-specific OAuth capability, not a generic auth probe:
     // API keys, absent credentials, and environment auth must never reach this endpoint.

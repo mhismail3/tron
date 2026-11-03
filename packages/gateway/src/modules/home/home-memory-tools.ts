@@ -115,8 +115,9 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
       parameters: SEARCH_PARAMETERS,
       executionMode: "sequential",
       execute: async (_toolCallId, request: { query: string; from?: number; to?: number }, signal) => {
-        // A Stop abandons the wait for the memory's lock (an ingest or checkpoint
-        // may hold it); the read itself is an in-memory scan.
+        // A Stop abandons a queued wait for the memory's lock (an ingest or
+        // checkpoint may hold it); an ingest this call already started finishes.
+        // The read itself is an in-memory scan.
         const memory = memoryTools();
         return memory ? answer(await memory.search(request.query, request.from, request.to, signal)) : missing();
       },

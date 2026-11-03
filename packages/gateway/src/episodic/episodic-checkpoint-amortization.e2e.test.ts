@@ -22,7 +22,7 @@ it("checkpoints a large memory only once its append logs outgrow the live catalo
   try {
     const store = new EpisodicStore(workspace, "home", 1024 * 1024);
     await store.saveState(state);
-    const live = Array.from({ length: 400 }, (_, index) => message(index, "x".repeat(2_000)));
+    const live = Array.from({ length: 1_200 }, (_, index) => message(index, `${index}:${"x".repeat(2_000)}`));
     const liveBytes = live.reduce((total, record) => total + lineBytes(record), 0);
     await store.checkpoint({ messages: live, nodes: [], state, watermark: live.length });
 
@@ -48,7 +48,9 @@ it("checkpoints a large memory only once its append logs outgrow the live catalo
     // The batched checkpoint writer still publishes every record readably.
     await store.checkpoint({ messages: live, nodes: [], state, watermark: index });
     const read = await store.read();
-    expect(read.present && read.messages.size).toBe(live.length);
+    // More than one ~1 MiB write batch, every record back in order with its text.
+    expect(liveBytes).toBeGreaterThan(2 * 1024 * 1024);
+    expect([...read.messages.values()].map(record => [record.index, record.text])).toEqual(live.map(record => [record.index, record.text]));
     const entries = await readdir(join(root, "home/workspace/state/episodic/home"));
     expect(entries.filter(name => name.startsWith("checkpoint-"))).toHaveLength(1);
   } finally {

@@ -242,7 +242,10 @@ export class EpisodicMemory {
    */
   async entriesIngested(sessionId: string, signal?: AbortSignal): Promise<void> {
     await this.ingestForRead(sessionId, signal);
-    void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
+    // No checkpoint here: tool reads and activations come through this path, and a
+    // checkpoint holds the mutex for a whole-catalog rewrite. `entriesCommitted`
+    // (once per Home turn) owns it.
+    void this.drain().catch(() => {});
   }
 
   /** Projection refresh without admitting compactor work. Native reads must

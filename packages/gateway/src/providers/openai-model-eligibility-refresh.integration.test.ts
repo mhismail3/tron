@@ -6,13 +6,14 @@ import { OpenAIModelEligibility } from "./openai-model-eligibility.js";
 class Credentials implements CredentialStore {
   failList = false;
   readonly openai: Credential = { type: "api_key", key: "sk-test" };
-  async read(providerId: string) { return providerId === "openai" ? this.openai : undefined; }
+  anthropic: Credential | undefined;
+  async read(providerId: string) { return providerId === "openai" ? this.openai : providerId === "anthropic" ? this.anthropic : undefined; }
   async list(): Promise<readonly CredentialInfo[]> {
     if (this.failList) throw new Error("credential listing unavailable");
-    return [{ providerId: "openai", type: "api_key" }];
+    return [{ providerId: "openai", type: "api_key" }, ...(this.anthropic ? [{ providerId: "anthropic", type: this.anthropic.type }] : [])];
   }
   async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>) {
-    return fn(providerId === "openai" ? this.openai : undefined);
+    return fn(providerId === "openai" ? this.openai : providerId === "anthropic" ? this.anthropic : undefined);
   }
   async delete() {}
 }
@@ -45,9 +46,19 @@ it("reloads attached runtimes only when the eligibility state changes", async ()
   for (let read = 0; read < 5; read += 1) await eligibility.refresh();
   expect(reloads).toEqual([1, 1, 1, 1]);
 
+  // Another provider's stored credential changes every runtime's configured/OAuth
+  // snapshot (`provider.list` usage flags), so it reloads them too.
+  expect(runtimes[3]!.hasConfiguredAuth("anthropic")).toBe(false);
+  credentials.anthropic = { type: "api_key", key: "sk-ant-test" };
+  await eligibility.refresh();
+  expect(reloads).toEqual([2, 2, 2, 2]);
+  expect(runtimes[3]!.hasConfiguredAuth("anthropic")).toBe(true);
+  await eligibility.refresh();
+  expect(reloads).toEqual([2, 2, 2, 2]);
+
   credentials.failList = true;
   await eligibility.refresh();
-  expect(reloads).toEqual([2, 2, 2, 2]);
+  expect(reloads).toEqual([3, 3, 3, 3]);
   await eligibility.refresh();
-  expect(reloads).toEqual([2, 2, 2, 2]);
+  expect(reloads).toEqual([3, 3, 3, 3]);
 });
