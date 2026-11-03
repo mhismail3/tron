@@ -921,6 +921,7 @@ if sys.argv[1] == 'clean':
         self.assertFalse(self.reports())
         self.assertFalse((self.root / '.git/verify/green.json').exists())
         self.assertIsNone(holder.poll(), 'a capped batch never interrupts the holder')
+        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped batch leaves no ticket')
         # The capped batch left the line: the next run follows the holder.
         runs.start('next')
         runs.wait_queued('next')
@@ -1189,6 +1190,10 @@ class FullGatewayLockQueueTests(unittest.TestCase):
             [function] = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'wait_for_full_gateway_lock']
             return ast.dump(function)
         self.assertEqual(owner('tools/verify/batch.py'), owner('tools/verify/gateway.py'))
+        constants = lambda path: [line for line in (ROOT / path).read_text().splitlines()
+                                  if line.startswith(('FULL_GATEWAY_LOCK = ', "FULL_GATEWAY_LOCK_HELD = ", 'HELD_BY_CALLER = '))]
+        self.assertEqual([line.split(' = ')[1] for line in constants('tools/verify/batch.py')],
+                         [line.split(' = ')[1] for line in constants('tools/verify/gateway.py')])
 
 
 if __name__ == '__main__':

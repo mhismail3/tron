@@ -730,38 +730,41 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce):
         ticket.flush()
         return ticket
 
-    handle = open(FULL_GATEWAY_LOCK, 'a+')
     ticket = guarded(enqueue)
     mine = Path(ticket.name)
+    handle = open(FULL_GATEWAY_LOCK, 'a+')
     started = time.monotonic()
     announced = False
     try:
-        while True:
-            earlier = guarded(lambda: [path.read_text() for path in live() if path < mine])
-            if not earlier:
-                try:
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    pass
-            handle.seek(0)
-            line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
-            waited = time.monotonic() - started
-            if wait_seconds is not None and waited >= wait_seconds:
-                raise TimeoutError(f'{line}; waited {round(waited)}s')
-            if not announced:
-                announce(f'waiting for {FULL_GATEWAY_LOCK} ({line})')
-                announced = True
-            time.sleep(0.2)
+        try:
+            while True:
+                earlier = guarded(lambda: [path.read_text() for path in live() if path < mine])
+                if not earlier:
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        pass
+                handle.seek(0)
+                line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
+                waited = time.monotonic() - started
+                if wait_seconds is not None and waited >= wait_seconds:
+                    raise TimeoutError(f'{line}; waited {round(waited)}s')
+                if not announced:
+                    announce(f'waiting for {FULL_GATEWAY_LOCK} ({line})')
+                    announced = True
+                time.sleep(0.2)
+        finally:
+            try:
+                guarded(mine.unlink)
+            finally:
+                ticket.close()
+        handle.truncate(0)
+        handle.write(json.dumps(record))
+        handle.flush()
     except BaseException:
         handle.close()
         raise
-    finally:
-        guarded(mine.unlink)
-        ticket.close()
-    handle.truncate(0)
-    handle.write(json.dumps(record))
-    handle.flush()
     return handle
 
 
@@ -785,8 +788,8 @@ class Locks:
                                                            lambda line: print(f'batch: {line}', flush=True)))
         except TimeoutError as error:
             self.__exit__()
-            raise verify.VerifyError(f'a full-Gateway run holds {FULL_GATEWAY_LOCK} past the '
-                                     f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); coverage stays pending') from None
+            raise verify.VerifyError(f'a full-Gateway run holds or precedes this batch at {FULL_GATEWAY_LOCK} past the '
+                                     f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); nothing ran') from None
         except BaseException:
             self.__exit__()
             raise
