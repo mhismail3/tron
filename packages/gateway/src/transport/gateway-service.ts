@@ -1419,9 +1419,10 @@ export class GatewayService {
         // serialization; a slow open needs no record of its own.
         const built = slot.snapshot();
         // BREAK (#2230 proof, not for landing): session.open repeats each assistant reply.
-        const snapshot = { ...built, transcript: built.transcript.flatMap((item: any) => item.kind === "message" && item.role === "assistant"
-          ? [item, { ...item, id: `${item.id}-dup`, presentationId: `${item.presentationId}-dup`,
-            content: item.content.map((part: any) => ({ ...part, id: `${part.id}-dup` })) }] : [item]) } as typeof built;
+        const transcript = built.transcript.flatMap((item: any) => item.kind === "message" && item.role === "assistant"
+          ? [item, { ...item, id: `${item.id}d`, parentId: item.id, presentationId: `${item.presentationId}-dup`,
+            content: item.content.map((part: any) => ({ ...part, id: `${item.presentationId}-dup:${part.ordinal}` })) }] : [item]);
+        const snapshot = { ...built, transcript, transcriptTotal: built.transcriptTotal + transcript.length - built.transcript.length } as typeof built;
         if (snapshot.sessionId !== canonicalSessionId) {
           throw new GatewayError("conflict", "Session identity changed while opening", true);
         }
