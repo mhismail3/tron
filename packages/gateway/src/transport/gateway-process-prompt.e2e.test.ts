@@ -49,7 +49,7 @@ async function settled(gateway: GatewayProcess, sessionId: string): Promise<Snap
 }
 
 describe("prompt journeys across the real Gateway process", () => {
-  it("settles one streamed reply exactly once across reconnects, a lost-response retry and a process restart (#2230)", async () => {
+  it("settles one streamed reply exactly once across fresh-connection reads, a duplicate submit and a process restart (#2230)", async () => {
     const gateway = await startGatewayProcess();
     gateways.push(gateway);
     const prompt = "Reply once to this exact prompt.";
@@ -74,8 +74,8 @@ describe("prompt journeys across the real Gateway process", () => {
       expect(live.phase).toBe("running");
       expect((live.operation as { id?: string } | undefined)?.id).toBe(admitted.result.operationId);
 
-      // A phone that lost the admission response retries the same command while
-      // the reply is in flight: the Gateway answers its receipt and admits nothing.
+      // A duplicate submit of the same command while the reply is in flight (as a
+      // phone that lost the admission response sends): the receipt answers, nothing is admitted.
       const retried = await phone.request("session.prompt", { commandId: "prompt-once-command", sessionId, text: prompt });
       expect(retried.ok, JSON.stringify(retried)).toBe(true);
       expect(retried.result.operationId).toBe(admitted.result.operationId);
