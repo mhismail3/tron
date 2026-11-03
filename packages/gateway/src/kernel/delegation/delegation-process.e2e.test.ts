@@ -98,7 +98,7 @@ describe("delegation across the client socket of a real Gateway process", () => 
     const aborted = new Promise<void>((resolve) => { childAborted = resolve; });
     gateway.provider.script([
       () => subagentCall,
-      // The child's model call is held until the child process drops it.
+      // The child's model call is held until the child session drops it.
       (_request, signal) => new Promise((_resolve, reject) => {
         signal.addEventListener("abort", () => { childAborted(); reject(new Error("child request aborted")); });
         reach();
@@ -107,9 +107,10 @@ describe("delegation across the client socket of a real Gateway process", () => 
     const phone = await gateway.connect();
     const { sessionId, operationId } = await prompt(gateway, phone, "delegate-abort");
     await awaitsWithin(reached, "the child's held model request");
-    const live = await freshSnapshot(gateway, sessionId);
-    expect(live.phase).toBe("running");
-    expect(liveSubagents(live)).toHaveLength(1);
+    await waitFor(async () => {
+      const live = await freshSnapshot(gateway, sessionId);
+      return live.phase === "running" && liveSubagents(live).length === 1 || undefined;
+    }, "the running parent projects one live child row");
 
     const abort = await phone.request("session.abort", { commandId: "delegate-abort-command", sessionId, operationId });
     expect(abort.ok, JSON.stringify(abort)).toBe(true);
