@@ -142,8 +142,9 @@ export interface GatewayProcess {
   /** Every `gateway.jsonl` record written so far, across restarts. */
   log(): Promise<Array<Record<string, any>>>;
   /** Stop this process and start the same entrypoint over the same root and port.
-   * `environment` adds variables to the new process only (test preload switches). */
-  restart(options?: { environment?: Record<string, string> }): Promise<void>;
+   * `environment` adds variables to the new process only (test preload switches);
+   * `whileStopped` runs between the old process's exit and the new start. */
+  restart(options?: { environment?: Record<string, string>; whileStopped?: () => Promise<void> }): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -296,6 +297,7 @@ async function launchGatewayProcess(
     },
     async restart(restartOptions = {}) {
       await stop("the Gateway process exited after SIGTERM");
+      await restartOptions.whileStopped?.();
       await launch(restartOptions.environment);
     },
     async dispose() {

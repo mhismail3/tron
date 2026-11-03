@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { RunMarkerStore } from "../kernel/run/run-markers.js";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
@@ -36,6 +37,12 @@ async function listPhase(client: ProcessClient, sessionId: string): Promise<stri
   return (listed.result.sessions as Array<{ id: string; phase: string }>).find((row) => row.id === sessionId)?.phase;
 }
 
+/** One record per process start; `count` names the start whose post-listen recovery finished. */
+async function recoveries(gateway: GatewayProcess, count: number): Promise<void> {
+  await waitFor(async () => (await gateway.log()).filter((record) => record.event === "gateway.startup-step"
+    && record.step === "attention-recovery").length === count || undefined, `Gateway start ${count} finished attention recovery`);
+}
+
 describe("an accepted prompt across a real Gateway-process restart", () => {
   it("reports the held prompt interrupted, never replays it, and runs the next prompt (#2235)", async () => {
     const gateway = await startGatewayProcess();
@@ -58,6 +65,7 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
     await awaitsWithin(reached, "the held provider request");
     await phone.close();
+    await recoveries(gateway, 1);
 
     // Startup attention recovery runs after the listener serves. Holding its
     // last marker read places the reconnecting phone inside that window, which
@@ -84,9 +92,7 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     };
     await expectInterrupted("during startup attention recovery");
     await writeFile(`${hold}.go`, "");
-    // One record per process start: the first Gateway's and the restarted one's.
-    await waitFor(async () => (await gateway.log()).filter((record) => record.event === "gateway.startup-step"
-      && record.step === "attention-recovery").length === 2 || undefined, "the restarted Gateway finished attention recovery");
+    await recoveries(gateway, 2);
     await expectInterrupted("after startup attention recovery");
 
     // The restarted Gateway runs a new prompt normally, and still never replays the held one.
@@ -103,6 +109,54 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     expect(gateway.provider.requests[1]!.messages.filter((message) => message.role === "user")
       .map((message) => JSON.stringify(message.content)))
       .toEqual([JSON.stringify([{ type: "text", text: prompt }]), JSON.stringify([{ type: "text", text: "A new prompt." }])]);
+    expect(gateway.provider.errors).toEqual([]);
+    await reconnected.close();
+  });
+
+  it("reads a prompt whose completion is durably stamped as settled, inside and after the recovery window (#2235)", async () => {
+    const gateway = await startGatewayProcess();
+    gateways.push(gateway);
+    gateway.provider.script([() => ({ chunks: ["Completed reply."] })]);
+    const phone = await gateway.connect();
+    const created = await phone.request("session.create", { commandId: "stamped-create", cwd: gateway.cwd });
+    expect(created.ok, JSON.stringify(created)).toBe(true);
+    const sessionId = created.result.sessionId as string;
+    await openAndSync(phone, sessionId);
+    const admitted = await phone.request("session.prompt", { commandId: "stamped-command", sessionId, text: "Complete this prompt." });
+    expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+    const settled = await waitFor(async () => {
+      const snapshot = await openAndSync(phone, sessionId);
+      return snapshot.phase === "idle" && JSON.stringify(snapshot.transcript).includes("Completed reply.") ? snapshot : undefined;
+    }, "the prompt settled");
+    const completion = settled.transcript.find((item) => item.kind === "message" && item.role === "assistant")!;
+    await phone.close();
+    await recoveries(gateway, 1);
+
+    // The durable cut a crash leaves between stamping the completion and
+    // clearing its marker, written through the marker owner while no Gateway runs.
+    const hold = join(gateway.root, "attention-recovery");
+    await gateway.restart({
+      environment: { TRON_TEST_HOLD_ATTENTION_RECOVERY: hold },
+      whileStopped: async () => {
+        const markers = new RunMarkerStore(gateway.tronHome);
+        await markers.mark(sessionId, admitted.result.operationId);
+        await markers.markAssistantCompletion(sessionId, admitted.result.operationId, completion.id, completion.timestamp);
+      },
+    });
+    await waitFor(async () => existsSync(`${hold}.held`) || undefined, "attention recovery is held");
+    const reconnected = await gateway.connect();
+    const expectSettled = async (label: string) => {
+      const snapshot = await openAndSync(reconnected, sessionId);
+      expect(snapshot.phase, label).toBe("idle");
+      expect(await listPhase(reconnected, sessionId), label).toBe("idle");
+    };
+    await expectSettled("during startup attention recovery");
+    await writeFile(`${hold}.go`, "");
+    await recoveries(gateway, 2);
+    await expectSettled("after startup attention recovery");
+    expect(await new RunMarkerStore(gateway.tronHome).evidenceFor(sessionId)).toEqual([]);
+    expect(gateway.provider.requests).toHaveLength(1);
+    expect(gateway.provider.errors).toEqual([]);
     await reconnected.close();
   });
 });
