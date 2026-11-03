@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -40,8 +40,6 @@ import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
 
-/** The bound on known projects, least recently read first out. */
-const OBSERVED_PROJECT_LIMIT = 64;
 const PROJECT_FILES = new Set(["settings.json", "mcp.json"]);
 const STAGED_LIMIT = 20;
 
@@ -57,7 +55,6 @@ interface StoreState {
   /** Project stores: Tron's staged writes not yet seen in `HEAD`. */
   staged?: Array<{ changeId: string; path: string; blob: string }>;
   head?: string | null;
-  seen: string;
 }
 
 interface ObservedDocument { version: 1; stores: Record<string, StoreState> }
@@ -133,6 +130,12 @@ function subjectInstances(document: unknown, subjectId: string): Map<string, Obs
 }
 
 
+/** Only a missing root removes a project; an unreadable one keeps its state. */
+async function projectRemoved(root: string): Promise<boolean> {
+  try { await stat(root); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
+}
+
 const digestOf = (text: string | undefined) => text === undefined ? "" : createHash("sha256").update(text).digest("hex");
 
 const fingerprint = (value: ObservedValue | undefined) => value === undefined ? null : value.hash ?? JSON.stringify(value.value ?? null);
@@ -150,7 +153,7 @@ export class OutsideChanges {
   private disposal: Promise<void> | undefined;
   private retired = false;
   private failed: ((error: unknown) => void) | undefined;
-  /** Set when a comparison changed observed state beyond its `seen` instant. */
+  /** Set when a comparison changed observed state. */
   private changed = false;
 
   constructor(
@@ -238,9 +241,7 @@ export class OutsideChanges {
       if (entries.length) await this.record.append(entries);
       // Every settings read reconciles first, so an unchanged comparison must not
       // pay a durable write: under fsync pressure those writes queued every read
-      // behind this mutex for tens of seconds. `seen` only orders project
-      // eviction; the cached document keeps it current and the next real change
-      // persists it.
+      // behind this mutex for tens of seconds.
       if (this.changed) await this.save(document);
       this.changed = false;
     });
@@ -291,7 +292,9 @@ export class OutsideChanges {
       this.watchers.delete(`project-parent:${root}`);
       return;
     }
-    if (this.watchers.has(`project-parent:${root}`) || this.watchers.size > OBSERVED_PROJECT_LIMIT) return;
+    // Directory watchers share libuv's one FSEvents stream on macOS: no file
+    // descriptor per project, so known projects need no watcher bound.
+    if (this.watchers.has(`project-parent:${root}`)) return;
     this.watchDirectory(`project-parent:${root}`, root, name => name === ".pi", projectStores(root));
   }
 
@@ -409,7 +412,7 @@ export class OutsideChanges {
     const values = Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)]));
     const git = isProjectStore(store) ? await gitHeadState(store.root) : undefined;
     if (!state) {
-      document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}), seen: this.now().toISOString() };
+      document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}) };
       return;
     }
     // An instance Tron rewrote is no longer the outside value its mark described.
@@ -418,7 +421,6 @@ export class OutsideChanges {
     }
     state.values = values;
     state.digest = digestOf(text);
-    state.seen = this.now().toISOString();
     if (git) state.head = git.head;
   }
 
@@ -436,14 +438,20 @@ export class OutsideChanges {
   }
 
   private async save(document: ObservedDocument): Promise<void> {
-    // Bound the known projects: the least recently read leave first. `seen` is
-    // exact in process; after a restart it is the last persisted change.
-    for (const prefix of ["project:", "project-mcp:"]) {
-      const projects = Object.entries(document.stores).filter(([id]) => id.startsWith(prefix))
-        .sort(([, left], [, right]) => left.seen.localeCompare(right.seen));
-      for (const [id] of projects.slice(0, Math.max(0, projects.length - OBSERVED_PROJECT_LIMIT))) delete document.stores[id];
-    }
+    // Known projects are bounded by the disk, not by a count: a project whose
+    // root no longer exists (a removed worktree, a deleted project) leaves.
+    const roots = new Set(Object.keys(document.stores).flatMap(id => id.startsWith("project:") ? [id.slice("project:".length)]
+      : id.startsWith("project-mcp:") ? [id.slice("project-mcp:".length)] : []));
+    for (const root of roots) if (await projectRemoved(root)) this.forgetProject(document, root);
     await durableAtomicWriteJson(this.path, document);
+  }
+
+  private forgetProject(document: ObservedDocument, root: string): void {
+    for (const store of projectStores(root)) delete document.stores[storeId(store)];
+    for (const id of [`project:${root}`, `project-parent:${root}`]) {
+      this.watchers.get(id)?.close();
+      this.watchers.delete(id);
+    }
   }
 
   private async raw(store: ObservedStore): Promise<string | undefined> {
@@ -479,6 +487,13 @@ export class OutsideChanges {
   private async compare(document: ObservedDocument, store: ObservedStore, planned?: ReadonlyMap<string, PlannedWrite>, applied?: ReadonlyMap<string, { git?: GitResult; changeId: string }>,
     knownHead?: GitHeadState, headKnown = false): Promise<ChangeEntry[]> {
     const id = storeId(store);
+    if (isProjectStore(store) && await projectRemoved(store.root)) {
+      // A removed project has nothing to observe; its state leaves rather than
+      // becoming an empty baseline that each later read would rewrite.
+      if (document.stores[id]) this.changed = true;
+      this.forgetProject(document, store.root);
+      return [];
+    }
     const text = await this.raw(store);
     const digest = digestOf(text);
     const at = this.now().toISOString();
@@ -486,21 +501,15 @@ export class OutsideChanges {
     const head = !isProjectStore(store) ? undefined : headKnown ? knownHead : await gitHeadState(store.root);
     // The repository state names the compared file: `.pi/mcp.json` beside `.pi/settings.json`.
     const git = head && store.kind === "project-mcp" ? { ...head, path: join(dirname(head.path), "mcp.json") } : head;
-    if (state && !planned && state.digest === digest && (!git || git.head === (state.head ?? null))) {
-      state.seen = at;
-      return [];
-    }
+    if (state && !planned && state.digest === digest && (!git || git.head === (state.head ?? null))) return [];
     const current = await this.values(store, text);
-    if (!current) {
-      if (state) state.seen = at;
-      return [];
-    }
+    if (!current) return [];
     this.changed = true;
     if (!state) {
       // First sight is the baseline: nothing to compare with yet.
       document.stores[id] = {
         digest, values: Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)])), tron: {}, outside: {},
-        ...(git ? { head: git.head, staged: [] } : {}), seen: at,
+        ...(git ? { head: git.head, staged: [] } : {}),
       };
       if (!planned) return [];
       state = document.stores[id]!;
@@ -537,7 +546,6 @@ export class OutsideChanges {
     }
     state.values = Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)]));
     state.digest = digest;
-    state.seen = at;
     if (git) {
       if (git.head !== (state.head ?? null) && store.kind === "project") entries.push(...await this.committed(store, state, git.head, at));
       state.head = git.head;
