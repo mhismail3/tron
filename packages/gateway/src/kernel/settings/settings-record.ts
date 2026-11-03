@@ -82,9 +82,41 @@ function publication(entries: readonly ChangeEntry[]): { name: string; encoded: 
 }
 
 export class SettingsChangeRecord {
-  /** Writers replace a segment before publishing its index; readers share this
-   * mutex so every read observes one published index/segment cut. */
+  /** Serializes writers and recovery only. Readers never hold it: every file is
+   * replaced whole by an atomic rename, a segment is written before the index
+   * that names it, a tail only grows by keeping its exact prefix, and nothing is
+   * deleted. So one read of `index.json` names a cut whose rows stay readable as
+   * the first `count` lines of each named segment, whatever writers do meanwhile. */
   private readonly mutex = new AsyncMutex();
+  /** Writer-first admission for readers. A read waits for the writes already
+   * pending when it arrives (so it observes them, and an unthrottled stream of
+   * reads cannot starve the durable writer), never for writes that start after
+   * it, and a writer never waits for a reader. */
+  private writesStarted = 0;
+  private writesFinished = 0;
+  private readonly writeWaiters: Array<{ target: number; resume: () => void }> = [];
+
+  private async write<T>(operation: () => Promise<T>): Promise<T> {
+    this.writesStarted += 1;
+    try { return await this.mutex.run(operation); }
+    finally {
+      this.writesFinished += 1;
+      for (let index = this.writeWaiters.length - 1; index >= 0; index -= 1) {
+        const waiter = this.writeWaiters[index]!;
+        if (waiter.target > this.writesFinished) continue;
+        this.writeWaiters.splice(index, 1);
+        waiter.resume();
+      }
+    }
+  }
+
+  private async admitRead(): Promise<void> {
+    // Writes finish in the order they started (one mutex), so waiting for the
+    // count to reach those started before this read waits exactly for them.
+    const target = this.writesStarted;
+    if (this.writesFinished >= target) return;
+    await new Promise<void>((resume) => { this.writeWaiters.push({ target, resume }); });
+  }
   private readonly directory: string;
 
   constructor(tronHome: string, private readonly segmentEntries = SEGMENT_ENTRIES) {
@@ -95,7 +127,7 @@ export class SettingsChangeRecord {
 
   /** Recover complete published bytes before effects, with no effect replay or new journal. */
   async recover(): Promise<void> {
-    await this.mutex.run(async () => { await this.recoverIndex(); });
+    await this.write(async () => { await this.recoverIndex(); });
   }
 
   async append(entries: readonly ChangeEntry[]): Promise<void> {
@@ -103,7 +135,7 @@ export class SettingsChangeRecord {
     if (entries.length > SEGMENT_ENTRIES) throw new GatewayError("conflict", "The settings audit exceeds its row bound");
     const encoded = entries.map(entry => JSON.stringify(entry) + "\n");
     if (Buffer.byteLength(encoded.join("")) > SEGMENT_BYTES) throw new GatewayError("conflict", "The settings audit exceeds its byte bound");
-    await this.mutex.run(async () => {
+    await this.write(async () => {
       const index = await this.recoverIndex();
       let segment = index.segments.at(-1);
       let text = segment && !segment.closed && segment.count < this.segmentEntries
@@ -153,7 +185,7 @@ export class SettingsChangeRecord {
     const tail = index.segments.at(-1);
     // A non-tail segment is immutable. A valid JSON newline truncation must not
     // turn a complete grouped Undo into a silently partial restoration.
-    for (const segment of index.segments.slice(0, -1)) await this.indexedLines(segment);
+    for (const segment of index.segments.slice(0, -1)) await this.indexedLines(segment, true);
     if (tail) {
       const rows = await this.segmentLines(tail.name);
       if (rows.length < tail.count || tail.closed && rows.length !== tail.count) throw new GatewayError("conflict", "The settings audit tail conflicts with its index");
@@ -199,7 +231,7 @@ export class SettingsChangeRecord {
   async appendOnce(entries: readonly ChangeEntry[]): Promise<void> {
     const intent = publication(entries);
     if (!intent) return;
-    await this.mutex.run(async () => {
+    await this.write(async () => {
       const { name, encoded, count } = intent;
       const path = join(this.directory, `${name}.jsonl`);
       const index = await this.recoverIndex();
@@ -233,85 +265,88 @@ export class SettingsChangeRecord {
   /** Newest first. The cursor names a segment and how many of its lines remain.
    * Audit keeps every fact; presentation never folds retired approval outcomes. */
   async page(input: { cursor?: string; limit?: number; filter?: (entry: ChangeEntry) => boolean }): Promise<{ entries: ChangeEntry[]; nextCursor?: string }> {
+    await this.admitRead();
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
-    return this.mutex.run(async () => {
-      const index = await this.recoverIndex();
-      const [segmentIndex, remaining] = input.cursor ? parseCursor(input.cursor) : [index.segments.length - 1, Number.POSITIVE_INFINITY];
-      const entries: ChangeEntry[] = [];
-      const segment = index.segments[segmentIndex];
-      if (!segment) return { entries };
-      // Bound scanned work, not just returned matches: a sparse filter over the
-      // permanent audit must yield an empty page + cursor instead of a full scan.
-      const lines = await this.indexedLines(segment);
-      let end = Math.min(remaining, lines.length);
-      while (end > 0 && entries.length < limit) {
-        end -= 1;
-        const entry = lines[end]!;
-        if (!input.filter || input.filter(entry)) entries.push(entry);
-      }
-      if (end > 0) return { entries, nextCursor: `${segmentIndex}:${end}` };
-      return { entries, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
-    });
+    const index = await this.index();
+    const [segmentIndex, remaining] = input.cursor ? parseCursor(input.cursor) : [index.segments.length - 1, Number.POSITIVE_INFINITY];
+    const entries: ChangeEntry[] = [];
+    const segment = index.segments[segmentIndex];
+    if (!segment) return { entries };
+    // Bound scanned work, not just returned matches: a sparse filter over the
+    // permanent audit must yield an empty page + cursor instead of a full scan.
+    const lines = await this.indexedLines(segment);
+    let end = Math.min(remaining, lines.length);
+    while (end > 0 && entries.length < limit) {
+      end -= 1;
+      const entry = lines[end]!;
+      if (!input.filter || input.filter(entry)) entries.push(entry);
+    }
+    if (end > 0) return { entries, nextCursor: `${segmentIndex}:${end}` };
+    return { entries, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
   }
 
   /** An entry and every later fact that refers to it, oldest first. */
   async entry(changeId: string): Promise<{ entry: ChangeEntry; facts: ChangeEntry[]; undone?: true } | undefined> {
-    return this.mutex.run(async () => {
-      const index = await this.index();
-      const facts: ChangeEntry[] = [];
-      let undone = false;
-      for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
-        const lines = await this.indexedLines(index.segments[segmentIndex]!);
-        for (let line = lines.length - 1; line >= 0; line -= 1) {
-          const entry = lines[line]!;
-          if (entry.undoOf === changeId && entry.status === "applied") undone = true;
-          if (entry.refersTo === changeId) facts.unshift(entry);
-          else if (entry.changeId === changeId && !entry.refersTo) return { entry, facts, ...(undone ? { undone: true as const } : {}) };
-        }
+    await this.admitRead();
+    const index = await this.index();
+    const facts: ChangeEntry[] = [];
+    let undone = false;
+    for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
+      const lines = await this.indexedLines(index.segments[segmentIndex]!);
+      for (let line = lines.length - 1; line >= 0; line -= 1) {
+        const entry = lines[line]!;
+        if (entry.undoOf === changeId && entry.status === "applied") undone = true;
+        if (entry.refersTo === changeId) facts.unshift(entry);
+        else if (entry.changeId === changeId && !entry.refersTo) return { entry, facts, ...(undone ? { undone: true as const } : {}) };
       }
-      return undefined;
-    });
+    }
+    return undefined;
   }
 
   /** Exact complete group, oldest first. Corrupt history never authorizes a partial Undo. */
   async group(groupId: string, size: number): Promise<ChangeEntry[]> {
-    return this.mutex.run(async () => {
-      const index = await this.index();
-      const found: ChangeEntry[] = [];
-      for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
-        const lines = await this.indexedLines(index.segments[segmentIndex]!);
-        for (let line = lines.length - 1; line >= 0; line -= 1) {
-          const entry = lines[line]!;
-          if (entry.group?.id !== groupId) continue;
-          if (entry.group.size !== size || found.some(prior => prior.changeId === entry.changeId)) throw new GatewayError("conflict", "The settings audit group conflicts with its identity");
-          found.unshift(entry);
-        }
+    await this.admitRead();
+    const index = await this.index();
+    const found: ChangeEntry[] = [];
+    for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
+      const lines = await this.indexedLines(index.segments[segmentIndex]!);
+      for (let line = lines.length - 1; line >= 0; line -= 1) {
+        const entry = lines[line]!;
+        if (entry.group?.id !== groupId) continue;
+        if (entry.group.size !== size || found.some(prior => prior.changeId === entry.changeId)) throw new GatewayError("conflict", "The settings audit group conflicts with its identity");
+        found.unshift(entry);
       }
-      if (found.length !== size) throw new GatewayError("conflict", "The settings audit group is incomplete");
-      return found;
-    });
+    }
+    if (found.length !== size) throw new GatewayError("conflict", "The settings audit group is incomplete");
+    return found;
   }
 
   /** Any entry by its own id, a later fact included (an outside change refers to the value it replaced). */
   async find(changeId: string): Promise<ChangeEntry | undefined> {
-    return this.mutex.run(async () => {
-      const index = await this.index();
-      for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
-        const found = (await this.indexedLines(index.segments[segmentIndex]!)).find(entry => entry.changeId === changeId);
-        if (found) return found;
-      }
-      return undefined;
-    });
+    await this.admitRead();
+    const index = await this.index();
+    for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
+      const found = (await this.indexedLines(index.segments[segmentIndex]!)).find(entry => entry.changeId === changeId);
+      if (found) return found;
+    }
+    return undefined;
   }
 
   async segmentCount(): Promise<number> {
-    return this.mutex.run(async () => (await this.index()).segments.length);
+    await this.admitRead();
+    return (await this.index()).segments.length;
   }
 
-  private async indexedLines(segment: RecordIndex["segments"][number]): Promise<ChangeEntry[]> {
+  /** The indexed rows of one segment. A closed segment never changes; the open
+   * tail may already hold rows a later append wrote after the index this read
+   * used, so only its indexed prefix belongs to this cut. Recovery, which owns
+   * the writer lock, requires every non-tail segment to match exactly. */
+  private async indexedLines(segment: RecordIndex["segments"][number], exact = false): Promise<ChangeEntry[]> {
     const rows = await this.segmentLines(segment.name);
-    if (rows.length !== segment.count) throw new GatewayError("conflict", "The settings audit segment conflicts with its indexed row count");
-    return rows;
+    if (rows.length < segment.count || (exact || segment.closed) && rows.length !== segment.count) {
+      throw new GatewayError("conflict", "The settings audit segment conflicts with its indexed row count");
+    }
+    return rows.length === segment.count ? rows : rows.slice(0, segment.count);
   }
 
   private async segmentLines(name: string): Promise<ChangeEntry[]> {
