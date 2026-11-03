@@ -195,7 +195,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
           const result = await this.runtime.session.executeBash(command, undefined, {
             excludeFromContext,
             id: operationId,
-            operations: this.directBashProcesses!.shellOperations(),
+            operations: this.directBashProcesses!.shellOperations("user"),
           });
           const completedAt = new Date().toISOString();
           const bashEntries = this.sessionManager.getBranch().filter((entry) =>

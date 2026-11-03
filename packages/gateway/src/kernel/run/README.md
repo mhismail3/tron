@@ -69,7 +69,8 @@ actual K3 host; native frames do not select product modules or keep another list
   settlement and rejection of late results.
 - `direct-bash-process-owner.ts`: foreground shell process trees, timeout and abort
   cleanup, output settlement, private-environment filtering and the lowered agent-command
-  niceness (`nice -n 10` before the shell execs; docs/host-load.md).
+  niceness for the bash tool (`nice -n 10` before the shell execs; user `!` commands keep
+  default priority; docs/host-load.md).
 - `task-command-scope.ts`: a bound Home task worker's command scope under
   `$TMPDIR/tron-task-commands/<session>`: the commands' `TMPDIR`, each shell's recorded
   process group and an inherited anchor descriptor (fd 19). Owned processes are recorded-group
