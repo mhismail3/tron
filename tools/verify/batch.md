@@ -9,11 +9,13 @@ line with head, report path and each repair's state and next step; the caller de
 
 **Coverage.** First use needs `--base <main-anchor>`, not a claim of green.
 `<git-common-dir>/verify/green.json` names the last raw-green head and is the next base;
-`--base` cannot override it. Every run takes the nonwaiting repository `batch.lock` and
-`/tmp/tron-full-gateway.lock`; either held refuses (exit 2), never queued or skipped. Every other
-Gateway Vitest run (`tools/verify/gateway.py`) waits for that lock, so none overlaps a batch; batch
-lanes mark that they already hold it (`TRON_FULL_GATEWAY_LOCK_HELD=1`).
-Same green HEAD does nothing; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
+`--base` cannot override it. Every run takes the nonwaiting repository `batch.lock` (held refuses,
+exit 2), then waits its turn for `/tmp/tron-full-gateway.lock` in the same first-come queue as every
+other Gateway Vitest run ([runner](README.md)), so none overlaps a batch and none passes it. Holders
+are never interrupted; after 45 minutes the batch refuses (exit 2) naming the holder, earlier waiters
+and its wait, coverage still pending, never skipped. Batch lanes mark that they already hold the
+lock (`TRON_FULL_GATEWAY_LOCK_HELD=1`).
+Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
 required lane runs, even after failures: locks/declared consumers (`verify --all`), full
 default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned
 shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI journeys

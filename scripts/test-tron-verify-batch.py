@@ -15,6 +15,75 @@ ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / 'test-results/verify-batch'
 
 
+def wait_until(predicate, message, timeout=30):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError(message)
+        time.sleep(0.05)
+
+
+class GatewayRuns:
+    """Shipped Gateway runners pointed at one test lock, in their own scratch directory. Each stand-in
+    Vitest appends its test name to `order` once its run holds the lock; a run named holder* keeps
+    it until released (or its directory is gone, so an orphan of a killed runner still ends)."""
+
+    def __init__(self, lock: Path):
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-runs-')
+        directory = Path(self.temporary.name)
+        self.directory, self.order, self.runs = directory, directory / 'order', {}
+        source = (ROOT / 'tools/verify/gateway.py').read_text()
+        self.gateway = directory / 'tools/verify/gateway.py'
+        self.gateway.parent.mkdir(parents=True)
+        self.gateway.write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
+        node = directory / 'scripts/tron-node'
+        node.parent.mkdir()
+        node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        vitest = directory / 'packages/gateway/node_modules/.bin/vitest'
+        vitest.parent.mkdir(parents=True)
+        vitest.write_text(f'#!/bin/bash\necho "$2" >> {self.order}\n'
+                          f'while [[ "$2" == holder* && ! -e {directory}/release-$2 && -d {directory} ]]; do sleep 0.05; done\n')
+        for script in (node, vitest):
+            script.chmod(0o755)
+
+    def start(self, name):
+        inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
+        with (self.directory / f'{name}.err').open('w') as stderr:
+            self.runs[name] = subprocess.Popen(['python3', str(self.gateway), name], env=inherited,
+                                               stdout=subprocess.DEVNULL, stderr=stderr)
+        return self.runs[name]
+
+    def stderr(self, name):
+        return (self.directory / f'{name}.err').read_text()
+
+    def names(self):
+        lines = self.order.read_text().split() if self.order.exists() else []
+        return list(dict.fromkeys(lines))
+
+    def wait_holding(self, name):
+        wait_until(lambda: name in self.names(), f'{name} never held the lock: {self.stderr(name)}')
+
+    def wait_queued(self, name):
+        wait_until(lambda: 'waiting for' in self.stderr(name), f'{name} never queued: {self.stderr(name)}')
+
+    def release(self, name):
+        (self.directory / f'release-{name}').touch()
+
+    def wait_all(self, names=None):
+        for name in names or self.runs:
+            self.runs[name].wait(timeout=60)
+            if self.runs[name].returncode != -signal.SIGKILL:
+                assert self.runs[name].returncode == 0, (name, self.stderr(name))
+
+    def close(self):
+        for name, run in self.runs.items():
+            self.release(name)
+            if run.poll() is None:
+                run.terminate()
+                run.wait(timeout=30)
+        self.temporary.cleanup()
+
+
 class BatchTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='tron-batch-fixture-')
@@ -826,16 +895,59 @@ if sys.argv[1] == 'clean':
         holder = json.loads((Path(self.temporary.name) / 'full-gateway.lock').read_text())
         self.assertEqual(holder['purpose'], 'verify --batch')
 
-    def test_held_full_gateway_lock_keeps_coverage_pending_without_waiting(self):
-        import fcntl
+    def gateway_runs(self):
+        runs = GatewayRuns(Path(self.temporary.name) / 'full-gateway.lock')
+        self.addCleanup(runs.close)
+        return runs
+
+    def test_held_full_gateway_lock_keeps_coverage_pending_after_the_capped_wait(self):
         self.land('good', 'yes')
-        with (Path(self.temporary.name) / 'full-gateway.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            result = self.run_batch('--base', self.base)
+        # The shipped cap is 45 minutes; this fixture's copy of the batch waits 2 seconds.
+        source = (self.root / 'tools/verify/batch.py').read_text()
+        self.assertIn('\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60\n', source)
+        self.land('tools/verify/batch.py', source.replace('\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60\n', '\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 2\n'))
+        runs = self.gateway_runs()
+        holder = runs.start('holder')
+        runs.wait_holding('holder')
+        started = time.monotonic()
+        result = self.run_batch('--base', self.base)
+        waited = time.monotonic() - started
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn('full-Gateway run holds', result.stdout)
+        self.assertIn(f'"pid": {holder.pid}', result.stdout)
+        self.assertIn('gateway vitest holder', result.stdout)
+        self.assertRegex(result.stdout, r'waited \d+s')
+        self.assertGreaterEqual(waited, 2)
         self.assertFalse(self.reports())
         self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertIsNone(holder.poll(), 'a capped batch never interrupts the holder')
+        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped batch leaves no ticket')
+        # The capped batch left the line: the next run follows the holder.
+        runs.start('next')
+        runs.wait_queued('next')
+        runs.release('holder')
+        runs.wait_all()
+        self.assertEqual(runs.names(), ['holder', 'next'])
+
+    def test_a_due_batch_waits_its_turn_ahead_of_later_gateway_runs(self):
+        runs = self.gateway_runs()
+        self.land('scripts/tron-xcodebuild', f'#!/bin/sh\necho mac-build >> test-results/executed\necho batch >> {runs.order}\n')
+        runs.start('holder')
+        runs.wait_holding('holder')
+        output = Path(self.temporary.name) / 'batch.out'
+        with output.open('w') as stream:
+            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
+                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
+        wait_until(lambda: batch.poll() is not None or 'waiting for' in output.read_text(), 'the batch neither waited nor exited')
+        self.assertIsNone(batch.poll(), 'a due batch waits behind the holder instead of refusing:\n' + output.read_text())
+        for name in ('later-1', 'later-2'):
+            runs.start(name)
+            runs.wait_queued(name)
+        runs.release('holder')
+        self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
+        runs.wait_all()
+        self.assertEqual(runs.names(), ['holder', 'batch', 'later-1', 'later-2'])
 
     def test_red_while_disabled_publishes_after_the_enable_step(self):
         self.remote(publish=False)
@@ -977,6 +1089,134 @@ class ShardedIosProbeTests(unittest.TestCase):
         self.assertEqual(result['exit'], 0, result)
 
 
+class BrowserForkProvisionTests(unittest.TestCase):
+    """A Gateway run that selects the browser receipt test hands Vitest the pinned fork copy the
+    runner provisioned, so a batch's Gateway lane covers both cases instead of skipping them."""
+
+    PIN = 'd6cde09af8d7757bbfba5a4ffaf83381bb392683'
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-browser-fork-')
+        root = Path(self.temporary.name).resolve()
+        self.seen = root / 'seen'
+        (root / 'tools/verify').mkdir(parents=True)
+        source = (ROOT / 'tools/verify/gateway.py').read_text()
+        (root / 'tools/verify/gateway.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(root / 'full-gateway.lock'))))
+        self.adapter = root / 'packages/gateway/src/display/browser-live-view-adapter.ts'
+        self.adapter.parent.mkdir(parents=True)
+        self.adapter.write_text(f'const sources = [\n  "git:github.com/fitchmultz/pi-agent-browser-native",\n  "git:github.com/fitchmultz/pi-agent-browser-native@{self.PIN}",\n];\n')
+        (root / 'scripts').mkdir()
+        (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        vitest = root / 'packages/gateway/node_modules/.bin/vitest'
+        vitest.parent.mkdir(parents=True)
+        vitest.write_text(f'#!/bin/bash\necho "${{TRON_P99_17_BROWSER_FORK_COPY:-unset}}" >> {self.seen}\n')
+        for script in (root / 'scripts/tron-node', vitest):
+            script.chmod(0o755)
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        # An already provisioned copy of the pin: the runner reuses it without fetching.
+        self.copy = root / '.git/verify/fixtures' / f'pi-agent-browser-native-{self.PIN}'
+        self.copy.mkdir(parents=True)
+        (self.copy / '.tron-provisioned').write_text(self.PIN)
+        self.root = root
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_gateway(self, *args, env=None):
+        inherited = {key: value for key, value in os.environ.items() if key not in ('TRON_P99_17_BROWSER_FORK_COPY', 'TRON_FULL_GATEWAY_LOCK_HELD')}
+        return subprocess.run(['python3', str(self.root / 'tools/verify/gateway.py'), *args], env={**inherited, **(env or {})},
+                              capture_output=True, text=True, timeout=60)
+
+    def test_a_full_default_run_receives_the_provisioned_pinned_fork(self):
+        done = self.run_gateway('--reporter=default', '--reporter=json', '--outputFile.json=/dev/null')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.seen.read_text().split(), [str(self.copy)])
+
+    def test_a_run_naming_the_browser_test_receives_it_and_other_selections_do_not(self):
+        selections = {
+            ('src/sessions/browser-fork-receipts.integration.test.ts',): True,
+            ('src/sessions/browser-fork-receipts.integration.test.ts:48',): True,
+            (str(self.root / 'packages/gateway/src/sessions/browser-fork-receipts.integration.test.ts'),): True,
+            ('src/admin/package-updates.lock.integration.test.ts',): False,
+            ('--testTimeout', '5000', 'src/admin/package-updates.lock.integration.test.ts'): False,
+            ('--config', 'vitest.nested.config.ts'): False,
+            ('--config=vitest.mac-terminal.config.ts',): False,
+        }
+        for args in selections:
+            done = self.run_gateway(*args)
+            self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.seen.read_text().split(), [str(self.copy) if selected else 'unset' for selected in selections.values()])
+
+    def fork_repository(self, build: str) -> str:
+        """A local stand-in for the fork's repository: a lockfile with no dependencies and the given build script."""
+        fork = self.root / 'fork'
+        (fork / 'scripts').mkdir(parents=True)
+        (fork / 'package.json').write_text(json.dumps({'name': 'pi-agent-browser-native', 'version': '0.4.1'}))
+        (fork / 'package-lock.json').write_text(json.dumps({'name': 'pi-agent-browser-native', 'version': '0.4.1', 'lockfileVersion': 3,
+                                                            'requires': True, 'packages': {'': {'name': 'pi-agent-browser-native', 'version': '0.4.1'}}}))
+        (fork / 'scripts/build.mjs').write_text(build)
+        # A lifecycle script must never run: the lockfile install is --ignore-scripts.
+        package = json.loads((fork / 'package.json').read_text())
+        (fork / 'package.json').write_text(json.dumps({**package, 'scripts': {'postinstall': "node -e \"require('fs').writeFileSync('postinstall-ran','')\""}}))
+        git = ['git', '-C', str(fork), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null']
+        subprocess.run(['git', 'init', '-q', str(fork)], check=True)
+        subprocess.run([*git, 'add', '.'], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'fork'], check=True)
+        subprocess.run([*git, 'config', 'uploadpack.allowAnySHA1InWant', 'true'], check=True)
+        commit = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True).strip()
+        runner = self.root / 'tools/verify/gateway.py'
+        source = runner.read_text()
+        self.assertIn("'https://github.com/fitchmultz/pi-agent-browser-native.git'", source)
+        runner.write_text(source.replace("'https://github.com/fitchmultz/pi-agent-browser-native.git'", repr(str(fork))))
+        # Provisioning runs npm and the build under the repository's pinned Node.
+        (self.root / 'scripts/tron-node').write_text(f'#!/bin/bash\nexec {ROOT / "scripts/tron-node"} "$@"\n')
+        self.adapter.write_text(f'"git:github.com/fitchmultz/pi-agent-browser-native@{commit}"\n')
+        return commit
+
+    def test_an_unprovisioned_pin_is_fetched_by_sha_built_and_stamped_once(self):
+        commit = self.fork_repository("import { mkdirSync, writeFileSync } from 'node:fs';\n"
+                                      "mkdirSync('dist/extensions/agent-browser', { recursive: true });\n"
+                                      "writeFileSync('dist/extensions/agent-browser/index.js', 'export default () => {};\\n');\n")
+        fixtures = self.root / '.git/verify/fixtures'
+        killed = fixtures / '.pi-agent-browser-native-killed'
+        killed.mkdir()
+        (killed / 'partial').write_text('')
+        # A caller's GIT_DIR (a hook, say) must not redirect the fixture's own repository.
+        decoy = self.root / 'decoy.git'
+        subprocess.run(['git', 'init', '-q', '--bare', str(decoy)], check=True)
+        node = subprocess.check_output([str(ROOT / 'scripts/tron-node')], text=True).strip()
+        done = self.run_gateway(env={'GIT_DIR': str(decoy), 'TRON_NODE_BIN': node})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(list((decoy / 'objects/pack').iterdir()) + [path for path in (decoy / 'objects').iterdir() if path.name not in ('pack', 'info')], [],
+                         'provisioning wrote into the caller\'s repository')
+        target = fixtures / f'pi-agent-browser-native-{commit}'
+        self.assertEqual(self.seen.read_text().split(), [str(target)])
+        self.assertFalse(killed.exists(), 'a killed provisioner\'s staging survived')
+        self.assertFalse((target / 'postinstall-ran').exists(), 'a lifecycle script ran')
+        self.assertEqual((target / '.tron-provisioned').read_text(), commit)
+        self.assertEqual(subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'], text=True).strip(), commit)
+        self.assertTrue((target / 'dist/extensions/agent-browser/index.js').is_file())
+        again = self.run_gateway()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn('provisioning', again.stderr)
+
+    def test_a_failed_build_fails_the_run_and_leaves_no_copy_or_staging(self):
+        commit = self.fork_repository("process.exit(3);\n")
+        done = self.run_gateway()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn('scripts/build.mjs', done.stderr)
+        self.assertFalse(self.seen.exists())
+        fixtures = self.root / '.git/verify/fixtures'
+        self.assertEqual(sorted(path.name for path in fixtures.iterdir() if path.name.startswith(('.pi-agent', 'pi-agent-browser-native-' + commit))), [])
+
+    def test_an_ambiguous_product_pin_refuses_instead_of_choosing(self):
+        self.adapter.write_text(self.adapter.read_text() + f'"git:github.com/fitchmultz/pi-agent-browser-native@{"0" * 40}"\n')
+        done = self.run_gateway()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn('expected one pinned agent-browser fork', done.stderr)
+        self.assertFalse(self.seen.exists())
+
+
 class FullGatewayLockTests(unittest.TestCase):
     """A Gateway Vitest run waits for the host's full-Gateway lock, so it never overlaps a
     batch; a batch lane, which already holds it, runs without waiting."""
@@ -1029,6 +1269,59 @@ class FullGatewayLockTests(unittest.TestCase):
             out, err = run.communicate(timeout=30)
         self.assertEqual(run.returncode, 0, out + err)
         self.assertTrue(self.ran.exists())
+
+
+class FullGatewayLockQueueTests(unittest.TestCase):
+    """Full-Gateway lock waiters take it in arrival order, and a dead waiter or holder never wedges the line."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-queue-')
+        self.addCleanup(self.temporary.cleanup)
+        self.runs = GatewayRuns(Path(self.temporary.name) / 'full-gateway.lock')
+        self.addCleanup(self.runs.close)
+
+    def test_runs_take_the_lock_in_arrival_order(self):
+        self.runs.start('holder')
+        self.runs.wait_holding('holder')
+        for name in ('first', 'second', 'third'):
+            self.runs.start(name)
+            self.runs.wait_queued(name)
+        self.runs.release('holder')
+        self.runs.wait_all()
+        self.assertEqual(self.runs.names(), ['holder', 'first', 'second', 'third'])
+
+    def test_a_killed_waiter_and_a_killed_holder_lose_their_places(self):
+        holder = self.runs.start('holder')
+        self.runs.wait_holding('holder')
+        doomed = self.runs.start('doomed')
+        self.runs.wait_queued('doomed')
+        doomed.kill()
+        doomed.wait(timeout=30)
+        self.runs.start('after')
+        self.runs.wait_queued('after')
+        holder.kill()
+        holder.wait(timeout=30)
+        self.runs.wait_all(['after'])
+        self.assertEqual(self.runs.names(), ['holder', 'after'])
+        # Nothing stale remains ahead of a newcomer: it takes the free lock without waiting.
+        self.runs.start('fresh')
+        self.runs.wait_all(['fresh'])
+        self.assertNotIn('waiting for', self.runs.stderr('fresh'))
+        self.assertEqual(self.runs.names(), ['holder', 'after', 'fresh'])
+
+    def test_batch_and_gateway_runs_share_one_queue_owner(self):
+        # The batch fixture replaces gateway.py, so batch.py keeps its own copy of the queue owner;
+        # both must stay the same code.
+        import ast
+        def owner(path):
+            tree = ast.parse((ROOT / path).read_text())
+            [function] = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'wait_for_full_gateway_lock']
+            return ast.dump(function)
+        self.assertEqual(owner('tools/verify/batch.py'), owner('tools/verify/gateway.py'))
+        constants = lambda path: [line for line in (ROOT / path).read_text().splitlines()
+                                  if line.startswith(('FULL_GATEWAY_LOCK = ', "FULL_GATEWAY_LOCK_HELD = ", 'HELD_BY_CALLER = '))]
+        self.assertEqual([line.split(' = ')[1] for line in constants('tools/verify/batch.py')],
+                         [line.split(' = ')[1] for line in constants('tools/verify/gateway.py')])
 
 
 if __name__ == '__main__':
