@@ -31,9 +31,10 @@ safe to ship.** Tests protect feature work, never become a queue that blocks it.
   known-failure exemptions, qualified greens or “matches base/main” excuses. A retry that
   passes is evidence of nondeterminism, not a fix. Missing or skipped required coverage
   is not green.
-- This is the gate contract, not a claim that today's tools implement it. #2173 tracks
-  the deterministic pre-merge path, async full E2E and causal auto-revert implementation.
-  No agent may improvise an automatic push or production action around existing owners.
+- [`scripts/tron verify`](../tools/verify/README.md) is the pre-merge check; `verify --batch` is
+  the async full run and its causal revert, which publishes only a reviewed revert of a
+  culprit proven by fresh controls, once its remote is enabled. No agent may improvise an
+  automatic push or production action around that owner.
 
 ## P3 Tests are deterministic or they are bugs
 

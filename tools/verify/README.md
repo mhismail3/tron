@@ -1,8 +1,9 @@
 # Verify
 
-`scripts/tron verify` runs affected checks locally and reports broader post-land coverage. The manifests and their dependency
+`scripts/tron verify` runs the fast affected checks before merge; `verify --batch` runs full
+coverage asynchronously on landed main and causally reverts a proven culprit. The manifests and their dependency
 and dynamic-edge graph are the selection authority. No merge queue, landing gate or hosted
-CI is involved, and nothing here pushes or reverts main ([principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). A previous test pass never substitutes for
+CI is involved ([principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md) and [on-demand health contract](health-design.md#on-demand-command).
 
@@ -12,8 +13,9 @@ scripts/tron verify --plan                     # tier, paths, reasons and exact 
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
 scripts/tron verify --module <id>               # scoped baseline: owner tests + transitive consumer locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
-scripts/tron verify --batch --base <green-sha>   # initialize coverage in a dedicated clean main worktree
-scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the covered HEAD
+scripts/tron verify --batch --base <main-anchor> # initialize coverage in a dedicated clean main worktree
+scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
+scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
 ```
@@ -75,28 +77,11 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
-### Known failures
+### No exemptions
 
-**Implementation description, not exemption policy.**
-[Principles P2/P3/P9](../../docs/PRINCIPLES.md) forbid quarantines, waivers,
-known-failure exemptions and qualified greens. Existing runner labels/exit codes below
-do not establish green or authorize adding/renewing entries. The registry has no live
-entries. Runner/gate reconciliation belongs to #2176/#2194, not a second path.
-
-The runner validates `tools/verify/known-failures.json` on every selection, including plans.
-Its schema requires exact case, reproduction command/ancestor commit, full failure digest,
-owner issue and bounded expiry. Gateway digests hash the failure-message array, normalizing
-only the checkout root. Real-UI journeys have no registry matcher: every failure stays red.
-Tests execute unchanged and raw outcomes/logs remain visible. The validator's bounded
-`renewedFrom` capability is not permission to renew a red.
-
-Existing exit 0 labels include `quarantined` for exact unexpired Gateway matches and
-`expired` for exact expired matches (`expiredReds`); unrelated expiry appears in
-`expiredEntries`. `--all` reports any expiry as `expired`. Unknown/changed signatures,
-suite/runtime errors, missing reports and malformed registry data exit 1. Health retains
-these diagnostic verdicts. Selections have `checkpointEligible: false`; the current
-runner uses complete batches for eligibility. Neither a label nor exit 0 overrides P2:
-fix at the root or causally revert, with no waiver, retry-to-green or alternate runner.
+There is no known-failure registry, quarantine, waiver, expiry or qualified verdict
+([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Every
+executed failure is `failed` (exit 1); it is fixed at its root or causally reverted.
 
 Verify runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
 counts to `test-results/measure/`; its counts and errors never fail verify.
@@ -226,45 +211,11 @@ batch `--all`). Busy exit 73 records named checks/tests as `deferred`, exit 0, n
 passed. A deferred build also defers its index/tests; other affected checks still run.
 The batch covers those files. Genuine build/test errors and zero-test runs still fail.
 
-## Explicit Mac batches
+## Asynchronous full-main batches
 
-Home ([P2 owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)) or Mohsin
-runs `verify --batch` in a persistent clean worktree on fetched, landed main history.
-No scheduler, application install, deployment, service restart, push or automatic main revert is included. Every terminal run emits JSON `batchResult`, head and report path;
-the Home caller must deliver it, including red/uncovered. The trigger is a separate owner.
-
-First use requires `--base <main-anchor>`, not a claim of prior green.
-`verify/covered.json` owns the last green/qualified head; `verify/green.json` records strict green. `--base` cannot override coverage. A nonwaiting `batch.lock`
-refuses overlap; same covered HEAD does nothing by default. `--repeat` explicitly reruns all nine lanes only when HEAD is exactly the last covered commit; it cannot be combined with `--base`. This provides separate batch reports for confirming an identical main SHA without deleting or resetting coverage records. `--plan` is read-only.
-After local pinned Gateway/relay dependency preparation, every required lane runs even
-after failures: locks/declared consumers (`verify --all`, not full Gateway), full default
-and nested Gateway Vitest separately, signed Mac integration build/tests, relay Workers
-Vitest, unsigned shipping iOS compile, UI smoke `checkpoint` (build/run), real-Gateway
-boundary and real-UI journeys (installation disabled). Mac execution uses scratch HOME/TMPDIR.
-Missing owners/reports, empty/skipped evidence, deferred lanes and failed setup/cleanup
-are **uncovered**. Otherwise **green** means all passed; **qualified** requires every failure
-to match an unexpired exact registry case/digest; **red** means unwaived failure. Qualified
-advances covered history, never green; expired/changed digests waive nothing.
-Immutable `<git-common-dir>/verify/batches/` reports retain commands, logs, range age,
-lane wall times and attribution host seconds; task cleanup never removes them.
-
-iOS lanes release host slots between lanes (cap three). All slots busy at admission means
-deferred/uncovered, not a reservation or batch queue; races use the runner's owning lease.
-Unsigned compile composes `ios-test-lock.py --host-slot`; its owner lacks a simulator slot.
-Attribution follows coverage: probe one Vitest file plus anchored case filter, or an
-available XCTest class/method selector, at both ends and along main's first-parent chain.
-Never rerun a whole suite diagnostically. Missing selectors yield uncovered/inconclusive;
-setup errors or changed signatures are inconclusive, a failing baseline is pre-existing.
-A non-reproducing head retains flake attempts but needs a registry entry to qualify.
-Proof requires a two-parent landing-shaped range, identical signature twice at culprit
-and an observed good first parent; search costs approximately `ceil(log2(N)) + 3` probes; other history yields candidates only. Commit/lane/signature probes in `verify/probes/`
-and range memos in `verify/attributions/` prevent repeated work. Culprit files use
-`git diff <merge>^1 <merge>`; proof prepares local `revert/<sha>` via `git revert -m 1`,
-never pushing. Conflicts and refused/interrupted resource cleanup preserve the probe
-worktree and `attribution-*/progress.json` for exact-resource recovery.
-Guarded issue writes journal before dispatch in `verify/issue-writes/`, keyed by lane
-and normalized signature, not range. Later ranges comment on the same issue. Refused,
-uncertain or unfinished writes require reconciliation, never blind replay.
+`verify --batch` runs every required lane on landed main after merge and causally
+reverts a proven culprit once enabled; its contract, enable step and review command
+are in [batch.md](batch.md).
 
 ## Mutation sampling
 
@@ -284,14 +235,12 @@ deferred until a known-kill probe proves activation with pinned Vitest.
 `scripts/tron test tooling scripts/test-tron-verify.py scripts/test-tron-verify-tiers.py scripts/test-tron-verify-batch.py`
 drives real Git/CLI fixtures: affected selection, known-bad small changes, zero-test
 refusal, reproducible digests, dirty planning, descendant cleanup, batch ranges/overlap,
-bisection and refused issue authority. The iOS stand-in compiles real Swift indexes
+bisection, causal revert publication and refused issue authority. The iOS stand-in compiles real Swift indexes
 and stamps, exercises real `layers ios`, and emits XCTest-style summaries: locks-only
-selection, reuse, extensions, empty/failing runs and busy deferral. Registry cases cover
-exact/changed/expired digests, seven-day admission, one retained renewal and deletion-reset
-refusal; deleted non-Markdown docs pass static checks while zero-test code still fails.
+selection, reuse, extensions, empty/failing runs and busy deferral. Every Gateway case
+failure is a raw red; deleted non-Markdown docs pass static checks while zero-test code still fails.
 Hardware-free
 `scripts/test-ios-test-infrastructure.py HostSlotFixture RunnerFixture.test_run_forwards_bounded_host_slot_wait_before_simulator_work RunnerFixture.test_run_waits_for_a_host_slot_while_all_are_held`
 proves bounded acquisition cleanup, forwarding, the unchanged cap and default waiting.
 A fake Gateway runner covers `mutate` timeout/interrupt; logs: `test-results/verify-cli/`.
-Batch fixtures cover all lanes, case-only merge proof, issue/probe reuse, local revert,
-verdicts and interrupted cleanup preservation; logs: `test-results/verify-batch/`.
+Batch fixtures are listed in [batch.md](batch.md#verify); logs: `test-results/verify-batch/`.
