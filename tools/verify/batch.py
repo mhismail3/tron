@@ -19,7 +19,7 @@ import time
 import verify
 
 ROOT = verify.ROOT
-# The host convention agents also hold around manual full real-Gateway runs.
+# Reserved host path for full real-Gateway runs; only this owner takes it in-repo.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.

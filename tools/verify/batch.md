@@ -10,8 +10,8 @@ line with head, report path and each repair's state and next step; the caller de
 **Coverage.** First use needs `--base <main-anchor>`, not a claim of green.
 `<git-common-dir>/verify/green.json` names the last raw-green head and is the next base;
 `--base` cannot override it. Every run takes the nonwaiting repository `batch.lock` and
-`/tmp/tron-full-gateway.lock`, the lock agents hold around manual full real-Gateway runs
-(other runners do not take it); either held refuses (exit 2), never queued or skipped.
+`/tmp/tron-full-gateway.lock`, a reserved host path no other in-repo runner takes yet;
+either held refuses (exit 2), never queued or skipped.
 Same green HEAD does nothing; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
 required lane runs, even after failures: locks/declared consumers (`verify --all`), full
 default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned
@@ -38,8 +38,8 @@ root-caused; nothing is guessed or reverted. `verify/attributions/` memoizes per
 effect) fetches the remote main tip without touching FETCH_HEAD or tracking refs and
 requires the culprit on its first-parent history. A changed tip must still fail twice
 (passing twice is `stale`: no revert); an exact existing inverse is `already-reverted`.
-An unreadable remote is `pending`; it and an interrupted `building` journal resume on
-the next batch, as does `publication-disabled` once publication is enabled.
+An unreadable remote is `pending`; it and an interrupted `building` journal resume when a
+later red batch re-attributes the same culprit, as does `publication-disabled` once enabled.
 Migration paths or owners with `persistence`, `security` or `mac-installer` risk refuse.
 `git revert --no-edit [-m 1]` builds the candidate on the tip; a conflict is preserved
 unresolved. The candidate must pass the case twice and pass `verify --changed --base <tip>`,
