@@ -60,7 +60,7 @@ export interface ChangeEntry {
   /** A typed action fact: `key` names its subject, `after` its preview. Never undoable. */
   action?: true;
   /** Entries one change wrote together and undo reverts together: both notes of a
-   * profile supersede, or every item of a Confirm all (doc 6.4). */
+   * profile supersede, or every item of one multi-item profile change (doc 6.4). */
   group?: { id: string; size: number };
 }
 
