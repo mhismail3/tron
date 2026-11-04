@@ -1,0 +1,131 @@
+pattern	verdict	target	cluster	note
+scripts/tron	keep	scripts/tron	cli-entry	frozen: installed Gateway executes it (diagnose, mac replace, document-admission marker); the one front door
+scripts/tron_mac_replace.py	keep	scripts/tron_mac_replace.py	mac-install-replace	frozen: installed Gateway mac-replace-service.ts execs it; imports move to scripts/mac/
+scripts/tron-ios-device	keep	scripts/tron-ios-device	ios-device	frozen: installed Gateway ios-device-install-service.ts execs it; sibling calls repointed in the same commit
+scripts/tron-node	keep	scripts/tron-node	node-toolchain	toolchain shim used as a command prefix (payload build, docs, charter)
+scripts/cli.module.json	move	scripts/scripts.module.json	manifest	owns only the top-level entry points
+scripts/README.md	keep	scripts/README.md	cli-entry	new: command table + where-things-go (breadcrumb)
+scripts/tron-version	move	scripts/toolchain/tron-version	version	dispatched by scripts/tron version
+scripts/generate-xcode-project	move	scripts/toolchain/generate-xcode-project	xcode-gen	dispatched by scripts/tron ios|mac generate
+scripts/install-ci-tools.sh	move	scripts/toolchain/install-ci-tools.sh	node-toolchain	payload build caller updated in the same slice
+scripts/hash-npm-runtime.py	move	scripts/toolchain/hash-npm-runtime.py	node-toolchain	payload build caller updated in the same slice
+scripts/node-pin-mirrors.py	move	scripts/toolchain/node-pin-mirrors.py	node-toolchain	-
+scripts/verify-ci-toolchain.sh	move	scripts/toolchain/verify-ci-toolchain.sh	ci-toolchain	-
+scripts/test-install-ci-tools-node.sh	move	scripts/toolchain/test-install-ci-tools-node.sh	node-toolchain	-
+scripts/test-tron-node.py	move	scripts/toolchain/test-tron-node.py	node-toolchain	-
+scripts/test-tron-npm-bytecode.sh	move	scripts/toolchain/test-tron-npm-bytecode.sh	node-toolchain	-
+scripts/test-verify-ci-toolchain.py	move	scripts/toolchain/test-verify-ci-toolchain.py	ci-toolchain	-
+scripts/verify-gateway-protocol-contract.py	move	scripts/toolchain/verify-gateway-protocol-contract.py	protocol-contract	Xcode build phases (ios+mac project.yml) and bundle-gateway.sh updated together
+scripts/gateway_protocol_contract.py	move	scripts/toolchain/gateway_protocol_contract.py	protocol-contract	PYTHONPATH users updated together
+scripts/validate-push-service-config.sh	move	scripts/toolchain/validate-push-service-config.sh	protocol-contract	Xcode build phases + payload scripts updated together
+scripts/protocol-contract.module.json	merge	scripts/toolchain/toolchain.module.json	manifest	cli + protocol-contract manifests become one toolchain area
+scripts/update-model-release-dates.mjs	move	packages/gateway/scripts/update-model-release-dates.mjs	misc	imports Gateway src; Gateway package owns its vendored data
+scripts/run-main-source.py	move	scripts/ios/run-main-source.py	ios-share	dispatched by scripts/tron ios source and tron-ios-device
+scripts/test-main-source.py	move	scripts/ios/test-main-source.py	ios-share	-
+scripts/tron-dev	move	scripts/dev/tron-dev	dev	dispatched by scripts/tron dev
+scripts/tron-dev-state.mjs	move	scripts/dev/tron-dev-state.mjs	dev	-
+scripts/tron-dev-state.test.mjs	move	scripts/dev/tron-dev-state.test.mjs	dev	-
+scripts/tron-fsevents-guard	move	scripts/dev/tron-fsevents-guard	dev	LaunchAgent embeds its source; add scripts/tron fsevents-guard arm
+scripts/test-tron-fsevents-guard.py	move	scripts/dev/test-tron-fsevents-guard.py	dev	-
+scripts/dev.module.json	move	scripts/dev/dev.module.json	manifest	-
+scripts/gateway-install-inputs.mjs	move	packages/mac-app/scripts/gateway-install-inputs.mjs	gateway-payload	one payload-build home with bundle-gateway.sh (gateway-payload module)
+scripts/gateway-install-inputs.test.mjs	move	packages/mac-app/scripts/gateway-install-inputs.test.mjs	gateway-payload	-
+scripts/gateway-payload-deploy.mjs	move	packages/mac-app/scripts/gateway-payload-deploy.mjs	gateway-payload	payload-relative name app/scripts/gateway-payload-deploy.mjs unchanged
+scripts/gateway-payload-deploy.test.mjs	move	packages/mac-app/scripts/gateway-payload-deploy.test.mjs	gateway-payload	-
+scripts/tron-ios-test	move	scripts/ios/tron-ios-test	ios-test	dispatched by scripts/tron test ios (duplicate front door today)
+scripts/tron-ios-simulator	move	scripts/ios/tron-ios-simulator	ios-test	add scripts/tron ios simulator arm
+scripts/tron-xcodebuild	move	scripts/ios/tron-xcodebuild	ios-test	-
+scripts/ios-*	move	scripts/ios/	ios-test	-
+scripts/patch-ios-gateway-e2e-xctestrun.py	move	scripts/ios/patch-ios-gateway-e2e-xctestrun.py	ios-test	-
+scripts/validate-ios-artifact.py	move	scripts/ios/validate-ios-artifact.py	ios-device	-
+scripts/xcresult-failures.py	move	scripts/ios/xcresult-failures.py	ios-test	-
+scripts/tron-ios-device-bind.mjs	move	scripts/ios/tron-ios-device-bind.mjs	ios-device	packages/gateway/package.json test path updated
+scripts/tron-ios-device-bind.test.mjs	move	scripts/ios/tron-ios-device-bind.test.mjs	ios-device	-
+scripts/test-ios-*	move	scripts/ios/	ios-test	-
+scripts/test-tron-ios-device-share.py	move	scripts/ios/test-tron-ios-device-share.py	ios-share	-
+scripts/ios.module.json	move	scripts/ios/ios.module.json	manifest	-
+scripts/tron_mac_replace_*.py	move	scripts/mac/	mac-install-replace	entry scripts/tron_mac_replace.py adds scripts/mac to sys.path
+scripts/tron_mac_reinstall.py	move	scripts/mac/tron_mac_reinstall.py	mac-install-replace	dispatched by scripts/tron mac reinstall
+scripts/tron_checkpoint.py	move	scripts/mac/tron_checkpoint.py	mac-install-replace	dispatched by scripts/tron checkpoint
+scripts/tron_rebuild_lock.py	move	scripts/mac/tron_rebuild_lock.py	mac-install-replace	one owner (mac); iOS imports it by path
+scripts/verify-mac-install.sh	move	scripts/mac/verify-mac-install.sh	mac-install-replace	dispatched by scripts/tron mac verify
+scripts/validate-native-host.py	move	scripts/mac/validate-native-host.py	mac-install-replace	-
+scripts/mac.md	move	scripts/mac/README.md	doc	-
+scripts/mac.module.json	move	scripts/mac/mac.module.json	manifest	-
+scripts/test-cua-assets.sh	move	scripts/mac/test-cua-assets.sh	mac	-
+scripts/test-tron-mac-*.py	move	scripts/mac/	mac-install-replace	-
+scripts/test-verify-mac-install.py	move	scripts/mac/test-verify-mac-install.py	mac-install-replace	-
+scripts/check-agent-policy.sh	move	scripts/policy/check-agent-policy.sh	policy-guard	-
+scripts/check-documentation-policy.py	move	scripts/policy/check-documentation-policy.py	policy-guard	absorbs tools/budgets doc budgets (one doc-budget owner)
+scripts/personal-info-guard.sh	move	scripts/policy/personal-info-guard.sh	privacy-guard	.github/work.json scrubCommand + hook updated together
+scripts/install-hooks.sh	move	scripts/policy/install-hooks.sh	policy-guard	installed hook becomes: exec scripts/tron hook pre-commit
+scripts/test-personal-info-guard.py	move	scripts/policy/test-personal-info-guard.py	privacy-guard	-
+scripts/policy.module.json	move	scripts/policy/policy.module.json	manifest	-
+scripts/test-tron-budgets.py	merge	scripts/policy/test-documentation-policy.py	budgets-metrics	after #2134 budgets is docs-only; merges into documentation policy
+scripts/test-tron-docs.py	move	scripts/policy/test-tron-docs.py	docs-gen	-
+scripts/test-tron-ownership.py	move	scripts/structure/test-tron-ownership.py	ownership-structure	-
+scripts/test-tron-layers.py	move	scripts/structure/test-tron-layers.py	layers	-
+scripts/test-tron-metrics.py	move	scripts/structure/test-tron-metrics.py	budgets-metrics	-
+scripts/test-tron-measure.py	delete	-	budgets-metrics	in-flight #2134
+scripts/test-tron-verify*.py	move	scripts/verify/	verify-select	declared_files prefix scripts/test- generalised to scripts/**/test-
+scripts/test-tron-gateway-isolation.py	move	scripts/verify/test-tron-gateway-isolation.py	gateway-test-isolation	-
+scripts/test-work-cleanup.py	delete	-	work-github	in-flight #2141
+scripts/test-work-coordination.py	delete	-	work-github	in-flight #2141
+scripts/test-work-handoff.py	delete	-	work-github	in-flight #2141
+scripts/test-work-release.py	delete	-	work-github	in-flight #2141
+scripts/test-work-start.py	delete	-	work-github	in-flight #2141 (also a WORK_GH fake for home-task-continuity e2e; #2141 rewires it)
+scripts/test-work-*.py	move	scripts/work/	work-github	scripts/tron test tooling default glob updated
+scripts/tron-profile*	move	scripts/profile/	profiling	add scripts/tron profile arm
+scripts/tron_profile_*.py	move	scripts/profile/	profiling	-
+scripts/test-tron-profile.py	move	scripts/profile/test-tron-profile.py	profiling	-
+scripts/profile.module.json	move	scripts/profile/profile.module.json	manifest	-
+scripts/tron-triage	move	scripts/triage/tron-triage	triage-diagnose	add scripts/tron triage arm
+scripts/tron_triage.py	move	scripts/triage/tron_triage.py	triage-diagnose	-
+scripts/test-tron-triage.py	move	scripts/triage/test-tron-triage.py	triage-diagnose	-
+scripts/triage.module.json	move	scripts/triage/triage.module.json	manifest	-
+tools/ownership/*	move	scripts/structure/	ownership-structure	ownership + layout + tidy: one structure owner
+tools/layers/*	move	scripts/structure/	layers	-
+tools/metrics/moved.py	delete	-	budgets-metrics	in-flight #2134
+tools/metrics/*	move	scripts/structure/	budgets-metrics	metrics stays the line-count authority after #2134
+tools/budgets/*	merge	scripts/policy/check-documentation-policy.py	budgets-metrics	after #2134 only doc budgets remain; two doc-budget checkers become one
+tools/docs/*	move	scripts/policy/	docs-gen	generated docs index/settings reference
+tools/verify/core-journeys.md	move	scripts/verify/core-journeys.md	verify-select	required coverage map (PRINCIPLES P4); not a ledger
+tools/verify/*	move	scripts/verify/	verify-select	-
+tools/work/claim.py	delete	-	work-github	in-flight #2141
+tools/work/cleanup.py	delete	-	work-github	in-flight #2141
+tools/work/handoff.py	delete	-	work-github	in-flight #2141
+tools/work/release.py	delete	-	work-github	in-flight #2141
+tools/work/start.py	delete	-	work-github	in-flight #2141
+tools/work/*	move	scripts/work/	work-github	-
+tools/research/research.module.json	move	scripts/research/research.module.json	research	owner of #2139 may instead hand public-x to the global x-posts skill
+tools/research/*	move	scripts/research/	research	coordinate with #2139 (overlaps global x-posts skill)
+tools/web/web.module.json	move	packages/web/web.module.json	web-apps	package manifest
+tools/web/*	move	packages/web/	web-apps	Builds mini-app, preview fixtures, tron.css: product sources, not tooling; ios project.yml + e2e + share publisher updated
+tools/home-retro/DESIGN.md	move	packages/gateway/docs/home-retro.md	home-retro	Home owns the design; 2 relative links updated
+tools/home-retro/FINDINGS.md	delete	-	home-retro	dated evidence ledger; docs state current behavior only
+tools/home-retro/home-retro.module.json	delete	-	home-retro	directory disappears
+budgets.module.json	delete	-	manifest	tools/budgets merges into policy
+docs-index.module.json	move	scripts/policy/policy.module.json	manifest	merged into policy owner
+layers.module.json	merge	scripts/structure/structure.module.json	manifest	one structure owner
+metrics.module.json	merge	scripts/structure/structure.module.json	manifest	-
+ownership.module.json	merge	scripts/structure/structure.module.json	manifest	-
+verify.module.json	move	scripts/verify/verify.module.json	manifest	-
+work.module.json	move	scripts/work/work.module.json	manifest	-
+VERSION.env	move	config/version.env	version	scripts/tron, tron-version, docs, Base.xcconfig comment
+.codex/environments/environment.toml	delete	-	cli-entry	stale (scripts/tron dev -bdt/--stop no longer exist); no repo consumer; decision D6
+docs/restructure/plan.md	delete	-	ownership-structure	in-flight #2134
+docs/design/causal-auto-revert.md	merge	scripts/verify/batch.md	verify-select	zero inbound refs; keep only current-behavior content beside its owner
+docs/restructure/structure-plan.md	delete	-	ownership-structure	Phase-A scaffolding; deleted in S5
+docs/restructure/inventory*	delete	-	ownership-structure	Phase-A scaffolding; deleted in S5 (replaced by ownership --ledger)
+docs/restructure/*.tsv	delete	-	ownership-structure	Phase-A scaffolding; deleted in S5
+docs/restructure/audit/*	delete	-	ownership-structure	Phase-A scaffolding; deleted in S5
+docs/restructure/breadcrumbs/*	delete	-	ownership-structure	drafts land as real files in S1/S5
+docs/restructure/k0-kernel.md	move	packages/gateway/docs/kernel.md	ownership-structure	Gateway kernel contract belongs to the Gateway docs owner; ~8 links
+packages/ios-app/scripts/presentation-source-policy.py	merge	packages/ios-app/scripts/source-policy.py	ios-source-guards	two lexical Swift-source guards, one runner
+packages/ios-app/scripts/sheet-loading-source-policy.py	merge	packages/ios-app/scripts/source-policy.py	ios-source-guards	-
+packages/mac-app/scripts/fixtures/AppKitTerminationProbe.swift	move	packages/mac-app/Tests/Fixtures/AppKitTerminationProbe/AppKitTerminationProbe.swift	mac-install-replace	probes live in Tests/Fixtures
+packages/gateway/artifacts/pi-subagents-0.76.1-tron.[345678]*	delete	-	pi-sdk-pins	unreferenced superseded archives (pin keeps current + previous); ~30M
+packages/gateway/src/automations/tests/*	move	packages/gateway/src/automations/	gateway-test-placement	colocate
+packages/gateway/src/integrations/tests/*	move	packages/gateway/src/integrations/	gateway-test-placement	colocate
+packages/gateway/src/kernel/settings/settings-change.preparation.test.ts	move	packages/gateway/src/kernel/settings/settings-change.preparation.integration.test.ts	gateway-test-placement	naming rule
+packages/gateway/src/client/work-owner-status.ts	delete	-	work-github	loses its only consumer when #2141 lands (verify in #2141)

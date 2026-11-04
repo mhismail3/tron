@@ -16,7 +16,7 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-FIELDS = {"layer", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass"}
+FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass"}
 EDGE_FIELDS = {"to", "kind", "via", "why"}
 FORBIDDEN = set("[]{}\\")
 
@@ -133,7 +133,17 @@ def reject_duplicate_keys(pairs):
     return dict(pairs)
 
 
-def check(rev: str | None = None) -> tuple[dict, list[str]]:
+def modes_of(rev: str | None) -> dict[str, str]:
+    raw = git("ls-files", "-s", "-z") if rev is None else git("ls-tree", "-r", "-z", rev)
+    out = {}
+    for entry in raw.split(b"\0"):
+        if entry:
+            meta, path = entry.split(b"\t", 1)
+            out[path.decode("utf-8", "surrogateescape")] = meta.split()[0].decode()
+    return out
+
+
+def check(rev: str | None = None, layout: bool = False) -> tuple[dict, list[str]]:
     paths, read = inventory(rev)
     tracked = set(paths)
     manifests = [p for p in paths if p.endswith(SUFFIX)]
@@ -248,11 +258,15 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
                 problems.append(f"riskClass {risk!r} must be one of {', '.join(sorted(RISK_CLASSES))}")
         errors.extend(f"{manifest}: {p}" for p in problems)
 
+    if layout:
+        import layout as layout_rules
+        errors.extend(layout_rules.problems(paths, modes_of(rev), read))
+
     def listed(module: dict, key: str) -> list:
         value = module["data"].get(key)
         return value if isinstance(value, list) else []
 
-    summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
+    summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "purpose": m["data"].get("purpose", ""), "owned": m["owned"],
                          "verify": [c for c in listed(m, "verify") if isinstance(c, str)],
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
                          "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")
@@ -267,15 +281,26 @@ Without <rev>: the index's paths with working-tree contents. Exit 0 clean, 1 vio
 
 
 def main(argv: list[str]) -> int:
-    args = [a for a in argv if a != "--modules"]
+    args = [a for a in argv if a not in ("--modules", "--layout", "--ledger")]
     if any(a.startswith("-") for a in args) or len(args) > 1:
         print(USAGE, file=sys.stderr)
         return 2
     try:
-        result, errors = check(args[0] if args else None)
+        result, errors = check(args[0] if args else None, layout="--layout" in argv)
     except GitError as error:
         print(f"ownership: {error}", file=sys.stderr)
         return 2
+    if "--ledger" in argv:
+        import layout as layout_rules
+        _, read = inventory(args[0] if args else None)
+        owner = {path: (key, m) for key, m in result["modules"].items() for path in m["owned"]}
+        print("path\tmodule\tlayer\tpurpose")
+        for path in result["tracked"]:
+            key, module = owner.get(path, ("UNOWNED", {}))
+            tooling = (path.startswith("scripts/") or "/scripts/" in path) and not path.endswith((".json", ".md"))
+            text = layout_rules.purpose(read(path)) if tooling else ""
+            print(f"{path}\t{key}\t{module.get('layer', '')}\t{text or module.get('purpose', '')}")
+        return 1 if errors else 0
     if "--modules" in argv:
         for key, module in result["modules"].items():
             print(f"{key}\t{module['layer']}\t{len(module['owned'])}\t{module['manifest']}")

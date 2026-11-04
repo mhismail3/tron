@@ -1,0 +1,84 @@
+module	purpose	verdict	target
+gateway/admin	Gateway admin/settings/native-change/MCP surfaces	keep	-
+gateway/apps	Swift app offers/install for iOS apps	keep	-
+gateway/automations	durable automations runtime	keep	-
+gateway/automations-contract	automation wire contract types	keep	-
+gateway/client	terminal chat client and Gateway client	keep	-
+gateway/delegation	managed subagents (pi-subagents host)	keep	-
+gateway/display	display artifacts and live views	keep	-
+gateway/display-contract	display wire contract types	keep	-
+gateway/docs	Gateway owner docs	keep	-
+gateway/episodic	episodic memory	keep	-
+gateway/extension-activity	extension activity projection	keep	-
+gateway/extensions	extension loading	keep	-
+gateway/foundation	L0 config, errors, home paths, version	keep	-
+gateway/gateway-main	process entry and module composition	keep	-
+gateway/home	Home agent: tasks, memory, profile	keep	-
+gateway/host	Pi host and presentation	keep	-
+gateway/integrations	provider connections	keep	-
+gateway/integrations-contract	integrations wire contract types	keep	-
+gateway/lifecycle	process lifecycle and startup budget	keep	-
+gateway/machine	machine/worktree inspection	keep	-
+gateway/notifications	push notifications	keep	-
+gateway/package	Gateway package configuration (package.json, tsconfig, vitest, oxlint, layer baseline)	keep	-
+gateway/pi	Pi SDK seam	keep	-
+gateway/pi-sdk	Pi SDK / pi-subagents pins, artifacts, updaters and corpus	keep	-
+gateway/platform	platform helpers	keep	-
+gateway/projection	session projection	keep	-
+gateway/projects	project lifecycle (retiring under #2141 remainder)	keep	-
+gateway/protocol	wire protocol	keep	-
+gateway/providers	model providers	keep	-
+gateway/receipts	command receipts	keep	-
+gateway/resources	project resources and trust	keep	-
+gateway/run	runtime registry, run slot and sessions	keep	-
+gateway/run-model	run model types	keep	-
+gateway/runtime	runtime helpers	keep	-
+gateway/security	security, terminal SSH	keep	-
+gateway/session-catalog	canonical session catalog	keep	-
+gateway/session-search	session search	keep	-
+gateway/settings	settings schema and resolver	keep	-
+gateway/test-support	Gateway test harness and fixtures	keep	-
+gateway/transport	transport and RPC	keep	-
+gateway/util	L0 utilities	keep	-
+gateway/workspace	workspace tools registration	keep	-
+ios-app/app	iOS app shell	keep	-
+ios-app/auth	iOS auth	keep	-
+ios-app/automations	iOS automations/Home UI	keep	-
+ios-app/chat	iOS chat UI	keep	-
+ios-app/core	TronMobileCore framework	keep	-
+ios-app/docs	iOS owner docs	keep	-
+ios-app/e2e-tests	TronMobileE2ETests target	keep	-
+ios-app/hosted-fixtures	Hosted UI fixtures compiled into the app target	keep	-
+ios-app/mac-terminal-ssh	MacTerminalSSH SwiftPM package	keep	-
+ios-app/notifications	iOS notifications	keep	-
+ios-app/onboarding	iOS onboarding UI	keep	-
+ios-app/package	iOS package configuration (project.yml, xcconfigs, entitlements, test plans, scripts)	keep	-
+ios-app/presentation	shared presentation owners	keep	-
+ios-app/profiling	TronMobileProfiling target	keep	-
+ios-app/settings	iOS settings UI	keep	-
+ios-app/share-extension	share extension target	keep	-
+ios-app/state	iOS state layer	keep	-
+ios-app/swift-app-engine	TronSwiftAppEngine framework	keep	-
+ios-app/swift-app-ui-tests	TronSwiftAppUITests target	keep	-
+ios-app/swift-apps	Swift apps UI	keep	-
+ios-app/swift-apps-state	Swift apps state	keep	-
+ios-app/terminal	terminal UI	keep	-
+ios-app/ui-tests	TronMobileUITests target and UI locks	keep	-
+mac-app/app	TronMac app shell and resources	keep	-
+mac-app/docs	Mac owner docs	keep	-
+mac-app/gateway-payload	Gateway payload build/verify scripts	keep	-
+mac-app/integration-tests	TronMacIntegrationTests target and probes	keep	-
+mac-app/menu-bar	menu bar UI	keep	-
+mac-app/native-computer-control	computer-control SwiftPM package	keep	-
+mac-app/native-gateway-client	native Node addon	keep	-
+mac-app/native-host	native host target	keep	-
+mac-app/package	Mac package configuration	keep	-
+mac-app/search	search embedding helper	keep	-
+mac-app/server	Gateway server supervision	keep	-
+mac-app/support	L0 support	keep	-
+mac-app/wizard	setup wizard	keep	-
+protocol-fixtures/protocol-fixtures	shared wire constants read by Gateway tests and scripts	keep	-
+push-relay/push-relay	Cloudflare Worker APNs relay	keep	-
+repo/agents	cross-agent skills catalog (.agents)	keep	-
+repo/docs	repo docs (principles, runbook, design, restructure)	keep	-
+repo/root	root files (charter, readme, ignore rules, config/)	keep	-

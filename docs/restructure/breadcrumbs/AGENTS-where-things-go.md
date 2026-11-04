@@ -1,0 +1,31 @@
+# Draft: root AGENTS.md "Where things go" (lands in slice S1, final paths in S5)
+
+Budget: the charter stays ≤150 lines. This section is 11 lines; it replaces the
+Documentation section's owner list (4 lines) and the "Resources and cleanup" mention of
+scratch, and the Validation section's `tools/verify/README.md` link becomes
+`scripts/verify/README.md`. Net: +6 lines, offset by dropping the duplicated owner list in
+"Documentation" (−3) and folding the `Never git stash`/scratch clause (−3). Verified with
+`scripts/check-documentation-policy.py` when it lands.
+
+```markdown
+## Where things go
+- Root is fixed: `AGENTS.md README.md .gitignore .gitattributes .node-version root.module.json`
+  and `.agents/ .github/ .pi/ config/ docs/ packages/ scripts/`. Product code lives in
+  `packages/<pkg>/`; its README "Layout" says where its tests, fixtures and tooling go.
+- Repo tooling lives in `scripts/<area>/` beside its tests and one `<area>.module.json`;
+  people run it as `scripts/tron <command>` ([scripts/README.md](scripts/README.md)). Before
+  writing a script, search that table and `scripts/tron ownership --ledger`; extend the owner.
+- Every tracked file has one owner manifest; every script starts with a one-line purpose.
+  Remove a tool with its tests, manifest entry and `scripts/tron` arm in one change.
+- Scratch (workflow scripts, notes, drafts) goes only in `.scratch/`; evidence in
+  `test-results/`. Both are ignored and pruned (7/14 days); never commit them.
+- The pre-commit hook runs `scripts/tron ownership --layout`; each failure names its fix.
+  `scripts/tron tidy [--prune]` reports and clears residue, merged branches and worktrees.
+```
+
+Replacement for the Documentation owner line:
+
+```markdown
+- Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, each package README/`docs/`,
+  `scripts/README.md` and `scripts/tron --help`; skills only in `.agents/skills/`.
+```
