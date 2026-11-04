@@ -131,7 +131,7 @@ picks one of two by credential kind (`PAIRED_PER_MESSAGE_DEFLATE` in `src/transp
 | `connection.projection-rejected` | A producer broke the projection contract; fix that producer. |
 | `gateway.event-loop-delay` | GC pause near the delay → GC; utilization near 1 → the Gateway's own work; heavy swap or low `hostMemoryAvailablePercent` → the host. Observations, not attribution. |
 | Host fields on `connection.opened`/`closed` | The host was paging around the drop; evidence about the Mac only. |
-| `gateway.restart-drain.waiting` / `.stalled` | Blocker session, category, method, state, age; stalled means bounded shutdown, not success. |
+| `gateway.restart-drain.waiting` / `.stalled`; `gateway.stop-drain.waiting` | Blocker session, category, method, state, age; stalled means bounded shutdown, not success. A stop never stalls: its latest waiting record names what it still waits on. |
 
 The 25 s sampler cannot prove the absence of shorter stalls; a low current RSS says nothing
 about the historical peak.

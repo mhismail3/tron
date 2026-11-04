@@ -74,10 +74,32 @@ export function extensionActivityOwnsLiveWork(turns: OwnedTurnOwner, activity: E
 
 
 export function extensionActivityOwnsOwnLiveWork(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
+  if (!delegatedLifecycleOwner(turns, activity)) return false;
   const state = activity.lifecycle?.state;
   if (state === "queued" || state === "running") return true;
   if (state !== "paused") return false;
   return pausedProcessSettlementAt(turns, activity) === undefined;
+}
+
+
+/** A detached row is live only while a lifecycle the Gateway watches can settle it.
+ * Three routes qualify:
+ * - The row's owner is the installed delegated provider.
+ * - The row has no owner: an ownerless origin is the Gateway's own provider
+ *   attribution (`delegatedProviderOrigin`'s fallback for artifact-discovered runs).
+ * - Any tool's row whose run is bound to that exact tool call with a provider artifact
+ *   directory the Gateway admitted. Its watcher reads that directory's lifecycle files,
+ *   and their terminal state settles the row, so it is live, self-settling work. This
+ *   is the accepted rule and the behaviour locks pin it.
+ * Result fields `runId`/`state` without an admitted directory (a `schedule` runNow's
+ * queued automation run) describe state another owner keeps. Nothing here would ever
+ * settle them, so they never become live work, a drain blocker or a running dashboard
+ * phase. */
+function delegatedLifecycleOwner(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
+  const ownerId = activity.source.owner?.id;
+  if (ownerId === undefined || ownerId === turns.subagentExtensionOrigin().owner?.id) return true;
+  const binding = activity.runId === undefined ? undefined : turns.extensionRunOwnership.get(activity.runId);
+  return binding?.toolCallId === activity.toolCallId && binding.asyncDir !== undefined;
 }
 
 

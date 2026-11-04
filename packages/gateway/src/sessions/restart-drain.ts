@@ -1,5 +1,51 @@
 import type { AdministrativeDrainBlockerSummary, AdministrativeDrainSnapshot } from "../protocol/types.js";
 
+/** Reports blockers from the canonical drain loop without filling the persistent log. */
+export const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000;
+
+type DrainMode = "restart" | "stop";
+interface DrainLogger {
+  log(level: "info", message: string, metadata: { event: string; source: string }): void;
+}
+interface DrainOwner {
+  waitUntilIdle(continueDrain?: (snapshot: AdministrativeDrainSnapshot) => boolean): Promise<boolean>;
+  administrativeDrainSnapshot(): AdministrativeDrainSnapshot;
+}
+
+/** One `gateway.<mode>-drain.waiting` record naming every summarized blocker. */
+export function logDrainBlockers(logger: DrainLogger, mode: DrainMode, snapshot: AdministrativeDrainSnapshot): void {
+  const blockers = snapshot.blockers.map(({ sessionId, category, method, state, ageMs, progressAt }) => ({
+    ...(sessionId ? { sessionId } : {}), category, ...(method ? { method } : {}), state, ageMs: ageMs ?? null,
+    ...(progressAt ? { progressAt } : {}),
+  }));
+  logger.log("info", `Gateway ${mode} waiting on ${snapshot.blockerCount} operation(s): ${JSON.stringify(blockers)}`, {
+    event: `gateway.${mode}-drain.waiting`, source: "lifecycle",
+  });
+}
+
+/**
+ * The intentional stop's wait: it never cuts accepted work, so unlike the restart
+ * drain it has no stall bound (a stop exits 0 and nothing relaunches to recover cut
+ * work). What it shares is diagnosis: while blockers remain it names them on the
+ * restart drain's cadence. Resolves with the final snapshot for the caller's proof.
+ */
+export async function waitForStopDrain(
+  sessions: DrainOwner,
+  logger: DrainLogger,
+  intervalMs = DRAIN_WAIT_LOG_INTERVAL_MS,
+): Promise<AdministrativeDrainSnapshot> {
+  let lastWaitLogAt = Number.NEGATIVE_INFINITY;
+  await sessions.waitUntilIdle((snapshot) => {
+    const now = Date.now();
+    if (snapshot.blockerCount > 0 && now - lastWaitLogAt >= intervalMs) {
+      lastWaitLogAt = now;
+      logDrainBlockers(logger, "stop", snapshot);
+    }
+    return true;
+  });
+  return sessions.administrativeDrainSnapshot();
+}
+
 type RestartDrainDecision =
   | { outcome: "completed" }
   | { outcome: "waiting" }

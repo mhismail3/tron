@@ -28,7 +28,7 @@ import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./kernel/session/runtime-registry.js";
 import { startGatewayModules } from "./main/modules.js";
 import { GatewayWorkRegistry } from "./kernel/run/gateway-work-registry.js";
-import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/restart-drain.js";
+import { DRAIN_WAIT_LOG_INTERVAL_MS, logDrainBlockers, logUnresolvedDrainOwners, RestartDrainProgress, waitForStopDrain } from "./sessions/restart-drain.js";
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
@@ -662,7 +662,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
 }
 
 const DRAIN_STALL_LIMIT_MS = 180_000; // Bounds accepted work that stops making drain progress.
-const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000; // Reports blockers from the canonical drain loop without filling the persistent log.
 type AdministrativeExitMode = "restart" | "stop";
 interface AdministrativeExitOwner {
   mode: AdministrativeExitMode;
@@ -684,7 +683,7 @@ function requestAdministrativeExit(mode: AdministrativeExitMode, restartNow = fa
       const supersedesStop = administrativeExitOwner.mode === "stop";
       administrativeExitOwner.mode = "restart";
       const snapshot = sessions.administrativeDrainSnapshot();
-      logDrainBlockers(snapshot);
+      logDrainBlockers(logger, "restart", snapshot);
       logger.log("warning", supersedesStop
         ? "Gateway restart requested immediately during intentional stop"
         : "Gateway restart requested immediately during drain", { event: "gateway.restart-drain.stalled", source: "lifecycle" });
@@ -706,7 +705,7 @@ async function runRestartDrain(restartNow: boolean): Promise<void> {
   try {
     if (restartNow) {
       const snapshot = sessions.administrativeDrainSnapshot();
-      logDrainBlockers(snapshot);
+      logDrainBlockers(logger, "restart", snapshot);
       logger.log("warning", "Gateway restart requested immediately during drain", { event: "gateway.restart-drain.stalled", source: "lifecycle" });
       await shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
       return;
@@ -718,7 +717,7 @@ async function runRestartDrain(restartNow: boolean): Promise<void> {
       decision = progress.evaluate(snapshot, Date.now(), DRAIN_STALL_LIMIT_MS);
       if (decision.outcome === "stalled" || decision.outcome === "unresolved-owners") {
         if (decision.outcome === "stalled") {
-          logDrainBlockers(snapshot);
+          logDrainBlockers(logger, "restart", snapshot);
           logger.log("warning", `Gateway restart drain stalled: category=${decision.blocker.category} method=${decision.blocker.method ?? "none"} ageMs=${decision.ageMs}`, {
             event: "gateway.restart-drain.stalled", source: "lifecycle",
           });
@@ -734,7 +733,7 @@ async function runRestartDrain(restartNow: boolean): Promise<void> {
       const now = Date.now();
       if (now - lastWaitLogAt >= DRAIN_WAIT_LOG_INTERVAL_MS) {
         lastWaitLogAt = now;
-        logDrainBlockers(snapshot);
+        logDrainBlockers(logger, "restart", snapshot);
       }
       return true;
     });
@@ -752,21 +751,10 @@ async function runRestartDrain(restartNow: boolean): Promise<void> {
   }
 }
 
-function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDrainSnapshot>): void {
-  const blockers = snapshot.blockers.map(({ sessionId, category, method, state, ageMs, progressAt }) => ({
-    ...(sessionId ? { sessionId } : {}), category, ...(method ? { method } : {}), state, ageMs: ageMs ?? null,
-    ...(progressAt ? { progressAt } : {}),
-  }));
-  logger.log("info", `Gateway restart waiting on ${snapshot.blockerCount} operation(s): ${JSON.stringify(blockers)}`, {
-    event: "gateway.restart-drain.waiting", source: "lifecycle",
-  });
-}
-
 async function runStopDrain(): Promise<void> {
   logger.log("info", "Gateway stop scheduled after accepted work settles", { event: "gateway.stop-drain", source: "lifecycle" });
   try {
-    await sessions.waitUntilIdle();
-    const finalSnapshot = sessions.administrativeDrainSnapshot();
+    const finalSnapshot = await waitForStopDrain(sessions, logger);
     if (finalSnapshot.phase === "complete" && finalSnapshot.blockerCount === 0) {
       logger.log("info", "Gateway stop drain completed", { event: "gateway.stop-drain.completed", source: "lifecycle" });
       await shutdown("requested stop", 0, true);

@@ -35,6 +35,7 @@ export const nestedTestFiles = [
   "src/kernel/delegation/subagent-parity.integration.test.ts",
   "src/kernel/delegation/delegation.lock.integration.test.ts",
   "src/kernel/delegation/process-transcript-stop.integration.test.ts",
+  "src/kernel/delegation/managed-run-stop-drain.e2e.test.ts",
 ];
 
 export default defineConfig({

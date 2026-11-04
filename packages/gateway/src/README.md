@@ -109,6 +109,7 @@ Also the rows of `src/` modules that have no README yet: process lifecycle
 | `gateway.restart-drain.completed` | info | The drain reached zero blockers |
 | `gateway.restart-drain-failed` | error | The drain promise rejected: `error` |
 | `gateway.stop-drain` | info | The stop receipt settled and the process owner began waiting |
+| `gateway.stop-drain.waiting` | info | Every 15 s while the intentional stop waits, first at once: the blockers (`sessionId`, `category`, `method`, `state`, `ageMs`, `progressAt`) in the message. The stop has no stall bound, so the newest record names what it still waits on |
 | `gateway.stop-drain.completed` | info | No accepted-work blockers remain; cleanup begins |
 | `gateway.stop-drain.failed` | error | The stop wait rejected or the final snapshot could not prove completion; the Gateway keeps running with admission closed |
 | `process.uncaught-exception` | error | An uncaught exception reached the process: `error`, before `gateway.stopped` |
