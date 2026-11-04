@@ -74,10 +74,26 @@ export function extensionActivityOwnsLiveWork(turns: OwnedTurnOwner, activity: E
 
 
 export function extensionActivityOwnsOwnLiveWork(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
+  if (!delegatedLifecycleOwner(turns, activity)) return false;
   const state = activity.lifecycle?.state;
   if (state === "queued" || state === "running") return true;
   if (state !== "paused") return false;
   return pausedProcessSettlementAt(turns, activity) === undefined;
+}
+
+
+/** Only the delegated provider's lifecycle can settle a detached row, so only it can
+ * make one live: the row was authored by the installed provider's own owner, or its
+ * run is bound to this exact tool call with a provider artifact directory the Gateway
+ * admitted and watches. Another tool's `runId`/`state` result fields (a `schedule`
+ * runNow's queued automation run) describe state another owner keeps; nothing here
+ * ever settles them, so they never become live work, a drain blocker or a running
+ * dashboard phase. */
+function delegatedLifecycleOwner(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
+  const providerOwnerId = turns.subagentExtensionOrigin().owner?.id;
+  if (providerOwnerId !== undefined && activity.source.owner?.id === providerOwnerId) return true;
+  const binding = activity.runId === undefined ? undefined : turns.extensionRunOwnership.get(activity.runId);
+  return binding?.toolCallId === activity.toolCallId && binding.asyncDir !== undefined;
 }
 
 
