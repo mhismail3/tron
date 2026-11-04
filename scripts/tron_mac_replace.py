@@ -316,18 +316,15 @@ class Runner:
         A stop drains that work first, so a blocker that never settles would hold
         the runner after Quit with the app already gone. Work that settles within
         the platform's window (workers this operation just stopped, a finishing
-        turn) is waited for; anything left is named and nothing is quit.
+        turn) is waited for; anything left is named and nothing is quit. The
+        drain phase does not matter: a drain already in progress with a blocker
+        would hold the same way.
         """
         if getattr(self, 'offline_retry', False):
             return
         deadline, reported = time.monotonic() + self.platform.drain_settle_timeout, None
         while True:
             snapshot = self.platform.rpc('gateway.drain.status')
-            if snapshot.get('phase') in ('preparing', 'waiting'):
-                # A stop or restart drain is already running (a resumed runner's
-                # accepted Quit); join it rather than refuse work it already owns.
-                self.journal.note(f'{step}: joining the Gateway drain already in progress')
-                return
             if not snapshot.get('blockerCount'):
                 return
             summary, key = drain_blockers(snapshot)

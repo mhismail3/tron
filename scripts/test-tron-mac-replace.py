@@ -718,12 +718,30 @@ def drain_blocker_journey(base, home, root, calls, evidence):
     check(sent == ['home.taskList', 'gateway.drain.status', 'mac.replace.complete'],
           f'the runner reads drain status before any stop and sends no stop: {sent}', evidence)
 
+    data, sent = operation('draining', dict(blocked, phase='waiting'))
+    check(data['error']['step'] == 'stop-gateway' and 'detached-extension-run' in data['error']['message'] and lifecycle == [],
+          f'a drain already in progress with a blocker refuses the same way: {data.get("error")} {lifecycle}', evidence)
+
     idle = dict(blocked, blockerCount=0, blockerCounts={}, blockers=[])
     data, sent = operation('idle', idle)
     check(data['error']['step'] == 'stop-gateway' and 'fixture: Quit reached' in data['error']['message']
           and lifecycle == ['quit'] and data.get('stopRequested'),
           f'an idle Gateway proceeds to Quit as before: {data.get("error")} {lifecycle}', evidence)
     check(sent[:2] == ['home.taskList', 'gateway.drain.status'], f'idle drain status is read before Quit: {sent}', evidence)
+
+    # Work that settles inside the window (a worker this run just stopped) is waited for, then Quit proceeds.
+    import threading
+    platform.drain_settle_timeout = 30
+    settle = threading.Timer(3, lambda: snapshot.write_text(json.dumps(idle)))
+    settle.start()
+    try:
+        data, sent = operation('settling', blocked)
+    finally:
+        settle.cancel()
+    log = (root / 'settling/journal.log').read_text()
+    check(lifecycle == ['quit'] and 'fixture: Quit reached' in data['error']['message']
+          and 'waiting for accepted Gateway work: 2 blockers' in log and sent.count('gateway.drain.status') >= 2,
+          f'a blocker that settles within the window is waited for, then Quit proceeds: {lifecycle} {sent}', evidence)
 
 
 LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'

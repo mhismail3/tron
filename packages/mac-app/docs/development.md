@@ -226,14 +226,14 @@ scripts/tron mac replace --status --follow
 - **Drain check.** Before Quit (full) or the source update (quick), the runner reads
   `gateway.drain.status` and waits up to 5 minutes for accepted work to settle. Any blocker left
   fails the step naming its category, session and age; Tron is not quit and nothing is swapped.
-  Workers it already stopped stay resumable. A drain already in progress is joined.
+  Workers it already stopped stay resumable.
 - **Swap** clones `~/.tron` (`state-snapshot`), moves the Stable payload channel and old app into
   the operation directory and installs the verified build. A failure after the swap restores and
   verifies the previous app and payloads; the snapshot is never restored over newer data.
   Kept apps (`previous-app-<n>/Tron.app.kept`, `failed-app-<n>/Tron.app.kept`) are not `.app`
   bundles: Launch Services drops them on the rename and refuses to register them, so Finder,
   Spotlight and `open -b com.tron.mac` reach only `/Applications/Tron.app`. Rollback renames
-  the kept copy back and verifies it.
+  the kept copy back and verifies the restored Gateway's revision.
 - **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac
   verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`
   (current and previous kept); git and builds run with Homebrew's bin on `PATH` for git-lfs.
