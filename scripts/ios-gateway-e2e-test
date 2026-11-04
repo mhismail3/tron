@@ -1155,14 +1155,14 @@ run_ui_lane() {
     if ((ui_lanes > 1)); then
       journey_log="$run_root/journey-output.log"
       ui_queue_tool say "Real-UI journey $journey started on lane $test_lane"
-      ( run_ui_journey "$journey" "$xctestrun" ) >"$journey_log" 2>&1 &
+      ( journey_signal_traps; run_ui_journey "$journey" "$xctestrun" ) >"$journey_log" 2>&1 &
       ui_journey_pid=$!
       wait "$ui_journey_pid" || status=$?
       ui_journey_pid=""
       ui_queue_tool publish "$journey_log"
       rm -f "$journey_log"
     else
-      ( run_ui_journey "$journey" "$xctestrun" ) &
+      ( journey_signal_traps; run_ui_journey "$journey" "$xctestrun" ) &
       ui_journey_pid=$!
       wait "$ui_journey_pid" || status=$?
       ui_journey_pid=""
@@ -1171,6 +1171,18 @@ run_ui_lane() {
     ((status == 0)) || break
   done
   return 0
+}
+
+# A journey subshell keeps running until its foreground step has ended: bash runs
+# a caught signal's trap only after the foreground command returns, so a signal
+# that reaches the command tree lets the journey's process owner stop its
+# xcodebuild before the subshell exits. The command's own handler waits for the
+# subshell, so the app reset and fixture stop never race that teardown. (A
+# subshell left with the default disposition would die at once, mid-teardown.)
+journey_signal_traps() {
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
 }
 
 # This lane's own copy of the UI xctestrun, beside the built one so the products'
@@ -1269,7 +1281,7 @@ def lines(name):
 failed = lines("failed")
 if failed:
     status, journey = failed[0].split(" ", 1)
-    print(f"{status} first failed journey: {journey}")
+    print(f"{status} first failure: {journey}")
     raise SystemExit(0)
 # Every selected journey must have completed: one that was never claimed,
 # never finished, or lost from the queue fails the run.
@@ -1570,8 +1582,8 @@ handle_signal() {
     join_ui_lanes
   fi
   # The running journey received the same signal (the lease holder signals the
-  # whole command tree); its process owner stops its xcodebuild. Reset the app
-  # and stop the fixture only once it has ended.
+  # whole command tree) and exits only once its process owner has stopped its
+  # xcodebuild (journey_signal_traps). Reset the app and stop the fixture after.
   [[ -z "$ui_journey_pid" ]] || wait "$ui_journey_pid" 2>/dev/null || true
   # A signal ends a real-UI command before its tests finish: the hosted app is
   # still paired, and the E2E lane shares it. The signal's own exit stands even

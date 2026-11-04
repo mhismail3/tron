@@ -3748,6 +3748,22 @@ if "test-without-building" in arguments and "-resultBundlePath" in arguments:
     record({"action": "run", "test_filter": test_filter,
             "destination": arguments[arguments.index("-destination") + 1] if "-destination" in arguments else None,
             "targets": xctestrun_targets(arguments[arguments.index("-xctestrun") + 1]) if "-xctestrun" in arguments else None})
+    # `FAKE_XCODEBUILD_RUN_STARTED` (a path) is written once the run starts, which
+    # then runs until a signal; its teardown takes `FAKE_XCODEBUILD_TERM_DELAY`
+    # seconds and ends by appending `xcodebuild-ended` to the simctl log, so a
+    # case can order the teardown against the hosted-app reset.
+    if os.environ.get("FAKE_XCODEBUILD_RUN_STARTED"):
+        import signal
+        def ended(*_):
+            time.sleep(float(os.environ.get("FAKE_XCODEBUILD_TERM_DELAY") or 0))
+            with open(os.environ["FAKE_SIMCTL_LOG"], "a", encoding="utf-8") as handle:
+                handle.write("xcodebuild-ended\\n")
+            os._exit(143)
+        signal.signal(signal.SIGTERM, ended)
+        signal.signal(signal.SIGINT, ended)
+        Path(os.environ["FAKE_XCODEBUILD_RUN_STARTED"]).write_text("started")
+        while True:
+            time.sleep(0.05)
     # `FAKE_XCODEBUILD_RUN_BARRIER` (a directory) holds each run until
     # `FAKE_XCODEBUILD_RUN_BARRIER_COUNT` runs are in flight at once, so a case
     # proves journeys overlap; a run that waits alone fails.
@@ -4494,7 +4510,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         arguments = [argument for journey in journeys for argument in ("--only-testing", journey)]
         result = self.e2e("run-ui", *arguments, environment=environment)
         self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
-        self.assertIn(f"first failed journey: {journeys[0]}", result.stderr)
+        self.assertIn(f"first failure: {journeys[0]}", result.stderr)
         self.assertEqual(sorted(entry["test_filter"] for entry in self.ui_runs(environment)), sorted(journeys[:2]))
         reports = self.ui_reports()
         self.assertEqual(sorted(reports), sorted(journeys[:2]))
@@ -4519,7 +4535,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertFalse(calls.exists(), "a journey whose setup failed must not run: "
                                  + (calls.read_text() if calls.exists() else ""))
-                self.assertIn("first failed journey:", result.stderr)
+                self.assertIn("first failure:", result.stderr)
 
     def test_an_extra_lane_that_fails_after_running_journeys_fails_the_run(self) -> None:
         """#2253 review: an extra lane whose hosted-app reset fails after it ran
@@ -4534,6 +4550,49 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("lane default-ui2 ended (status 1)", result.stderr)
         self.assertEqual(sorted(self.ui_reports()), sorted(self.owned_ui_journeys()))
+
+    def test_a_signal_resets_the_app_only_after_the_journey_tore_down(self) -> None:
+        """#2253 review: a journey runs in a subshell; a signal must still let its
+        process owner stop xcodebuild before the command resets the hosted app
+        and stops the fixture, as the serial loop did, on one lane and on two."""
+        for lanes in ("1", "2"):
+            with self.subTest(lanes=lanes):
+                self.log_path.unlink(missing_ok=True)
+                started = self.root / f"run-started-{lanes}"
+                environment = self.ui_environment(
+                    TRON_IOS_E2E_UI_LANES=lanes, FAKE_XCODEBUILD_RUN_STARTED=str(started),
+                    FAKE_XCODEBUILD_TERM_DELAY="2", FAKE_XCODEBUILD_LOG=str(self.root / f"signal-xcodebuild-{lanes}.jsonl"),
+                )
+                journey = self.owned_ui_journeys()[0]
+                process = subprocess.Popen(
+                    [str(E2E), "run-ui", "--only-testing", journey],
+                    env=self.readiness_node_environment(environment),
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+                )
+                try:
+                    deadline = time.monotonic() + 90
+                    while not started.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    self.assertTrue(started.exists(), process.poll() is not None and process.communicate()[1])
+                    os.killpg(process.pid, signal.SIGTERM)
+                    _, stderr = process.communicate(timeout=120)
+                    self.assertEqual(process.returncode, 128 + signal.SIGTERM, stderr)
+                    lines = self.log_path.read_text().splitlines()
+                    ended = [index for index, line in enumerate(lines) if line == "xcodebuild-ended"]
+                    # The reset of the lane that ran the journey; an idle extra lane resets at once.
+                    runs = self.ui_runs(environment)
+                    self.assertEqual(len(runs), 1, runs)
+                    udid = runs[0]["destination"].rsplit("id=", 1)[1]
+                    resets = [index for index, line in enumerate(lines) if line.startswith(f"uninstall {udid} ")]
+                    self.assertEqual(len(ended), 1, lines)
+                    self.assertTrue(resets, lines)
+                    self.assertLess(ended[0], resets[0], f"the app was reset before the journey tore down: {lines}")
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=30)
+                    self.close_pipes(process)
+                    self.e2e("stop", environment=environment)
 
     def test_an_extra_lane_that_cannot_be_leased_costs_no_coverage(self) -> None:
         """#2253: an extra lane another command holds exits 73 without running a
