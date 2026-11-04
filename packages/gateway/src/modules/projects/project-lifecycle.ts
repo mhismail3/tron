@@ -205,8 +205,7 @@ export class ProjectLifecycle {
     catch { signal?.throwIfAborted(); throw new GatewayError("conflict", "Git command did not complete; inspect project state before retrying"); }
   }
   private git(path: string, args: string[], signal?: AbortSignal): Promise<string> {
-    // Even read-only log inspection can launch a repository-configured verifier.
-    return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "log.showSignature=false", ...args], path, signal);
+    return this.command("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", ...args], path, signal);
   }
   private async inspect(action: Action, signal?: AbortSignal, shared?: ProjectOccupancy) {
     signal?.throwIfAborted();

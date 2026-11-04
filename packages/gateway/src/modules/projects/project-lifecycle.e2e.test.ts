@@ -287,6 +287,41 @@ if (args.includes("worktree")) {
     expect((await f.changes.record.page({ limit: 50 })).entries).toEqual(before);
   });
 
+  it("retains the native response fence when a failed create's audit publication also fails", async () => {
+    const f = await fixture(), audit = f.changes.record.path, retained = audit + "-retained";
+    const realGit = (await exec("/usr/bin/which", ["git"])).stdout.trim();
+    const bin = join(f.root, "failing-init-bin"), counter = join(f.root, "init-calls");
+    await mkdir(bin);
+    // Real Git for every read; `init` blocks the canonical audit file, then fails.
+    await writeFile(join(bin, "git"), `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = init ]; then
+    printf attempt >> ${JSON.stringify(counter)}
+    mv ${JSON.stringify(audit)} ${JSON.stringify(retained)}
+    printf blocked > ${JSON.stringify(audit)}
+    exit 7
+  fi
+done
+exec ${JSON.stringify(realGit)} "$@"
+`, { mode: 0o700 });
+    const reviewed = await f.create("uncertain-init");
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    try {
+      await expect(f.decide(reviewed)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+    } finally { vi.unstubAllEnvs(); }
+    expect((await f.trust.inspect(f.path("uncertain-init"))).effectiveDecision).toBe(false);
+    await rm(audit); await rename(retained, audit);
+    const directory = join(f.tronHome, "gateway", "command-receipts");
+    const receipts = await Promise.all((await readdir(directory)).filter(name => name.endsWith(".json")).map(async name =>
+      JSON.parse(await readFile(join(directory, name), "utf8"))));
+    const pending = receipts.filter(receipt => receipt.method === "extension.respond" && receipt.status === "pending");
+    expect(pending).toHaveLength(1);
+    await expect(f.service.invoke(phone, "extension.respond", { commandId: pending[0].commandId })).rejects.toMatchObject({
+      code: "conflict", details: { outcomeUnknown: true } });
+    expect(await readFile(counter, "utf8")).toBe("attempt");
+    evidence.push({ failedAuditReceipt: pending[0], partialCreateRetained: true });
+  });
+
   it("native folder paths and cursors are exact and never trim into another project", async () => {
     const f = await fixture();
     await f.decide(await f.create("exact-native"));
@@ -481,6 +516,32 @@ if (args.includes("worktree")) {
       expect((await f.registry.create(project.cwd)).cwd).toBe(project.cwd);
       expect((error as Error).message).not.toMatch(/remains fenced/);
     } finally { release(); await prompt; }
+  });
+
+  it("a failed trust application with successful compensation restores trusted project resources without retiring the session", async () => {
+    const f = await fixture();
+    await f.decide(await f.create("restored-source"));
+    const source = f.path("restored-source");
+    await mkdir(join(source, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(source, ".pi", "extensions", "restoration-probe.ts"), `export default function(pi) {
+  pi.registerTool({ name: "restoration_probe", label: "Restoration", description: "Trusted resource proof",
+    parameters: { type: "object", properties: {} },
+    execute: async () => ({ content: [{ type: "text", text: "trusted resource" }] }) });
+}`);
+    const slot = await f.registry.create(source);
+    const tools = () => (slot as unknown as { runtime: { session: { getAllTools(): Array<{ name: string }> } } }).runtime.session.getAllTools().map(tool => tool.name);
+    expect(tools()).toContain("restoration_probe");
+    let applications = 0;
+    await expect(f.trust.setAndApply(source, false, async inspection => {
+      await f.registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false);
+      if (++applications === 1) throw new Error("Fixture failure after the first native reload");
+    }, inspection => f.registry.commitProjectReload(inspection.projectDir),
+    inspection => f.registry.abortProjectReload(inspection.projectDir))).rejects.toThrow(/first native reload/);
+    expect(applications).toBe(2);
+    expect((await f.trust.inspect(source)).effectiveDecision).toBe(true);
+    expect(slot.isDisposed).toBe(false);
+    expect(tools()).toContain("restoration_probe");
+    expect((await f.registry.create(source)).cwd).toBe(source);
   });
 
   it("failed application and compensation retire uncertain runtimes and release native project admission", async () => {

@@ -332,7 +332,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             result = .object(["workspace": .string("/fixture/projects"), "projects": .array([
                 .object(["name": .string("Example"), "path": .string("/fixture/projects/Example"),
                     "trust": .object(["effectiveDecision": .bool(true)]),
-                    "eligibility": .object(Dictionary(uniqueKeysWithValues: ["trust", "github", "rename", "archive", "untrust"].map {
+                    "eligibility": .object(Dictionary(uniqueKeysWithValues: ["trust", "untrust"].map {
                         ($0, JSONValue.object(["allowed": .bool(true)]))
                     }))])
             ]), "nextCursor": .null])
