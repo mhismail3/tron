@@ -2090,7 +2090,6 @@ export class GatewayService {
       case "packages.checkUpdates":
         rejectUnknownFields(params, ["cwd"], "Package update check");
         return safeJson(await this.dependencies.packages.checkUpdates(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
-      case "packages.install":
       case "packages.remove":
       case "packages.update":
         rejectUnknownFields(params, ["commandId", "cwd", "source", "local"], "Package mutation");
@@ -2101,7 +2100,7 @@ export class GatewayService {
           let result: Awaited<ReturnType<PackageService["mutate"]>>;
           try {
             result = await this.dependencies.packages.mutate(
-              method.slice("packages.".length) as "install" | "remove" | "update",
+              method === "packages.update" ? "update" : "remove",
               method === "packages.update" ? optionalString(params.source, "source", 2_000) : string(params.source, "source", { max: 2_000 }),
               cwd,
               local,

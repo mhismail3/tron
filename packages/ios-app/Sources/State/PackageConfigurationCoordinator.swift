@@ -3,7 +3,6 @@ import Observation
 import TronMobileCore
 
 enum PackageMutationAction: String, Sendable {
-    case install
     case update
     case remove
 }
