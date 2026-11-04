@@ -117,7 +117,7 @@ pinned provider limits.
 
 Implement storage only alongside its production capability and focused tests.
 The [Profile contract](../src/modules/home/profile.md) owns current-format personal
-notes. Only the offline retirement converter reads old Knowledge. Constructing a
+notes. Nothing reads old Knowledge. Constructing a
 capability service alone must not create real namespace state.
 
 - One explicit owner per namespace; bounded reads, schema version, revision and
