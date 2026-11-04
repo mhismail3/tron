@@ -17,6 +17,8 @@ subprocess `TRON_FULL_GATEWAY_LOCK_HELD=1`; `verify --all` and the affected-chec
 unmarked, so their Gateway groups queue for themselves. Gateway runs never overlap, and a
 pre-land run waits only for the batch's own Gateway runs, never its iOS lanes. Holders are never interrupted; a lane still
 waiting after 45 minutes is uncovered naming the holder, earlier waiters and its wait, never skipped.
+Unmarked runs (the verifier's Gateway groups, verifier-step probes, the candidate's affected
+checks) wait in the same queue without a cap, like any pre-land run; no holder waits on the batch.
 Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
 required lane runs, even after failures: locks/declared consumers (`verify --all`), full
 default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned

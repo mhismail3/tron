@@ -117,6 +117,9 @@ if sys.argv[1:3] == ['work','issue'] or sys.argv[1:3] == ['work','comment']:
     print('created issue #100')
     sys.exit(0)
 Path('test-results').mkdir(exist_ok=True)
+# The verifier and the candidate's affected checks run their Gateway groups through the real runner,
+# which skips the host lock when this marker is set; only a batch Gateway lane may pass it on.
+if os.environ.get('TRON_FULL_GATEWAY_LOCK_HELD'): sys.exit('verify ran marked as holding the full-Gateway lock')
 with Path('test-results/executed').open('a') as f: f.write(' '.join(sys.argv[1:3])+'\\n')
 import subprocess
 affected = '--changed' in sys.argv and os.environ.get('FIXTURE_AFFECTED')
@@ -310,6 +313,16 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)
 
+    def test_an_inherited_held_lock_marker_reaches_only_the_gateway_lanes(self):
+        # A batch started under a caller's marker must not pass it to lanes that do not hold the lock.
+        self.land('good', 'yes')
+        self.env['TRON_FULL_GATEWAY_LOCK_HELD'] = '1'
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'green')
+        self.assertEqual([lane['name'] for lane in report['results'] if lane.get('fullGatewayLock')], ['Gateway default', 'Gateway nested'])
+
     def test_repeat_requires_explicit_flag_and_executes_all_lanes(self):
         self.land('good', 'yes')
         first = self.run_batch('--base', self.base)
@@ -384,7 +397,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(fresh.count((culprit, 'bad')), 2)
         self.assertEqual(fresh.count((proof['parent'], 'good')), 2)
         self.assertTrue(all(p['command'][-2:] == ['-t', '^suite\\ >\\ group\\ >\\ case$'] for p in proof['probes']))
-        self.assertTrue(all(p['selectedTests'] == 1 for p in proof['probes'] if p['fresh']))
+        self.assertTrue(all(p['selectedTests'] == 1 for p in proof['probes'] if p.get('fresh')))
         repair = failure['repair']
         self.assertEqual(repair['state'], 'publication-disabled')
         self.assertEqual(self.git('rev-parse', 'revert/' + culprit), repair['candidate'])
@@ -1210,6 +1223,25 @@ class ShardedIosProbeTests(unittest.TestCase):
             lane = {'name': 'tests: ios 2/3', 'command': ['python3', str(stub), str(root / 'run')], 'cwd': '.', 'probe': True}
             result = batch.execute(root, lane, root / 'probe')
         self.assertEqual(result['exit'], 0, result)
+
+    def test_a_verifier_gateway_step_probe_records_how_many_tests_it_selected(self):
+        # A full-verify Gateway step probe counts failed as well as passed cases as selected, so a
+        # reproducing failure is never mistaken for an empty selection, and an empty one is visible.
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        for passed, failed, selected in ((0, 1, 1), (0, 0, 0)):
+            with self.subTest(passed=passed, failed=failed), tempfile.TemporaryDirectory(prefix='tron-batch-probe-') as temporary:
+                root = Path(temporary)
+                stub = root / 'vitest.py'
+                stub.write_text('import json, pathlib, sys\n'
+                                'out = pathlib.Path(sys.argv[1].split("=", 1)[1])\n'
+                                f'out.write_text(json.dumps({{"numPassedTests": {passed}, "numFailedTests": {failed}, "testResults": []}}))\n'
+                                f'sys.exit({failed})\n')
+                lane = {'name': 'tests: gateway', 'command': ['python3', str(stub), f'--outputFile.json={root / "step-vitest.json"}'],
+                        'cwd': '.', 'probe': True}
+                result = batch.execute(root, lane, root / 'probe')
+                self.assertEqual(result['selectedTests'], selected, result)
 
 
 class BrowserForkProvisionTests(unittest.TestCase):

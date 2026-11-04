@@ -235,6 +235,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         if vitest and vitest.exists():
             data = json.loads(vitest.read_text())
             count = data.get('numPassedTests', 0)
+            result['selectedTests'] = count + data.get('numFailedTests', 0)
             failures = [f"{Path(suite['name']).name} > {test['fullName']}" for suite in data.get('testResults', [])
                         for test in suite.get('assertionResults', []) if test.get('status') == 'failed']
             shutil.copy2(vitest, directory / 'vitest.json')

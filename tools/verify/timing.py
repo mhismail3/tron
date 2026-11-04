@@ -106,6 +106,8 @@ def bundle_timing(bundle: Path, errors: list[str]) -> dict:
         case = {'test': node.get('nodeIdentifier'), 'result': node.get('result'), 'seconds': node.get('durationInSeconds')}
         try:
             case.update(activities(bundle, node['nodeIdentifier']))
+        except subprocess.TimeoutExpired:
+            raise
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
             errors.append(f"activities {bundle} {node.get('nodeIdentifier')}: {error}")
         cases.append(case)
@@ -156,6 +158,10 @@ def lane_timing(result: dict, directory: Path, root: Path) -> dict:
     for bundle in dict.fromkeys(path for text in texts.values() for path in bundles(text)):
         try:
             results.append(bundle_timing(bundle, errors))
+        except subprocess.TimeoutExpired as error:
+            # A hung xcresulttool would cost every remaining bundle the same wait; stop observing.
+            errors.append(f'{bundle}: {error}; remaining result bundles not read')
+            break
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
             errors.append(f'tests {bundle}: {error}')
     if results:

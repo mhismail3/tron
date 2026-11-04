@@ -16,7 +16,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 # The host's one full-Gateway run at a time, shared with `verify --batch`. A run waits its turn
-# for it instead of overlapping a batch; batch lanes already hold it and say so in their environment.
+# for it instead of overlapping a batch Gateway lane; such a lane holds it and says so in its environment.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 HELD_BY_CALLER = 'TRON_FULL_GATEWAY_LOCK_HELD'
 
