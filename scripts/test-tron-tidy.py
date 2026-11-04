@@ -11,7 +11,7 @@ and `tools/ownership/*.py`, and runs the command as a worker would:
    tooling no code names, and a pre-commit hook that differs from install-hooks.sh.
 2. A report run deletes nothing.
 3. `--prune` removes only expired scratch/evidence, bytecode, branches merged into
-   origin/main that no worktree has checked out (printing the restore command) and merged
+   origin/main (not merely into a local, unpushed main) that no worktree has checked out (printing the restore command) and merged
    worktrees with no local files, no process inside and no HEAD activity for 3 days.
    Unmerged work, ignored local files such as `.env.local`, a live process, recent
    activity, residue and orphan directories are kept.
@@ -87,9 +87,11 @@ class Fixture:
         target.write_text(content)
         return target
 
-    def commit(self, cwd: Path, message: str) -> None:
+    def commit(self, cwd: Path, message: str, days_old: float = 0) -> None:
         self.git(cwd, "add", "-A")
-        self.git(cwd, "commit", "-q", "--no-verify", "-m", message)
+        when = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - days_old * DAY))
+        subprocess.run(["git", "commit", "-q", "--no-verify", "-m", message], cwd=cwd, check=True, capture_output=True,
+                       env={**self.env, "GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when})
 
     def worktree(self, name: str, *, merged: bool, idle_days: float) -> Path:
         path = self.trees / name
@@ -105,11 +107,11 @@ class Fixture:
             age(gitdir / name_, idle_days)
         return path
 
-    def branch(self, name: str, *, merged: bool) -> str:
+    def branch(self, name: str, *, merged: bool, days_old: float = 0) -> str:
         self.git(self.repo, "branch", name, "main")
         self.git(self.repo, "checkout", "-q", name)
         self.write(f"{name}.txt", name)
-        self.commit(self.repo, name)
+        self.commit(self.repo, name, days_old)
         sha = self.git(self.repo, "rev-parse", "HEAD")
         self.git(self.repo, "checkout", "-q", "main")
         if merged:
@@ -210,6 +212,8 @@ class PruneTests(TidyCase):
         self.unmerged = f.worktree("unmerged", merged=False, idle_days=20)
         self.done = f.branch("done", merged=True)
         self.wip = f.branch("wip", merged=False)
+        f.branch("local-only", merged=False, days_old=20)  # merged into this checkout's main, never pushed
+        f.git(f.repo, "merge", "-q", "--no-ff", "--no-edit", "local-only")
         age(f.write(".scratch/old.js"), 10)
         f.write(".scratch/new.js")
         f.write("tools/ownership/__pycache__/x.pyc")
@@ -231,7 +235,7 @@ class PruneTests(TidyCase):
         branches = f.git(f.repo, "branch", "--format=%(refname:short)").splitlines()
         self.assertNotIn("done", branches)
         self.assertIn(f"tidy: pruned branch done (restore: git branch done {self.done})", out)
-        for kept in ("wip", "unmerged", "merged-local", "merged-live", "merged-recent"):
+        for kept in ("wip", "local-only", "unmerged", "merged-local", "merged-live", "merged-recent"):
             self.assertIn(kept, branches)
         self.assertIn("tidy: branches: ", out)
 
