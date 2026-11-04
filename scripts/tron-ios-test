@@ -21,6 +21,7 @@ PROCESS="$ROOT/scripts/ios-test-process.py"
 SIMULATOR="$ROOT/scripts/ios-test-simulator.py"
 LOCKER="$ROOT/scripts/ios-test-lock.py"
 IDENTITY="$ROOT/scripts/ios-test-build-identity.py"
+FAILURES="$ROOT/scripts/xcresult-failures.py"
 
 EXIT_TEST_FAILURE=65
 EXIT_DESTINATION=66
@@ -571,6 +572,7 @@ Path(os.environ["TRON_RUN_OWNER_PATH"]).write_text(json.dumps({
 }, indent=2, sort_keys=True) + "\n")
 PY
 result_bundle="$run_dir/TestResults.xcresult"
+build_result_bundle="$run_dir/Build.xcresult"
 summary_path="$run_dir/summary.json"
 metadata_path="$run_dir/metadata.json"
 
@@ -639,6 +641,7 @@ run_process() {
 
 build_products() {
   "$ROOT/scripts/generate-xcode-project" ios
+  local build_status=0
   run_process build "${TRON_IOS_TEST_BUILD_TIMEOUT_SECONDS:-1800}" \
     "${TRON_IOS_TEST_BUILD_NO_OUTPUT_SECONDS:-300}" "$DERIVED_DATA/Build/Products" \
     "$ROOT/scripts/tron-xcodebuild" build-for-testing \
@@ -650,7 +653,14 @@ build_products() {
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
       -enableCodeCoverage YES \
-      -showBuildTimingSummary
+      -resultBundlePath "$build_result_bundle" \
+      -showBuildTimingSummary || build_status=$?
+  if ((build_status != 0)); then
+    # The raw log is the evidence; the compact block names each error's file:line.
+    python3 "$FAILURES" --build --root "$ROOT" "$build_result_bundle" >&2 || true
+    echo "iOS build failed with status $build_status: $run_dir/build.log" >&2
+    return "$build_status"
+  fi
   # Stamp only after a successful build, so a failed rebuild never leaves
   # products claiming a source state they were not built from.
   printf '%s\n' "$source_identity" \
@@ -793,6 +803,7 @@ run_tests() {
     write_coverage
     echo "iOS test run complete: $run_dir"
   else
+    python3 "$FAILURES" --tests --root "$ROOT" "$result_bundle" >&2 || true
     echo "iOS test run failed with status $test_status: $run_dir" >&2
   fi
   return "$test_status"
