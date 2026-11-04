@@ -61,6 +61,23 @@ def lanes(root: Path, base: str) -> list[dict]:
     return result
 
 
+def case_names(data: dict, failed: dict, root: Path) -> dict:
+    """Each failed identity's describe titles and test title, the parts Vitest's `-t` matches joined with ' > '.
+
+    The reporter's `fullName` joins them with spaces, so it cannot be split back into a selector."""
+    names = {}
+    for suite in data.get('testResults', []):
+        try:
+            file = Path(suite['name']).resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        for test in suite.get('assertionResults', []):
+            identity = f"{file}::{test.get('fullName')}"
+            if identity in failed and test.get('title') is not None:
+                names[identity] = [*test.get('ancestorTitles', []), test['title']]
+    return names
+
+
 def signature(message: str, failures: list[str], output: str, root: Path) -> dict | None:
     # A test identity alone cannot distinguish a code regression from setup failing
     # in that same case (for example missing staged products at the baseline).
@@ -179,6 +196,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         if vitest and vitest.exists():
             data = json.loads(vitest.read_text())
             result['passingTests'] = data.get('numPassedTests', 0)
+            result['selectedTests'] = data.get('numPassedTests', 0) + data.get('numFailedTests', 0)
+            result['caseNames'] = case_names(data, failed, root)
             if (not case_complete or not (data.get('numPassedTests', 0) + data.get('numFailedTests', 0))
                     or data.get('numPendingTests') or data.get('numPendingTestSuites')):
                 result.update(status='uncovered', reason='empty or skipped cases')
@@ -257,6 +276,10 @@ def prepare(root: Path, directory: Path) -> bool:
 
 
 
+class ProbeSelectionError(verify.VerifyError):
+    """An exact-case recipe ran zero tests where the case is known to exist: a tooling error, never 'unresolved'."""
+
+
 class Prober:
     """One disposable worktree runs every exact-case execution of one investigation.
 
@@ -278,7 +301,7 @@ class Prober:
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return subprocess.run(['git', *args], cwd=self.root, check=check, capture_output=True, text=True)
 
-    def probe(self, sha: str, hint: bool = False) -> str:
+    def probe(self, sha: str, hint: bool = False, selection_required: bool = False) -> str:
         key = hashlib.sha256(json.dumps([sha, self.failed['name'], self.failed['signature']], sort_keys=True).encode()).hexdigest()
         cache = self.cache / f'{key}.json'
         if hint and cache.exists():
@@ -301,6 +324,12 @@ class Prober:
             outcome = execute(self.root, {**self.failed['probe'], 'probe': True}, attempt)
         finally:
             stop_fixture(self.root, attempt / 'stop')
+        if selection_required and outcome.get('selectedTests') == 0:
+            # The case failed at this commit, so a recipe selecting nothing is a broken selector, not a non-reproduction.
+            self.record['probes'].append({'commit': sha, 'outcome': 'selector-error', 'fresh': True, **outcome})
+            save(self.directory / 'progress.json', self.record)
+            raise ProbeSelectionError(f"attribution probe for {self.failed['name']} selected no tests at {sha[:12]}: "
+                                      f"{shlex.join(outcome['executedCommand'])}")
         if outcome.get('status') == 'uncovered' or outcome.get('exit') is None:
             state = 'unknown'
         elif outcome['exit'] == 0:
@@ -317,9 +346,9 @@ class Prober:
         save(self.directory / 'progress.json', self.record)
         return state
 
-    def controls(self, sha: str, expected: str) -> bool:
+    def controls(self, sha: str, expected: str, selection_required: bool = False) -> bool:
         """Two fresh executions must both observe `expected`; any mixture refuses."""
-        return all(self.probe(sha) == expected for _ in range(2))
+        return all(self.probe(sha, selection_required=selection_required) == expected for _ in range(2))
 
     def close(self) -> None:
         # Never erase a probe whose owning resource helper could not clean it.
@@ -368,7 +397,7 @@ def attribute(base: str, head: str, failed: dict, prober: Prober) -> dict:
     if octopus:
         result['unsupportedHistory'] = octopus
         return unresolved('octopus landing on main first-parent history')
-    if not prober.controls(head, 'bad'):
+    if not prober.controls(head, 'bad', selection_required=True):
         return unresolved('head did not reproduce the exact failure in two fresh executions')
     # `base` is the last raw-green batch; the search assumes it, the parent control proves it.
     low, high = -1, len(commits) - 1
@@ -635,11 +664,14 @@ def failure_cases(outcome: dict) -> list[dict]:
     cases = []
     if outcome.get('vitest') and outcome.get('failureComplete'):
         for identity, digest in outcome.get('failures', {}).items():
-            file, case = identity.split('::', 1)
+            file = identity.split('::', 1)[0]
+            names = outcome.get('caseNames', {}).get(identity)
+            if not names:
+                continue
             command = outcome['command']
             cases.append({**outcome, 'signature': {'failures': {identity: digest}},
                           'probe': {'name': outcome['name'], 'vitest': True,
-                                    'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(case) + '$']}})
+                                    'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(' > '.join(names)) + '$']}})
     # Other owners may only be probed if the recorded invocation is already a case filter.
     elif outcome.get('xctestCases') and outcome.get('signature'):
         for case in outcome['xctestCases']:
@@ -984,6 +1016,7 @@ def main(argv: list[str]) -> int:
                     if not cases:
                         outcome.update(status='uncovered', reason='owner provided no exact-case attribution selector')
                     for case_index, failed in enumerate(cases or [outcome]):
+                        report['activeLane'] = f"attribution: {failed['name']}"
                         attribution_directory = directory / f'attribution-{index}-{case_index}'
                         attribution, journal = investigate(base, head, failed, attribution_directory, state,
                                                            {'redReport': str(directory / 'first-report.json'), 'evidence': str(manifest)})
@@ -1016,7 +1049,7 @@ def main(argv: list[str]) -> int:
                 except (OSError, ValueError, subprocess.SubprocessError) as issue_error:
                     report['issueError'] = str(issue_error)
                 save(path, report)
-                print(f'batch: ERROR; partial evidence {path}; last-green unchanged', flush=True)
+                print(f'batch: ERROR ({error}); partial evidence {path}; last-green unchanged', flush=True)
                 return 2
             finally:
                 try:

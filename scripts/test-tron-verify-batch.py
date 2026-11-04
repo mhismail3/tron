@@ -135,7 +135,7 @@ if affected == 'red': verdict = 'failed'
 Path('test-results/verify',sha+'.json').write_text(json.dumps({'commit':sha,'verdict':verdict,'message':'locks passed','passingTests':1,'steps':[],'selection':{},'skipped':[]}))
 sys.exit(1 if verdict == 'failed' else 0)
 ''', True)
-        self.write('tools/verify/gateway.py', '''import json,os,sys,time,subprocess
+        self.write('tools/verify/gateway.py', '''import json,os,re,sys,time,subprocess
 from pathlib import Path
 # A batch lane runs under the batch's full-Gateway lock and must say so, or the real
 # runner would wait on the lock its own batch holds.
@@ -160,14 +160,18 @@ if (root/'unstable-repeat').exists() and '-t' in args and failed:
     count=int(counter.read_text()) if counter.exists() else 0
     counter.write_text(str(count+1))
     if count: failed=False
-if '-t' in args and args[args.index('-t')+1] != '^suite\\\\ case$':
-    raise SystemExit('wrong exact case filter')
+# Like Vitest 5: the reporter's fullName joins titles with spaces, but -t matches them joined with ' > '
+# (createTaskName), and a case it does not match is skipped.
+titles=['suite','group','other' if (root/'renamed-probe').exists() and '-t' in args else 'case']
+selected='-t' not in args or re.search(args[args.index('-t')+1],' > '.join(titles))
+failed=failed and bool(selected)
 output=Path(next(a.split('=',1)[1] for a in args if a.startswith('--outputFile.json=')))
 output.parent.mkdir(parents=True,exist_ok=True)
-data={'numPassedTests':0 if failed else 1,'numFailedTests':1 if failed else 0,
+status='failed' if failed else 'passed' if selected else 'skipped'
+data={'numPassedTests':int(status=='passed'),'numFailedTests':int(failed),'numPendingTests':int(not selected),
       'testResults':[{'name':str(root/'packages/gateway/src/example.test.ts'),
        'status':'failed' if failed else 'passed','assertionResults':[
-        {'fullName':'suite case','status':'failed' if failed else 'passed',
+        {'ancestorTitles':titles[:-1],'title':titles[-1],'fullName':' '.join(titles),'status':status,
          'failureMessages':['AssertionError: stable failure'] if failed else []}]}]}
 if (root/'changed-signature').exists() and '-t' in args and failed:
     data['testResults'][0]['assertionResults'][0]['failureMessages']=['AssertionError: different failure']
@@ -379,7 +383,8 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(fresh.count((head, 'bad')), 2)
         self.assertEqual(fresh.count((culprit, 'bad')), 2)
         self.assertEqual(fresh.count((proof['parent'], 'good')), 2)
-        self.assertTrue(all('-t' in p['command'] for p in proof['probes']))
+        self.assertTrue(all(p['command'][-2:] == ['-t', '^suite\\ >\\ group\\ >\\ case$'] for p in proof['probes']))
+        self.assertTrue(all(p['selectedTests'] == 1 for p in proof['probes'] if p['fresh']))
         repair = failure['repair']
         self.assertEqual(repair['state'], 'publication-disabled')
         self.assertEqual(self.git('rev-parse', 'revert/' + culprit), repair['candidate'])
@@ -465,6 +470,26 @@ if sys.argv[1] in ('run', 'checkpoint'):
         proof = self.reports()[-1]['failures'][0]['attribution']
         self.assertEqual(proof['status'], 'unresolved')
         self.assertEqual([p['outcome'] for p in proof['probes'] if p['commit'] == self.base], ['unknown'])
+        self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
+
+    def test_head_probe_selecting_no_tests_fails_loudly_instead_of_unresolved(self):
+        # The case failed at head, so an exact-case recipe that runs nothing there is a broken selector.
+        self.land('bad', 'yes')
+        self.land('renamed-probe', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('selected no tests', result.stdout)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'error')
+        self.assertIn('attribution probe for Gateway default selected no tests', report['error'])
+        self.assertEqual(report['activeLane'], 'attribution: Gateway default')
+        self.assertEqual(report['results'][1]['exit'], 1)
+        self.assertTrue((Path(report['evidence'])).is_file())
+        [progress] = (self.root / '.git/verify/batches').glob('*/attribution-1-0/progress.json')
+        probes = json.loads(progress.read_text())['probes']
+        self.assertEqual([(p['outcome'], p['selectedTests']) for p in probes], [('selector-error', 0)])
+        self.assertFalse(list((self.root / '.git/verify/attributions').glob('*.json')), 'a selector error is never memoized')
+        self.assertFalse((self.root / '.git/verify/green.json').exists())
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
     def test_second_culprit_reproduction_is_required(self):
