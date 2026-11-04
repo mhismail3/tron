@@ -110,11 +110,10 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveMovesAndArchives"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleListOmitsArchivedAndDepartedProjects"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveCreatesUntrustsAndTrusts"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleDenialRetainsUntrustedRepository"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleRefusedApprovalShowsItsReason"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyArchiveUsesCanonicalReason"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleBusyTrustUsesCanonicalReason"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsTrustRowTrustsABlockedProject"
 )
@@ -982,7 +981,7 @@ run_ui_journey() {
   if [[ "$journey" == *testHomeSettingsCardDeclineAppliesNothingAndDoubleApproveAppliesOnce ]]; then
     prepare_home_automation_fixture 100
   fi
-  if [[ "$journey" == *testProjectLifecycleBusyArchiveUsesCanonicalReason ]]; then
+  if [[ "$journey" == *testProjectLifecycleBusyTrustUsesCanonicalReason ]]; then
     # A real linked worktree exercises the lifecycle owner's canonical busy reason.
     local busy="$TRON_E2E_WORKSPACE/busy-project"
     # Empty canonical fixture store: there has been no trust decision to grant.

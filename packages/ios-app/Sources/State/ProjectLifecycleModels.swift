@@ -19,7 +19,7 @@ struct ProjectLifecycleEligibility: Decodable, Sendable {
 
 struct ProjectLifecycleRow: Decodable, Identifiable, Sendable {
     struct Eligibility: Decodable, Sendable {
-        let trust, github, rename, archive, untrust: ProjectLifecycleEligibility
+        let trust, untrust: ProjectLifecycleEligibility
     }
     struct Trust: Decodable, Sendable {
         let effectiveDecision: Bool?
@@ -38,7 +38,7 @@ struct ProjectLifecycleListing: Decodable, Sendable {
 }
 
 enum ProjectLifecycleOperation: String, Sendable {
-    case create, trust, rename, archive, untrust
+    case create, trust, untrust
 }
 
 /// `projects.change` without a confirmation: the exact review and the typed

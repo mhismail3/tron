@@ -1,4 +1,4 @@
-import { lstat, realpath, stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import {
   hasTrustRequiringProjectResources,
@@ -135,53 +135,6 @@ export class TrustService {
    * before it has a Git root. Never resolve this reservation to an ancestor. */
   async reserveUntrustedDirectory(path: string): Promise<void> {
     await this.mutationMutex.run(async () => this.store.set(await this.canonicalDirectory(path), false));
-  }
-
-  /** Approved filesystem relocation shares trust's existing mutation lock and
-   * runtime reload fence. A partial move is retained fail-closed, never replayed. */
-  async relocate(
-    path: string, destination: string, preserveTrust: boolean, move: () => Promise<void>,
-    apply: (inspection: TrustInspection) => Promise<void>,
-    commit: (inspection: TrustInspection) => Promise<void>,
-    abort: (inspection: TrustInspection) => Promise<void>,
-  ): Promise<void> {
-    await this.mutationMutex.run(async () => {
-      const previous = await this.inspectUnlocked(path);
-      const sourceIdentity = await lstat(previous.cwd);
-      const target = await this.canonicalDirectory(destination);
-      this.store.set(target, false);
-      const proposed = { ...previous, savedDecision: false, effectiveDecision: false };
-      await this.withRuntimeRetirement(async () => {
-        const restore = async (failure: unknown): Promise<never> => {
-          try { await apply(previous); await commit(previous); }
-          catch (rollbackFailure) {
-            throw new GatewayError("internal", "Project relocation could not establish or restore its runtime transition", false, {
-              failure: failure instanceof Error ? failure.message : String(failure),
-              rollbackFailure: rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure),
-            });
-          }
-          throw failure;
-        };
-        try { await apply(proposed); }
-        catch (failure) { return restore(failure); }
-        try { await move(); }
-        catch (failure) {
-          const current = await lstat(previous.cwd).catch(() => undefined);
-          const sourceRetained = current?.isDirectory() && current.dev === sourceIdentity.dev && current.ino === sourceIdentity.ino;
-          if (sourceRetained) return restore(failure);
-          // An absent/replaced source is an uncertain partial effect, never a
-          // grant. Preserve the retained destination, without reversing the move.
-          this.store.set(previous.projectDir, false);
-          await commit(proposed);
-          throw failure;
-        }
-        // The native project fence excludes admission until both keys publish.
-        // Revocation belongs to a completed move, not a pre-effect refusal.
-        this.store.set(previous.projectDir, false);
-        this.store.set(target, preserveTrust && previous.effectiveDecision === true);
-        await commit(proposed);
-      }, () => abort(previous));
-    });
   }
 
   async set(path: string, decision: boolean | null): Promise<TrustInspection> {

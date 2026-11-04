@@ -7,7 +7,7 @@ import TronMobileCore
 @MainActor
 struct ProjectLifecycleView: View {
     enum Route: Hashable {
-        case list, add, create, details(String), rename(String)
+        case list, add, create, details(String)
     }
     let route: Route
     var workspace = ""
@@ -22,7 +22,6 @@ struct ProjectLifecycleView: View {
     /// whenever they reload; they must not erase an accepted command's outcome.
     @PresentationState private var refusal: String?
     @PresentationState private var name = ""
-    @PresentationState private var github = false
     @PresentationState private var submitting = false
     @PresentationState private var generation = 0
     @PresentationState private var reviewing: ProjectLifecycleReview?
@@ -100,22 +99,14 @@ struct ProjectLifecycleView: View {
                 ProjectLifecycleView(route: .create, workspace: workspace)
             } chooseExisting: { choosingFolder = true }
         case .create:
-            ProjectLifecycleCreatePage(workspace: "~/Workspace", name: $name, github: $github) {
+            ProjectLifecycleCreatePage(workspace: "~/Workspace", name: $name) {
                 request(.create, sourceName: name)
             }
         case .details:
             if let project {
-                ProjectLifecycleDetailPage(project: presentation(project, root: workspace), github: $github, identifier: "project-lifecycle-details") {
-                    ProjectLifecycleView(route: .rename(project.path), workspace: workspace)
-                } requestTrust: { request(.trust, sourceName: project.name) }
-                  requestArchive: { request(.archive, sourceName: project.name) }
-                  requestUntrust: { request(.untrust, sourceName: project.name) }
-            } else { TronLoadingState(label: "Inspecting project…") }
-        case .rename:
-            if let project {
-                ProjectLifecycleRenamePage(project: presentation(project, root: workspace), workspace: "~/Workspace", name: $name) {
-                    request(.rename, sourceName: project.name, newName: name)
-                }
+                ProjectLifecycleDetailPage(project: presentation(project, root: workspace), identifier: "project-lifecycle-details",
+                    requestTrust: { request(.trust, sourceName: project.name) },
+                    requestUntrust: { request(.untrust, sourceName: project.name) })
             } else { TronLoadingState(label: "Inspecting project…") }
         }
     }
@@ -125,9 +116,7 @@ struct ProjectLifecycleView: View {
         let home = URL(fileURLWithPath: root).deletingLastPathComponent().path
         let display = row.path.hasPrefix(home + "/") ? "~" + row.path.dropFirst(home.count) : row.path
         return ProjectLifecycleProject(name: row.name, path: row.path, displayPath: display, trusted: row.trust?.effectiveDecision == true,
-            archiveUnavailableReason: row.eligibility.archive.refusal, trustUnavailableReason: row.eligibility.trust.refusal,
-            githubUnavailableReason: row.eligibility.github.refusal, renameUnavailableReason: row.eligibility.rename.refusal,
-            untrustUnavailableReason: row.eligibility.untrust.refusal)
+            trustUnavailableReason: row.eligibility.trust.refusal, untrustUnavailableReason: row.eligibility.untrust.refusal)
     }
 
     private func load() async {
@@ -151,21 +140,20 @@ struct ProjectLifecycleView: View {
                     .filter { $0.key == TrustedProjectsSettingsView.key }.compactMap { $0.qualifiers?["project"] } ?? []
                 let archive = URL(fileURLWithPath: page.workspace).appendingPathComponent(".archive").path
                 for path in Set(saved).subtracting(listed).sorted() {
-                    // Trust keeps deny tombstones after moves. They are not
-                    // projects, and must not undo the listing owner's hidden
-                    // archive namespace. Other saved unsupported folders remain.
+                    // Saved decisions under the hidden archive folder are not
+                    // projects; the listing owner hides that folder too. Other
+                    // saved unsupported folders remain.
                     guard path != archive, !path.hasPrefix(archive + "/") else { continue }
                     let row = try await model.settingsTrust.inspectProject(path: path)
                     guard admits() else { return }
-                    guard row.eligibility.archive.code != "not_found" else { continue }
+                    guard row.eligibility.trust.code != "not_found" else { continue }
                     page.projects.append(row)
                 }
                 listing = page
-            case .details(let path), .rename(let path):
+            case .details(let path):
                 let row = try await model.settingsTrust.inspectProject(path: path)
                 guard admits() else { return }
                 project = row
-                if case .rename = route, name.isEmpty { name = row.name }
             case .add, .create: break
             }
         } catch is CancellationError {
@@ -175,7 +163,7 @@ struct ProjectLifecycleView: View {
         }
     }
 
-    private func request(_ operation: ProjectLifecycleOperation, sourceName: String, newName: String? = nil) {
+    private func request(_ operation: ProjectLifecycleOperation, sourceName: String) {
         guard !submitting, activity.allowsDataPublication else { return }
         submitting = true
         let identity = model.knowledgeDestinationIdentity
@@ -190,7 +178,7 @@ struct ProjectLifecycleView: View {
         Task { @MainActor in
             defer { submitting = false }
             do {
-                let reviewed = try await model.settingsTrust.reviewProject(operation, name: sourceName, newName: newName, github: github)
+                let reviewed = try await model.settingsTrust.reviewProject(operation, name: sourceName)
                 guard admitsPresentation() else { return }
                 reviewing = reviewed
             } catch {

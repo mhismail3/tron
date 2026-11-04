@@ -15,10 +15,10 @@ export function projectRuntimePort(owners: () => {
   return {
     occupancy: async signal => {
       const targets = await activeTaskTargets(signal);
-      return { assertIdle: (path, moving) => {
+      return { assertIdle: path => {
         const within = (value: string) => value === path || value.startsWith(`${path}/`);
-        if (owners().runtimeEntries().some(([, slot]) => !slot.isDisposed && (within(slot.projectDir) || within(slot.cwd)) && (moving || slot.isBusy))) {
-          throw new GatewayError("busy", moving ? "Close project sessions before moving the folder" : "Stop active project sessions before changing trust");
+        if (owners().runtimeEntries().some(([, slot]) => !slot.isDisposed && (within(slot.projectDir) || within(slot.cwd)) && slot.isBusy)) {
+          throw new GatewayError("busy", "Stop active project sessions before changing trust");
         }
         if (targets.some(within)) throw new GatewayError("busy", "Project has an active or pending Home worker");
       } };
