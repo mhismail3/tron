@@ -468,7 +468,7 @@ def run() -> None:
             assert edited.returncode == 0 and state["edited"] == {"body": "## Remaining\nOnly the iOS half is left.\n"}
             assert state["writes"] == ["edit"]
 
-            # Nesting (docs/restructure/plan.md §9.1): an epic or a task links under an epic parent.
+            # Nesting: an epic or a task links under an epic parent.
             def parent(name, success, child, epic, *options):
                 result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "issue", "parent", str(child),
                                          "--epic", str(epic), *options], cwd=repo, env=env, capture_output=True, text=True, timeout=30)

@@ -16,7 +16,7 @@ struct TronDocumentSheet<Content: View>: View {
     /// Swift app's tabs, #909); each stack root then applies
     /// `tronDocumentSheetChrome` itself, so the chrome is never nested.
     let hostsNavigation: Bool
-    @State private var selectedDetent: PresentationDetent
+    @State private var selectedDetent: PresentationDetent // view-local: a rebuilt sheet starts at its initial detent
     @ViewBuilder let content: () -> Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 

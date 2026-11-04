@@ -2,8 +2,7 @@
 
 A scenario lock records what one deterministic scenario makes the real Gateway
 and the pinned Pi SDK emit, persist and send, normalizes it, and compares it
-byte for byte with a committed golden
-([restructure plan §6.4](../../../docs/restructure/plan.md#64-gateway-behavior-locks-v3)).
+byte for byte with a committed golden.
 Restructure slices must leave every golden unchanged; a golden diff means the
 slice changed behavior.
 

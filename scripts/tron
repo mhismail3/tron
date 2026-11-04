@@ -56,8 +56,6 @@ Commands:
                                     Rebuild main; five isolated simulator/Gateway smoke outcomes
                                     --prepare-reinstall writes a manual maintenance receipt, never installs
   version                           Print the canonical Tron version
-  measure <base> [<head>]         Advisory moved/rewrite line counts between commits;
-                                    JSON in test-results/measure/, never gates
   metrics [<rev>] [--compare <base>]
                                     Read-only restructure metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
@@ -87,9 +85,7 @@ Commands:
                                     unindexed file beyond packages/<pkg>/layer-baseline.json,
                                     which only shrinks; undeclared pairs are reported only
                                     (tools/layers); never a gate
-  budgets [<rev>] [--base <ref>]   Report files over 500 lines and docs over budget; fail a
-                                    production file new since <ref> (default origin/main) over
-                                    800 lines or a doc over twice its budget; never a gate
+  budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
   docs modules [<path>]|signals|rpc|settings
                                     Print a generated Markdown index (module map, module
                                     README Signals, Gateway RPCs, settings keys); docs
@@ -217,9 +213,6 @@ case "$cmd" in
     ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
-    ;;
-  measure)
-    exec python3 "$ROOT/tools/metrics/moved.py" "$@"
     ;;
   metrics)
     exec python3 "$ROOT/tools/metrics/metrics.py" "$@"

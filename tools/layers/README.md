@@ -1,7 +1,7 @@
 # Layers
 
 `scripts/tron layers` checks a package's module dependency graph against each
-module's manifest `layer` and `dependsOn` ([plan §6.7 V5](../../docs/restructure/plan.md#67-structure-checkers-v5-v6-v8-v9-v10)).
+module's manifest `layer` and `dependsOn` (layers below).
 It covers the Gateway and iOS. Mac has no checker until its builds carry a
 build stamp. It reports and is never wired into a hook, landing or queue.
 
@@ -16,6 +16,19 @@ Exit 0: no upward, two-way or Pi-seam violation beyond the baseline. Exit 1:
 problems, listed one per line. Exit 2: usage error, ownership violations, an unowned graph file (`git add` and
 own it), a missing compiler or Xcode library, or stale iOS evidence. None of
 these is ever reported as clean.
+
+## Layers
+
+Every manifest declares one layer; dependencies point downward only.
+
+```text
+L5 composition   gateway main / iOS App / Mac App     wiring
+L4 surfaces      transport+RPC dispatch / iOS UI      routes to owners
+L3 modules       capability owners                    declared dependencies
+L2 kernel        harness primitives                   session/run/host lifecycles
+L1 contracts     wire + persisted value types         values
+L0 platform      durability, logging, process, timing  foundations
+```
 
 ## Gateway graph
 

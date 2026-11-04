@@ -92,24 +92,12 @@ else `(root)`.
   construction. A window with no commits (a merge whose ancestors are all older)
   reports `share: null`, printed `n/a`, never 0%.
 
-## Unavailable metrics
-
-These keys are always present with `status: "unavailable"`, a reason and an
-owner, and never carry a number:
-
-| Key | Owner |
-|---|---|
-| `M1.lockCoverage`, `M1.lockDeterminism` | 0.4 catalog, 0.8 Gateway and 0.9 iOS locks |
-| `M1.lockSensitivity` | 0.10 mutation evaluation (milestones) |
-| `M2.layerViolations`, `M2.directoryCycles` | 0.4 layers, 0.6 resolved import/reference graph |
-| `M2.registrationFootprint` | Phase 2 module descriptors |
-| `M2.navigationProbe` | milestone steward (fresh-agent probe) |
-| `M4.sliceVerifyTime` | 0.11 `scripts/tron verify` |
+## Not measured here
 
 Verify records per-run step timings in `test-results/verify/<sha>.json`.
 Metrics does not read those reports: execution duration is not derivable from Git objects.
 
-Import edges are deliberately not inferred from text search: type-only, dynamic,
+Import edges are not inferred from text search (`scripts/tron layers` owns the graph): type-only, dynamic,
 re-exported and path-mapped imports make a grep graph wrong in both directions.
 
 ## Compare
@@ -123,25 +111,6 @@ the hand-written total delta. A pair whose category changed is listed as
 hand-written category contributes its full lines). Files over 500 lines are
 followed through renames and listed as `renamed`, `left` (deleted, or now at or
 under the threshold) or `entered`.
-
-## Moved lines (V10)
-
-`scripts/tron measure <base> [<head>]` (default HEAD) writes
-`test-results/measure/<base-sha>-<head-sha>.json`. Only errors exit 2; never gates.
-Git's `diff -M` pairs renamed paths using the existing metrics helper. Within
-each pair, sequence matching ignores leading spaces/tabs. Equal lines in a
-rename count as `moved` (destination) and `movedOut` (source); unchanged lines
-in a same-path file do not count. Remaining removed/added lines are paired
-across the diff by identical indentation-stripped bytes, at most once each.
-Residual pairs count as `rewritten`; excess is `new` or `deleted`.
-`changedInMove` is the renamed subset of `rewritten`, not a disjoint count.
-Totals count destinations once (`moved` equals `movedOut`). Binary files/gitlinks
-are flagged, not counted. Sequence matching is worst-case quadratic per file.
-Like `color-moved=plain`, these are text estimates, not semantic proof: common
-lines may match unrelated edits; heavy rewrites may defeat rename detection.
-Unpaired rewrites remain new/deleted. Reviewers must inspect residual edits.
-JSON is deterministic. `scripts/tron test tooling scripts/test-tron-measure.py`
-exercises moves, indentation, rewrites, duplicates and binary data in temp Git.
 
 ## Verify
 
