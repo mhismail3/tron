@@ -1352,6 +1352,49 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         self.assertEqual(self.assert_never_publishes('skipped')['verdict'], 'uncovered')
 
 
+class AppleLaneTests(unittest.TestCase):
+    """#2268: every batch runs from a fresh worktree, so the Apple chain's simulator lanes are the
+    repository's, not the worktree's: one warm set per repository, owned by it."""
+
+    def setUp(self):
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        self.batch = batch
+        self.temporary = tempfile.TemporaryDirectory(prefix='tron-apple-lane-')
+        self.addCleanup(self.temporary.cleanup)
+
+    def repository(self, name):
+        root = Path(self.temporary.name).resolve() / name
+        git = ['git', '-C', str(root), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null']
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        subprocess.run([*git, 'commit', '-q', '--allow-empty', '-m', 'root'], check=True)
+        return root, git
+
+    def apple_environments(self, root):
+        return {lane['name']: lane['env'] for lane in self.batch.lanes(root, 'HEAD') if lane.get('chain') == 'apple' and lane.get('env')}
+
+    def test_batch_worktrees_of_one_repository_share_its_owned_apple_lane(self):
+        primary, git = self.repository('primary')
+        worktrees = [Path(self.temporary.name).resolve() / f'batch-{index}' for index in (1, 2)]
+        for worktree in worktrees:
+            subprocess.run([*git, 'worktree', 'add', '-q', '--detach', str(worktree)], check=True)
+        other, _ = self.repository('other')
+        common = os.path.realpath(primary / '.git')
+        environments = [self.apple_environments(root) for root in (primary, *worktrees)]
+        self.assertEqual(sorted(environments[0]), ['iOS smoke', 'real Gateway UI journeys', 'real Gateway boundary'])
+        names = {env['TRON_IOS_TEST_LANE'] for environment in environments for env in environment.values()}
+        self.assertEqual(len(names), 1, names)
+        self.assertTrue(all(env['TRON_IOS_TEST_LANE_REPOSITORY'] == common
+                            for environment in environments for env in environment.values()), environments)
+        # Smoke products stay each worktree's own: products prune follows their worktree.
+        smoke = {environment['iOS smoke']['TRON_IOS_TEST_DERIVED_DATA'] for environment in environments}
+        self.assertEqual(len(smoke), 3, smoke)
+        theirs = self.apple_environments(other)['real Gateway UI journeys']
+        self.assertNotIn(theirs['TRON_IOS_TEST_LANE'], names)
+        self.assertEqual(theirs['TRON_IOS_TEST_LANE_REPOSITORY'], os.path.realpath(other / '.git'))
+
+
 class ShardedIosProbeTests(unittest.TestCase):
     """#2173: verify names a sharded iOS step `tests: ios k/N`; its bisect probe is still the iOS
     group, so a passing shard probe counts its XCTest summary instead of reading as empty."""

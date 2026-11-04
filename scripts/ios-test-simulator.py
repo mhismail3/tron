@@ -44,6 +44,11 @@ SWEEP_DEPTH = 2
 # default lane's directory is `ios-test` and a named lane's is its
 # `ios-test-<name>` sibling, which is what a lane's reported name strips.
 LANE_TTL_SECONDS = 7 * 24 * 60 * 60
+# A lane a whole repository owns rather than one worktree (verify --batch's Apple lanes, which
+# each batch reuses from a fresh worktree): the repository's git common directory, recorded
+# once in the marker. Its lane outlives the worktree that created it and is reaped when that
+# repository is gone or the lane is idle past the TTL.
+LANE_REPOSITORY_ENVIRONMENT = "TRON_IOS_TEST_LANE_REPOSITORY"
 LANE_DIRECTORY_PREFIX = "ios-test"
 # A lease records the holder's pid and the second it started; the process table's
 # own age for that pid is what proves the pid has not been recycled into another
@@ -766,7 +771,7 @@ def lane_rows(arguments: argparse.Namespace) -> list[list[str]]:
             rows.append([label, "-", "not-provisioned", lease, "-", "-"])
             continue
         device, state = lane_device(document, marker)
-        worktree = marker.get("worktree")
+        worktree = marker.get("repository") or marker.get("worktree")
         last_used = marker.get("last_used_epoch_seconds")
         size = device.get("dataPathSize") if device is not None else None
         rows.append([
@@ -831,7 +836,7 @@ def simulator_rows(arguments: argparse.Namespace) -> list[list[str]]:
             continue
         claimed.add(marker["udid"])
         device, state = lane_device(document, marker)
-        worktree = marker.get("worktree")
+        worktree = marker.get("repository") or marker.get("worktree")
         rows.append([
             marker["name"],
             state,
@@ -1177,15 +1182,21 @@ def expiry_of(marker_path: Path, now: float, default_state_dir: Path) -> str:
     linked worktree has a lane of its own, so its simulator would otherwise
     outlive it for the whole idle period. The default lane is exempt - its
     marker names whichever checkout first created it - and a later command in a
-    named lane simply provisions it again. "undated" means a marker written
-    before lanes recorded their last use; it is kept until a command uses the
-    lane and dates it.
+    named lane simply provisions it again. A repository lane (its marker names
+    a `repository`) is exempt too: it is "repository-deleted" only once that
+    repository is gone, and otherwise expires by the TTL. "undated" means a
+    marker written before lanes recorded their last use; it is kept until a
+    command uses the lane and dates it.
     """
     marker = load_marker(marker_path)
     if marker is None:
         return "no-marker"
+    repository = marker.get("repository")
     worktree = marker.get("worktree")
-    if (
+    if isinstance(repository, str) and repository:
+        if not Path(repository).exists():
+            return "repository-deleted"
+    elif (
         isinstance(worktree, str) and worktree and not Path(worktree).exists()
         and lane_label(marker_path.parent, default_state_dir) != "default"
     ):
@@ -1225,13 +1236,13 @@ def remove_lane(directory: Path, arguments: argparse.Namespace) -> None:
     shutil.rmtree(directory)
 
 
-REMOVABLE_EXPIRY = ("expired", "worktree-deleted")
+REMOVABLE_EXPIRY = ("expired", "worktree-deleted", "repository-deleted")
 
 
 def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
     """Remove a lane unused for longer than the TTL, or whose worktree is gone.
 
-    Returns "expired" or "worktree-deleted", or why not: "fresh", "undated",
+    Returns "expired", "worktree-deleted" or "repository-deleted", or why not: "fresh", "undated",
     "no-marker", "busy" (a
     live process holds the lease), "skipped" (an unreadable marker or an unsafe
     directory) or "failed". A lane the file system refuses to remove is reported
@@ -1260,7 +1271,8 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
             # file that vanished, or a state directory the sweep cannot delete.
             print(f"warning: could not remove lane {marker_path.parent}: {error}", file=sys.stderr)
             return "failed"
-    reason = "its worktree no longer exists" if outcome == "worktree-deleted" else "unused for longer than the TTL"
+    reason = {"worktree-deleted": "its worktree no longer exists",
+              "repository-deleted": "its repository no longer exists"}.get(outcome, "unused for longer than the TTL")
     print(f"removed lane {lane_label(marker_path.parent, arguments.default_state_dir)} ({marker_path.parent}): {reason}")
     return outcome
 
@@ -1476,23 +1488,39 @@ def clean_runs(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def lane_repository() -> str | None:
+    """The repository TRON_IOS_TEST_LANE_REPOSITORY gives a lane, refused unless it is an existing
+    absolute directory. Read before any simulator is created, so a bad value never leaves one unmarked."""
+    repository = os.environ.get(LANE_REPOSITORY_ENVIRONMENT) or None
+    if repository is not None and (not os.path.isabs(repository) or not os.path.isdir(repository)):
+        raise DestinationError(f"{LANE_REPOSITORY_ENVIRONMENT} must name an existing directory: {repository}")
+    return os.path.realpath(repository) if repository is not None else None
+
+
 def stamp_lane_use(arguments: argparse.Namespace, marker: dict[str, Any]) -> dict[str, Any]:
     """Record the lane's creating worktree and this use in the lane's marker.
 
     `worktree` is written once, when the lane's simulator is created: a later
     `lane-remove` uses it to decide whether the lane's products belong to a
-    worktree that still exists. `last_used_epoch_seconds` is refreshed by every
-    use and is what the sweep dates a lane by.
+    worktree that still exists. `repository` is written once from
+    TRON_IOS_TEST_LANE_REPOSITORY, which must name an existing directory: the
+    lane then belongs to that repository, not its creating worktree (see
+    `expiry_of`). `last_used_epoch_seconds` is refreshed by every use and is
+    what the sweep dates a lane by.
     """
     updated = dict(marker)
     if arguments.worktree is not None and "worktree" not in updated:
         updated["worktree"] = os.path.realpath(arguments.worktree)
+    repository = lane_repository()
+    if repository is not None and "repository" not in updated:
+        updated["repository"] = repository
     updated["last_used_epoch_seconds"] = int(time.time())
     atomic_write(arguments.marker, updated)
     return updated
 
 
 def provision(arguments: argparse.Namespace) -> dict[str, Any]:
+    lane_repository()
     document = inventory()
     runtime = exact_runtime(document, arguments.runtime)
     device_type = exact_device_type(document, arguments.device_type)
