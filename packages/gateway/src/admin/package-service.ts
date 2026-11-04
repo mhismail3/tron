@@ -1,7 +1,5 @@
 import { MANAGED_SUBAGENTS_SOURCE, managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { randomUUID } from "node:crypto";
-import { access } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
 import {
   DefaultPackageManager,
   SettingsManager,
@@ -127,26 +125,6 @@ export class PackageService {
     }
   }
 
-  private async validateInstallSource(source: string, cwd: string): Promise<void> {
-    const trimmed = source.trim();
-    if (!trimmed) throw new GatewayError("invalid_request", "Package source is required");
-    // Preflight only unambiguous filesystem spellings. Pi owns source parsing,
-    // including tilde paths, file URLs and Git shorthand; do not reinterpret
-    // those inputs with a second resolver. Any SDK-admitted failure is fenced.
-    if (isAbsolute(source) || source.startsWith("./") || source.startsWith("../")) {
-      try { await access(resolve(cwd, source)); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR") {
-          throw new GatewayError("not_found", "Package source path does not exist");
-        }
-        throw error;
-      }
-    }
-    if (trimmed.startsWith("npm:") && trimmed.slice("npm:".length).trim() === "") {
-      throw new GatewayError("invalid_request", "Package source is required");
-    }
-  }
-
   private async trackAdministrative<T>(operation: (work: GatewayWorkHandle | undefined) => Promise<T>): Promise<T> {
     const work = this.workRegistry?.begin({
       kind: "administrative-provider-package-operation",
@@ -196,7 +174,7 @@ export class PackageService {
     }));
   }
 
-  async mutate(action: "install" | "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {
+  async mutate(action: "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {
     return this.trackAdministrative((work) => this.mutex.run(async () => {
       if (source === MANAGED_SUBAGENTS_SOURCE) {
         throw new GatewayError("conflict", "Tron manages pi-subagents; package commands cannot change its bundled payload");
@@ -220,13 +198,7 @@ export class PackageService {
           instance: instanceId("sources.packages", {}), changeId: operationId, value: undefined }];
         await this.outside?.begin(writes);
         try {
-        if (action === "install") {
-          if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
-          await this.validateInstallSource(source, cwd);
-          mutationAdmitted = true;
-          await manager.installAndPersist(source, { local });
-          await this.flushSettings(settings);
-        } else if (action === "remove") {
+        if (action === "remove") {
           if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
           mutationAdmitted = true;
           await manager.removeAndPersist(source, { local });

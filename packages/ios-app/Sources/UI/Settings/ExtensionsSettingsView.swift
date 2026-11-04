@@ -10,10 +10,7 @@ struct ExtensionsSettingsView: View {
     }
     private var inventory: PackageInventory? { model.packageInventory(for: target) }
     private var updates: [PackageUpdate] { model.packageUpdates(for: target) }
-    @PresentationState private var source = ""
-    @PresentationState private var local = false
     @PresentationState private var packageToRemove: PackageSummary?
-    @PresentationState private var showingInstall = false
     @PresentationState private var reloading = false
     @PresentationState private var refreshError: String?
     @PresentationState private var mutationErrors: [PackageMutationOperation: String] = [:]
@@ -90,30 +87,18 @@ struct ExtensionsSettingsView: View {
                     } else if packageError == nil {
                         TronPlaceholderState(
                             title: "No packages configured",
-                            detail: "Use Reload or install a package below.",
+                            detail: "Use Reload, or ask Tron to install one.",
                             icon: "shippingbox"
                         )
                     }
                 }
 
-                // Keep installation beside the installed list, without a
-                // second heading competing with the package inventory. The npm
-                // command is how Install Package runs, so it shares that card.
-                VStack(spacing: 0) {
-                    Button { showingInstall = true } label: {
-                        TronSettingsRow(
-                            icon: "arrow.down.circle.fill",
-                            title: "Install Package",
-                            accent: .tronPrimary
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    TronSettingsDivider()
-                    SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
-                                         presentation: .keys([Self.npmCommandKey]), detailedKeys: true)
-                }
-                .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.06)
-                .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
+                // The npm command is how Pi installs the packages listed above; it keeps
+                // its own card beside them, without a second heading.
+                SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
+                                     presentation: .keys([Self.npmCommandKey]), detailedKeys: true)
+                    .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.06)
+                    .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
 
                 if supportsModules {
                     modulesSection
@@ -166,18 +151,6 @@ struct ExtensionsSettingsView: View {
         }
         .onDisappear {
             revokeMutationTasks()
-        }
-        .tronManagedSheet(
-            isPresented: $showingInstall,
-            identity: "settings.packages.install"
-        ) {
-            NavigationStack {
-                packageInstallSheet
-            }
-            .tronTopBlur(.sheet)
-            .tronPresentation()
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
         }
         .tronManagedSheet(
             item: $packageToRemove,
@@ -379,68 +352,6 @@ struct ExtensionsSettingsView: View {
         mutationErrors[operation] = error.localizedDescription
     }
 
-    private var packageInstallSheet: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            TronSettingsSections(alignment: .leading, spacing: 18, lazy: true, hidesLoneHeading: true) {
-                VStack(alignment: .leading, spacing: 8) {
-                    sheetSectionHeader(
-                        "Source",
-                        detail: "Use an npm package, Git URL, or local path."
-                    )
-                    PackageSourceField(source: $source)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    sheetSectionHeader(
-                        "Install Scope",
-                        detail: projectCWD == nil
-                            ? "Packages are installed for every project from this screen."
-                            : "Choose whether this package is available everywhere or only in the current project."
-                    )
-                    TronToggleRow(
-                        icon: "folder.badge.gearshape",
-                        title: "Current project only",
-                        accent: .tronPrimary,
-                        isOn: $local
-                    )
-                    .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.07)
-                    .disabled(projectCWD == nil)
-                }
-
-                Button("Install Package") { install() }
-                    .buttonStyle(TronActionButtonStyle(role: .primary))
-                    .disabled(source.isEmpty || activeMutations[.install(source)] != nil)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
-        }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Install Package")
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button { showingInstall = false } label: {
-                    Image(systemName: "checkmark")
-                        .font(TronTypography.buttonSM)
-                        .tronToolbarAction()
-                }
-                .accessibilityLabel("Done")
-            }
-        }
-    }
-
-    private func sheetSectionHeader(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: TronSpacing.xs) {
-            Text(title)
-                .tronSectionHeading()
-                .foregroundStyle(Color.tronTextPrimary)
-                .accessibilityAddTraits(.isHeader)
-            Text(detail)
-                .font(TronTypography.settingsRowSubtext)
-                .foregroundStyle(Color.tronTextMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     private func packageRow(_ package: PackageSummary) -> some View {
         Button {
             packageToInspect = package
@@ -509,59 +420,6 @@ struct ExtensionsSettingsView: View {
             .tronSettingsCaption(PackageThemesPresentation.caption(for: items))
             .environment(\.tronSettingsVisualTheme, nil)
         }
-    }
-
-    private func install() {
-        let value = source
-        let operation = PackageMutationOperation.install(value)
-        let requestedTarget = target
-        let profileRevision = model.profileRevision
-        let invalidationGeneration = model.packageInvalidationGeneration
-        let token = beginMutation(operation)
-        let authoritative = Task { @MainActor in
-            try await model.mutatePackage(
-                action: .install,
-                source: value,
-                local: local,
-                target: requestedTarget,
-                surfaceError: false
-            )
-        }
-        let task = Task { @MainActor in
-            defer {
-                finishMutation(
-                    operation,
-                    target: requestedTarget,
-                    token: token,
-                    profileRevision: profileRevision,
-                    invalidationGeneration: invalidationGeneration
-                )
-            }
-            do {
-                try await authoritative.value
-                guard mutationIsCurrent(
-                    target: requestedTarget,
-                    operation: operation,
-                    token: token,
-                    profileRevision: profileRevision,
-                    invalidationGeneration: invalidationGeneration
-                ) else { return }
-                source = PackageInstallDraftPolicy.afterSuccess(current: source, captured: value)
-                recordMutationSuccess(operation)
-            } catch is CancellationError {
-                return
-            } catch {
-                guard mutationIsCurrent(
-                    target: requestedTarget,
-                    operation: operation,
-                    token: token,
-                    profileRevision: profileRevision,
-                    invalidationGeneration: invalidationGeneration
-                ) else { return }
-                recordMutationFailure(operation, error: error)
-            }
-        }
-        activeMutations[operation] = OwnedMutation(token: token, task: task)
     }
 
     private func update(_ package: PackageSummary) {
