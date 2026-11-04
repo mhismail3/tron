@@ -2,7 +2,8 @@
 """Print a finished result bundle's failures as a short, agent-readable block.
 
 The one owner of compact xcresult failure output for `scripts/tron-ios-test` and
-the E2E harness. `--build` lists compiler/build errors as `error: path:line: message`;
+the E2E harness. `--build` lists compiler/build errors as `error: path:line: message` (`error:
+message` without a source location);
 `--tests` lists each failure message as `failure: test: message` (`failure: message`
 when no test case encloses it). The raw xcodebuild log stays
 the evidence: this summary is optional, never changes a caller's status and is
