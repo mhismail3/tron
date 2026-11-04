@@ -96,7 +96,7 @@ class BatchTests(unittest.TestCase):
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.git('init', '-q', '-b', 'main')
-        for file in ('batch.py', 'verify.py'):
+        for file in ('batch.py', 'verify.py', 'timing.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.
@@ -169,7 +169,7 @@ output=Path(next(a.split('=',1)[1] for a in args if a.startswith('--outputFile.j
 output.parent.mkdir(parents=True,exist_ok=True)
 status='failed' if failed else 'passed' if selected else 'skipped'
 data={'numPassedTests':int(status=='passed'),'numFailedTests':int(failed),'numPendingTests':int(not selected),
-      'testResults':[{'name':str(root/'packages/gateway/src/example.test.ts'),
+      'testResults':[{'name':str(root/'packages/gateway/src/example.test.ts'),'startTime':1000,'endTime':2500,
        'status':'failed' if failed else 'passed','assertionResults':[
         {'ancestorTitles':titles[:-1],'title':titles[-1],'fullName':' '.join(titles),'status':status,
          'failureMessages':['AssertionError: stable failure'] if failed else []}]}]}
@@ -491,6 +491,56 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertFalse(list((self.root / '.git/verify/attributions').glob('*.json')), 'a selector error is never memoized')
         self.assertFalse((self.root / '.git/verify/green.json').exists())
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
+
+    def test_lane_timing_is_recorded_and_never_changes_the_verdict(self):
+        results = Path(self.temporary.name) / 'results'
+        bin = Path(self.temporary.name) / 'bin'
+        (bin / 'xcrun').write_text('''#!/usr/bin/env python3
+import json,sys
+args=sys.argv[1:]
+path=args[args.index('--path')+1]
+if 'broken' in path: sys.exit('xcresulttool: cannot open result bundle')
+if args[:4]==['xcresulttool','get','test-results','tests']:
+    print(json.dumps({'testNodes':[{'nodeType':'Test Plan','children':[{'nodeType':'Test Suite','children':[
+        {'nodeType':'Test Case','nodeIdentifier':'Journeys/testFlow()','result':'Passed','durationInSeconds':4.5}]}]}]}))
+elif args[:4]==['xcresulttool','get','test-results','activities'] and args[args.index('--test-id')+1]=='Journeys/testFlow()':
+    print(json.dumps({'testRuns':[{'activities':[
+        {'title':'Start Test','startTime':100.0},
+        {'title':'Tap "Send" Button','startTime':100.5,'childActivities':[{'title':'Wait for app to idle','startTime':100.6}]},
+        {'title':'Tap "Done" Button','startTime':102.0,'childActivities':[{'title':'Wait for app to idle','startTime':102.1}]},
+        {'title':'Tear Down','startTime':102.75}]}]}))
+else: sys.exit('unexpected xcrun '+' '.join(args))
+''')
+        (bin / 'xcrun').chmod(0o755)
+        self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
+                  f'if [ "$1" = run-ui ]; then for j in good broken; do mkdir -p {results}/$j/Journeys.xcresult; '
+                  'echo "Real-UI journey Tron/Journeys/test-$j completed in 7s (status 0); evidence: ' + str(results) + '/$j"; '
+                  f'printf "\\t%s\\n" {results}/$j/Journeys.xcresult; done; fi\n')
+        self.land('scripts/tron-xcodebuild', '#!/bin/sh\necho mac-build >> test-results/executed\n'
+                  'printf "Build Timing Summary\\n\\nSwiftCompile (12 tasks) | 40.5 seconds\\n\\nLd (2 tasks) | 1.25 seconds\\n\\n** TEST BUILD SUCCEEDED **\\n"\n')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'green')
+        lanes = {lane['name']: lane for lane in report['results']}
+        self.assertTrue(all(lane['timing']['seconds'] == lane['seconds'] for lane in lanes.values()))
+        self.assertEqual(lanes['Gateway default']['timing']['vitestFiles'], {'vitest.json': [
+            {'file': 'packages/gateway/src/example.test.ts', 'seconds': 1.5, 'cases': 1, 'status': 'passed'}]})
+        self.assertEqual(lanes['Mac integration']['timing']['buildTiming'], [{'log': 'output.log', 'buckets': [
+            {'bucket': 'SwiftCompile', 'tasks': 12, 'seconds': 40.5}, {'bucket': 'Ld', 'tasks': 2, 'seconds': 1.25}]}])
+        ui = lanes['real Gateway UI journeys']['timing']
+        self.assertEqual(ui['journeys'], [{'kind': 'Real-UI journey', 'test': f'Tron/Journeys/test-{name}', 'seconds': 7, 'status': 0}
+                                          for name in ('good', 'broken')])
+        self.assertEqual(ui['xcresults'], [{'bundle': str(results / 'good/Journeys.xcresult'), 'cases': [{
+            'test': 'Journeys/testFlow()', 'result': 'Passed', 'seconds': 4.5, 'runs': [{
+                'activities': 4, 'idleWaits': 2,
+                'slowest': [{'title': 'Tap "Send" Button', 'seconds': 1.5}, {'title': 'Tap "Done" Button', 'seconds': 0.75},
+                            {'title': 'Start Test', 'seconds': 0.5}],
+                'byKind': {'Tap … Button': {'count': 2, 'seconds': 2.25}, 'Start Test': {'count': 1, 'seconds': 0.5}}}]}]}])
+        # An unreadable bundle is an observation error, not a coverage or verdict input.
+        [error] = ui['errors']
+        self.assertEqual(error, f"tests {results / 'broken/Journeys.xcresult'}: xcresulttool exit 1: "
+                                'xcresulttool: cannot open result bundle')
 
     def test_second_culprit_reproduction_is_required(self):
         self.land('unstable-repeat', 'yes')

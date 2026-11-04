@@ -26,7 +26,12 @@ lanes; all slots busy at admission is deferred. **Green** means every lane execu
 Missing owners/reports, empty/skipped/deferred evidence, a non-`passed` verifier verdict,
 failed setup/cleanup or changed source is **uncovered**; any executed failure is **red**.
 Neither advances `green.json`. Immutable `verify/batches/<range>/` keeps commands, logs,
-counts and wall times; on a red, `first-report.json` and the `evidence.json` hash manifest
+counts and wall times. Each lane's `timing` in `report.json` is read-only observation
+([`timing.py`](timing.py)), never a verdict input: start/end and full-Gateway lock wait/hold,
+verifier step seconds, per-file Vitest wall seconds, `-showBuildTimingSummary` buckets, per-journey
+wall seconds, and per-case and top-level activity seconds (idle waits counted) from each result
+bundle the log names (`xcresulttool get test-results tests|activities`); an unreadable source is
+listed under `errors`. On a red, `first-report.json` and the `evidence.json` hash manifest
 freeze the first failure after every lane joined and before any probe runs.
 
 **Attribution** probes one exact case (Vitest file plus `-t` anchoring the describe and test

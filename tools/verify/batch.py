@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import time
 
+import timing
 import verify
 
 ROOT = verify.ROOT
@@ -47,7 +48,7 @@ def lanes(root: Path, base: str) -> list[dict]:
         result.append({'name': name, 'command': ['python3', 'tools/verify/gateway.py', *config],
                        'vitest': True, 'gatewayLock': True, 'requires': 'packages/gateway/package-lock.json'})
     result.extend([
-        {'name': 'Mac integration', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
+        {'name': 'Mac integration', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData -showBuildTimingSummary && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
          'requires': 'packages/mac-app/project.yml'},
         {'name': 'relay', 'command': ['scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/push-relay', 'test', '--'],
          'vitest': True, 'testRoot': 'packages/push-relay', 'requires': 'packages/push-relay/package-lock.json'},
@@ -1009,6 +1010,10 @@ def main(argv: list[str]) -> int:
                         outcome = execute(ROOT, lane, directory / f'lane-{index}')
                     except (OSError, ValueError, KeyError, verify.VerifyError, subprocess.SubprocessError) as error:
                         outcome = {**lane, 'exit': None, 'status': 'uncovered', 'error': str(error), 'seconds': 0}
+                    try:
+                        outcome['timing'] = timing.lane_timing(outcome, directory / f'lane-{index}', ROOT)
+                    except Exception as error:  # observation only: never a verdict input
+                        outcome['timing'] = {'errors': [f'{type(error).__name__}: {error}']}
                     report['results'].append(outcome)
                     save(path, report)
                     source_unchanged()
