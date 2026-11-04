@@ -247,6 +247,8 @@ class PruneTests(TidyCase):
         (f.repo / ".scratch").rename(f.base / "scratch-moved")
         (f.repo / ".scratch").symlink_to(outside, target_is_directory=True)
         result = f.tidy("--prune")
+        self.assertIn(result.returncode, (0, 1), result.stdout + result.stderr)
+        self.assertIn("item(s) need a decision", result.stdout)
         self.assertTrue((outside / "old.txt").exists(), result.stdout + result.stderr)
         self.assertNotIn("old.txt", result.stdout)
 
