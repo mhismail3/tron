@@ -182,6 +182,11 @@ lane_selection="$(python3 "$simulator_owner" "${lane_selector[@]}")" || exit 1
   IFS= read -r test_discovery_root
   IFS= read -r test_default_state_root
 } <<<"$lane_selection"
+# An extra run-ui lane is a named lane; its parent passes the default lane it
+# selected, which the pre-lane overrides named there.
+if [[ "$command" == run-ui-lane && -n "${TRON_IOS_E2E_UI_DEFAULT_STATE_DIR:-}" ]]; then
+  test_default_state_root="$TRON_IOS_E2E_UI_DEFAULT_STATE_DIR"
+fi
 simulator_marker="$test_state_root/simulator.json"
 test_lock="$test_state_root/lease.lock"
 development_state="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
@@ -1019,9 +1024,11 @@ run_ui_journey() {
     status=$?
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest-ui"
-  # One report path for every journey: the consumer that asked for this journey
-  # reads `results/latest-ui/report.json` as soon as the command returns, before
-  # the next journey's run moves this link.
+  # One report path for every journey of a lane: the consumer that asked for one
+  # journey on one lane reads `results/latest-ui/report.json` as soon as the
+  # command returns, before the next journey's run moves this link. A parallel
+  # run has one such link per lane; its journeys' evidence directories are the
+  # ones each journey's completion line names.
   if ((status == 0)); then
     # A journey that cannot reach the fixture skips, and a skip is not a passing
     # real-UI journey: exactly one journey must have executed and passed.
@@ -1083,9 +1090,11 @@ with (root / "lock").open("a") as lock:
         pending = (root / "pending").read_text().splitlines()
         if not pending:
             raise SystemExit(0)
-        (root / "pending").write_text("".join(line + "\n" for line in pending[1:]))
+        # Claimed before it leaves `pending`, so a failed write never loses it;
+        # the verdict still requires a completion for every selected journey.
         with (root / "claimed").open("a") as handle:
             handle.write(f"{arguments[0]} {pending[0]}\n")
+        (root / "pending").write_text("".join(line + "\n" for line in pending[1:]))
         print(pending[0])
     elif operation == "complete":
         journey, status, lane = arguments
@@ -1133,11 +1142,14 @@ PY
 
 # Run journeys from the shared queue on this command's lane until none is left or
 # one has failed. Each journey runs in its own subshell, so a failure ends that
-# journey rather than the lane, and the lane records it before it stops. With
+# journey rather than the lane, and the lane records it before it stops. The
+# queue, not this function's status, carries the outcome; callers run it outside
+# any `||`/`&&`/`if` context, which would disable errexit inside every journey
+# subshell and let a failed setup step run the journey anyway. With
 # more than one lane the journey's output is held until it ends and then
 # published whole, so the shared log reads as a serial run's.
 run_ui_lane() {
-  local xctestrun="$1" journey status journey_log first_status=0
+  local xctestrun="$1" journey status journey_log
   while journey="$(ui_queue_tool claim "$test_lane")" && [[ -n "$journey" ]]; do
     status=0
     if ((ui_lanes > 1)); then
@@ -1156,12 +1168,9 @@ run_ui_lane() {
       ui_journey_pid=""
     fi
     ui_queue_tool complete "$journey" "$status" "$test_lane"
-    if ((status != 0)); then
-      first_status="$status"
-      break
-    fi
+    ((status == 0)) || break
   done
-  return "$first_status"
+  return 0
 }
 
 # This lane's own copy of the UI xctestrun, beside the built one so the products'
@@ -1196,8 +1205,11 @@ spawn_ui_lane() {
     done
     unset TRON_IOS_TEST_LOCK_HELD TRON_IOS_TEST_LEASE_FD TRON_IOS_TEST_LEASE_LOCK TRON_IOS_TEST_SLOT_FD \
       TRON_IOS_TEST_LANE TRON_IOS_TEST_STATE_DIR TRON_IOS_TEST_DEVICE_NAME
-    # A named lane lives under the same lane root as this command's lane.
+    # A named lane lives under the same lane root as this command's lane, and
+    # names the same default lane: the pre-lane overrides that select it here
+    # cannot travel with a named lane, so its directory does.
     export TRON_IOS_TEST_DISCOVERY_ROOT="$test_discovery_root"
+    export TRON_IOS_E2E_UI_DEFAULT_STATE_DIR="$test_default_state_root"
     export TRON_IOS_E2E_STATE_DIR="$run_root/lane$index"
     export TRON_IOS_E2E_DERIVED_DATA="$derived_data"
     export TRON_IOS_E2E_UI_QUEUE="$ui_queue"
@@ -1212,6 +1224,8 @@ spawn_ui_lane() {
 # was leased, the Mac refused its simulator, or the queue was empty before it
 # got a host slot) cost no coverage: the other lanes ran the journeys. It is
 # reported, never hidden, and never turned into a pass or a failure on its own.
+# A lane that claimed journeys and then failed (for example its hosted-app reset
+# or fixture stop) fails the run, as it would have failed a serial one.
 join_ui_lanes() {
   local index status claimed
   ((${#ui_lane_pids[@]})) || return 0
@@ -1222,6 +1236,8 @@ join_ui_lanes() {
     grep -q "^${ui_lane_names[$index]} " "$ui_queue/claimed" 2>/dev/null && claimed=1
     if ((status != 0 && claimed == 0)); then
       echo "warning: real-UI lane ${ui_lane_names[$index]} ran no journey (status $status); the other lanes ran them" >&2
+    elif ((status != 0)); then
+      ui_queue_tool stop "$status" "lane ${ui_lane_names[$index]} ended (status $status)"
     fi
   done
   ui_lane_pids=()
@@ -1255,12 +1271,12 @@ if failed:
     status, journey = failed[0].split(" ", 1)
     print(f"{status} first failed journey: {journey}")
     raise SystemExit(0)
-claimed = {line.split(" ", 1)[1] for line in lines("claimed")}
+# Every selected journey must have completed: one that was never claimed,
+# never finished, or lost from the queue fails the run.
 completed = {line.split(" ")[1] for line in lines("completed")}
-unfinished = sorted(claimed - completed)
-pending = lines("pending")
-if unfinished or pending:
-    print(f"1 journeys never finished: {' '.join(unfinished + pending)}")
+missing = [journey for journey in lines("selected") if journey not in completed]
+if missing or not lines("selected"):
+    print(f"1 journeys never finished: {' '.join(missing) or 'none selected'}")
 else:
     print("0")
 PY
@@ -1269,7 +1285,7 @@ PY
 run_ui() {
   # Journey code and the fixture that drives it are one source state, exactly as
   # the E2E lane: prove the products before renewing any Gateway state.
-  local started=$SECONDS xctestrun lane_run status=0 verdict index
+  local started=$SECONDS xctestrun lane_run status verdict index
   local -a journeys
   xctestrun="$(find_xctestrun "$ui_xctestrun_glob")"
   [[ -f "$xctestrun" ]] || die "UI test products are not built; run '$0 run-ui'"
@@ -1287,7 +1303,8 @@ run_ui() {
   ui_queue="$run_root/ui-queue"
   rm -rf "$ui_queue"
   mkdir -p "$ui_queue"
-  ui_journey_order "${journeys[@]}" >"$ui_queue/pending"
+  ui_journey_order "${journeys[@]}" >"$ui_queue/selected"
+  cp "$ui_queue/selected" "$ui_queue/pending"
   # The trap stays installed on success too: it is what stops the fixture this
   # command renewed and returns the lane's hosted app to the unpaired state the
   # E2E lane expects, and it joins every extra lane before the command ends.
@@ -1296,7 +1313,7 @@ run_ui() {
     spawn_ui_lane "$index"
   done
   lane_run="$(lane_xctestrun "$xctestrun")"
-  run_ui_lane "$lane_run" || status=$?
+  run_ui_lane "$lane_run"
   retire_idle_ui_lanes
   join_ui_lanes
   verdict="$(ui_queue_verdict)"
@@ -1316,7 +1333,7 @@ run_ui() {
 # fixture directory, the parent's products and queue.
 run_ui_lane_command() {
   [[ -n "$ui_queue" && -d "$ui_queue" ]] || die "run-ui-lane runs only under run-ui (TRON_IOS_E2E_UI_QUEUE)"
-  local xctestrun lane_run status=0
+  local xctestrun lane_run
   xctestrun="$(find_xctestrun "$ui_xctestrun_glob")"
   [[ -f "$xctestrun" ]] || die "UI test products are not built; run '$0 run-ui'"
   python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" \
@@ -1328,8 +1345,7 @@ run_ui_lane_command() {
   stop_fixture_on_exit=1
   trap finish_e2e_run EXIT
   lane_run="$(lane_xctestrun "$xctestrun")"
-  run_ui_lane "$lane_run" || status=$?
-  return "$status"
+  run_ui_lane "$lane_run"
 }
 
 run_test() {
@@ -1528,10 +1544,20 @@ case "$command" in
     # The same sweep as scripts/tron-ios-test, before this command provisions
     # anything: owned lanes booted with no live lease are reclaimed, and this
     # command's own lane is leased above, so the sweep never touches it.
-    python3 "$simulator_owner" sweep \
-      --discovery-root "$test_discovery_root" --default-state-dir "$test_default_state_root" \
-      --development-state "$development_state" \
-      || echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2
+    if [[ "$command" == run-ui-lane ]]; then
+      # The shared stdout carries whole journeys; an extra lane's sweep report
+      # goes through the queue's lock like any other line.
+      sweep_report="$(python3 "$simulator_owner" sweep \
+        --discovery-root "$test_discovery_root" --default-state-dir "$test_default_state_root" \
+        --development-state "$development_state")" \
+        || echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2
+      [[ -z "${sweep_report:-}" ]] || ui_queue_tool say "$sweep_report"
+    else
+      python3 "$simulator_owner" sweep \
+        --discovery-root "$test_discovery_root" --default-state-dir "$test_default_state_root" \
+        --development-state "$development_state" \
+        || echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2
+    fi
     ;;
 esac
 handle_signal() {
@@ -1543,6 +1569,10 @@ handle_signal() {
     kill -TERM "${ui_lane_pids[@]}" 2>/dev/null || true
     join_ui_lanes
   fi
+  # The running journey received the same signal (the lease holder signals the
+  # whole command tree); its process owner stops its xcodebuild. Reset the app
+  # and stop the fixture only once it has ended.
+  [[ -z "$ui_journey_pid" ]] || wait "$ui_journey_pid" 2>/dev/null || true
   # A signal ends a real-UI command before its tests finish: the hosted app is
   # still paired, and the E2E lane shares it. The signal's own exit stands even
   # when the reset cannot run.
