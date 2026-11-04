@@ -44,8 +44,8 @@ integration is one unit; octopus history is unresolved. Proof requires two fresh
 executions with the identical normalized signature at the head, a binary search proposal
 (cached `verify/probes/` outcomes are hints only), then two fresh passes at the culprit's
 first parent and two fresh identical failures at the culprit. Any mixed, unknown, setup,
-empty or changed-signature execution is **unresolved**, except that a head control selecting
-no tests is a broken selector: the batch errors (exit 2) naming the command. Unresolved, the red stays red and is
+empty or changed-signature execution is **unresolved**, except that an exact-case Vitest head
+control selecting no tests is a broken selector: the batch errors (exit 2) naming the command. Unresolved, the red stays red and is
 root-caused; nothing is guessed or reverted. `verify/attributions/` memoizes per range.
 
 **Repair** (`verify/repairs/<culprit>.json`, one journal per landing, written before each
