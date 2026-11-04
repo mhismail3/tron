@@ -54,10 +54,8 @@ Commands:
                                     Rebuild main; five isolated simulator/Gateway smoke outcomes
                                     --prepare-reinstall writes a manual maintenance receipt, never installs
   version                           Print the canonical Tron version
-  measure <base> [<head>]         Advisory moved/rewrite line counts between commits;
-                                    JSON in test-results/measure/, never gates
   metrics [<rev>] [--compare <base>]
-                                    Read-only restructure metrics of a commit's Git
+                                    Read-only repository metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
@@ -85,9 +83,7 @@ Commands:
                                     unindexed file beyond packages/<pkg>/layer-baseline.json,
                                     which only shrinks; undeclared pairs are reported only
                                     (tools/layers); never a gate
-  budgets [<rev>] [--base <ref>]   Report files over 500 lines and docs over budget; fail a
-                                    production file new since <ref> (default origin/main) over
-                                    800 lines or a doc over twice its budget; never a gate
+  budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
   docs modules [<path>]|signals|rpc|settings
                                     Print a generated Markdown index (module map, module
                                     README Signals, Gateway RPCs, settings keys); docs
@@ -104,21 +100,6 @@ Commands:
                                     Project to .github/work.json (tools/work); reports
                                     undeclared labels, fields and options as drift;
                                     --prune deletes the ones no open work uses
-  work start <issue> [--session <id>] [--integration] [--base <remote-branch>]
-                                    Claim an open, unclaimed issue: remote branch,
-                                    Project status, claim comment, and its worktree;
-                                    --integration explicitly admits epics, --base records
-                                    the exact configured-remote starting branch
-  work handoff <issue> --reason <text> [--session <id>]
-                                    Transfer an existing claim in place; unknown owner
-                                    state refuses; force requires exact TTY confirmation
-  work recover <issue> --expected-local <SHA> --expected-remote <SHA> --reason <text>
-                                    Publish a clean settled-owner descendant as unverified
-                                    work; exact heads required; handoff remains separate
-  work release <issue> --reason <text> | --stale [--dry-run]
-                                    Give up a stale claim after preserving its work;
-                                    --stale sweeps claims idle over 72h whose owner is
-                                    absent; force (TTY) only for a legacy non-Gateway owner
   work comment <issue> --body-file <md>
                                     Privacy-check and audit a public issue comment
   work issue create --title <t> --body-file <md> --kind <label> --area <label>...
@@ -142,10 +123,6 @@ Commands:
   work auth setup|status            Store the agents' dedicated GitHub token once in
                                     Keychain (maintainer, Terminal), or show its login,
                                     scopes and expiry; every work command checks it first
-  work cleanup [--all] [--dry-run]  Remove this task worktree and its branches after
-                                    exact-head completion and local-preservation proofs;
-                                    --all checks every one under the worktree root,
-                                    naming why each other is kept
 
   terminal-ssh status|start|stop|recover --home <tron-home>
                                     Own private user SSH service; no root, PF, or
@@ -215,9 +192,6 @@ case "$cmd" in
     ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
-    ;;
-  measure)
-    exec python3 "$ROOT/tools/metrics/moved.py" "$@"
     ;;
   metrics)
     exec python3 "$ROOT/tools/metrics/metrics.py" "$@"

@@ -423,7 +423,7 @@ private struct SettingsModelPicker: View {
     let onChoose: (JSONValue) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var served: [SettingsOption]?
+    @State private var served: [SettingsOption]? // view-local: a rebuilt picker reads the served models again
 
     /// Every model the Gateway serves for the key, once each page is read.
     private var servedModels: Set<ModelRef>? {

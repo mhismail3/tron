@@ -119,9 +119,8 @@ owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the 
 
 - Issues/Project coordinate, never approve ([Git/gh skill](.agents/skills/tron-work/SKILL.md)).
   One writer/file; inspect with Git/gh; resume settled same-slice workers before replacing them.
-  Existing claims are preservation metadata, not locks. Never edit another worker's tree, delete its branch or take over unknown or live
-  work; preserve unpublished or parked checkpoints. `release`/`handoff` keep local work;
-  `cleanup`/`recover` keep exact-head safeguards. After each issue lands on origin/main, sync primary main
+  Never edit another worker's tree, delete its branch or take over unknown or live work;
+  preserve unpublished or parked checkpoints. After each issue lands on origin/main, sync primary main
   with `git merge --ff-only origin/main` only if tracked-clean and strictly behind; keep untracked files, never reset/rebase.
 - Issue writes use `scripts/tron work`; reads may use `gh`. A nonzero GraphQL exit is
   uncertain: inspect remote state, never replay. Repository protection is maintainer-only.

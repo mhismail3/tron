@@ -51,9 +51,16 @@ class GitSkill(unittest.TestCase):
         self.git(self.repo, "push", "origin", "main")
         updated = self.skill("Integrate")
         self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
+        integrated = self.git(self.task, "rev-parse", "HEAD")
+        fetched_main = self.git(self.remote, "rev-parse", "main")
         pushed = self.skill("Publish")
         self.assertEqual(pushed.returncode, 0, pushed.stdout + pushed.stderr)
-        self.assertEqual(self.git(self.remote, "rev-parse", "main"), self.git(self.task, "rev-parse", "HEAD"))
+        # A --no-ff merge lands: fetched main stays first parent, the tested branch is second,
+        # and the landed tree is exactly the tested one. The task stays on its branch.
+        self.assertEqual(self.git(self.remote, "rev-parse", "main^1"), fetched_main)
+        self.assertEqual(self.git(self.remote, "rev-parse", "main^2"), integrated)
+        self.assertEqual(self.git(self.remote, "rev-parse", "main^{tree}"), self.git(self.task, "rev-parse", "HEAD^{tree}"))
+        self.assertEqual(self.git(self.task, "rev-parse", "HEAD"), integrated)
         self.assertEqual(self.git(self.remote, "show", "main:worker"), "worker")
         self.assertEqual(self.git(self.remote, "show", "main:concurrent"), "another worker")
         self.assertFalse((self.repo / ".git/work").exists())

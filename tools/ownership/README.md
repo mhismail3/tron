@@ -1,7 +1,7 @@
 # Module ownership
 
 Every tracked path has exactly one owning module. A module is declared by a
-co-located `<name>.module.json` manifest (format B′, [plan §6.1](../../docs/restructure/plan.md#61-module-manifest-v1)).
+co-located `<name>.module.json` manifest (format B′).
 `scripts/tron ownership` checks the whole repository. It is read-only and
 reports; it is never wired into hooks, landing or a queue.
 
@@ -45,7 +45,7 @@ are the tracked paths ending in `.module.json`. There is no central registry.
 
   | Key | Required | Rule |
   |---|---|---|
-  | `layer` | yes | `L0`–`L5` ([plan §5.1](../../docs/restructure/plan.md#51-layers-all-packages)). Code modules use their current best-fit layer; tooling, docs, test targets and package configuration use `L5`, because nothing depends on them |
+  | `layer` | yes | `L0`–`L5` ([layers](../layers/README.md#layers)). Code modules use their current best-fit layer; tooling, docs, test targets and package configuration use `L5`, because nothing depends on them |
   | `owns` | yes | non-empty list of unique patterns, relative to the manifest's directory |
   | `dependsOn` | no | other module ids; kernel ports (plan §6.1) are accepted once K-0 defines them |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |

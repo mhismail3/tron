@@ -491,8 +491,8 @@ build_validated_app() {
 compile_unsigned_app() {
     require_full_xcode
     # Products live outside the worktree, like ios.build's: the Swift package
-    # checkouts are nested Git clones that would keep `work cleanup` from
-    # removing a finished worktree (#1063). One owned, stamped directory per
+    # checkouts are nested Git clones that would block removing a finished
+    # worktree (#1063). One owned, stamped directory per
     # worktree; a directory whose worktree is gone is pruned here first.
     local identity="$ROOT_DIR/scripts/ios-test-build-identity.py" key derived
     # Fatal, not a warning: a prune that silently never runs leaks gigabytes.

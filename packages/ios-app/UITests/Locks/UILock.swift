@@ -1,7 +1,7 @@
 import UIKit
 import XCTest
 
-/// Restructure UI locks (docs/restructure/plan.md §6.6). A lock pins one
+/// UI locks (README.md beside this file). A lock pins one
 /// hosted-fixture screen state with explicit pixel and optional AX witnesses in `Goldens/`:
 ///
 /// - `<name>.a11y.txt`: the app's accessibility hierarchy as normalized text

@@ -6,8 +6,7 @@ disposable Git repository with an isolated HOME and Git configuration, commits
 fixture files with fixed dates, and runs the command as a worker would:
 
 1. Classification, line counting and the 500-line threshold follow the
-   documented rules, and every unmeasured plan metric is reported unavailable
-   without a number.
+   documented rules; only observed metrics are reported.
 2. The same commit yields byte-identical JSON regardless of working-tree,
    index, untracked-file or time-zone state, and an older commit is measured
    without checking it out.
@@ -36,11 +35,6 @@ ARTIFACTS = ROOT / "test-results" / "metrics-cli"
 TOOL_FILES = ("scripts/tron", "tools/metrics/metrics.py")
 DAY = 86400
 T0 = 1_700_000_000  # 2023-11-14: far from the wall clock, so clock anchoring fails loudly.
-UNAVAILABLE = {
-    "M1.lockCoverage", "M1.lockDeterminism", "M1.lockSensitivity",
-    "M2.layerViolations", "M2.directoryCycles",
-    "M2.registrationFootprint", "M2.navigationProbe", "M4.sliceVerifyTime",
-}
 
 
 def lines(count: int, prefix: str = "line") -> str:
@@ -209,17 +203,12 @@ class ClassificationTests(RepoCase):
         self.assertEqual(large["byCategory"], {"production": 1, "tests": 1, "tooling": 0, "docs": 1})
         self.assertIn("Hand-written files > 500 lines: 3", self.result.stdout)
 
-    def test_unmeasured_plan_metrics_are_unavailable_without_numbers(self) -> None:
+    def test_only_observed_metrics_are_reported(self) -> None:
         metrics = self.data["metrics"]
-        self.assertEqual({k for k, v in metrics.items() if v["status"] == "unavailable"}, UNAVAILABLE)
-        for key in UNAVAILABLE:
-            with self.subTest(metric=key):
-                self.assertEqual(set(metrics[key]), {"status", "reason", "owner"})
-                self.assertTrue(metrics[key]["reason"] and metrics[key]["owner"])
+        self.assertEqual(set(metrics), {"M2.fileSize", "M2.hotspotShare", "M3.size"})
         self.assertEqual({k for k, v in metrics.items() if v["status"] == "observed"},
                          {"M2.fileSize", "M2.hotspotShare", "M3.size"})
-        for key in UNAVAILABLE:
-            self.assertIn(key, self.result.stdout)
+        self.assertNotIn("Unavailable", self.result.stdout)
 
 
 class DeterminismTests(RepoCase):
@@ -345,7 +334,6 @@ class CompareTests(RepoCase):
         self.assertIn("- >500 entered: packages/gateway/src/grow.ts (510)", out)
         self.assertNotIn("entered: packages/gateway/src/core/big.ts", out)
         self.assertIn("Metrics Δ: LOC prod/test/tool/docs -299/0/+30/+5; files>500 -1; "
-                      "violations unavailable (0.4 manifests; 0.6 layer checker #1354); "
                       "hotspot 100.0%→100.0%.", out)
 
 

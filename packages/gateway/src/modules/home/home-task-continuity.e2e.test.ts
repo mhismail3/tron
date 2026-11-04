@@ -1,14 +1,12 @@
 /**
  * Stopped or restarted Home workers never block the maintainer (#929). Real RuntimeRegistry,
- * GatewayService and GatewayServer with a faux model; the claim journey runs the real
- * `scripts/tron work` CLI and owner-status helper against this Gateway over its socket.
+ * GatewayService and GatewayServer with a faux model.
  */
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { execFile, spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile, copyFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -640,87 +638,6 @@ describe("one ordered message lane per Home worker", () => {
     expect(users.indexOf("Maintainer second")).toBeGreaterThan(users.indexOf("Home first"));
     evidence.push({ case: "shared-lane-maintainer-and-home", order: users.slice(1) });
   }, 60_000);
-});
-
-describe("claims of stopped Home workers", () => {
-  it("admits an ordinary settled-claim successor, explicitly hands off to Home, and refuses implicit live-owner takeover", async () => {
-    const f = await fixture();
-    const { port } = await listen(f);
-    const entered = { count: 0 };
-    f.faux.setResponses([holding(entered), holding(entered)]);
-    const stopped = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "worker-one", intent: "Finite work", target: f.cwd });
-    await waitFor(() => entered.count === 1, "first worker turn");
-    await homeOwnerOf(f.registry).stopTask({ taskId: stopped.taskId, operationId: stopped.operationId });
-    expect((await stopped.completion).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
-    const successor = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "worker-two", intent: "Finite work", target: f.cwd });
-    await waitFor(() => entered.count === 2, "successor worker turn");
-    cleanups.push(async () => {
-      await homeOwnerOf(f.registry).stopTask({ taskId: successor.taskId, operationId: successor.operationId }).catch(() => {});
-      await successor.completion.catch(() => {});
-    });
-
-    // A real claim, created by `work start` for the stopped worker's session.
-    const root = await mkdtemp(join(tmpdir(), "tron-claim-takeover-"));
-    cleanups.push(() => rm(root, { recursive: true, force: true }));
-    const repo = join(root, "repo"), home = join(root, "home"), state = join(root, "github.json");
-    for (const directory of [join(repo, ".github"), join(repo, "scripts"), home]) await mkdir(directory, { recursive: true });
-    await copyFile(join(REPO, ".github/work.json"), join(repo, ".github/work.json"));
-    await copyFile(join(REPO, "scripts/personal-info-guard.sh"), join(repo, "scripts/personal-info-guard.sh"));
-    await writeFile(state, JSON.stringify({ state: "OPEN", status: "Ready", labels: [], blockers: [], comments: [], writes: [] }));
-    const env = { ...process.env, HOME: home, TMPDIR: join(f.root, "tmp"), WORK_GH: join(REPO, "scripts/test-work-start.py"),
-      WORK_START_FIXTURE: state, PYTHONDONTWRITEBYTECODE: "1", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
-      TRON_DATA_DIR: f.tronHome, TRON_GATEWAY_HOST: "127.0.0.1", TRON_GATEWAY_PORT: String(port), PI_CODING_AGENT_DIR: f.agentDir };
-    delete (env as Record<string, unknown>).PI_SESSION_ID;
-    const git = (...args: string[]) => {
-      const result = spawnSync("git", args, { cwd: repo, env, encoding: "utf8" });
-      if (result.status) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
-      return result.stdout.trim();
-    };
-    git("init", "-b", "main"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
-    git("add", "."); git("commit", "-m", "base");
-    git("init", "--bare", join(root, "remote.git")); git("remote", "add", "origin", join(root, "remote.git")); git("push", "origin", "main");
-    // Asynchronous: the Gateway answering the owner-status helper runs in this process.
-    const work = async (session: string, ...args: string[]) => {
-      const result = await promisify(execFile)("python3", [join(REPO, "tools/work/cli.py"), ...args], { cwd: repo, env: { ...env, WORK_SESSION_ID: session }, encoding: "utf8", timeout: 240_000 })
-        .then(({ stdout, stderr }) => ({ status: 0, stdout, stderr }), (error: { code?: number; stdout?: string; stderr?: string }) => ({ status: error.code ?? 1, stdout: error.stdout ?? "", stderr: error.stderr ?? "" }));
-      evidence.push({ case: "work", session, args, exit: result.status, stdout: result.stdout, stderr: result.stderr });
-      return result;
-    };
-
-    const created = await work(stopped.sessionId, "start", "41");
-    expect(created.status, created.stderr).toBe(0);
-    const branch = /branch:\s+(\S+)/u.exec(created.stdout)![1]!;
-    git("fetch", "-q", "origin");
-    expect(git("log", "-1", "--format=%B", `origin/${branch}`)).toContain(`Work-Claim-Session: ${stopped.sessionId}`);
-
-    // A settled claim is reusable by an ordinary worker, not only Home tasks.
-    const ordinarySession = "01a10000-0000-7000-8000-000000000000";
-    const outsider = await work(ordinarySession, "start", "41");
-    expect(outsider.status, outsider.stderr).toBe(0);
-    git("fetch", "-q", "origin");
-    const ordinaryTransfer = git("log", "-1", "--format=%B", `origin/${branch}`);
-    expect(ordinaryTransfer).toContain(`Work-Claim-Session: ${ordinarySession}`);
-    expect(ordinaryTransfer).toContain(`Work-Handoff-From: ${stopped.sessionId}`);
-
-    // Explicit coordination transfer needs no liveness override or Home identity.
-    const takeover = await work(successor.sessionId, "handoff", "41", "--reason", "explicit transfer to successor Home task");
-    expect(takeover.status, takeover.stderr).toBe(0);
-    git("fetch", "-q", "origin");
-    const transfer = git("log", "-1", "--format=%B", `origin/${branch}`);
-    expect(transfer).toContain(`Work-Claim-Session: ${successor.sessionId}`);
-    expect(transfer).toContain(`Work-Handoff-From: ${ordinarySession}`);
-    expect(transfer).toContain("explicit transfer to successor Home task");
-    const comments = (JSON.parse(await readFile(state, "utf8")) as { comments: string[] }).comments;
-    expect(comments.some(comment => comment.includes(`\`${ordinarySession}\` → \`${successor.sessionId}\``))).toBe(true);
-
-    // The successor is live: a further claimant is refused, naming the live verdict.
-    const live = await work("01a10000-0000-7000-8000-000000000001", "start", "41");
-    expect(live.status).not.toBe(0);
-    expect(live.stderr).toMatch(/owner is live/u);
-    git("fetch", "-q", "origin");
-    expect(git("log", "-1", "--format=%B", `origin/${branch}`)).toContain(`Work-Claim-Session: ${successor.sessionId}`);
-    evidence.push({ case: "settled-claim-takeover", stopped: stopped.sessionId, successor: successor.sessionId, ordinarySuccessorAdmitted: true, liveRefused: true });
-  }, 300_000);
 });
 
 /** A worker turn that records the newest user text it saw, then reports. */

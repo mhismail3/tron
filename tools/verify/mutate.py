@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """scripts/tron mutate: seeded, sampled mutation of one source file against the locks verify selects.
 
-Milestone lock sensitivity (plan §3 M1, §6.6; maintainer decision 2026-10-19 on #1345, from
-the #1465 evaluation): each sampled mutant flips one operator in the file, the *locks*
+On-demand lock sensitivity (#1465): each sampled mutant flips one operator in the file, the *locks*
 `scripts/tron verify` would select for a change to that file run, and a failing run kills
 the mutant. M1 measures what locks catch, so module journeys are not part of the run. It measures and never gates: it exits non-zero only for usage errors, unmutated locks that do not pass, or harness errors.
 A mutant whose locks outlive `--timeout` (an infinite loop starves vitest's own timers) is
