@@ -4554,14 +4554,16 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
     def test_a_signal_resets_the_app_only_after_the_journey_tore_down(self) -> None:
         """#2253 review: a journey runs in a subshell; a signal must still let its
         process owner stop xcodebuild before the command resets the hosted app
-        and stops the fixture, as the serial loop did, on one lane and on two."""
-        for lanes in ("1", "2"):
-            with self.subTest(lanes=lanes):
+        and stops the fixture, as the serial loop did, on one lane and on two,
+        for SIGTERM and for SIGINT (which an async subshell would ignore)."""
+        for lanes, signalled in (("1", signal.SIGTERM), ("2", signal.SIGTERM), ("1", signal.SIGINT), ("2", signal.SIGINT)):
+            with self.subTest(lanes=lanes, signal=signalled.name):
                 self.log_path.unlink(missing_ok=True)
-                started = self.root / f"run-started-{lanes}"
+                key = f"{lanes}-{signalled.name}"
+                started = self.root / f"run-started-{key}"
                 environment = self.ui_environment(
                     TRON_IOS_E2E_UI_LANES=lanes, FAKE_XCODEBUILD_RUN_STARTED=str(started),
-                    FAKE_XCODEBUILD_TERM_DELAY="2", FAKE_XCODEBUILD_LOG=str(self.root / f"signal-xcodebuild-{lanes}.jsonl"),
+                    FAKE_XCODEBUILD_TERM_DELAY="2", FAKE_XCODEBUILD_LOG=str(self.root / f"signal-xcodebuild-{key}.jsonl"),
                 )
                 journey = self.owned_ui_journeys()[0]
                 process = subprocess.Popen(
@@ -4574,9 +4576,9 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
                     while not started.exists() and process.poll() is None and time.monotonic() < deadline:
                         time.sleep(0.05)
                     self.assertTrue(started.exists(), process.poll() is not None and process.communicate()[1])
-                    os.killpg(process.pid, signal.SIGTERM)
+                    os.killpg(process.pid, signalled)
                     _, stderr = process.communicate(timeout=120)
-                    self.assertEqual(process.returncode, 128 + signal.SIGTERM, stderr)
+                    self.assertEqual(process.returncode, 128 + signalled, stderr)
                     lines = self.log_path.read_text().splitlines()
                     ended = [index for index, line in enumerate(lines) if line == "xcodebuild-ended"]
                     # The reset of the lane that ran the journey; an idle extra lane resets at once.

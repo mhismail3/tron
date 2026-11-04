@@ -235,7 +235,6 @@ ui_lanes="${TRON_IOS_E2E_UI_LANES:-1}"
 ui_queue="${TRON_IOS_E2E_UI_QUEUE:-}"
 ui_lane_pids=()
 ui_lane_names=()
-ui_journey_pid=""
 simulator_args=(
   --marker "$simulator_marker"
   --runtime "$TRON_CI_IOS_RUNTIME_VERSION"
@@ -1151,21 +1150,23 @@ PY
 run_ui_lane() {
   local xctestrun="$1" journey status journey_log
   while journey="$(ui_queue_tool claim "$test_lane")" && [[ -n "$journey" ]]; do
-    status=0
+    journey_log="$run_root/journey-output.log"
+    ((ui_lanes == 1)) || ui_queue_tool say "Real-UI journey $journey started on lane $test_lane"
+    # The subshell runs in the foreground, as the serial loop's journey did: a
+    # signal's trap in this shell then runs only once the journey has ended
+    # (journey_signal_traps), and an async subshell would ignore SIGINT. Errexit
+    # is off here only to read its status; the subshell turns it back on.
+    set +e
     if ((ui_lanes > 1)); then
-      journey_log="$run_root/journey-output.log"
-      ui_queue_tool say "Real-UI journey $journey started on lane $test_lane"
-      ( journey_signal_traps; run_ui_journey "$journey" "$xctestrun" ) >"$journey_log" 2>&1 &
-      ui_journey_pid=$!
-      wait "$ui_journey_pid" || status=$?
-      ui_journey_pid=""
+      ( set -e; journey_signal_traps; run_ui_journey "$journey" "$xctestrun" ) >"$journey_log" 2>&1
+    else
+      ( set -e; journey_signal_traps; run_ui_journey "$journey" "$xctestrun" )
+    fi
+    status=$?
+    set -e
+    if ((ui_lanes > 1)); then
       ui_queue_tool publish "$journey_log"
       rm -f "$journey_log"
-    else
-      ( journey_signal_traps; run_ui_journey "$journey" "$xctestrun" ) &
-      ui_journey_pid=$!
-      wait "$ui_journey_pid" || status=$?
-      ui_journey_pid=""
     fi
     ui_queue_tool complete "$journey" "$status" "$test_lane"
     ((status == 0)) || break
@@ -1176,9 +1177,9 @@ run_ui_lane() {
 # A journey subshell keeps running until its foreground step has ended: bash runs
 # a caught signal's trap only after the foreground command returns, so a signal
 # that reaches the command tree lets the journey's process owner stop its
-# xcodebuild before the subshell exits. The command's own handler waits for the
-# subshell, so the app reset and fixture stop never race that teardown. (A
-# subshell left with the default disposition would die at once, mid-teardown.)
+# xcodebuild before the subshell exits, and this command's own handler (deferred
+# behind the foreground subshell) resets the app and stops the fixture only then.
+# A subshell left with the default disposition would die at once, mid-teardown.
 journey_signal_traps() {
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -1581,10 +1582,6 @@ handle_signal() {
     kill -TERM "${ui_lane_pids[@]}" 2>/dev/null || true
     join_ui_lanes
   fi
-  # The running journey received the same signal (the lease holder signals the
-  # whole command tree) and exits only once its process owner has stopped its
-  # xcodebuild (journey_signal_traps). Reset the app and stop the fixture after.
-  [[ -z "$ui_journey_pid" ]] || wait "$ui_journey_pid" 2>/dev/null || true
   # A signal ends a real-UI command before its tests finish: the hosted app is
   # still paired, and the E2E lane shares it. The signal's own exit stands even
   # when the reset cannot run.
