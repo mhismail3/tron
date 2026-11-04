@@ -83,15 +83,18 @@ export function extensionActivityOwnsOwnLiveWork(turns: OwnedTurnOwner, activity
 
 
 /** Only the delegated provider's lifecycle can settle a detached row, so only it can
- * make one live: the row was authored by the installed provider's own owner, or its
- * run is bound to this exact tool call with a provider artifact directory the Gateway
- * admitted and watches. Another tool's `runId`/`state` result fields (a `schedule`
- * runNow's queued automation run) describe state another owner keeps; nothing here
- * ever settles them, so they never become live work, a drain blocker or a running
+ * make one live. Every tool row carries the owner the extension boundary attributed;
+ * an origin without one is the Gateway's own provider attribution
+ * (`delegatedProviderOrigin`'s fallback for artifact-discovered runs). A row with an
+ * attributed owner other than the installed provider is live only when its run is
+ * bound to this exact tool call with a provider artifact directory the Gateway
+ * admitted and watches. Another owner's `runId`/`state` result fields (a `schedule`
+ * runNow's queued automation run) describe state that owner keeps; nothing here ever
+ * settles them, so they never become live work, a drain blocker or a running
  * dashboard phase. */
 function delegatedLifecycleOwner(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
-  const providerOwnerId = turns.subagentExtensionOrigin().owner?.id;
-  if (providerOwnerId !== undefined && activity.source.owner?.id === providerOwnerId) return true;
+  const ownerId = activity.source.owner?.id;
+  if (ownerId === undefined || ownerId === turns.subagentExtensionOrigin().owner?.id) return true;
   const binding = activity.runId === undefined ? undefined : turns.extensionRunOwnership.get(activity.runId);
   return binding?.toolCallId === activity.toolCallId && binding.asyncDir !== undefined;
 }
