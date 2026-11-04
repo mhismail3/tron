@@ -329,9 +329,7 @@ class Runner:
                 return
             summary, key = drain_blockers(snapshot)
             if time.monotonic() >= deadline:
-                quit = ('a Quit an earlier attempt requested may still be draining' if self.data.get('stopRequested')
-                        else 'Tron was not quit')
-                raise Failure(f'the Gateway drain is blocked by {summary}. {quit} and nothing was swapped; '
+                raise Failure(f'the Gateway drain is blocked by {summary}. This attempt did not quit Tron and swapped nothing; '
                               'settle or stop that work (see gateway.drain.status), then retry')
             if key != reported:
                 self.journal.progress(step, f'waiting for accepted Gateway work: {summary}')
