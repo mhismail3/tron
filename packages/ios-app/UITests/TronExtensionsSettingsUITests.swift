@@ -60,7 +60,7 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Install Package"].exists, "no native install form: \(app.debugDescription)")
         let npm = app.descendants(matching: .any)["settings-row-sources.npmCommand"]
         XCTAssertTrue(npm.exists, app.debugDescription)
-        XCTAssertLessThan(npm.frame.maxY, searchPaths.frame.minY + 1)
+        XCTAssertLessThan(npm.frame.maxY, searchPaths.frame.minY)
     }
 
     /// Captures the whole sheet, top to the Search paths group, per appearance.

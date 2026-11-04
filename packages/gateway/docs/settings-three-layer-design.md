@@ -89,7 +89,7 @@ mechanism; its restricted execution recipe is not expanded by this redesign (dec
 | `sources.skills` | sources | P,M | no | yes | no | Resource reload |
 | `sources.prompts` | sources | P,M | no | yes | no | Resource reload |
 | `sources.themes` | sources | P,M | no | yes | no | Resource reload |
-| `sources.packages` | sources | P,M | no | yes | no | Guided package editor/resource reload; trusted code |
+| `sources.packages` | sources | P,M | no | yes | no | Exact install card/resource reload; trusted code |
 | `sources.npmCommand` | sources | M | no | no | no | Next package operation |
 | `setup.sessionDir` | setup | M, no writer | no | no | no | Stopped-runtime configuration; hide from Settings |
 | `setup.installTelemetry` | setup | M | no | no | no | Next request |

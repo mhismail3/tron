@@ -1692,7 +1692,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
         // Hand-built owners hold these keys on Settings; their own journeys prove the control.
         let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
-            "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Sources settings (#1482)",
+            "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' npm command card (#1482)",
             "permissions.macTerminalServer": "this Mac's Connections page (testSettingsSourcesTextDoneAndRoutes)"] : [:]
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),

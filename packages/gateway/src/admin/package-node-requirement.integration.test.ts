@@ -17,7 +17,7 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../kernel/delegation
  * `PackageService`, Pi's real `DefaultPackageManager` and canonical
  * `settings.json` in a temporary agent directory. The fixture packages declare a
  * satisfied, an unsatisfied, an invalid and no range; the warning never blocks
- * install or listing (maintainer decision D-2, recorded on #241).
+ * a configured package or listing (maintainer decision D-2, recorded on #241).
  */
 
 const client: ClientContext = {
