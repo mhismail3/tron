@@ -36,6 +36,10 @@ from tron_rebuild_lock import RebuildLock, RebuildBusy  # noqa: E402
 LIBC = ctypes.CDLL(None, use_errno=True)
 DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
 WORKER_STOP_TIMEOUT = 10 * 60
+# A kept app copy must not be a `.app` bundle: Launch Services does not resolve
+# a directory without the package extension, even when explicitly registered,
+# so `open -b`, Finder and Spotlight cannot launch it (#2257).
+KEPT_APP_NAME = 'Tron.app.kept'
 RESUME_TEXT = ('The Mac app was replaced while this task ran, so it was stopped and preserved. '
                'Continue the task in place from where you left off.')
 
@@ -306,7 +310,34 @@ class Runner:
         self.journal.save()
         return active
 
+    def require_drain_idle(self, step):
+        """Refuse before any stop or restart while the Gateway reports accepted work (#2257).
+
+        A stop drains that work first, so a blocker that never settles would hold
+        the runner after Quit with the app already gone. Work that settles within
+        the platform's window (workers this operation just stopped, a finishing
+        turn) is waited for; anything left is named and nothing is quit. The
+        drain phase does not matter: a drain already in progress with a blocker
+        would hold the same way.
+        """
+        if getattr(self, 'offline_retry', False):
+            return
+        deadline, reported = time.monotonic() + self.platform.drain_settle_timeout, None
+        while True:
+            snapshot = self.platform.rpc('gateway.drain.status')
+            if not snapshot['blockerCount']:
+                return
+            summary, key = drain_blockers(snapshot)
+            if time.monotonic() >= deadline:
+                raise Failure(f'the Gateway drain is blocked by {summary}. This attempt did not quit Tron and swapped nothing; '
+                              'settle or stop that work (see gateway.drain.status), then retry')
+            if key != reported:
+                self.journal.progress(step, f'waiting for accepted Gateway work: {summary}')
+                reported = key
+            time.sleep(2)
+
     def step_stop_gateway(self):
+        self.require_drain_idle('stop-gateway')
         self.data['stopRequested'] = True
         self.journal.save()
         self.platform.quit_app(self.log('stop-gateway'))
@@ -354,7 +385,7 @@ class Runner:
                 swap['retiredChannel'] = str(retired)
                 self.journal.save()
                 os.rename(channel, retired)
-            previous = private_mkdir(operation / f'previous-app-{self.data["attempt"]}') / 'Tron.app'
+            previous = private_mkdir(operation / f'previous-app-{self.data["attempt"]}') / KEPT_APP_NAME
             swap['previousApp'] = str(previous)
             self.journal.save()
             os.rename(platform.installed, previous)
@@ -427,6 +458,7 @@ class Runner:
 
     def step_rebuild(self):
         """Quick path: the Gateway's own LaunchAgent-owned source update, followed to its terminal state."""
+        self.require_drain_idle('rebuild')
         command = self.platform.mutation('gateway.update', {'channel': 'stable', 'mode': 'source'})['commandId']
         deadline, last = time.monotonic() + 30 * 60, None
         while time.monotonic() < deadline:
@@ -485,7 +517,7 @@ class Runner:
                 previous = Path(swap['previousApp']) if swap.get('previousApp') else None
                 if previous is not None and previous.exists():
                     if platform.installed.exists():
-                        os.rename(platform.installed, operation / f'failed-app-{attempt}.app')
+                        os.rename(platform.installed, private_mkdir(operation / f'failed-app-{attempt}') / KEPT_APP_NAME)
                     os.rename(previous, platform.installed)
                 elif not platform.installed.exists():
                     raise Failure(f'neither the previous app ({previous}) nor an installed app exists')
@@ -520,6 +552,29 @@ class Runner:
         except (RpcError, Failure, OSError, ValueError, KeyError) as error:
             self.data['notification'] = {'state': 'unavailable', 'detail': str(error)[:300]}
         self.journal.save()
+
+
+def drain_blockers(snapshot):
+    """`gateway.drain.status` blockers as text (category, session, age), and a stable key without ages."""
+    parts, keys = [], []
+    for blocker in snapshot.get('blockers', [])[:3]:
+        where = f' {blocker["method"]}' if blocker.get('method') else ''
+        where += f' in session {blocker["sessionId"]}' if blocker.get('sessionId') else ''
+        keys.append(f'{blocker.get("category")}{where} ({blocker.get("state")})')
+        age = blocker.get('ageMs')
+        parts.append(keys[-1] + (f' for {format_age(age / 1000)}' if isinstance(age, (int, float)) else ''))
+    count = int(snapshot.get('blockerCount') or len(parts))
+    more = f' and {count - len(parts)} more' if count > len(parts) else ''
+    return f'{count} blocker{"s" if count != 1 else ""}: ' + '; '.join(parts) + more, (keys, count)
+
+
+def format_age(seconds):
+    seconds = int(seconds)
+    if seconds < 60:
+        return f'{seconds}s'
+    if seconds < 3600:
+        return f'{seconds // 60}m {seconds % 60}s'
+    return f'{seconds // 3600}h {seconds % 3600 // 60}m'
 
 
 def prune_builds(platform, keep):
