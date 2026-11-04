@@ -26,8 +26,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
    `scripts/personal-info-guard.sh`, its pre-commit hook, `scripts/tron work` writes]
 5. **iOS:** follow `.agents/skills/tron-ios/SKILL.md` and its build matrix for any build,
    test, signing or device work. Never erase app or Keychain data to fix a mismatch.
-   Simulator/device helpers hold host-wide leases: on exit 73 wait for the named holder;
-   never bypass via `xcodebuild`, `simctl` or `devicectl`. [check: leases]
+   Simulator/device helpers hold host-wide leases: on exit 73 wait for the named holder; never
+   bypass them via `xcodebuild`, `simctl`, `devicectl`, Xcode MCP, XcodeBuildMCP or AXe. [check: leases]
 6. **One approval path:** #2128's shared before/after card binds irreversible effects,
    trust/authority, privacy expansion, spend and installs to an exact tap. Other typed
    changes apply/log/Undo; never invent Undo or log secrets. Ask only for missing intent;

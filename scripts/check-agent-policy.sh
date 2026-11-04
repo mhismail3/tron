@@ -59,6 +59,9 @@ for path in paths:
 PY
 grep -Fq 'SIGSTOP' "$ROOT/AGENTS.md" \
   || fail "shared guidance lacks Gateway work-suspension stop rule"
+grep -Fq 'XcodeBuildMCP' "$ROOT/AGENTS.md" \
+  && grep -Fq 'xcrun mcpbridge' "$ROOT/.agents/skills/tron-ios/SKILL.md" \
+  || fail "simulator lease rule lacks the agent (MCP/AXe) simulator paths"
 # Scan tracked and not-yet-tracked source so the check is trustworthy before
 # commit as well as in CI. Only the untouched external caller and bounded
 # compatibility implementation and policy tests may spell retired names.
