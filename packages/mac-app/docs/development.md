@@ -231,7 +231,7 @@ scripts/tron mac replace --status --follow
   the operation directory and installs the verified build. A failure after the swap restores and
   verifies the previous app and payloads; the snapshot is never restored over newer data.
   Kept apps (`previous-app-<n>/Tron.app.kept`, `failed-app-<n>/Tron.app.kept`) are not `.app`
-  bundles: Launch Services drops them on the rename and refuses to register them, so Finder,
+  bundles: Launch Services does not resolve them even when registered, so Finder,
   Spotlight and `open -b com.tron.mac` reach only `/Applications/Tron.app`. Rollback renames
   the kept copy back and verifies the restored Gateway's revision.
 - **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac

@@ -36,9 +36,9 @@ from tron_rebuild_lock import RebuildLock, RebuildBusy  # noqa: E402
 LIBC = ctypes.CDLL(None, use_errno=True)
 DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
 WORKER_STOP_TIMEOUT = 10 * 60
-# A kept app copy must not be a `.app` bundle: Launch Services follows a rename
-# of a registered bundle and refuses to register a directory without the
-# package extension, so `open -b`, Finder and Spotlight cannot launch it (#2257).
+# A kept app copy must not be a `.app` bundle: Launch Services does not resolve
+# a directory without the package extension, even when explicitly registered,
+# so `open -b`, Finder and Spotlight cannot launch it (#2257).
 KEPT_APP_NAME = 'Tron.app.kept'
 RESUME_TEXT = ('The Mac app was replaced while this task ran, so it was stopped and preserved. '
                'Continue the task in place from where you left off.')
@@ -325,11 +325,13 @@ class Runner:
         deadline, reported = time.monotonic() + self.platform.drain_settle_timeout, None
         while True:
             snapshot = self.platform.rpc('gateway.drain.status')
-            if not snapshot.get('blockerCount'):
+            if not snapshot['blockerCount']:
                 return
             summary, key = drain_blockers(snapshot)
             if time.monotonic() >= deadline:
-                raise Failure(f'the Gateway drain is blocked by {summary}. Tron was not quit and nothing was swapped; '
+                quit = ('a Quit an earlier attempt requested may still be draining' if self.data.get('stopRequested')
+                        else 'Tron was not quit')
+                raise Failure(f'the Gateway drain is blocked by {summary}. {quit} and nothing was swapped; '
                               'settle or stop that work (see gateway.drain.status), then retry')
             if key != reported:
                 self.journal.progress(step, f'waiting for accepted Gateway work: {summary}')
