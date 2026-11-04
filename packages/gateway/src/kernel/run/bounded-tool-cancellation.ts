@@ -25,7 +25,7 @@ export class ToolCallInterrupt extends Error {
 
 const interruptedText = (interrupt: ToolCallInterrupt, name: string, output: string) =>
   `Interrupted by ${interrupt.by}: this ${name} call was cancelled before it finished${name === "bash" ? ", and its command was stopped with its child processes" : ""}. `
-  + "Your session, worktree, branch, commits and claim are unchanged; a following message may say what to do instead."
+  + "Your session, worktree, branch and commits are unchanged; a following message may say what to do instead."
   + (output.trim() ? `\n\nOutput before the interrupt:\n${output}` : "");
 
 const resultText = (value: unknown): string => {

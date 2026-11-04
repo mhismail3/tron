@@ -30,7 +30,7 @@ packages:
     path: native-computer-control
 
 # Every directory source excludes "**/*.module.json" and "**/README.md": module
-# manifests and owner docs (docs/restructure/plan.md §6.1) are repository
+# manifests and owner docs (tools/ownership/README.md) are repository
 # metadata that XcodeGen would otherwise copy into the product's Resources.
 # Folder references (type: folder) are copied whole by Xcode and cannot exclude,
 # so no manifest may live inside one.

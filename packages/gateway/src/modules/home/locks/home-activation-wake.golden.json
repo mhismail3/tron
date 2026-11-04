@@ -1868,7 +1868,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6",
+        "promptHash": "sha256:bddafb42ff0b02e667dd19b0344bc44c1a97c89c5077e0e5af7611225fc0cf00",
         "messages": [
           {
             "role": "user",
@@ -1911,7 +1911,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6",
+        "promptHash": "sha256:bddafb42ff0b02e667dd19b0344bc44c1a97c89c5077e0e5af7611225fc0cf00",
         "messages": [
           {
             "role": "user",
@@ -1963,7 +1963,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6",
+        "promptHash": "sha256:bddafb42ff0b02e667dd19b0344bc44c1a97c89c5077e0e5af7611225fc0cf00",
         "messages": [
           {
             "role": "user",
@@ -2048,7 +2048,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6"
+      "promptHash": "sha256:bddafb42ff0b02e667dd19b0344bc44c1a97c89c5077e0e5af7611225fc0cf00"
     },
     {
       "caller": "home-delegated",
@@ -2056,7 +2056,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6"
+      "promptHash": "sha256:bddafb42ff0b02e667dd19b0344bc44c1a97c89c5077e0e5af7611225fc0cf00"
     },
     {
       "caller": "home-wake",
@@ -2064,7 +2064,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:627520ae3d23a89b49518e911d2624f1381a9e4abbb345090ce6c1cd199cd9a6"
+      "promptHash": "sha256:bddafb42ff0b02e667dd19b0344bc44c1a97c89c5077e0e5af7611225fc0cf00"
     }
   ],
   "requestOptions": [
@@ -2228,7 +2228,7 @@
       },
       {
         "name": "task",
-        "schema": "sha256:b53b0d8769f28b3b6ffcc13a71e7280eab66eb298b560bb326a70f393afc15a6"
+        "schema": "sha256:599b0150bd16aaefd60db3a0760a59d978bc42a74031dcc6346432c688dba392"
       },
       {
         "name": "profile",
@@ -3411,7 +3411,7 @@
               }
             },
             {
-              "description": "Inspect and control the tasks you delegated. list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId and the actions each allows. status {taskId}: one task's durable record, spend and live subagent runs; no control effect. report {taskId, offset?, limit?}: a UTF-8 byte page (limit up to 4096) of a settled task's immutable report. metrics {from?, to?, taskId?, limit?}: read-only task retro projection; default roots delegated in the last 72 hours, at most 31 days, up to 50 lineages. UTC from/to form [from,to); taskId selects its whole lineage regardless of creation time. Retained progress is partial; missing landed, steering, wait, billing and verify data stays unavailable. No sessions opened or live state changed. steer {taskId, text}: send a message to a running worker without stopping it. interrupt {taskId, text?}: cancel only the worker's in-flight command or tool call (its child processes too); the worker keeps running, reads that the call was interrupted, then text as a steer. Use it to end a long or stuck command without stopping the worker. stop {taskId}: stop a running or queued worker; its session, worktree, branch, commits and claim are kept. resume {taskId, text?}: continue a stopped or settled worker in place (same session, worktree and claim; it re-asks any question the stop interrupted); the reply names the new taskId. Never delegate a replacement. rename {taskId, title}: rename the worker's session, running or settled, without interrupting it; the title shows in the session list and task list, persists, and a resume keeps it. The brief is unchanged. Control actions need only taskId: the Gateway uses the worker's current task and operation, including a later resume of the task you name. Pass operationId only to guard against acting on a newer operation than the one you read. To read or change a worker's model, thinking or other session settings, use the settings tool with taskId: a running worker uses a model, thinking or Run change from its next model request and is signalled in its steering lane; resolve's worker.lastResponse shows what its latest response ran on.",
+              "description": "Inspect and control the tasks you delegated. list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId and the actions each allows. status {taskId}: one task's durable record, spend and live subagent runs; no control effect. report {taskId, offset?, limit?}: a UTF-8 byte page (limit up to 4096) of a settled task's immutable report. metrics {from?, to?, taskId?, limit?}: read-only task retro projection; default roots delegated in the last 72 hours, at most 31 days, up to 50 lineages. UTC from/to form [from,to); taskId selects its whole lineage regardless of creation time. Retained progress is partial; missing landed, steering, wait, billing and verify data stays unavailable. No sessions opened or live state changed. steer {taskId, text}: send a message to a running worker without stopping it. interrupt {taskId, text?}: cancel only the worker's in-flight command or tool call (its child processes too); the worker keeps running, reads that the call was interrupted, then text as a steer. Use it to end a long or stuck command without stopping the worker. stop {taskId}: stop a running or queued worker; its session, worktree, branch and commits are kept. resume {taskId, text?}: continue a stopped or settled worker in place (same session and worktree; it re-asks any question the stop interrupted); the reply names the new taskId. Never delegate a replacement. rename {taskId, title}: rename the worker's session, running or settled, without interrupting it; the title shows in the session list and task list, persists, and a resume keeps it. The brief is unchanged. Control actions need only taskId: the Gateway uses the worker's current task and operation, including a later resume of the task you name. Pass operationId only to guard against acting on a newer operation than the one you read. To read or change a worker's model, thinking or other session settings, use the settings tool with taskId: a running worker uses a model, thinking or Run change from its next model request and is signalled in its steering lane; resolve's worker.lastResponse shows what its latest response ran on.",
               "name": "task",
               "parameters": {
                 "properties": {
