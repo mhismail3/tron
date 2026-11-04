@@ -16,15 +16,18 @@ import subprocess
 import tempfile
 import time
 
+import timing
 import verify
 
 ROOT = verify.ROOT
-# The host's one full-Gateway run at a time. A batch and every other Gateway Vitest run
-# (tools/verify/gateway.py, same path) take it in arrival order; batch subprocesses carry
-# FULL_GATEWAY_LOCK_HELD so their own Gateway runs do not wait on this batch.
+# The host's one full-Gateway run at a time. A batch takes it only around each lane or probe
+# marked `gatewayLock` (a full Gateway Vitest run), in arrival order with every other Gateway
+# Vitest run (tools/verify/gateway.py, same path), and marks that subprocess
+# FULL_GATEWAY_LOCK_HELD so its runner does not wait on the batch. Every other subprocess runs
+# unmarked: Gateway runs inside it (the verifier's Gateway groups) queue for the lock themselves.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 FULL_GATEWAY_LOCK_HELD = 'TRON_FULL_GATEWAY_LOCK_HELD'
-# A due batch waits its turn this long, then refuses loudly; coverage stays pending, never skipped.
+# A Gateway lane waits its turn this long, then is uncovered naming the holder; never skipped.
 FULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.
@@ -43,9 +46,9 @@ def lanes(root: Path, base: str) -> list[dict]:
     result = [{'name': 'full verify', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
         result.append({'name': name, 'command': ['python3', 'tools/verify/gateway.py', *config],
-                       'vitest': True, 'requires': 'packages/gateway/package-lock.json'})
+                       'vitest': True, 'gatewayLock': True, 'requires': 'packages/gateway/package-lock.json'})
     result.extend([
-        {'name': 'Mac integration', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
+        {'name': 'Mac integration', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData -showBuildTimingSummary && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
          'requires': 'packages/mac-app/project.yml'},
         {'name': 'relay', 'command': ['scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/push-relay', 'test', '--'],
          'vitest': True, 'testRoot': 'packages/push-relay', 'requires': 'packages/push-relay/package-lock.json'},
@@ -59,6 +62,23 @@ def lanes(root: Path, base: str) -> list[dict]:
          'requires': 'scripts/ios-gateway-e2e-test', 'ios': True},
     ])
     return result
+
+
+def case_names(data: dict, failed: dict, root: Path) -> dict:
+    """Each failed identity's describe titles and test title, the parts Vitest's `-t` matches joined with ' > '.
+
+    The reporter's `fullName` joins them with spaces, so it cannot be split back into a selector."""
+    names = {}
+    for suite in data.get('testResults', []):
+        try:
+            file = Path(suite['name']).resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        for test in suite.get('assertionResults', []):
+            identity = f"{file}::{test.get('fullName')}"
+            if identity in failed and test.get('title') is not None:
+                names[identity] = [*test.get('ancestorTitles', []), test['title']]
+    return names
 
 
 def signature(message: str, failures: list[str], output: str, root: Path) -> dict | None:
@@ -84,7 +104,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     log = directory / 'output.log'
     print(f"batch: {lane['name']} … live log: {log}", flush=True)
-    start = time.monotonic()
+    start, started_at = time.monotonic(), time.time()
     if lane.get('requires') and not (root / lane['requires']).is_file():
         return {**lane, 'exit': None, 'status': 'uncovered', 'reason': 'missing required owner', 'seconds': 0}
     if lane.get('ios'):
@@ -117,22 +137,42 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     if lane['name'] == 'full verify':
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         (root / 'test-results/verify' / f'{sha}.json').unlink(missing_ok=True)
-    with log.open('w') as output:
-        process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
-                                   stdout=output, stderr=subprocess.STDOUT,
-                                   env={**os.environ, 'TRON_IOS_E2E_NO_INSTALL': '1', FULL_GATEWAY_LOCK_HELD: '1'},
-                                   start_new_session=True)
+    env = {key: value for key, value in os.environ.items() if key != FULL_GATEWAY_LOCK_HELD}
+    env['TRON_IOS_E2E_NO_INSTALL'] = '1'
+    held, window = None, None
+    if lane.get('gatewayLock'):
+        record = {'pid': os.getpid(), 'worktree': str(root), 'purpose': f"verify --batch: {lane['name']}"}
         try:
-            code = process.wait()
-        except BaseException:
-            os.killpg(process.pid, signal.SIGTERM)
+            held = wait_for_full_gateway_lock(record, FULL_GATEWAY_LOCK_WAIT_SECONDS,
+                                              lambda line: print(f"batch: {lane['name']} {line}", flush=True))
+        except TimeoutError as error:
+            return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
+                    'reason': f'a full-Gateway run held or preceded this lane at {FULL_GATEWAY_LOCK} past the '
+                              f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); not run'}
+        env[FULL_GATEWAY_LOCK_HELD] = '1'
+        window = {'waitSeconds': round(time.monotonic() - start, 3), 'acquiredAt': time.time()}
+    try:
+        with log.open('w') as output:
+            process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
+                                       stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
             try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            raise
-    result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'log': str(log), 'executedCommand': command}
+                code = process.wait()
+            except BaseException:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                raise
+    finally:
+        if held:
+            held.close()
+            window['releasedAt'] = time.time()
+    result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'startedAt': started_at, 'endedAt': time.time(),
+              'log': str(log), 'executedCommand': command}
+    if window:
+        result['fullGatewayLock'] = window
     if deferred_ios:
         result.update(status='uncovered', reason='deferred: verifier iOS consumers; all host slots held')
     # Preserve the owning verifier's exact selection, failed tests and partial step logs.
@@ -179,6 +219,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         if vitest and vitest.exists():
             data = json.loads(vitest.read_text())
             result['passingTests'] = data.get('numPassedTests', 0)
+            result['selectedTests'] = data.get('numPassedTests', 0) + data.get('numFailedTests', 0)
+            result['caseNames'] = case_names(data, failed, root)
             if (not case_complete or not (data.get('numPassedTests', 0) + data.get('numFailedTests', 0))
                     or data.get('numPendingTests') or data.get('numPendingTestSuites')):
                 result.update(status='uncovered', reason='empty or skipped cases')
@@ -193,6 +235,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         if vitest and vitest.exists():
             data = json.loads(vitest.read_text())
             count = data.get('numPassedTests', 0)
+            result['selectedTests'] = count + data.get('numFailedTests', 0)
             failures = [f"{Path(suite['name']).name} > {test['fullName']}" for suite in data.get('testResults', [])
                         for test in suite.get('assertionResults', []) if test.get('status') == 'failed']
             shutil.copy2(vitest, directory / 'vitest.json')
@@ -257,6 +300,10 @@ def prepare(root: Path, directory: Path) -> bool:
 
 
 
+class ProbeSelectionError(verify.VerifyError):
+    """An exact-case recipe ran zero tests where the case is known to exist: a tooling error, never 'unresolved'."""
+
+
 class Prober:
     """One disposable worktree runs every exact-case execution of one investigation.
 
@@ -278,7 +325,7 @@ class Prober:
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return subprocess.run(['git', *args], cwd=self.root, check=check, capture_output=True, text=True)
 
-    def probe(self, sha: str, hint: bool = False) -> str:
+    def probe(self, sha: str, hint: bool = False, selection_required: bool = False) -> str:
         key = hashlib.sha256(json.dumps([sha, self.failed['name'], self.failed['signature']], sort_keys=True).encode()).hexdigest()
         cache = self.cache / f'{key}.json'
         if hint and cache.exists():
@@ -301,6 +348,12 @@ class Prober:
             outcome = execute(self.root, {**self.failed['probe'], 'probe': True}, attempt)
         finally:
             stop_fixture(self.root, attempt / 'stop')
+        if selection_required and outcome.get('selectedTests') == 0:
+            # The case failed at this commit, so a recipe selecting nothing is a broken selector, not a non-reproduction.
+            self.record['probes'].append({'commit': sha, 'outcome': 'selector-error', 'fresh': True, **outcome})
+            save(self.directory / 'progress.json', self.record)
+            raise ProbeSelectionError(f"attribution probe for {self.failed['name']} selected no tests at {sha[:12]}: "
+                                      f"{shlex.join(outcome['executedCommand'])}")
         if outcome.get('status') == 'uncovered' or outcome.get('exit') is None:
             state = 'unknown'
         elif outcome['exit'] == 0:
@@ -317,9 +370,9 @@ class Prober:
         save(self.directory / 'progress.json', self.record)
         return state
 
-    def controls(self, sha: str, expected: str) -> bool:
+    def controls(self, sha: str, expected: str, selection_required: bool = False) -> bool:
         """Two fresh executions must both observe `expected`; any mixture refuses."""
-        return all(self.probe(sha) == expected for _ in range(2))
+        return all(self.probe(sha, selection_required=selection_required) == expected for _ in range(2))
 
     def close(self) -> None:
         # Never erase a probe whose owning resource helper could not clean it.
@@ -368,7 +421,9 @@ def attribute(base: str, head: str, failed: dict, prober: Prober) -> dict:
     if octopus:
         result['unsupportedHistory'] = octopus
         return unresolved('octopus landing on main first-parent history')
-    if not prober.controls(head, 'bad'):
+    # Only an exact-case Vitest recipe names one case known to exist; other recipes may select
+    # nothing for real reasons (a file that fails to load), which stays an ordinary outcome.
+    if not prober.controls(head, 'bad', selection_required=bool(failed['probe'].get('vitest'))):
         return unresolved('head did not reproduce the exact failure in two fresh executions')
     # `base` is the last raw-green batch; the search assumes it, the parent control proves it.
     low, high = -1, len(commits) - 1
@@ -635,11 +690,14 @@ def failure_cases(outcome: dict) -> list[dict]:
     cases = []
     if outcome.get('vitest') and outcome.get('failureComplete'):
         for identity, digest in outcome.get('failures', {}).items():
-            file, case = identity.split('::', 1)
+            file = identity.split('::', 1)[0]
+            names = outcome.get('caseNames', {}).get(identity)
+            if not names:
+                continue
             command = outcome['command']
             cases.append({**outcome, 'signature': {'failures': {identity: digest}},
-                          'probe': {'name': outcome['name'], 'vitest': True,
-                                    'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(case) + '$']}})
+                          'probe': {'name': outcome['name'], 'vitest': True, 'gatewayLock': bool(outcome.get('gatewayLock')),
+                                    'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(' > '.join(names)) + '$']}})
     # Other owners may only be probed if the recorded invocation is already a case filter.
     elif outcome.get('xctestCases') and outcome.get('signature'):
         for case in outcome['xctestCases']:
@@ -769,35 +827,22 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce):
 
 
 class Locks:
-    """The nonwaiting repository batch lock, then the host's full-Gateway lock in arrival order."""
+    """The nonwaiting repository batch lock. The host's full-Gateway lock is per Gateway lane (`execute`)."""
 
     def __init__(self, state: Path):
         state.mkdir(exist_ok=True)
-        self.handles = [(state / 'batch.lock').open('a')]
+        self.handle = (state / 'batch.lock').open('a')
 
     def __enter__(self):
         try:
-            fcntl.flock(self.handles[0], fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             self.__exit__()
             raise verify.VerifyError('another batch owns this repository; no queue or wait') from None
-        # Waiting Gateway runs print the recorded holder; name this batch, not a previous run.
-        record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'verify --batch'}
-        try:
-            self.handles.append(wait_for_full_gateway_lock(record, FULL_GATEWAY_LOCK_WAIT_SECONDS,
-                                                           lambda line: print(f'batch: {line}', flush=True)))
-        except TimeoutError as error:
-            self.__exit__()
-            raise verify.VerifyError(f'a full-Gateway run holds or precedes this batch at {FULL_GATEWAY_LOCK} past the '
-                                     f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); nothing ran') from None
-        except BaseException:
-            self.__exit__()
-            raise
         return self
 
     def __exit__(self, *_):
-        for handle in self.handles:
-            handle.close()
+        self.handle.close()
 
 
 def review(args, state: Path) -> int:
@@ -968,6 +1013,10 @@ def main(argv: list[str]) -> int:
                         outcome = execute(ROOT, lane, directory / f'lane-{index}')
                     except (OSError, ValueError, KeyError, verify.VerifyError, subprocess.SubprocessError) as error:
                         outcome = {**lane, 'exit': None, 'status': 'uncovered', 'error': str(error), 'seconds': 0}
+                    try:
+                        outcome['timing'] = timing.lane_timing(outcome, directory / f'lane-{index}', ROOT)
+                    except Exception as error:  # observation only: never a verdict input
+                        outcome['timing'] = {'errors': [f'{type(error).__name__}: {error}']}
                     report['results'].append(outcome)
                     save(path, report)
                     source_unchanged()
@@ -984,6 +1033,7 @@ def main(argv: list[str]) -> int:
                     if not cases:
                         outcome.update(status='uncovered', reason='owner provided no exact-case attribution selector')
                     for case_index, failed in enumerate(cases or [outcome]):
+                        report['activeLane'] = f"attribution: {failed['name']}"
                         attribution_directory = directory / f'attribution-{index}-{case_index}'
                         attribution, journal = investigate(base, head, failed, attribution_directory, state,
                                                            {'redReport': str(directory / 'first-report.json'), 'evidence': str(manifest)})
@@ -1016,7 +1066,7 @@ def main(argv: list[str]) -> int:
                 except (OSError, ValueError, subprocess.SubprocessError) as issue_error:
                     report['issueError'] = str(issue_error)
                 save(path, report)
-                print(f'batch: ERROR; partial evidence {path}; last-green unchanged', flush=True)
+                print(f'batch: ERROR ({error}); partial evidence {path}; last-green unchanged', flush=True)
                 return 2
             finally:
                 try:

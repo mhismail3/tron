@@ -57,8 +57,8 @@ this host's native binary from the registry's `agent-browser@<version>` package 
 the fork pin is the only engine update. An ambiguous pin or declaration, or failed provisioning,
 fails the run. It first waits
 its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and earlier waiters) and
-records itself there, so Gateway runs never overlap each other or a `verify --batch`, whose lanes
-already hold it. Waiters, batch included, take the lock first-come first-served: each holds the
+records itself there, so Gateway runs never overlap each other or a `verify --batch` Gateway lane,
+which holds it only while that lane runs ([batch](batch.md)). Waiters, batch included, take the lock first-come first-served: each holds the
 flock of a numbered ticket in `/tmp/tron-full-gateway.lock.queue/` while it waits, so a dead
 waiter's ticket is pruned, and only the earliest live ticket tries the lock.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
