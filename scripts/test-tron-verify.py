@@ -49,7 +49,7 @@ COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/chec
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs")
             for p in (ROOT / d).glob("*.py")]]
 PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\nunittest.main()\n"
-AGENTS = "# Charter\n\nNever SIGSTOP Gateway-owned work.\n"
+AGENTS = "# Charter\n\nNever SIGSTOP Gateway-owned work. Never bypass simulator leases via XcodeBuildMCP.\n"
 FAILING = "import unittest\nclass T(unittest.TestCase):\n    def test_broken(self):\n        self.assertEqual(1, 2)\nunittest.main()\n"
 
 
@@ -74,7 +74,8 @@ class Repo:
         self.write(".agents/README.md", "# Guidance\n\n[tron-ios](skills/tron-ios/SKILL.md)\n")
         self.write(".agents/skills/NOTICE.md", "# Notice\n")
         self.write(".agents/skills/tron-ios/SKILL.md", "---\nname: tron-ios\ndescription: iOS work.\n---\n\n"
-                   "Tron Device on LocalDevice. Never install Release or DevicePerformance; signed artifacts are evidence.\n")
+                   "Tron Device on LocalDevice. Never install Release or DevicePerformance; signed artifacts are evidence.\n"
+                   "Agent simulator paths (xcrun mcpbridge) take the same leases.\n")
         self.write("tooling.module.json", json.dumps({"layer": "L5", "owns": [
             "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
             "scripts/ios-test-build-identity.py", ".github/**", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",

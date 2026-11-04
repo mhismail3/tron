@@ -204,6 +204,7 @@ for arg in sys.argv:
         self.write('scripts/ios-test-lock.py', '''import sys,subprocess
 HOST_SLOTS=3
 def read_slot_holders(): return [None,None,None]
+def slot_worktrees(): return [None,None,None]
 if __name__ == '__main__': raise SystemExit(subprocess.call(sys.argv[sys.argv.index('--')+1:]))
 ''')
         self.write('scripts/tron-ios-device', '#!/bin/sh\necho compile >> test-results/executed\n', True)
@@ -1060,6 +1061,31 @@ if sys.argv[1] == 'clean':
         # The nested lane queues again after its default lane releases, so earlier arrivals go first.
         self.assertEqual(runs.names(), ['holder', 'batch-default', 'later-1', 'later-2', 'batch-nested'])
 
+    def test_an_interrupt_cancels_a_lane_waiting_for_the_full_gateway_lock(self):
+        """#2253 review: the Gateway lane waits on a chain thread; SIGTERM must end that wait at once,
+        give up its queue place and never start the lane, then report the batch interrupted."""
+        runs = self.gateway_runs()
+        self.land_gateway_lane_marker(runs.order)
+        runs.start('holder')
+        runs.wait_holding('holder')
+        output = Path(self.temporary.name) / 'batch.out'
+        with output.open('w') as stream:
+            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
+                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: batch.poll() is None and (batch.kill(), batch.wait(timeout=40)))
+        wait_until(lambda: batch.poll() is not None or 'Gateway default waiting for' in output.read_text(),
+                   'the Gateway lane neither waited nor exited')
+        self.assertIsNone(batch.poll(), output.read_text())
+        batch.send_signal(signal.SIGTERM)
+        self.assertEqual(batch.wait(timeout=15), 130, output.read_text())
+        self.assertEqual(self.reports()[-1]['verdict'], 'interrupted')
+        # The holder still has the lock; once it releases, nothing of the batch takes it.
+        runs.start('after')
+        runs.wait_queued('after')
+        runs.release('holder')
+        runs.wait_all(['holder', 'after'])
+        self.assertEqual(runs.names(), ['holder', 'after'])
+
     def test_pre_land_gateway_runs_do_not_wait_for_the_ui_journey_lane(self):
         runs = self.gateway_runs()
         self.land_gateway_lane_marker(runs.order)
@@ -1075,15 +1101,136 @@ if sys.argv[1] == 'clean':
         self.addCleanup(lambda: gate.is_dir() and (gate / 'release').touch())
         wait_until(lambda: (gate / 'started').exists() or batch.poll() is not None, 'the UI journey lane never started', timeout=60)
         self.assertIsNone(batch.poll(), output.read_text())
-        # While the batch's UI journeys run, a pre-land Gateway run takes the free lock at once.
+        # The Node chain runs beside the UI journeys; once its Gateway lanes are done, a
+        # pre-land Gateway run takes the free lock at once while the journeys still run.
+        wait_until(lambda: self.reports() and 'Gateway nested' in [lane['name'] for lane in self.reports()[-1]['results']],
+                   'the Gateway lanes never finished beside the UI journeys', timeout=60)
         runs.start('pre-land')
         runs.wait_all(['pre-land'])
         self.assertNotIn('waiting for', runs.stderr('pre-land'))
         (gate / 'release').touch()
         self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
         self.assertEqual(runs.names(), ['batch-default', 'batch-nested', 'pre-land'])
-        lanes = {lane['name']: lane for lane in self.reports()[-1]['results']}
-        self.assertLessEqual(lanes['Gateway nested']['fullGatewayLock']['releasedAt'], lanes['real Gateway UI journeys']['startedAt'])
+
+    def test_node_and_apple_chains_run_concurrently_and_join_before_the_verdict(self):
+        """#2253: each chain waits for a lane of the other, so a sequential batch could not finish.
+        The report keeps plan order, and the verdict comes only after both chains joined."""
+        gate = Path(self.temporary.name) / 'chains'
+        gate.mkdir()
+        source = (self.root / 'tools/verify/gateway.py').read_text()
+        self.land('tools/verify/gateway.py', source.replace(
+            "name='nested' if nested else 'default'\n",
+            "name='nested' if nested else 'default'\n"
+            f"gate=Path({str(gate)!r})\n"
+            "if name=='default':\n"
+            "    deadline=time.time()+30\n"
+            "    while not (gate/'apple-boundary').exists():\n"
+            "        if time.time()>deadline: sys.exit('the Apple chain never ran beside the Node chain')\n"
+            "        time.sleep(0.05)\n"
+            "else: (gate/'node-nested').touch()\n", 1))
+        self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
+                  f'if [ "$1" = all ]; then touch {gate}/apple-boundary; fi\n'
+                  f'if [ "$1" = run-ui ]; then i=0; while [ ! -e {gate}/node-nested ]; do i=$((i+1)); [ $i -gt 600 ] && exit 1; sleep 0.05; done; fi\n')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('batch: concurrent chains: node: full verify → Gateway default → Gateway nested → Mac integration → relay; '
+                      'apple: shipping iOS compile → iOS smoke → real Gateway boundary → real Gateway UI journeys', result.stdout)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'green')
+        self.assertEqual([lane['name'] for lane in report['results']], [lane['name'] for lane in report['lanes']])
+        lanes = {lane['name']: lane for lane in report['results']}
+        self.assertLess(lanes['real Gateway boundary']['endedAt'], lanes['Gateway default']['endedAt'])
+        self.assertLess(lanes['Gateway nested']['startedAt'], lanes['real Gateway UI journeys']['endedAt'])
+
+    def test_the_apple_chain_has_its_own_simulator_lane_beside_the_verifiers_ios_steps(self):
+        """#2253 review: the verifier's iOS steps (Node chain) and the Apple chain's smoke, boundary and
+        UI lanes run at once in one worktree. A lane lease refuses a second holder at once (73), so
+        they must not share this worktree's lane, nor the smoke build its DerivedData."""
+        lease = ('''import fcntl,os,sys,time
+from pathlib import Path
+Path('test-results').mkdir(exist_ok=True)
+lane=os.environ.get('TRON_IOS_TEST_LANE','worktree')
+handle=open('test-results/lane-'+lane+'.lock','a')
+try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError: print('error: lane '+lane+' is already leased'); sys.exit(73)
+with open('test-results/lanes','a') as f: f.write(sys.argv[0].rsplit('/',1)[-1]+' '+sys.argv[1]+' '+lane+' '+os.environ.get('TRON_IOS_TEST_DERIVED_DATA','worktree-products')+'\\n')
+Path('test-results/started-'+sys.argv[1]).touch()
+# Hold the lease until the other chain's iOS step has started too, so the two overlap.
+other={'build':'checkpoint','checkpoint':'build'}.get(sys.argv[1])
+deadline=time.time()+20
+while other and not Path('test-results/started-'+other).exists() and time.time()<deadline: time.sleep(0.05)
+''')
+        for owner in ('scripts/tron-ios-test', 'scripts/ios-gateway-e2e-test'):
+            source = (self.root / owner).read_text()
+            if owner == 'scripts/tron-ios-test':
+                source = source.replace("import json,sys\n", "import json,sys\n" + lease, 1)
+            else:
+                source = '#!/usr/bin/env python3\n' + lease + "with open('test-results/executed','a') as f: f.write('boundary-'+sys.argv[1]+'\\n')\n"
+            self.write(owner, source, True)
+        tron = (self.root / 'scripts/tron').read_text()
+        self.write('scripts/tron', tron.replace(
+            "if affected == 'red': verdict = 'failed'\n",
+            "if affected == 'red': verdict = 'failed'\n"
+            "if sys.argv[1:3] == ['verify','--all'] and subprocess.call(['scripts/tron-ios-test','build']): verdict = 'deferred'\n", 1), True)
+        self.commit('lane leases')
+        self.base = self.git('rev-parse', 'HEAD')
+        self.land('good', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.reports()[-1]['verdict'], 'green')
+        lanes = [line.split() for line in (self.root / 'test-results/lanes').read_text().splitlines()]
+        verifier = [lane for lane in lanes if lane[1] == 'build']
+        apple = [lane for lane in lanes if lane[1] in ('checkpoint', 'all', 'run-ui')]
+        self.assertEqual(len(verifier), 1, lanes)
+        self.assertEqual(len(apple), 3, lanes)
+        self.assertEqual({lane[2] for lane in verifier}, {'worktree'})
+        self.assertEqual(len({lane[2] for lane in apple}), 1, lanes)
+        self.assertNotEqual(apple[0][2], 'worktree')
+        smoke = next(lane for lane in apple if lane[1] == 'checkpoint')
+        self.assertNotEqual(smoke[3], 'worktree-products', 'the smoke build must not share the verifier\'s products')
+
+    def test_a_red_in_one_chain_still_runs_the_other_chain_before_attribution(self):
+        """#2253: a failing Node lane does not stop the Apple chain; the freeze sees every lane."""
+        self.land('bad', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(len(report['results']), 9)
+        first = json.loads(next((self.root / '.git/verify/batches').glob('*/first-report.json')).read_text())
+        self.assertEqual([lane['name'] for lane in first['results']], [lane['name'] for lane in report['lanes']])
+        self.assertIn('boundary-run-ui', (self.root / 'test-results/executed').read_text())
+
+    def test_ui_journeys_run_on_owned_lanes_longest_first_from_the_previous_batch(self):
+        """#2253: the UI journey lane takes three host-slot lanes and, from the second batch on,
+        the previous batch's per-journey seconds."""
+        self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
+                  'if [ "$1" = run-ui ]; then echo "lanes=$TRON_IOS_E2E_UI_LANES seconds=${TRON_IOS_E2E_UI_JOURNEY_SECONDS:-none}" >> test-results/ui-env;\n'
+                  '  echo "Real-UI journey TronMobileUITests/RealGatewayPairAndChatUITests/testSlow completed in 200s (status 0); evidence: /nowhere"\n'
+                  '  echo "Real-UI journey TronMobileUITests/RealGatewayPairAndChatUITests/testQuick completed in 40s (status 0); evidence: /nowhere"; fi\n')
+        first = self.run_batch('--base', self.base)
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        second = self.run_batch('--repeat')
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        environments = (self.root / 'test-results/ui-env').read_text().splitlines()
+        self.assertEqual(environments[0], 'lanes=3 seconds=none')
+        lanes, seconds = environments[1].split(' ')
+        self.assertEqual(lanes, 'lanes=3')
+        self.assertEqual(json.loads(Path(seconds.split('=', 1)[1]).read_text()), {
+            'TronMobileUITests/RealGatewayPairAndChatUITests/testSlow': 200,
+            'TronMobileUITests/RealGatewayPairAndChatUITests/testQuick': 40})
+
+    def test_a_host_slot_this_batch_holds_does_not_defer_its_other_chain(self):
+        """#2253: every slot held, but one by this batch's own worktree: that slot frees when its lane
+        ends, so the Apple lanes are admitted (and wait for it) rather than deferred."""
+        owner = (self.root / 'scripts/ios-test-lock.py').read_text()
+        self.land('scripts/ios-test-lock.py', owner.replace(
+            'def read_slot_holders(): return [None,None,None]\ndef slot_worktrees(): return [None,None,None]',
+            'from pathlib import Path\ndef read_slot_holders(): return ["this batch","other","other"]\n'
+            'def slot_worktrees(): return [str(Path(__file__).resolve().parents[1]),"/elsewhere",""]'))
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.reports()[-1]['verdict'], 'green')
+        self.assertNotIn('--skip', json.dumps(self.reports()[-1]['results'][0]['executedCommand']))
 
     def test_red_while_disabled_publishes_after_the_enable_step(self):
         self.remote(publish=False)

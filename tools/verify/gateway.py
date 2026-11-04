@@ -23,7 +23,7 @@ HELD_BY_CALLER = 'TRON_FULL_GATEWAY_LOCK_HELD'
 
 # tools/verify/batch.py carries this same function (its test fixture replaces this file);
 # scripts/test-tron-verify-batch.py keeps the two identical.
-def wait_for_full_gateway_lock(record, wait_seconds, announce):
+def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
     """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
 
     Waiters take the lock in arrival order: each queues a numbered ticket beside the lock and
@@ -31,7 +31,8 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce):
     its place and the next look at the queue deletes its ticket. Only the earliest live ticket
     tries the lock, whose own flock the kernel likewise drops for a dead holder. The queue
     directory's flock serializes numbering and pruning. Never interrupts the holder; raises
-    TimeoutError naming it after `wait_seconds` (None waits indefinitely).
+    TimeoutError naming it after `wait_seconds` (None waits indefinitely), and InterruptedError
+    once `cancelled()` is true, giving up its place.
     """
     queue = Path(FULL_GATEWAY_LOCK + '.queue')
     queue.mkdir(exist_ok=True)
@@ -82,6 +83,8 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce):
                 handle.seek(0)
                 line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
                 waited = time.monotonic() - started
+                if cancelled is not None and cancelled():
+                    raise InterruptedError(f'cancelled after {round(waited)}s waiting ({line})')
                 if wait_seconds is not None and waited >= wait_seconds:
                     raise TimeoutError(f'{line}; waited {round(waited)}s')
                 if not announced:

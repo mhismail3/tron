@@ -23,8 +23,21 @@ Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lan
 required lane runs, even after failures: locks/declared consumers (`verify --all`), full
 default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned
 shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI journeys
-(installation disabled; Mac uses scratch HOME/TMPDIR). iOS lanes release host slots between
-lanes; all slots busy at admission is deferred. **Green** means every lane executed and passed.
+(installation disabled; Mac uses scratch HOME/TMPDIR). The lanes run as two concurrent chains, each
+in plan order: **Node** (`verify --all`, Gateway default, nested, Mac integration, relay) and
+**Apple** (compile, smoke, boundary, UI journeys under host slots); the console prints both
+chains, each lane's live log and its result, and `report.json` keeps `results` in plan order
+with `activeLane` naming every running lane. The Apple chain's simulator lanes run on their own
+persistent named lane (`batch-apple-<hash>`, smoke products in its own DerivedData), so they never
+contend with the verifier's iOS steps for this worktree's lane lease. A chain that errors (for
+example changed source) or an interrupt stops the other chain's running lane and cancels a lane
+waiting for the full-Gateway lock (uncovered, never started); both join before fixture cleanup,
+freeze, attribution and verdict. iOS lanes release host slots between lanes; all slots held by other
+work at admission is deferred, while a slot this batch's own worktree holds frees when its
+lane ends, so the lane is admitted and waits for it. The UI journey lane runs its journeys on
+three owned lanes (`TRON_IOS_E2E_UI_LANES=3`, one host slot each), longest first by the newest
+earlier batch's per-journey seconds (`previous-journey-seconds.json` in the lane directory);
+its attribution probe runs the one failed journey on one lane. **Green** means every lane executed and passed.
 Missing owners/reports, empty/skipped/deferred evidence, a non-`passed` verifier verdict,
 failed setup/cleanup or changed source is **uncovered**; any executed failure is **red**.
 Neither advances `green.json`. Immutable `verify/batches/<range>/` keeps commands, logs,
@@ -89,6 +102,10 @@ revert each); stale red; unreadable remote; migration and `security` owner bound
 conflict; an inverse that leaves the failure; failing affected checks; mutated frozen evidence;
 mixed controls, suite-level errors, skipped/missing coverage and octopus history; held locks
 (per-lane arrival order, capped waits, a pre-land run passing a running UI lane), a stand-in
-Vitest that matches `-t` like Vitest 5, a head probe selecting nothing (error, exit 2) and
-interrupted cleanup preservation. The fixture points the host lock at its own temporary
+Vitest that matches `-t` like Vitest 5, a head probe selecting nothing (error, exit 2),
+chains that each wait on the other's lane (only concurrent chains finish), the Apple chain's
+own simulator lane beside the verifier's iOS steps, an interrupt cancelling a lane waiting for
+the Gateway lock, a red Node lane
+beside a full Apple chain, UI journey lanes with the previous batch's seconds, a slot held by
+this batch's own worktree, and interrupted cleanup preservation. The fixture points the host lock at its own temporary
 file; the production path is not exercised by tests.
