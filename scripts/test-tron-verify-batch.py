@@ -1061,6 +1061,31 @@ if sys.argv[1] == 'clean':
         # The nested lane queues again after its default lane releases, so earlier arrivals go first.
         self.assertEqual(runs.names(), ['holder', 'batch-default', 'later-1', 'later-2', 'batch-nested'])
 
+    def test_an_interrupt_cancels_a_lane_waiting_for_the_full_gateway_lock(self):
+        """#2253 review: the Gateway lane waits on a chain thread; SIGTERM must end that wait at once,
+        give up its queue place and never start the lane, then report the batch interrupted."""
+        runs = self.gateway_runs()
+        self.land_gateway_lane_marker(runs.order)
+        runs.start('holder')
+        runs.wait_holding('holder')
+        output = Path(self.temporary.name) / 'batch.out'
+        with output.open('w') as stream:
+            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
+                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: batch.poll() is None and (batch.kill(), batch.wait(timeout=40)))
+        wait_until(lambda: batch.poll() is not None or 'Gateway default waiting for' in output.read_text(),
+                   'the Gateway lane neither waited nor exited')
+        self.assertIsNone(batch.poll(), output.read_text())
+        batch.send_signal(signal.SIGTERM)
+        self.assertEqual(batch.wait(timeout=15), 130, output.read_text())
+        self.assertEqual(self.reports()[-1]['verdict'], 'interrupted')
+        # The holder still has the lock; once it releases, nothing of the batch takes it.
+        runs.start('after')
+        runs.wait_queued('after')
+        runs.release('holder')
+        runs.wait_all(['holder', 'after'])
+        self.assertEqual(runs.names(), ['holder', 'after'])
+
     def test_pre_land_gateway_runs_do_not_wait_for_the_ui_journey_lane(self):
         runs = self.gateway_runs()
         self.land_gateway_lane_marker(runs.order)
@@ -1116,6 +1141,53 @@ if sys.argv[1] == 'clean':
         lanes = {lane['name']: lane for lane in report['results']}
         self.assertLess(lanes['real Gateway boundary']['endedAt'], lanes['Gateway default']['endedAt'])
         self.assertLess(lanes['Gateway nested']['startedAt'], lanes['real Gateway UI journeys']['endedAt'])
+
+    def test_the_apple_chain_has_its_own_simulator_lane_beside_the_verifiers_ios_steps(self):
+        """#2253 review: the verifier's iOS steps (Node chain) and the Apple chain's smoke, boundary and
+        UI lanes run at once in one worktree. A lane lease refuses a second holder at once (73), so
+        they must not share this worktree's lane, nor the smoke build its DerivedData."""
+        lease = ('''import fcntl,os,sys,time
+from pathlib import Path
+Path('test-results').mkdir(exist_ok=True)
+lane=os.environ.get('TRON_IOS_TEST_LANE','worktree')
+handle=open('test-results/lane-'+lane+'.lock','a')
+try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError: print('error: lane '+lane+' is already leased'); sys.exit(73)
+with open('test-results/lanes','a') as f: f.write(sys.argv[0].rsplit('/',1)[-1]+' '+sys.argv[1]+' '+lane+' '+os.environ.get('TRON_IOS_TEST_DERIVED_DATA','worktree-products')+'\\n')
+Path('test-results/started-'+sys.argv[1]).touch()
+# Hold the lease until the other chain's iOS step has started too, so the two overlap.
+other={'build':'checkpoint','checkpoint':'build'}.get(sys.argv[1])
+deadline=time.time()+20
+while other and not Path('test-results/started-'+other).exists() and time.time()<deadline: time.sleep(0.05)
+''')
+        for owner in ('scripts/tron-ios-test', 'scripts/ios-gateway-e2e-test'):
+            source = (self.root / owner).read_text()
+            if owner == 'scripts/tron-ios-test':
+                source = source.replace("import json,sys\n", "import json,sys\n" + lease, 1)
+            else:
+                source = '#!/usr/bin/env python3\n' + lease + "with open('test-results/executed','a') as f: f.write('boundary-'+sys.argv[1]+'\\n')\n"
+            self.write(owner, source, True)
+        tron = (self.root / 'scripts/tron').read_text()
+        self.write('scripts/tron', tron.replace(
+            "if affected == 'red': verdict = 'failed'\n",
+            "if affected == 'red': verdict = 'failed'\n"
+            "if sys.argv[1:3] == ['verify','--all'] and subprocess.call(['scripts/tron-ios-test','build']): verdict = 'deferred'\n", 1), True)
+        self.commit('lane leases')
+        self.base = self.git('rev-parse', 'HEAD')
+        self.land('good', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.reports()[-1]['verdict'], 'green')
+        lanes = [line.split() for line in (self.root / 'test-results/lanes').read_text().splitlines()]
+        verifier = [lane for lane in lanes if lane[1] == 'build']
+        apple = [lane for lane in lanes if lane[1] in ('checkpoint', 'all', 'run-ui')]
+        self.assertEqual(len(verifier), 1, lanes)
+        self.assertEqual(len(apple), 3, lanes)
+        self.assertEqual({lane[2] for lane in verifier}, {'worktree'})
+        self.assertEqual(len({lane[2] for lane in apple}), 1, lanes)
+        self.assertNotEqual(apple[0][2], 'worktree')
+        smoke = next(lane for lane in apple if lane[1] == 'checkpoint')
+        self.assertNotEqual(smoke[3], 'worktree-products', 'the smoke build must not share the verifier\'s products')
 
     def test_a_red_in_one_chain_still_runs_the_other_chain_before_attribution(self):
         """#2253: a failing Node lane does not stop the Apple chain; the freeze sees every lane."""

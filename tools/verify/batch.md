@@ -27,9 +27,12 @@ shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI j
 in plan order: **Node** (`verify --all`, Gateway default, nested, Mac integration, relay) and
 **Apple** (compile, smoke, boundary, UI journeys under host slots); the console prints both
 chains, each lane's live log and its result, and `report.json` keeps `results` in plan order
-with `activeLane` naming every running lane. A chain that errors (for example changed source)
-or an interrupt stops the other chain's running lane; both join before fixture cleanup, freeze,
-attribution and verdict. iOS lanes release host slots between lanes; all slots held by other
+with `activeLane` naming every running lane. The Apple chain's simulator lanes run on their own
+persistent named lane (`batch-apple-<hash>`, smoke products in its own DerivedData), so they never
+contend with the verifier's iOS steps for this worktree's lane lease. A chain that errors (for
+example changed source) or an interrupt stops the other chain's running lane and cancels a lane
+waiting for the full-Gateway lock (uncovered, never started); both join before fixture cleanup,
+freeze, attribution and verdict. iOS lanes release host slots between lanes; all slots held by other
 work at admission is deferred, while a slot this batch's own worktree holds frees when its
 lane ends, so the lane is admitted and waits for it. The UI journey lane runs its journeys on
 three owned lanes (`TRON_IOS_E2E_UI_LANES=3`, one host slot each), longest first by the newest
@@ -100,7 +103,9 @@ conflict; an inverse that leaves the failure; failing affected checks; mutated f
 mixed controls, suite-level errors, skipped/missing coverage and octopus history; held locks
 (per-lane arrival order, capped waits, a pre-land run passing a running UI lane), a stand-in
 Vitest that matches `-t` like Vitest 5, a head probe selecting nothing (error, exit 2),
-chains that each wait on the other's lane (only concurrent chains finish), a red Node lane
+chains that each wait on the other's lane (only concurrent chains finish), the Apple chain's
+own simulator lane beside the verifier's iOS steps, an interrupt cancelling a lane waiting for
+the Gateway lock, a red Node lane
 beside a full Apple chain, UI journey lanes with the previous batch's seconds, a slot held by
 this batch's own worktree, and interrupted cleanup preservation. The fixture points the host lock at its own temporary
 file; the production path is not exercised by tests.

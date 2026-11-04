@@ -49,8 +49,18 @@ def save(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
+def apple_lane(root: Path) -> dict[str, str]:
+    """The Apple chain's own simulator lane and smoke products, so its iOS lanes never contend with
+    the verifier's iOS steps (the Node chain) for this worktree's lane lease or DerivedData. Named
+    per batch worktree and persistent, so its builds stay incremental across batches."""
+    name = 'batch-apple-' + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]
+    return {'TRON_IOS_TEST_LANE': name,
+            'TRON_IOS_TEST_DERIVED_DATA': str(Path.home() / 'Library/Developer/Tron/ios/test-derived-data' / name)}
+
+
 def lanes(root: Path, base: str) -> list[dict]:
     """Compose existing owners, not a second test catalog."""
+    apple = apple_lane(root)
     # Required lanes never disappear when a checkout/tool is missing.
     result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
@@ -64,11 +74,13 @@ def lanes(root: Path, base: str) -> list[dict]:
         {'name': 'shipping iOS compile', 'chain': 'apple', 'command': ['scripts/tron-ios-device', 'compile'],
          'requires': 'packages/ios-app/project.yml', 'ios': True},
         {'name': 'iOS smoke', 'chain': 'apple', 'command': ['scripts/tron-ios-test', 'checkpoint'],
-         'requires': 'scripts/tron-ios-test', 'ios': True},
+         'requires': 'scripts/tron-ios-test', 'ios': True, 'env': apple},
+        # The E2E harness keeps its own DerivedData and fixture; only its lane moves.
         {'name': 'real Gateway boundary', 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'all'],
-         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True},
+         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True, 'env': {'TRON_IOS_TEST_LANE': apple['TRON_IOS_TEST_LANE']}},
         {'name': UI_JOURNEY_LANE, 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui'],
-         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True, 'env': {'TRON_IOS_E2E_UI_LANES': str(UI_JOURNEY_LANES)}},
+         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True,
+         'env': {'TRON_IOS_TEST_LANE': apple['TRON_IOS_TEST_LANE'], 'TRON_IOS_E2E_UI_LANES': str(UI_JOURNEY_LANES)}},
     ])
     return result
 
@@ -116,9 +128,9 @@ def host_slots_busy(root: Path) -> bool | None:
 def previous_journey_seconds(state: Path, current: Path) -> dict[str, int]:
     """Per-journey seconds from the newest earlier batch whose UI journey lane logged any, the
     journey lines the lane owner prints (`timing.JOURNEY`); empty when none did."""
-    batches = sorted((path for path in (state / 'batches').glob('*/report.json') if path.parent != current),
-                     key=lambda path: int(path.parent.name.rsplit('-', 1)[-1]), reverse=True)
-    for path in batches:
+    batches = sorted(((int(path.parent.name.rsplit('-', 1)[-1]), path) for path in (state / 'batches').glob('*/report.json')
+                      if path.parent != current and path.parent.name.rsplit('-', 1)[-1].isdigit()), reverse=True)
+    for _, path in batches:
         try:
             lane = next(item for item in json.loads(path.read_text()).get('results', []) if item.get('name') == UI_JOURNEY_LANE)
             log = Path(lane['log']).read_text(errors='replace')
@@ -130,9 +142,11 @@ def previous_journey_seconds(state: Path, current: Path) -> dict[str, int]:
     return {}
 
 
-# Lane process groups running now, so an interrupted or failed chain set can stop both chains.
+# Lane process groups running now, so an interrupted or failed chain set can stop both chains,
+# and the cancellation a lane still waiting for the full-Gateway lock observes.
 RUNNING: set[int] = set()
 RUNNING_LOCK = threading.Lock()
+CANCELLED = threading.Event()
 
 
 def stop_running(grace: float = 30) -> None:
@@ -165,7 +179,8 @@ def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
     A chain that raises stops the other chain's running lane and starts no further lane;
     an interrupt (SIGINT, or SIGTERM through the verifier's handler) does the same. Either way
     every chain has ended before this returns or re-raises, so nothing writes the report after."""
-    stop, errors = threading.Event(), []
+    stop, errors = CANCELLED, []
+    stop.clear()
 
     def chain(items):
         try:
@@ -188,10 +203,18 @@ def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
                 thread.join(timeout=0.1)
     except BaseException:
         stop.set()
-        stop_running()
-        for thread in threads:
-            thread.join()
+        # Join every chain even through a repeated interrupt: nothing may write the report after.
+        while any(thread.is_alive() for thread in threads):
+            try:
+                stop_running()
+                for thread in threads:
+                    thread.join(timeout=0.1)
+            except KeyboardInterrupt:
+                continue
+        # Every chain has ended: cleanup that runs after (the fixture stop) must not see the stop.
+        stop.clear()
         raise
+    stop.clear()
     if errors:
         raise errors[0]
 
@@ -241,7 +264,10 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         record = {'pid': os.getpid(), 'worktree': str(root), 'purpose': f"verify --batch: {lane['name']}"}
         try:
             held = wait_for_full_gateway_lock(record, FULL_GATEWAY_LOCK_WAIT_SECONDS,
-                                              lambda line: print(f"batch: {lane['name']} {line}", flush=True))
+                                              lambda line: print(f"batch: {lane['name']} {line}", flush=True), CANCELLED.is_set)
+        except InterruptedError as error:
+            return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
+                    'reason': f'batch stopped while this lane waited for {FULL_GATEWAY_LOCK} ({error}); not run'}
         except TimeoutError as error:
             return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
                     'reason': f'a full-Gateway run held or preceded this lane at {FULL_GATEWAY_LOCK} past the '
@@ -249,6 +275,10 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         env[FULL_GATEWAY_LOCK_HELD] = '1'
         window = {'waitSeconds': round(time.monotonic() - start, 3), 'acquiredAt': time.time()}
     try:
+        if CANCELLED.is_set():
+            # Stopped while it waited or set up: a lane that has not started never starts.
+            return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
+                    'reason': 'batch stopped before this lane started; not run'}
         with log.open('w') as output:
             process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
                                        stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
@@ -849,7 +879,7 @@ def next_action(journal: dict) -> dict:
 
 # tools/verify/gateway.py owns this same function; this copy exists because the batch fixture
 # replaces that file. scripts/test-tron-verify-batch.py keeps the two identical.
-def wait_for_full_gateway_lock(record, wait_seconds, announce):
+def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
     """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
 
     Waiters take the lock in arrival order: each queues a numbered ticket beside the lock and
@@ -857,7 +887,8 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce):
     its place and the next look at the queue deletes its ticket. Only the earliest live ticket
     tries the lock, whose own flock the kernel likewise drops for a dead holder. The queue
     directory's flock serializes numbering and pruning. Never interrupts the holder; raises
-    TimeoutError naming it after `wait_seconds` (None waits indefinitely).
+    TimeoutError naming it after `wait_seconds` (None waits indefinitely), and InterruptedError
+    once `cancelled()` is true, giving up its place.
     """
     queue = Path(FULL_GATEWAY_LOCK + '.queue')
     queue.mkdir(exist_ok=True)
@@ -908,6 +939,8 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce):
                 handle.seek(0)
                 line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
                 waited = time.monotonic() - started
+                if cancelled is not None and cancelled():
+                    raise InterruptedError(f'cancelled after {round(waited)}s waiting ({line})')
                 if wait_seconds is not None and waited >= wait_seconds:
                     raise TimeoutError(f'{line}; waited {round(waited)}s')
                 if not announced:
