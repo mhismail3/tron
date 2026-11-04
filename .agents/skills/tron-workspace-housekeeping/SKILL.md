@@ -33,6 +33,14 @@ sweeps and prunes those (see
 
 ## 1. Inventory without changing state
 
+Start with `scripts/tron tidy` (read-only; `--json` for a record). It reports
+untracked files, unowned ignored residue, expired `.scratch/` and `test-results/`
+entries, orphan worktree directories, hook drift, and each worktree's and branch's
+merged, dirty, live and idle state ([workspace hygiene](../../../tools/ownership/README.md#workspace-hygiene)).
+`scripts/tron tidy --prune` is a destructive action under the authority above; it
+deletes only what `origin/main` already has. Use the commands below to inspect what
+it reports or to decide what it leaves.
+
 Resolve the repository root and common Git directory first. Run from that root;
 all examples below assume it, not the skill directory. Inspect the remote locally
 without copying credential-bearing URLs into reports.

@@ -2,7 +2,9 @@
   "layer": "L5",
   "owns": [
     "ownership.module.json",
+    "scripts/test-tron-layout.py",
     "scripts/test-tron-ownership.py",
+    "scripts/test-tron-tidy.py",
     "tools/ownership/**"
   ]
 }

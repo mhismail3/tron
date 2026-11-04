@@ -2,13 +2,16 @@
 
 Every tracked path has exactly one owning module. A module is declared by a
 co-located `<name>.module.json` manifest (format B′).
-`scripts/tron ownership` checks the whole repository. It is read-only and
-reports; it is never wired into hooks, landing or a queue.
+`scripts/tron ownership` checks the whole repository and the [layout](#layout)
+`root.module.json` declares. It is read-only; `scripts/tron verify` runs it as its
+first static step.
 
 ```bash
 scripts/tron ownership             # index paths, working-tree manifest contents
 scripts/tron ownership <rev>       # one commit's Git objects, without checking it out
 scripts/tron ownership --modules   # also print id, layer, owned paths, manifest
+scripts/tron ownership --ledger    # path, module, layer and purpose of every tracked path
+scripts/tron tidy [--json|--prune] # workspace hygiene (below)
 ```
 
 Exit 0: every path is owned exactly once and every manifest is valid. Exit 1:
@@ -47,6 +50,8 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   |---|---|---|
   | `layer` | yes | `L0`–`L5` ([layers](../layers/README.md#layers)). Code modules use their current best-fit layer; tooling, docs, test targets and package configuration use `L5`, because nothing depends on them |
   | `owns` | yes | non-empty list of unique patterns, relative to the manifest's directory |
+  | `purpose` | no | one line; `--ledger` shows it for owned files that state none themselves |
+  | `layout` | no | only in `root.module.json`; see [Layout](#layout) |
   | `dependsOn` | no | other module ids; kernel ports (plan §6.1) are accepted once K-0 defines them |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
   | `capabilities` | no | non-empty strings (the catalog does not exist yet) |
@@ -82,9 +87,60 @@ common parent (for example `work.module.json` at the root owns
 Edges, capabilities, risk classes and verification declarations are optional
 fields checked by their owning tools. `--modules` prints the current map.
 
+## Layout
+
+`root.module.json` `layout` declares where files may go; `tools/ownership/layout.py`
+checks it in the same pass, and each message names the fix:
+
+- **`root`**: the only top-level entries. A new one is refused.
+- **`scriptsTop`**: the only files directly in `scripts/`. New tooling goes in
+  `scripts/<area>/` (or beside its tool in `tools/<tool>/` until that moves) with
+  its tests and manifest, plus a `scripts/tron` subcommand if people run it.
+- **`frozen`**: paths code older than the checkout runs by path (the installed
+  Gateway, or the Mac replace orchestrator at another revision). They must exist;
+  change their content, never their path.
+- **Purpose.** Tooling (`.py`, `.sh`, `.mjs`, `.js`, `.ts` or executable files under
+  `scripts/`, `tools/` and `packages/*/scripts/`, except tests) states what it does in
+  a comment or docstring in its first 12 lines. Directives such as `# shellcheck`
+  do not count. `--ledger` prints that line.
+- **Tests** sit beside the code they prove: none in the root, `docs/`, `config/`,
+  `.agents/` or `.github/`; Swift `*Tests.swift` only in `UITests/`, `E2ETests/`,
+  `ProfilingTests/`, `SwiftAppUITests/` or `Tests/`; Gateway tests are
+  `*.integration.test.ts` or `*.e2e.test.ts` beside their module, never in `tests/`.
+- **`unmigrated`** lists, per rule (`purpose`, `gateway-test-name`,
+  `gateway-test-dir`), the files that broke it when the layout was declared.
+
+`root`, `scriptsTop` and every `unmigrated` list only shrink. An entry with nothing
+left to allow is stale and must be removed, and an entry that is not in
+`root.module.json` at the merge base with `origin/main` is refused: put the file
+where it belongs instead. A repository without `layout` gets ownership checks only.
+
+## Workspace hygiene
+
+`scripts/tron tidy` (`tidy.py`) reports, for the primary checkout and every
+registered worktree: untracked files; ignored paths with no named writer
+(including empty ignored directories, which Git does not list); `__pycache__`;
+`.scratch/` entries older than 7 days and `test-results/` entries older than 14
+days, aged by the newest file inside; tooling no tracked code, config or test names
+(report-only, by file name); directories in `<checkout>-worktrees/` that are not
+registered worktrees; a pre-commit hook that differs from what
+`scripts/install-hooks.sh` writes; each worktree's merged/dirty/live state and last
+HEAD activity; and branches merged into `origin/main` or idle over 14 days. Exit 1
+means something needs a decision; `--json` prints the same report.
+
+`--prune` deletes only expired scratch and evidence, bytecode, branches merged into
+`origin/main` that no worktree has checked out (printing `git branch <name> <sha>`
+to restore each), and merged worktrees with no untracked, modified or
+non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
+working directory is inside, and no HEAD activity for 3 days. Without `lsof` it
+prunes no worktree. Unmerged branches, residue and orphan directories are only
+reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
+`~/Library/Developer/Tron/ios`.
+
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-ownership.py` runs the CLI against
-disposable Git repositories: valid layouts, coverage and schema violations,
-placement and Git-only discovery. The last run is kept under
-`test-results/ownership-cli/`.
+`scripts/tron test tooling scripts/test-tron-ownership.py scripts/test-tron-layout.py
+scripts/test-tron-tidy.py` runs the CLIs against disposable Git repositories:
+ownership (valid layouts, coverage and schema violations, placement, Git-only
+discovery), one case per layout rule and the shrink-only lists, and tidy's report
+and prune safety. The last runs are kept under `test-results/{ownership,layout,tidy}-cli/`.

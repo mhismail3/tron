@@ -16,7 +16,8 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-FIELDS = {"layer", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass"}
+FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass", "layout"}
+ROOT_MANIFEST = "root.module.json"
 EDGE_FIELDS = {"to", "kind", "via", "why"}
 FORBIDDEN = set("[]{}\\")
 
@@ -45,6 +46,30 @@ def inventory(rev: str | None) -> tuple[list[str], callable]:
     paths = [p.decode("utf-8", "surrogateescape")
              for p in git("ls-tree", "-r", "-z", "--name-only", sha).split(b"\0") if p]
     return sorted(paths), lambda path: git("cat-file", "blob", f"{sha}:{path}")
+
+
+def modes_of(rev: str | None) -> dict[str, str]:
+    """Git file mode (100644, 100755, 120000) of every tracked path."""
+    raw = git("ls-files", "-s", "-z") if rev is None else git("ls-tree", "-r", "-z", rev)
+    modes = {}
+    for entry in raw.split(b"\0"):
+        if entry:
+            meta, path = entry.split(b"\t", 1)
+            modes[path.decode("utf-8", "surrogateescape")] = meta.split()[0].decode()
+    return modes
+
+
+def base_layout(rev: str | None) -> dict | None:
+    """root.module.json's layout at the merge base with origin/main; the lists may only shrink from it."""
+    try:
+        base = git("merge-base", rev or "HEAD", "refs/remotes/origin/main").decode().strip()
+    except GitError:
+        raise GitError("cannot find the merge base with origin/main to check that layout lists only shrink; "
+                       "run `git fetch origin main`") from None
+    try:
+        return json.loads(git("cat-file", "blob", f"{base}:{ROOT_MANIFEST}")).get("layout")
+    except (GitError, ValueError, AttributeError):
+        return None
 
 
 def pattern_problem(pattern: object) -> str | None:
@@ -175,6 +200,10 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
                 problems.append(f"missing required key {key!r}")
         if "layer" in data and not one_of(data["layer"], LAYERS):
             problems.append("layer must be one of L0..L5")
+        if "purpose" in data and not (isinstance(data["purpose"], str) and data["purpose"].strip()):
+            problems.append("purpose must be a non-empty string")
+        if "layout" in data and manifest != ROOT_MANIFEST:
+            problems.append(f"layout is declared only in {ROOT_MANIFEST}")
         owns = unique_list(data.get("owns", []), "owns", problems)
         if "owns" in data and not owns:
             problems.append("owns must not be empty")
@@ -248,11 +277,17 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
                 problems.append(f"riskClass {risk!r} must be one of {', '.join(sorted(RISK_CLASSES))}")
         errors.extend(f"{manifest}: {p}" for p in problems)
 
+    root = modules.get(ROOT_MANIFEST, {}).get("data", {})
+    if "layout" in root:
+        import layout  # sibling module; only repositories that declare a layout need it
+        errors.extend(layout.problems(root["layout"], paths, modes_of(rev), read, base_layout(rev)))
+
     def listed(module: dict, key: str) -> list:
         value = module["data"].get(key)
         return value if isinstance(value, list) else []
 
     summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
+                         "purpose": m["data"].get("purpose") if isinstance(m["data"].get("purpose"), str) else "",
                          "verify": [c for c in listed(m, "verify") if isinstance(c, str)],
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
                          "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")
@@ -261,14 +296,15 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
     return {"tracked": paths, "modules": dict(sorted(summary.items()))}, sorted(set(errors))
 
 
-USAGE = """usage: scripts/tron ownership [<rev>] [--modules]
-Checks every tracked path has exactly one <name>.module.json owner (tools/ownership/README.md).
+USAGE = """usage: scripts/tron ownership [<rev>] [--modules | --ledger]
+Checks every tracked path has exactly one <name>.module.json owner, and the layout root.module.json
+declares (tools/ownership/README.md). --ledger prints path, module, layer and purpose per tracked path.
 Without <rev>: the index's paths with working-tree contents. Exit 0 clean, 1 violations, 2 usage/Git."""
 
 
 def main(argv: list[str]) -> int:
-    args = [a for a in argv if a != "--modules"]
-    if any(a.startswith("-") for a in args) or len(args) > 1:
+    args = [a for a in argv if a not in ("--modules", "--ledger")]
+    if any(a.startswith("-") for a in args) or len(args) > 1 or {"--modules", "--ledger"} <= set(argv):
         print(USAGE, file=sys.stderr)
         return 2
     try:
@@ -276,6 +312,22 @@ def main(argv: list[str]) -> int:
     except GitError as error:
         print(f"ownership: {error}", file=sys.stderr)
         return 2
+    if "--ledger" in argv:
+        import layout
+        rev = args[0] if args else None
+        _, read = inventory(rev)
+        modes = modes_of(rev)
+        owner = {path: module for module in result["modules"].values() for path in module["owned"]}
+        ids = {id(module): key for key, module in result["modules"].items()}
+        print("path\tmodule\tlayer\tpurpose")
+        for path in result["tracked"]:
+            module = owner.get(path)
+            text = layout.purpose(read(path)) if layout.is_tooling(path, modes.get(path, "")) else ""
+            print("\t".join([path, ids[id(module)] if module else "UNOWNED", (module or {}).get("layer") or "",
+                             (text or (module or {}).get("purpose", "")).replace("\t", " ")]))
+        for error in errors:
+            print(error, file=sys.stderr)
+        return 1 if errors else 0
     if "--modules" in argv:
         for key, module in result["modules"].items():
             print(f"{key}\t{module['layer']}\t{len(module['owned'])}\t{module['manifest']}")
