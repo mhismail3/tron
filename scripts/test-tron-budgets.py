@@ -2,15 +2,12 @@
 """CLI tests for `scripts/tron budgets` (tools/budgets/README.md).
 
 Each case copies the real `scripts/tron`, `tools/budgets` and `tools/metrics`
-into a disposable Git repository, commits a base, then a change over it:
+into a disposable Git repository and commits a change:
 
-1. Known-bad: a change that creates a production file over 800 lines fails;
-   800 lines passes, and a new test or tooling file of any size only reports.
-2. Existing files only report: an over-500 file growing, and an over-800 file
-   renamed (a move, not a new file), pass.
-3. Docs fail only above twice their budget (package README 200, other README
-   150, other docs 300); the root README and the plan are not this checker's.
-4. An unknown base is an error (exit 2), never clean.
+1. Docs fail only above twice their budget (package README 200, other README
+   150, other docs 300); the root README is not this checker's. Code files of
+   any size are not this checker's either.
+2. An unknown revision is an error (exit 2), never clean.
 
 The last run's output is kept in `test-results/budgets-cli/`.
 """
@@ -49,11 +46,9 @@ class Repo:
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.path / relative)
         self.write("README.md", lines(400))  # root README: the documentation policy's budget
-        self.write("docs/restructure/plan.md", lines(1400))  # exempt until epic exit
         self.write(f"{APP}/big.ts", lines(600))
-        self.write(f"{APP}/huge.ts", lines(900))
+        self.write(f"{APP}/huge.ts", lines(900))  # code of any size is not this checker's
         self.commit("base")
-        self.git("checkout", "-q", "-b", "change")
 
     def git(self, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=self.path, env=self.env, check=True,
@@ -89,41 +84,9 @@ class BudgetCase(unittest.TestCase):
         self.temp.cleanup()
 
     def problems(self, code: int) -> list[str]:
-        result = self.repo.budgets("--base", "main")
+        result = self.repo.budgets()
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         return [line for line in result.stdout.splitlines() if not line.startswith("budgets:")]
-
-
-class NewFileTests(BudgetCase):
-    def test_a_new_production_file_over_800_lines_fails(self) -> None:
-        r = self.repo
-        r.write(f"{APP}/edge.ts", lines(800))
-        r.write(f"{APP}/new.ts", lines(801))
-        r.write(f"{APP}/big.test.ts", lines(1200))  # tests only report
-        r.write("scripts/tool.py", lines(1200))  # tooling only reports
-        r.commit("known-bad")
-        self.assertEqual(self.problems(1), [
-            f"new production file over 800 lines: {APP}/new.ts has 801 lines (split it by cohesive operation)"])
-        r.write(f"{APP}/new.ts", lines(800))
-        r.commit("split")
-        self.assertEqual(self.problems(0), [])
-        self.assertIn("6 code files over 500 lines", r.budgets("--base", "main").stdout)
-
-
-class ExistingFileTests(BudgetCase):
-    def test_existing_oversized_files_grow_and_move_without_failing(self) -> None:
-        r = self.repo
-        r.write(f"{APP}/big.ts", lines(741))
-        (r.path / APP / "moved").mkdir()
-        r.git("mv", f"{APP}/huge.ts", f"{APP}/moved/huge.ts")
-        r.write(f"{APP}/moved/huge.ts", lines(950))
-        r.commit("grow and move")
-        self.assertEqual(self.problems(0), [])
-        # A new file at a path whose old file moved away is new, and is bounded.
-        r.write(f"{APP}/huge.ts", lines(900, "other"))
-        r.commit("recreate")
-        self.assertEqual(self.problems(1), [
-            f"new production file over 800 lines: {APP}/huge.ts has 900 lines (split it by cohesive operation)"])
 
 
 class DocTests(BudgetCase):
@@ -133,10 +96,9 @@ class DocTests(BudgetCase):
         r.write("docs/tool/README.md", lines(300))
         r.write("docs/fine.md", lines(600))
         r.write("README.md", lines(900))
-        r.write("docs/restructure/plan.md", lines(2000))
         r.commit("docs within twice their budget")
         self.assertEqual(self.problems(0), [])
-        self.assertIn("3 docs over budget (reported)", r.budgets("--base", "main").stdout)
+        self.assertIn("3 docs over budget (reported)", r.budgets().stdout)
         r.write("packages/gateway/README.md", lines(401))
         r.write("docs/tool/README.md", lines(301))
         r.write("docs/fine.md", lines(601))
@@ -150,10 +112,11 @@ class DocTests(BudgetCase):
 
 
 class ErrorTests(BudgetCase):
-    def test_unknown_base_is_an_error(self) -> None:
-        unknown = self.repo.budgets("--base", "nope")
+    def test_unknown_revision_is_an_error(self) -> None:
+        unknown = self.repo.budgets("nope")
         self.assertEqual(unknown.returncode, 2)
-        self.assertIn("base nope cannot be measured", unknown.stderr)
+        self.assertIn("budgets: unknown revision: nope", unknown.stderr)
+        self.assertNotIn("no doc over", unknown.stdout)
 
 
 if __name__ == "__main__":

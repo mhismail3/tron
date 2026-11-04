@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "tools" / "layers"))
 import swift_index  # noqa: E402  (the one authority on a fresh iOS index and build stamp)
 
 GATEWAY = "packages/gateway"
-# A change here reaches everything above it, so it selects every lock (plan §6.2.2).
+# A change here reaches everything above it, so it selects every lock.
 WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 # Locks not named `*.lock.integration.test.ts`: the Pi SDK seam's behavior trace and corpus.
@@ -417,7 +417,7 @@ class Run:
         self.on_update = lambda: None
 
     def step(self, name: str, command: list[str] | str, cwd: Path = ROOT, count=None, env: dict | None = None,
-             advisory: bool = False, accept=(0,)) -> dict:
+             accept=(0,)) -> dict:
         self.index += 1
         label = f"[{self.index}/{self.total}] {name}"
         started = time.time()
@@ -445,13 +445,13 @@ class Run:
         output = log.read_text(errors="replace")
         ok = code in accept and not interrupted
         tests = count(output) if count and ok else None
-        status = "interrupted" if interrupted else "ok" if ok else ("advisory" if advisory else "failed")
+        status = "interrupted" if interrupted else "ok" if ok else "failed"
         seconds = round(time.time() - started, 1)
         result.update(status=status, exit=code, tests=tests, seconds=seconds)
         self.on_update()
         print(f"{label} {status.upper()} in {seconds}s" + (f" — {tests} passing test(s)" if tests is not None else ""), flush=True)
         if status != "ok":
-            tail = output.strip().splitlines()[-(1 if advisory else 25):]
+            tail = output.strip().splitlines()[-25:]
             print("\n".join(f"    {line}" for line in tail), flush=True)
             print(f"    full log: {result['log']}", flush=True)
         if interrupted:
@@ -653,8 +653,7 @@ def main(argv: list[str]) -> int:
         print(f"  why: {reason}", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
-    plan_steps = ["ownership", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard", "git diff --check",
-                  "moved-lines (advisory)"] \
+    plan_steps = ["ownership", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios build"] if ios_lane else []) + ["layers ios"] \
         + [name for group in sorted(groups) for name in test_step_names(group, shards, skipped_group(group))]
@@ -666,14 +665,13 @@ def main(argv: list[str]) -> int:
     baseline_docs = name == "all" or (name == "changed" and not selection["paths"])
     checks = [
         ("ownership", [tron, "ownership"], {}),
-        ("budgets", [tron, "budgets", "HEAD", "--base", base], {}),
+        ("budgets", [tron, "budgets", "HEAD"], {}),
         ("documentation policy", ["python3", "scripts/check-documentation-policy.py"], {}),
         ("generated docs", [tron, "docs", "check", *([] if baseline_docs else ["--base", base])]
          if baseline_docs or selection["docInputs"] or gateway_touched else None, {}),
         ("agent policy", ["bash", "scripts/check-agent-policy.sh"], {}),
         ("privacy guard", f"git diff {base}..HEAD | scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),
-        ("moved-lines (advisory)", [tron, "measure", base, sha], {"advisory": True}),
     ]
     gateway_checks = [("gateway typecheck", node + ["npm", "run", "check"]),
                       ("gateway lint", node + ["npm", "run", "lint"]),
@@ -757,7 +755,7 @@ def main(argv: list[str]) -> int:
                 cwd = ROOT if label == "layers gateway" else ROOT / GATEWAY
                 if run.step(label, command, cwd=cwd)["status"] == "failed":
                     return finish("failed", f"{label} failed")
-        # The iOS reference check reads the index of this commit's own test build (plan §6.7, #1459). The iOS
+        # The iOS reference check reads the index of this commit's own test build (#1459). The iOS
         # lane builds it when the stamp is stale; a selection without iOS reports it skipped, never passed.
         stale = ios_index_stale()
         ios_deferred = False

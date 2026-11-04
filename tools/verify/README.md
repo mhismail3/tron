@@ -100,8 +100,6 @@ There is no known-failure registry, quarantine, waiver, expiry or qualified verd
 ([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Every
 executed failure is `failed` (exit 1); it is fixed at its root or causally reverted.
 
-Verify runs `scripts/tron measure <base> HEAD` as an advisory step, writing per-file moved/rewrite
-counts to `test-results/measure/`; its counts and errors never fail verify.
 
 ## Selection
 

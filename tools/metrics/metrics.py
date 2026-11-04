@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Read-only, deterministic restructure metrics (docs/restructure/plan.md §3).
+"""Read-only, deterministic repository metrics (tools/metrics/README.md).
 
 Every number is computed from Git objects of one commit, never from the working
 tree or the wall clock, so the same commit always yields byte-identical JSON.
-Definitions, classification rules and unavailable metrics: tools/metrics/README.md.
+Definitions and classification rules: tools/metrics/README.md.
 The tool reports; it never gates (exit status reflects only usage or Git errors).
 """
 
@@ -52,28 +52,6 @@ TEST_PATHS = {"packages/ios-app/MacTerminalSSH/Sources/MacTerminalProbe/main.swi
 LEGAL = re.compile(r"(?i)(^|[-_.])(license|notice|copying)$")
 TEST_NAME = re.compile(r"\.test\.[A-Za-z0-9]+$")
 HOSTED_FIXTURE = re.compile(r"^(Hosted\w*(Fixture|Probe)\w*|\w+HostedProbe)\.swift$")
-
-# key: (reason it is not measured now, owning slice). Never reported as a number.
-UNAVAILABLE = {
-    "M1.lockCoverage": ("No capability catalog (plan §6.3) or behavior locks exist yet.",
-        "0.4 manifests (catalog); 0.8 Gateway locks #1355; 0.9 iOS locks #1356"),
-    "M1.lockDeterminism": ("No behavior locks exist yet to rerun.",
-        "0.8 Gateway locks #1355; 0.9 iOS locks #1356"),
-    "M1.lockSensitivity": ("No locks or evaluated mutation tool yet; sampled at milestones.",
-        "0.10 persisted, wire and sensitivity"),
-    "M2.layerViolations": ("Needs manifest layers and a resolved import/reference graph; grep "
-                           "misreads type-only, dynamic, re-exported and path-mapped edges.",
-        "0.4 manifests; 0.6 layer checker #1354"),
-    "M2.directoryCycles": ("Needs the resolved import/reference graph, not grep-inferred edges.",
-        "0.6 layer checker #1354"),
-    "M2.registrationFootprint": ("Needs module descriptors and composition roots.",
-        "Phase 2 K-0 and pilot module #1348"),
-    "M2.navigationProbe": ("A fresh-agent probe run at milestones, not a repository computation.",
-        "Milestone steward (plan §14.8)"),
-    "M4.sliceVerifyTime": ("`scripts/tron verify --changed` records timings per run; they are not derivable from Git objects.",
-        "0.11 scripts/tron verify #1354"),
-}
-
 
 class MetricsError(Exception):
     pass
@@ -284,8 +262,6 @@ def measure(sha: str) -> dict:
             "handWrittenByPackage": dict(sorted(by_package.items())),
         },
     }
-    for key, (reason, owner) in UNAVAILABLE.items():
-        metrics[key] = {"status": "unavailable", "reason": reason, "owner": owner}
     return {
         "schema": SCHEMA,
         "definitions": "tools/metrics/README.md",
@@ -350,13 +326,6 @@ def short_share(hot: dict) -> str:
     return "n/a" if hot["share"] is None else f"{hot['share'] * 100:.1f}%"
 
 
-def violations(base: dict, head: dict) -> str:
-    b, h = base["metrics"]["M2.layerViolations"], head["metrics"]["M2.layerViolations"]
-    if h["status"] != "observed" or b["status"] != "observed":
-        return f"violations unavailable ({h.get('owner') or b.get('owner')})"
-    return f"violations {b['count']}→{h['count']}"
-
-
 def compare(base: dict, head: dict) -> str:
     bs, hs = base["metrics"]["M3.size"], head["metrics"]["M3.size"]
     bf, hf = base["metrics"]["M2.fileSize"], head["metrics"]["M2.fileSize"]
@@ -384,8 +353,6 @@ def compare(base: dict, head: dict) -> str:
     excluded.append(f"binary bytes {fmt(bs['byCategory']['binary']['bytes'])} → "
                     f"{fmt(hs['byCategory']['binary']['bytes'])}")
     lines += ["", "Excluded (not hand-written): " + "; ".join(excluded) + "."]
-    unavailable = [k for k, v in head["metrics"].items() if v["status"] == "unavailable"]
-    lines.append("Unavailable (not measured; owners in JSON): " + ", ".join(unavailable) + ".")
 
     base_files = {f["path"]: f for f in base["files"]}
     head_files = {f["path"]: f for f in head["files"]}
@@ -436,7 +403,7 @@ def compare(base: dict, head: dict) -> str:
         "",
         f"Metrics Δ: LOC prod/test/tool/docs {signed(d['production'])}/{signed(d['tests'])}/"
         f"{signed(d['tooling'])}/{signed(d['docs'])}; files>{SIZE_THRESHOLD} "
-        f"{signed(hf['count'] - bf['count'])}; {violations(base, head)}; "
+        f"{signed(hf['count'] - bf['count'])}; "
         f"hotspot {short_share(bh)}→{short_share(hh)}.",
     ]
     return "\n".join(lines)
@@ -454,8 +421,7 @@ def summary(result: dict) -> str:
         f"Fixture data lines {fmt(cats['fixtures']['lines'])} (separate)",
         f"Hand-written files > {SIZE_THRESHOLD} lines: {large['count']} "
         + "(" + ", ".join(f"{c} {n}" for c, n in large["byCategory"].items()) + ")",
-        f"Hotspot share ({HOTSPOT_WINDOW_DAYS}d to {hot['windowEnd']}, top {HOTSPOT_TOP}): {pct(hot)}",
-        "Unavailable: " + ", ".join(k for k, v in result["metrics"].items() if v["status"] == "unavailable"),
+        f"Hotspot share ({HOTSPOT_WINDOW_DAYS}d to {hot['windowEnd']}, top {HOTSPOT_TOP}): {pct(hot)}"
     ])
 
 

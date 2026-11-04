@@ -1,9 +1,8 @@
 # Docs indexes
 
 `scripts/tron docs` prints cross-module indexes from manifests and code, so no
-doc keeps a hand-edited copy of them
-([plan §5.6](../../docs/restructure/plan.md#56-docs-target), D1 in
-[§4.3](../../docs/restructure/plan.md#43-multi-agent-native-design-principles-dev-time)).
+doc keeps a hand-edited copy of them; documentation otherwise sits beside its
+owner ([AGENTS.md](../../AGENTS.md#documentation)).
 It uses only the standard library of Python and the pinned Node.
 
 ```bash

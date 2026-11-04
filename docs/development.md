@@ -236,8 +236,7 @@ normal startup and Replace Mac App never convert or restore Knowledge data.
 `scripts/tron metrics [<rev>]` measures Git objects and writes
 `test-results/metrics/<sha>.json`; `--compare <base>` prints a delta table.
 Counts are trailing evidence, not targets or closing-paperwork obligations.
-The [metric definitions](../tools/metrics/README.md) own classification and
-explicitly unavailable measurements.
+The [metric definitions](../tools/metrics/README.md) own classification.
 
 ## Module ownership
 
@@ -257,9 +256,8 @@ Existing upward and two-way pairs live in the shrink-only
 always allowed.
 [Layer rules](../tools/layers/README.md).
 
-`scripts/tron budgets` reports a commit's files over 500 lines and docs over
-budget. It fails only a change that creates a production file over 800 lines, or
-a doc above twice its budget. [Budget rules](../tools/budgets/README.md).
+`scripts/tron budgets` reports a commit's docs over budget and fails only a doc
+above twice its budget. [Budget rules](../tools/budgets/README.md).
 
 Run affected checks before landing with the merge procedure in the
 [Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)).
