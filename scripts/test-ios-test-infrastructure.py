@@ -2282,6 +2282,13 @@ if command == 'bootstatus':
 if command == 'terminate':
     raise SystemExit(0)
 if command == 'uninstall':
+    # `FAKE_SIMCTL_UNINSTALL_FAIL_NAME` fails the reset on the simulator with that name.
+    failing = os.environ.get('FAKE_SIMCTL_UNINSTALL_FAIL_NAME')
+    if failing:
+        document = json.loads(inventory_path.read_text())
+        if any(device['udid'] == udid and device['name'] == failing
+               for devices in document['devices'].values() for device in devices):
+            print('fake simctl: uninstall refused', file=sys.stderr); raise SystemExit(1)
     raise SystemExit(0)
 if command == 'get_app_container':
     print('no such app container', file=sys.stderr); raise SystemExit(2)
@@ -3758,6 +3765,9 @@ if "build-for-testing" in arguments:
     record({"action": "build", "scheme": scheme, "test_plan": test_plan})
     with (products / (scheme + "_" + test_plan + "_iOS.xctestrun")).open("wb") as handle:
         plistlib.dump({"TestConfigurations": [{"IsEnabled": True, "TestTargets": targets}]}, handle)
+    # `FAKE_XCODEBUILD_BROKEN_XCTESTRUN` leaves an xctestrun no journey can patch.
+    if os.environ.get("FAKE_XCODEBUILD_BROKEN_XCTESTRUN"):
+        (products / (scheme + "_" + test_plan + "_iOS.xctestrun")).write_text("not a property list")
     # The built hosted product, so a command that resets the lane's app state can
     # read the bundle identifier it must remove.
     app_plist = products / "Test-iphonesimulator/TronMobile.app/Info.plist"
@@ -3772,7 +3782,48 @@ if "test-without-building" in arguments and "-resultBundlePath" in arguments:
     if calls:
         with open(calls, "a", encoding="utf-8") as handle: handle.write(test_filter + "\\n")
     record({"action": "run", "test_filter": test_filter,
+            "destination": arguments[arguments.index("-destination") + 1] if "-destination" in arguments else None,
             "targets": xctestrun_targets(arguments[arguments.index("-xctestrun") + 1]) if "-xctestrun" in arguments else None})
+    # `FAKE_XCODEBUILD_RUN_STARTED` (a path) is written once the run starts, which
+    # then runs until a signal; its teardown takes `FAKE_XCODEBUILD_TERM_DELAY`
+    # seconds and ends by appending `xcodebuild-ended` to the simctl log, so a
+    # case can order the teardown against the hosted-app reset.
+    if os.environ.get("FAKE_XCODEBUILD_RUN_STARTED"):
+        import signal
+        def ended(*_):
+            time.sleep(float(os.environ.get("FAKE_XCODEBUILD_TERM_DELAY") or 0))
+            with open(os.environ["FAKE_SIMCTL_LOG"], "a", encoding="utf-8") as handle:
+                handle.write("xcodebuild-ended\\n")
+            os._exit(143)
+        signal.signal(signal.SIGTERM, ended)
+        signal.signal(signal.SIGINT, ended)
+        Path(os.environ["FAKE_XCODEBUILD_RUN_STARTED"]).write_text("started")
+        while True:
+            time.sleep(0.05)
+    # `FAKE_XCODEBUILD_RUN_BARRIER` (a directory) holds each run until
+    # `FAKE_XCODEBUILD_RUN_BARRIER_COUNT` runs are in flight at once, so a case
+    # proves journeys overlap; a run that waits alone fails.
+    barrier = os.environ.get("FAKE_XCODEBUILD_RUN_BARRIER")
+    if barrier:
+        Path(barrier).mkdir(parents=True, exist_ok=True)
+        (Path(barrier) / test_filter.rsplit("/", 1)[-1]).write_text("")
+        deadline = time.monotonic() + 60
+        while len(list(Path(barrier).iterdir())) < int(os.environ["FAKE_XCODEBUILD_RUN_BARRIER_COUNT"]):
+            if time.monotonic() > deadline:
+                print("fake xcodebuild: no concurrent run reached the barrier", file=sys.stderr)
+                raise SystemExit(99)
+            time.sleep(0.05)
+    # `FAKE_XCODEBUILD_FAIL_FILTER` fails that one journey; every other run then
+    # waits for `FAKE_XCODEBUILD_PASS_AFTER` (a path) to exist, if set.
+    if os.environ.get("FAKE_XCODEBUILD_FAIL_FILTER") == test_filter:
+        raise SystemExit(65)
+    if os.environ.get("FAKE_XCODEBUILD_PASS_AFTER"):
+        deadline = time.monotonic() + 60
+        while not Path(os.environ["FAKE_XCODEBUILD_PASS_AFTER"]).exists():
+            if time.monotonic() > deadline:
+                print("fake xcodebuild: the awaited path never appeared", file=sys.stderr)
+                raise SystemExit(98)
+            time.sleep(0.05)
     invocation = Path(calls).read_text().splitlines() if calls and Path(calls).exists() else []
     failure = int(os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_EXIT") or 0)
     if failure and len(invocation) == 1:
@@ -4407,6 +4458,223 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.assertIn("Gateway: stopped", status.stdout)
         self.assertIn("Fault proxy: stopped", status.stdout)
         self.assertEqual(len(self.hosted_app_resets()), 1, "a failed run must still reset the hosted app")
+
+    def ui_reports(self) -> dict[str, list[tuple[Path, dict[str, Any]]]]:
+        """Every journey report run-ui left, by journey: its own lane's and each extra lane's."""
+        state = self.root / "e2e-state"
+        reports: dict[str, list[tuple[Path, dict[str, Any]]]] = {}
+        for path in sorted([*state.glob("results/*/report.json"), *state.glob("lane*/results/*/report.json")]):
+            if path.parent.is_symlink():
+                continue  # `latest-ui` names one of the directories already listed
+            report = json.loads(path.read_text())
+            reports.setdefault(report["journey"], []).append((path.parent, report))
+        return reports
+
+    def three_ui_journeys(self) -> list[str]:
+        return [*self.owned_ui_journeys(),
+                "TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight"]
+
+    def ui_runs(self, environment: dict[str, str]) -> list[dict[str, Any]]:
+        return [entry for entry in self.xcodebuild_invocations(environment) if entry["action"] == "run"]
+
+    def test_parallel_run_ui_overlaps_journeys_on_owned_lanes_with_their_own_fixtures(self) -> None:
+        """#2253: with two lanes, two journeys run at once - the fake xcodebuild
+        holds each run until both are in flight - each on its own simulator and
+        against its own fixture, with complete evidence, and both lanes end
+        released, with their fixtures stopped and their hosted apps reset."""
+        environment = self.ui_environment(
+            TRON_IOS_E2E_UI_LANES="2",
+            FAKE_XCODEBUILD_RUN_BARRIER=str(self.root / "barrier"),
+            FAKE_XCODEBUILD_RUN_BARRIER_COUNT="2",
+        )
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("on 2 lane(s) (status 0)", result.stdout)
+        runs = self.ui_runs(environment)
+        self.assertEqual(sorted(entry["test_filter"] for entry in runs), sorted(self.owned_ui_journeys()))
+        self.assertEqual(len({entry["destination"] for entry in runs}), 2, "each lane runs on its own simulator")
+        for entry in runs:
+            self.assertEqual(entry["targets"].get("TronMobileUITests"), XCTESTRUN_FIXTURE_KEYS)
+        reports = self.ui_reports()
+        self.assertEqual(sorted(reports), sorted(self.owned_ui_journeys()))
+        fixtures = set()
+        for journey, entries in reports.items():
+            with self.subTest(journey=journey):
+                self.assertEqual(len(entries), 1, entries)
+                directory, report = entries[0]
+                self.assertEqual(report["journey_status"], 0)
+                self.assertTrue(report["evidence_complete"])
+                for name in ("Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "summary.json"):
+                    self.assertTrue((directory / name).exists(), f"missing {name} in {directory}")
+                fixtures.add(report["fixture"])
+        self.assertEqual(len(fixtures), 2, "each lane renews its own fixture")
+        # Each journey's output is published whole when it ends: its completion
+        # line follows its own start line.
+        lines = result.stdout.splitlines()
+        for journey in self.owned_ui_journeys():
+            started = [index for index, line in enumerate(lines) if line.startswith(f"Real-UI journey {journey} started on lane")]
+            completed = [index for index, line in enumerate(lines)
+                         if re.fullmatch(rf"Real-UI journey {re.escape(journey)} completed in \d+s \(status 0\); evidence: .+", line)]
+            self.assertEqual(len(started), 1, result.stdout)
+            self.assertEqual(len(completed), 1, result.stdout)
+            self.assertLess(started[0], completed[0], result.stdout)
+        lanes = [self.state, self.discovery_root / "ios-test-default-ui2"]
+        udids = []
+        for lane in lanes:
+            marker = json.loads((lane / "simulator.json").read_text())
+            udids.append(marker["udid"])
+            self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown", f"{lane} left booted")
+        self.assertEqual(sorted(self.hosted_app_resets()),
+                         sorted(f"uninstall {udid} com.tron.mobile.testhost" for udid in udids))
+        for fixture in fixtures:
+            self.assertFalse((Path(fixture) / "gateway.pid").exists(), f"{fixture} left its Gateway running")
+            self.assertFalse((Path(fixture) / "proxy.pid").exists(), f"{fixture} left its proxy running")
+
+    def test_parallel_run_ui_starts_no_journey_after_a_failure_and_keeps_running_ones(self) -> None:
+        """#2253: after the first failure no lane claims another journey, as a
+        serial run stops at its first failure; the journey already running on the
+        other lane finishes with its evidence, and the command carries the first
+        failure's status and names it."""
+        journeys = self.three_ui_journeys()
+        environment = self.ui_environment(
+            TRON_IOS_E2E_UI_LANES="2",
+            FAKE_XCODEBUILD_RUN_BARRIER=str(self.root / "barrier"),
+            FAKE_XCODEBUILD_RUN_BARRIER_COUNT="2",
+            FAKE_XCODEBUILD_FAIL_FILTER=journeys[0],
+            FAKE_XCODEBUILD_PASS_AFTER=str(self.root / "e2e-state/ui-queue/failed"),
+        )
+        arguments = [argument for journey in journeys for argument in ("--only-testing", journey)]
+        result = self.e2e("run-ui", *arguments, environment=environment)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn(f"first failure: {journeys[0]}", result.stderr)
+        self.assertEqual(sorted(entry["test_filter"] for entry in self.ui_runs(environment)), sorted(journeys[:2]))
+        reports = self.ui_reports()
+        self.assertEqual(sorted(reports), sorted(journeys[:2]))
+        self.assertEqual(reports[journeys[0]][0][1]["journey_status"], 65)
+        self.assertEqual(reports[journeys[1]][0][1]["journey_status"], 0)
+        self.assertTrue(reports[journeys[1]][0][1]["evidence_complete"])
+        failed = re.findall(r"Real-UI journey (\w+/\w+/\w+) completed .*\(status [1-9]\d*\)", result.stdout)
+        self.assertEqual(failed, [journeys[0]], "the batch probes exactly the failed journey")
+
+    def test_a_journey_whose_setup_fails_never_runs(self) -> None:
+        """#2253 review: each journey runs in a subshell; a failed setup step
+        (here the xctestrun patch) must end it before xcodebuild runs, serially
+        and in parallel, and fail the command."""
+        for lanes in ("1", "2"):
+            with self.subTest(lanes=lanes):
+                calls = self.root / f"setup-calls-{lanes}.txt"
+                environment = self.ui_environment(
+                    TRON_IOS_E2E_UI_LANES=lanes, FAKE_XCODEBUILD_BROKEN_XCTESTRUN="1",
+                    FAKE_XCODEBUILD_CALLS=str(calls),
+                )
+                result = self.e2e("run-ui", environment=environment)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(calls.exists(), "a journey whose setup failed must not run: "
+                                 + (calls.read_text() if calls.exists() else ""))
+                self.assertIn("first failure:", result.stderr)
+
+    def test_an_extra_lane_that_fails_after_running_journeys_fails_the_run(self) -> None:
+        """#2253 review: an extra lane whose hosted-app reset fails after it ran
+        a journey fails the run, as a serial run's failed reset does."""
+        environment = self.ui_environment(
+            TRON_IOS_E2E_UI_LANES="2",
+            FAKE_XCODEBUILD_RUN_BARRIER=str(self.root / "barrier"),
+            FAKE_XCODEBUILD_RUN_BARRIER_COUNT="2",
+            FAKE_SIMCTL_UNINSTALL_FAIL_NAME="Tron iOS Tests (default-ui2)",
+        )
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("lane default-ui2 ended (status 1)", result.stderr)
+        self.assertEqual(sorted(self.ui_reports()), sorted(self.owned_ui_journeys()))
+
+    def test_a_signal_resets_the_app_only_after_the_journey_tore_down(self) -> None:
+        """#2253 review: a journey runs in a subshell; a signal must still let its
+        process owner stop xcodebuild before the command resets the hosted app
+        and stops the fixture, as the serial loop did, on one lane and on two,
+        for SIGTERM and for SIGINT (which an async subshell would ignore)."""
+        for lanes, signalled in (("1", signal.SIGTERM), ("2", signal.SIGTERM), ("1", signal.SIGINT), ("2", signal.SIGINT)):
+            with self.subTest(lanes=lanes, signal=signalled.name):
+                self.log_path.unlink(missing_ok=True)
+                key = f"{lanes}-{signalled.name}"
+                started = self.root / f"run-started-{key}"
+                environment = self.ui_environment(
+                    TRON_IOS_E2E_UI_LANES=lanes, FAKE_XCODEBUILD_RUN_STARTED=str(started),
+                    FAKE_XCODEBUILD_TERM_DELAY="2", FAKE_XCODEBUILD_LOG=str(self.root / f"signal-xcodebuild-{key}.jsonl"),
+                )
+                journey = self.owned_ui_journeys()[0]
+                process = subprocess.Popen(
+                    [str(E2E), "run-ui", "--only-testing", journey],
+                    env=self.readiness_node_environment(environment),
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+                )
+                try:
+                    deadline = time.monotonic() + 90
+                    while not started.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    self.assertTrue(started.exists(), process.poll() is not None and process.communicate()[1])
+                    os.killpg(process.pid, signalled)
+                    _, stderr = process.communicate(timeout=120)
+                    self.assertEqual(process.returncode, 128 + signalled, stderr)
+                    lines = self.log_path.read_text().splitlines()
+                    ended = [index for index, line in enumerate(lines) if line == "xcodebuild-ended"]
+                    # The reset of the lane that ran the journey; an idle extra lane resets at once.
+                    runs = self.ui_runs(environment)
+                    self.assertEqual(len(runs), 1, runs)
+                    udid = runs[0]["destination"].rsplit("id=", 1)[1]
+                    resets = [index for index, line in enumerate(lines) if line.startswith(f"uninstall {udid} ")]
+                    self.assertEqual(len(ended), 1, lines)
+                    self.assertTrue(resets, lines)
+                    self.assertLess(ended[0], resets[0], f"the app was reset before the journey tore down: {lines}")
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=30)
+                    self.close_pipes(process)
+                    self.e2e("stop", environment=environment)
+
+    def test_an_extra_lane_that_cannot_be_leased_costs_no_coverage(self) -> None:
+        """#2253: an extra lane another command holds exits 73 without running a
+        journey; this command's own lane runs every journey and the run passes,
+        naming the lane that ran none."""
+        lane = self.discovery_root / "ios-test-default-ui2"
+        lane.mkdir(parents=True)
+        holder = subprocess.Popen(
+            [sys.executable, "-c", "import fcntl,sys,time; h=open(sys.argv[1],'a'); "
+             "fcntl.flock(h, fcntl.LOCK_EX); print('held', flush=True); time.sleep(600)", str(lane / "lease.lock")],
+            env=self.contained_environment(self.root), stdout=subprocess.PIPE, text=True,
+        )
+        self.holders.append(holder)
+        self.assertEqual(holder.stdout.readline().strip(), "held")
+        environment = self.ui_environment(TRON_IOS_E2E_UI_LANES="2")
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("real-UI lane default-ui2 ran no journey (status 73)", result.stderr)
+        self.assertEqual([entry["test_filter"] for entry in self.ui_runs(environment)], self.owned_ui_journeys())
+        self.assertEqual(sorted(self.ui_reports()), sorted(self.owned_ui_journeys()))
+
+    def test_run_ui_starts_the_longest_recorded_journey_first(self) -> None:
+        """#2253: journeys run longest first by an earlier run's seconds; one with
+        no recorded seconds goes first, since its length is unknown."""
+        journeys = self.three_ui_journeys()
+        seconds = self.root / "journey-seconds.json"
+        seconds.write_text(json.dumps({journeys[0]: 10, journeys[2]: 300}))
+        environment = self.ui_environment(TRON_IOS_E2E_UI_JOURNEY_SECONDS=str(seconds))
+        arguments = [argument for journey in journeys for argument in ("--only-testing", journey)]
+        result = self.e2e("run-ui", *arguments, environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([entry["test_filter"] for entry in self.ui_runs(environment)],
+                         [journeys[1], journeys[2], journeys[0]])
+
+    def test_run_ui_refuses_more_lanes_than_host_slots(self) -> None:
+        """#2253: each lane takes a host slot, so a lane count outside 1..cap is
+        refused before anything is leased or built."""
+        for lanes in ("0", "4", "two"):
+            with self.subTest(lanes=lanes):
+                environment = self.ui_environment(TRON_IOS_E2E_UI_LANES=lanes)
+                result = self.e2e("run-ui", environment=environment)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("TRON_IOS_E2E_UI_LANES must be 1 to 3", result.stderr)
+                self.assertEqual(self.xcodebuild_invocations(environment), [])
 
     def test_only_testing_refuses_a_selector_run_ui_does_not_own(self) -> None:
         """The journeys are `run-ui`'s alone — a selector for anything else, a
