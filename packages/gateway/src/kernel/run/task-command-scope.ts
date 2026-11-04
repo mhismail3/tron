@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * A Home task worker's command scope (kernel/run/README.md, docs/host-load.md). While a task
@@ -15,6 +16,14 @@ import { join } from "node:path";
  * start`). The scope lives on disk so a Gateway restart or runtime rebuild keeps it.
  */
 const SCOPE_ROOT_NAME = "tron-task-commands";
+/**
+ * The commands' `TMPDIR` is in a sibling of the scope root, keyed by a short session digest, not
+ * inside the scope directory: tools and tests nest their own temp roots and fixtures under it, and paths
+ * written into data or used as socket addresses have byte limits (#2260). This keeps it about
+ * 20 bytes past the temp root. 40 bits make two live scopes sharing one key negligible.
+ */
+const TEMP_ROOT_NAME = "tron-tc";
+const TEMP_KEY_HEX = 10;
 /** Inherited by every shell: high enough that `exec 3>`…`exec 9>` idioms do not replace it. */
 export const TASK_SCOPE_ANCHOR_FD = 19;
 /** `lstart` has one-second resolution. */
@@ -32,14 +41,17 @@ export interface TaskCommandScope { readonly directory: string; readonly tmp: st
 /** Read when called, so an isolated `TMPDIR` (tests, verify) isolates the root too. */
 export function taskCommandRoot(): string { return join(os.tmpdir(), SCOPE_ROOT_NAME); }
 
-function scopeAt(directory: string): TaskCommandScope {
-  return { directory, tmp: join(directory, "tmp"), anchor: join(directory, "anchor"), groups: join(directory, "groups") };
+function scopeAt(root: string, sessionId: string): TaskCommandScope {
+  const directory = join(root, sessionId);
+  const key = createHash("sha256").update(sessionId).digest("hex").slice(0, TEMP_KEY_HEX);
+  return { directory, tmp: join(dirname(root), TEMP_ROOT_NAME, key), anchor: join(directory, "anchor"), groups: join(directory, "groups") };
 }
 
 /** Binds the worker session's next commands to the task. A resumed task rebinds the same session. */
 export function bindTaskCommandScope(sessionId: string, taskId: string, root = taskCommandRoot()): TaskCommandScope {
   if (!SESSION_ID_PATTERN.test(sessionId) || !TASK_ID_PATTERN.test(taskId)) throw new Error("Invalid task command scope identity");
-  const scope = scopeAt(join(root, sessionId));
+  const scope = scopeAt(root, sessionId);
+  mkdirSync(scope.directory, { recursive: true, mode: 0o700 });
   mkdirSync(scope.tmp, { recursive: true, mode: 0o700 });
   if (!existsSync(scope.anchor)) writeFileSync(scope.anchor, "", { mode: 0o600 });
   writeFileSync(join(scope.directory, BOUND), taskId, { mode: 0o600 });
@@ -49,12 +61,12 @@ export function bindTaskCommandScope(sessionId: string, taskId: string, root = t
 /** The session's bound scope, or none: interactive sessions and settled tasks run commands unscoped. */
 export function boundTaskCommandScope(sessionId: string, root = taskCommandRoot()): TaskCommandScope | undefined {
   if (!SESSION_ID_PATTERN.test(sessionId)) return undefined;
-  const scope = scopeAt(join(root, sessionId));
+  const scope = scopeAt(root, sessionId);
   return existsSync(join(scope.directory, BOUND)) ? scope : undefined;
 }
 
 export function taskCommandScopeOf(sessionId: string, root = taskCommandRoot()): TaskCommandScope | undefined {
-  return SESSION_ID_PATTERN.test(sessionId) ? scopeAt(join(root, sessionId)) : undefined;
+  return SESSION_ID_PATTERN.test(sessionId) ? scopeAt(root, sessionId) : undefined;
 }
 
 function readMarker(scope: TaskCommandScope, name: string): string | undefined {
@@ -187,7 +199,7 @@ export type TaskScopeReap =
   | { outcome: "refused"; reason: "process-table-unreadable" | "survivors" | "rebound" | "remove-failed"; processes: number; survivors: number };
 
 /**
- * Kills everything a settled scope owns, then removes it, temp files included. Owned processes
+ * Kills everything a settled scope owns, then removes it and its `TMPDIR`. Owned processes
  * are frozen, ownership is read again (one forking in between is still caught, as the
  * foreground owner does), and the scope must still be settled for `taskId` before the kill and
  * before the removal: a successor bound meanwhile is never reaped. Anything uncertain leaves
@@ -215,7 +227,11 @@ export async function reapTaskCommandScope(scope: TaskCommandScope, taskId: stri
   const survivors = after ? [...owned].filter(pid => after.has(pid)).length : owned.size;
   if (survivors > 0) return { outcome: "refused", reason: "survivors", processes: owned.size, survivors };
   if (!settled()) return { outcome: "refused", reason: "rebound", processes: owned.size, survivors: 0 };
-  try { await rm(scope.directory, { recursive: true, force: true, maxRetries: 2 }); }
+  // `TMPDIR` first: the scope directory is what the next sweep finds if a removal fails.
+  try {
+    await rm(scope.tmp, { recursive: true, force: true, maxRetries: 2 });
+    await rm(scope.directory, { recursive: true, force: true, maxRetries: 2 });
+  }
   catch { return { outcome: "refused", reason: "remove-failed", processes: owned.size, survivors: 0 }; }
   return { outcome: "reaped", processes: owned.size, survivors: 0 };
 }
@@ -224,7 +240,7 @@ export async function reapTaskCommandScope(scope: TaskCommandScope, taskId: stri
 export async function listTaskCommandScopes(root = taskCommandRoot()): Promise<Array<{ sessionId: string; bound: string | undefined; settled: string | undefined; scope: TaskCommandScope }>> {
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
   return entries.filter(entry => entry.isDirectory() && SESSION_ID_PATTERN.test(entry.name)).map(entry => {
-    const scope = scopeAt(join(root, entry.name));
+    const scope = scopeAt(root, entry.name);
     return { sessionId: entry.name, bound: readMarker(scope, BOUND), settled: readMarker(scope, SETTLED), scope };
   });
 }

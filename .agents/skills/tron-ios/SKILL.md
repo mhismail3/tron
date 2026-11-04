@@ -63,6 +63,12 @@ scripts/tron-ios-test prune
 scripts/tron-ios-test clean
 ```
 
+A failed `build` prints `error: path:line: message` for each build error and a
+failed `run` prints `failure: test: message` for each test failure (first 20),
+read from the run's result bundle (`Build.xcresult`, `TestResults.xcresult`) by
+`scripts/xcresult-failures.py`. Read that block first; the raw `build.log` and
+`test.log` in the printed run directory stay the evidence.
+
 For a physical development device targeting Stable, first complete the Mac
 Release reinstall runbook and `scripts/tron mac verify`, then use the device
 helper without overriding its safe defaults:
@@ -202,6 +208,11 @@ reclaim simulators yourself.
   (exit 73 from `scripts/tron-ios-simulator` or `scripts/tron-ios-device`,
   naming the holder) with raw `xcodebuild`, `simctl` or `devicectl`; wait for
   the holder's command to finish.
+- Never build for, boot, install on or drive a simulator or device through an
+  agent tool outside the `scripts/ios-test-lock.py` leases and slots: Xcode's
+  MCP (`xcrun mcpbridge`; Xcode 27 `xcrun mcp-server`), XcodeBuildMCP,
+  MobileBuildMCP, AXe or any similar MCP/CLI. They bypass the lanes and the
+  3-slot cap; use the commands above.
 - Never install a production Release artifact through the ordinary device
   helper or automate signing, archive delivery, upload, or deployment. The
   user-requested development `share` is not a release path.
