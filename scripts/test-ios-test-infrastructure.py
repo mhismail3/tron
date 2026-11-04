@@ -2183,6 +2183,27 @@ with open(state / 'events', 'a', encoding='utf-8') as events:
         finally:
             self.stop_host_slot_holders(holder)
 
+    def test_slot_worktrees_names_each_holders_worktree_without_taking_a_slot(self) -> None:
+        """#2253: the batch admits a lane past slots its own worktree holds, so the owner names
+        each held slot's worktree (None when free) from the holder's own metadata."""
+        self.start_job("job0")
+        self.wait_until(lambda: self.started() == ["job0"], "the job to start")
+        try:
+            probe = self.run_script([sys.executable, "-c", (
+                "import importlib.util, json, sys\n"
+                "spec = importlib.util.spec_from_file_location('lock', sys.argv[1])\n"
+                "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n"
+                "print(json.dumps(module.slot_worktrees()))"), str(LOCK)],
+                self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+            worktrees = json.loads(probe.stdout)
+            self.assertEqual(len(worktrees), self.cap)
+            self.assertEqual([worktree for worktree in worktrees if worktree is not None], [str(self.root / "worktree-job0")])
+            self.assertEqual(self.started(), ["job0"], "the probe must take no slot")
+        finally:
+            self.release("job0")
+            self.assertEqual(self.jobs["job0"].wait(timeout=30), 0)
+
     def test_the_slots_are_listed_without_taking_one(self) -> None:
         holders = self.hold_host_slots(self.environment, 2)
         try:
