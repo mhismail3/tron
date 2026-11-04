@@ -41,8 +41,6 @@ Commands:
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
   ios generate                      Regenerate iOS with pinned XcodeGen
   ios source                        Resolve fetched origin/main for install/share
-  profile cutover --plan|--apply|--rollback
-                                    Maintainer-only bound offline Profile migration
   mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify [--require-bundled]    Verify installed app, payload, LaunchAgent, and PID
   mac replace --plan|--start|--status [--follow] [--json]
@@ -236,11 +234,6 @@ case "$cmd" in
       source) exec python3 "$ROOT/scripts/run-main-source.py" ;;
       *) usage >&2; exit 64 ;;
     esac
-    ;;
-  profile)
-    [[ "${1:-}" == cutover ]] || { echo "usage: scripts/tron profile cutover --plan|--apply|--rollback" >&2; exit 2; }
-    shift
-    exec python3 "$ROOT/scripts/tron_profile_cutover.py" "$@"
     ;;
   mac)
     case "${1:-}" in

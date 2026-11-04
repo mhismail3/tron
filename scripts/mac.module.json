@@ -14,8 +14,6 @@
     "tron_mac_replace_platform.py",
     "tron_mac_replace_rpc.py",
     "tron_rebuild_lock.py",
-    "tron_profile_cutover.py",
-    "test-tron-profile-cutover.py",
     "validate-native-host.py",
     "verify-mac-install.sh"
   ]

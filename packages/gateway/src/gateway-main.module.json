@@ -5,10 +5,7 @@
     "gateway-main.ts",
     "index.ts",
     "main/modules.ts",
-    "main/settings-schema.ts",
-    "maintenance/profile-cutover.ts",
-    "maintenance/profile-cutover-cli.ts",
-    "maintenance/profile-cutover.integration.test.ts"
+    "main/settings-schema.ts"
   ],
   "dependsOn": [
     "gateway/apps",
