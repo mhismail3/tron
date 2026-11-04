@@ -16,9 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ownership"))
 from ownership import STEM, SUFFIX, module_id
 
 import bootstrap
-import claim as claims
 import comments
-import start
 from gh import Gh, GhError, GhWriteRefused
 
 
@@ -167,7 +165,7 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, 
                 or label.startswith((board["kindPrefix"], board["areaPrefix"]))):
             raise TrackingError(f"{label!r} is not an additional declared label")
         labels.append(label)
-    status = status or config["claim"]["readyStatus"]
+    status = status or config["issues"]["readyStatus"]
     _check_options(config, status, priority)
     _scrub(repo, config, title + "\n\n" + body, "issue title and body")
     owner, name = _repository(gh)
@@ -216,7 +214,7 @@ def edit_issue(gh: Gh, repo: Path, config: dict, number: int, title: Optional[st
 
 def _check_options(config: dict, status: Optional[str], priority: Optional[str]) -> None:
     declared_fields = {field["name"]: field for field in config["project"]["fields"]}
-    for name, value in ((config["claim"]["statusField"], status), (config["issues"]["priorityField"], priority)):
+    for name, value in ((config["issues"]["statusField"], status), (config["issues"]["priorityField"], priority)):
         if value is None:
             continue
         field = declared_fields.get(name)
@@ -458,11 +456,23 @@ def _finish_step(finished: List[str], done: str, failed: str, action: Callable[[
     finished.append(done)
 
 
+def set_status(gh: Gh, item: dict, status: str) -> None:
+    field = item["project"]["field"]
+    option = next((o["id"] for o in field["options"] if o["name"] == status), None)
+    if option is None:
+        raise TrackingError(f"Project field has no {status!r} option; run bootstrap")
+    gh.graphql(
+        "mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue("
+        "input: {projectId: $project, itemId: $item, fieldId: $field, value: {singleSelectOptionId: $option}}) "
+        "{ projectV2Item { id } } }",
+        project=item["project"]["id"], item=item["id"], field=field["id"], option=option,
+    )
+
+
 def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comment_file: Path) -> None:
     """Comment, close and set Status Done without claiming or changing Git work.
 
-    Issue state retires the active claim; deleting its branch/worktree belongs to
-    cleanup, which proves the work is preserved. Closure needs no owner lookup.
+    Closure needs no owner lookup and never touches branches or worktrees.
     Re-running after a partial failure is safe: a comment already posted for this
     reason and text is not posted again, even if someone else closed the issue.
     """
@@ -470,7 +480,7 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
         raise TrackingError("issue numbers must be positive")
     text = comments.prepared_body(repo, config, comment_file)
     marker = _close_marker(reason, text)
-    rules = config["claim"]
+    rules = config["issues"]
     owner, name = _repository(gh)
     repository = f"{owner}/{name}"
     issue = _issue(gh, repository, number)
@@ -504,7 +514,7 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
                      lambda: gh.run("issue", "close", str(number), "--reason", _CLOSE_REASONS[reason]))
     if status_item is not None:
         _finish_step(finished, f"Status set to {done_status}", "Status update",
-                     lambda: start.set_status(gh, status_item, done_status))
+                     lambda: set_status(gh, status_item, done_status))
     print(f"closed issue #{number} as {_CLOSE_REASONS[reason]}")
 
 
@@ -513,14 +523,13 @@ def reopen_issue(gh: Gh, repo: Path, config: dict, number: int, comment_file: Pa
 
     The reason comment is required and carries an audit marker, so a re-run after a
     partial failure finds it and finishes the reopen instead of posting it again.
-    Claims are left as they are: reopening returns work to its owner, if any.
     """
     if number <= 0:
         raise TrackingError("issue numbers must be positive")
     text = comments.prepared_body(repo, config, comment_file)
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     marker = f"<!-- work:reopen digest={digest} -->"
-    rules = config["claim"]
+    rules = config["issues"]
     owner, name = _repository(gh)
     repository = f"{owner}/{name}"
     issue = _issue(gh, repository, number)
@@ -529,8 +538,7 @@ def reopen_issue(gh: Gh, repo: Path, config: dict, number: int, comment_file: Pa
     is_closed = issue.get("state") != "open"
     if not is_closed and not posted:
         raise TrackingError(f"#{number} is open; work issue reopen only finishes a reopen it started")
-    claimed = claims.existing_claims(repo, rules["remote"], rules["baseBranch"], number)
-    status = rules["claimedStatus"] if claimed else rules["readyStatus"]
+    status = rules["readyStatus"]
 
     _, project = _project(gh, repo, config)
     items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]
@@ -550,6 +558,6 @@ def reopen_issue(gh: Gh, repo: Path, config: dict, number: int, comment_file: Pa
         _finish_step(finished, "issue reopened", "reopen", lambda: gh.run("issue", "reopen", str(number)))
     if status_item is not None:
         _finish_step(finished, f"Status set to {status}", "Status update",
-                     lambda: start.set_status(gh, status_item, status))
+                     lambda: set_status(gh, status_item, status))
     print(f"reopened issue #{number}" + (f" with Status {status}" if status_item else
                                           "; it is not in the work Project, so its Status is unchanged"))

@@ -78,12 +78,12 @@
           {
             "name": "Ready",
             "color": "BLUE",
-            "description": "Open and unclaimed; any agent may claim it"
+            "description": "Open; any agent may pick it up"
           },
           {
             "name": "In progress",
             "color": "YELLOW",
-            "description": "Claimed; has a branch and worktree"
+            "description": "Being worked on"
           },
           {
             "name": "Blocked",
@@ -125,72 +125,12 @@
       }
     ]
   },
-  "claim": {
-    "remote": "origin",
-    "baseBranch": "main",
-    "worktreeRoot": "../tron-worktrees",
-    "readyStatus": "Ready",
-    "claimedStatus": "In progress",
-    "claimedStatuses": [
-      "In progress"
-    ],
-    "statusField": "Status",
-    "excludeLabels": [
-      "epic"
-    ],
-    "branchTypes": [
-      {
-        "label": "kind:bug",
-        "type": "fix"
-      },
-      {
-        "label": "kind:maintenance",
-        "type": "chore"
-      },
-      {
-        "label": "area:docs",
-        "type": "docs"
-      }
-    ],
-    "defaultBranchType": "feat"
-  },
   "verify": {
     "scrubCommand": "scripts/personal-info-guard.sh --stdin"
   },
-  "cleanup": {
-    "regenerableIgnored": [
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/build/**",
-      "**/.build/**",
-      "**/DerivedData/**",
-      "**/__pycache__/**",
-      "**/*.pyc",
-      "**/.pytest_cache/**",
-      "**/*.tsbuildinfo",
-      "**/test-results/**",
-      "**/.DS_Store",
-      ".ci-tools/**",
-      "packages/ios-app/TronMobile.xcodeproj/**",
-      "packages/mac-app/TronMac.xcodeproj/**",
-      "packages/mac-app/Sources/Resources/Gateway/**",
-      "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-      "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources/AppIcon.icns"
-    ],
-    "releaseCommands": [
-      {
-        "name": "ios-gateway-e2e",
-        "command": "scripts/ios-gateway-e2e-test clean",
-        "timeoutSeconds": 300
-      },
-      {
-        "name": "ios-test",
-        "command": "scripts/tron-ios-test clean",
-        "timeoutSeconds": 300
-      }
-    ]
-  },
   "issues": {
+    "statusField": "Status",
+    "readyStatus": "Ready",
     "doneStatus": "Done",
     "epicLabel": "epic",
     "priorityField": "Priority",

@@ -1,6 +1,6 @@
 ---
 name: tron-workspace-housekeeping
-description: Audit and safely clean up merged or obsolete Tron branches, inactive worktrees, and stale Git metadata. Task worktrees under the work tooling's worktree root go through `scripts/tron work cleanup`; this audit covers everything else. Preserve active work, unmerged commits, and owner-managed resources.
+description: Audit and safely clean up merged or obsolete Tron branches, inactive worktrees, and stale Git metadata. Preserve active work, unmerged commits, and owner-managed resources.
 ---
 
 # Tron workspace housekeeping
@@ -12,29 +12,6 @@ credentials, application installs, or Gateway lifecycle operations. It also does
 not own simulator or lane lifetime: `scripts/tron-ios-test` releases, admits,
 sweeps and prunes those (see
 [iOS simulator lanes, runs and products](#ios-simulator-lanes-runs-and-products)).
-
-## Task worktrees: `scripts/tron work cleanup`
-
-Worktrees under the `claim.worktreeRoot` of `.github/work.json` belong to the
-work tooling. Do not audit or remove them by hand:
-
-- The owner runs `scripts/tron work cleanup` from its task worktree after
-  landing and closing the issue.
-- `scripts/tron work cleanup --all --dry-run` reports, for every worktree under
-  the root, whether it is provably done or the exact reason it is kept; drop
-  `--dry-run` to remove the provably done ones.
-
-It removes a worktree and its branches only after completion and preservation
-checks pass. A merged PR at the local head is one completion proof; a closed
-issue with exact-main ancestry or only its unchanged claim commit are others.
-The tree must be clean, every ignored file regenerable, and no process working
-inside. It first runs the release commands configured in `.github/work.json`
-from inside the worktree. [`tools/work/README.md`](../../../tools/work/README.md#exact-head-cleanup) owns
-the contract. A worktree it keeps stays with its owner: resolve the reason it
-names, never delete around it.
-
-The audit below is for everything else: worktrees outside that root, other
-branches, and stale metadata.
 
 ## Authority and scope
 
