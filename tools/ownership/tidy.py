@@ -38,7 +38,7 @@ REGENERABLE = {  # deleting loses nothing; the writer recreates it
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS",
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources",
 }
-LOCAL = {".claude", "packages/mac-app/.env.local"}  # per-user state: reported never, pruned never
+LOCAL = {".claude", "progress.md", "packages/mac-app/.env.local"}  # per-user state: reported never, pruned never
 PROTECTED_BRANCHES = {"main"}
 TEST_NAME = re.compile(r"(^test[-_])|(\.test\.)")
 SKIP_SCAN = (".md", ".tsv", ".module.json", ".png", ".jpg", ".pdf", ".tgz", ".caf", ".ttf", ".otf", ".icns")
@@ -182,7 +182,7 @@ def report(prune: bool) -> dict:
                 out["residue"].append(str(entry))
         for folder, days in ((SCRATCH, SCRATCH_DAYS), (EVIDENCE, EVIDENCE_DAYS)):
             for base in [tree / folder, *tree.glob(f"packages/*/{folder}")]:
-                if base.is_dir():
+                if base.is_dir() and not base.is_symlink():  # never age, or prune, files outside the checkout
                     out["expired"] += [str(p) for p in sorted(base.iterdir()) if age_days(p) > days]
 
     for w in trees[1:]:
@@ -216,9 +216,13 @@ def report(prune: bool) -> dict:
     out["hook"] = hook_drift()
 
     if prune:
-        for path in out["expired"] + out["bytecode"]:
-            shutil.rmtree(path, ignore_errors=True) if Path(path).is_dir() else Path(path).unlink(missing_ok=True)
-            out["pruned"].append(path)
+        for path in map(Path, out["expired"] + out["bytecode"]):
+            try:
+                shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
+            except OSError as error:
+                out["notes"].append(f"could not delete {path}: {error.strerror or error}")
+            if not path.exists() and not path.is_symlink():
+                out["pruned"].append(str(path))
         for w in out["worktrees"]:
             if w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
                 # --force only because what remains is regenerable ignored output (node_modules, build).

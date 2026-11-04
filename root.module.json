@@ -90,7 +90,6 @@
       "scripts/test-tron-gateway-isolation.py",
       "scripts/test-tron-ios-device-share.py",
       "scripts/test-tron-layers.py",
-      "scripts/test-tron-layout.py",
       "scripts/test-tron-mac-reinstall.py",
       "scripts/test-tron-mac-replace.py",
       "scripts/test-tron-metrics.py",
@@ -98,7 +97,6 @@
       "scripts/test-tron-npm-bytecode.sh",
       "scripts/test-tron-ownership.py",
       "scripts/test-tron-profile.py",
-      "scripts/test-tron-tidy.py",
       "scripts/test-tron-triage.py",
       "scripts/test-tron-verify-batch.py",
       "scripts/test-tron-verify-tiers.py",
@@ -157,21 +155,6 @@
       "scripts/tron-fsevents-guard",
       "scripts/tron-ios-device",
       "scripts/tron_mac_replace.py"
-    ],
-    "unmigrated": {
-      "purpose": [
-        "packages/gateway/scripts/check-pi-subagents.mjs",
-        "packages/ios-app/scripts/verify-archive-privacy.sh",
-        "scripts/gateway-install-inputs.mjs",
-        "scripts/tron-ios-device-bind.mjs"
-      ],
-      "gateway-test-name": [
-        "packages/gateway/src/kernel/settings/settings-change.preparation.test.ts"
-      ],
-      "gateway-test-dir": [
-        "packages/gateway/src/automations/tests/automation-rpc.lock.integration.test.ts",
-        "packages/gateway/src/integrations/tests/connections.lifecycle.lock.integration.test.ts"
-      ]
-    }
+    ]
   }
 }

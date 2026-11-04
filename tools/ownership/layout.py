@@ -10,12 +10,10 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-KEYS = {"root", "scriptsTop", "frozen", "unmigrated"}
-RULES = ("purpose", "gateway-test-name", "gateway-test-dir")
+KEYS = {"root", "scriptsTop", "frozen"}
 TEST_NAME = re.compile(r"(^test[-_].+\.(py|sh|js|mjs)$)|(\.test\.(ts|mjs|js)$)|(Tests?\.swift$)")
 SWIFT_TEST_DIRS = {"UITests", "E2ETests", "ProfilingTests", "SwiftAppUITests", "Tests"}
 NO_TESTS = {"docs", "config", ".agents", ".github"}
-GATEWAY_TEST = re.compile(r"\.(integration|e2e)\.test\.(ts|mjs)$")
 TOOLING_SUFFIXES = (".py", ".sh", ".mjs", ".js", ".ts")
 PURPOSE_LINES = 12
 COMMENT = re.compile(r"^(#|//|\*|/\*\*?|\"\"\"|''')\s*")
@@ -39,7 +37,7 @@ def purpose(blob: bytes) -> str:
 
 def is_tooling(path: str, mode: str) -> bool:
     parts = path.split("/")
-    if not (parts[0] in ("scripts", "tools") or (parts[0] == "packages" and "scripts" in parts[2:-1])):
+    if not (parts[0] in ("scripts", "tools") or (parts[0] == "packages" and len(parts) > 3 and parts[2] == "scripts")):
         return False
     return not TEST_NAME.search(parts[-1]) and (parts[-1].endswith(TOOLING_SUFFIXES) or mode == "100755")
 
@@ -48,58 +46,22 @@ def schema(layout: object) -> list[str]:
     if not isinstance(layout, dict):
         return ["root.module.json: layout must be an object"]
     out = [f"root.module.json: layout has unknown key {key!r}" for key in sorted(set(layout) - KEYS)]
-    out += [f"root.module.json: layout is missing {key!r}" for key in ("root", "scriptsTop", "frozen") if key not in layout]
-    for key in ("root", "scriptsTop", "frozen"):
+    out += [f"root.module.json: layout is missing {key!r}" for key in sorted(KEYS) if key not in layout]
+    for key in sorted(KEYS):
         value = layout.get(key, [])
         if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
             out.append(f"root.module.json: layout.{key} must be a list of paths")
-    unmigrated = layout.get("unmigrated", {})
-    if not isinstance(unmigrated, dict):
-        out.append("root.module.json: layout.unmigrated must map a rule to paths")
-    else:
-        for rule, value in unmigrated.items():
-            if rule not in RULES:
-                out.append(f"root.module.json: layout.unmigrated has unknown rule {rule!r} (rules: {', '.join(RULES)})")
-            if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
-                out.append(f"root.module.json: layout.unmigrated.{rule} must be a list of paths")
     return out
 
 
-def lists(layout: dict) -> dict[str, list[str]]:
-    """Every shrink-only list by its display name."""
-    out = {"root": layout.get("root", []), "scriptsTop": layout.get("scriptsTop", [])}
-    for rule, value in (layout.get("unmigrated") or {}).items():
-        out[f"unmigrated.{rule}"] = value
-    return out
-
-
-def rule_violations(paths: list[str], modes: dict[str, str], read) -> dict[str, dict[str, str]]:
-    """Violations of the allowlistable rules, by rule then path."""
-    found: dict[str, dict[str, str]] = {rule: {} for rule in RULES}
-    for path in paths:
-        parts = path.split("/")
-        name = parts[-1]
-        if is_tooling(path, modes.get(path, "")) and not purpose(read(path)):
-            found["purpose"][path] = (f"layout: {path}: add a one-line purpose comment in its first {PURPOSE_LINES} lines "
-                                      "(what it does, who runs it); `scripts/tron ownership --ledger` shows it")
-        if path.startswith("packages/gateway/") and TEST_NAME.search(name) and name.endswith((".ts", ".mjs")):
-            if not GATEWAY_TEST.search(name):
-                found["gateway-test-name"][path] = (f"layout: {path}: Gateway tests are named *.integration.test.ts or "
-                                                    "*.e2e.test.ts (packages/gateway/test-support/README.md)")
-            if path.startswith("packages/gateway/src/") and "tests" in parts[3:-1]:
-                found["gateway-test-dir"][path] = (f"layout: {path}: Gateway tests sit beside their subject; "
-                                                   "move it out of tests/ into the module directory")
-    return found
-
-
-def problems(layout: dict, paths: list[str], modes: dict[str, str], read, base: dict | None) -> list[str]:
+def problems(layout: dict, paths: list[str], modes: dict[str, str], read, base: dict | None = None) -> list[str]:
+    """Layout violations of one tree; with `base` (the layout at the merge base), also what this change grew."""
     out = schema(layout)
     if out:
         return out
     tracked = set(paths)
     tops = {path.split("/", 1)[0] for path in paths}
     root, scripts_top, frozen = set(layout["root"]), set(layout["scriptsTop"]), layout["frozen"]
-    unmigrated = {rule: set(value) for rule, value in (layout.get("unmigrated") or {}).items()}
 
     for top in sorted(tops - root):
         out.append(f"layout: root entry {top!r} is not in the layout; put it under scripts/, docs/, config/ or a "
@@ -116,6 +78,9 @@ def problems(layout: dict, paths: list[str], modes: dict[str, str], read, base: 
     for path in paths:
         parts = path.split("/")
         name = parts[-1]
+        if is_tooling(path, modes.get(path, "")) and not purpose(read(path)):
+            out.append(f"layout: {path}: add a one-line purpose comment in its first {PURPOSE_LINES} lines "
+                       "(what it does, who runs it); `scripts/tron ownership --ledger` shows it")
         if parts[0] == "scripts" and len(parts) == 2 and path not in scripts_top:
             if TEST_NAME.search(name):
                 out.append(f"layout: {path}: tests live beside the tool they prove (tools/<tool>/ or scripts/<area>/), "
@@ -132,16 +97,12 @@ def problems(layout: dict, paths: list[str], modes: dict[str, str], read, base: 
                 out.append(f"layout: {path}: Swift tests belong in a test target (UITests/, E2ETests/, ProfilingTests/, "
                            "SwiftAppUITests/, Tests/), not app sources")
 
-    for rule, violations in rule_violations(paths, modes, read).items():
-        allowed = unmigrated.get(rule, set())
-        out += [message for path, message in sorted(violations.items()) if path not in allowed]
-        out += [f"layout: root.module.json layout.unmigrated.{rule} lists {path!r}, which no longer breaks that rule; "
-                "remove it" for path in sorted(allowed - set(violations))]
-
     if base is not None and not schema(base):
-        before = lists(base)
-        for key, entries in lists(layout).items():
-            for entry in sorted(set(entries) - set(before.get(key, []))):
+        for key in ("root", "scriptsTop"):
+            for entry in sorted(set(layout[key]) - set(base[key])):
                 out.append(f"layout: root.module.json layout.{key} gained {entry!r} since origin/main; these lists only "
                            f"shrink: put the file where it belongs instead ({WHERE})")
+        for path in sorted(set(base["frozen"]) - set(frozen) - tracked):
+            out.append(f"layout: {path} was frozen at origin/main and this change unfreezes and removes it; code older "
+                       "than this checkout still runs it, so keep it until the maintainer's checkpoint ships without it")
     return out

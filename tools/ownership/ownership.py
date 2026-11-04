@@ -67,9 +67,14 @@ def base_layout(rev: str | None) -> dict | None:
         raise GitError("cannot find the merge base with origin/main to check that layout lists only shrink; "
                        "run `git fetch origin main`") from None
     try:
-        return json.loads(git("cat-file", "blob", f"{base}:{ROOT_MANIFEST}")).get("layout")
-    except (GitError, ValueError, AttributeError):
-        return None
+        blob = git("cat-file", "blob", f"{base}:{ROOT_MANIFEST}")
+    except GitError:
+        return None  # no root manifest at the base: nothing declared yet to shrink from
+    try:
+        data = json.loads(blob)
+    except ValueError:
+        raise GitError(f"{ROOT_MANIFEST} at merge base {base[:12]} is not valid JSON") from None
+    return data.get("layout") if isinstance(data, dict) else None
 
 
 def pattern_problem(pattern: object) -> str | None:
@@ -158,7 +163,9 @@ def reject_duplicate_keys(pairs):
     return dict(pairs)
 
 
-def check(rev: str | None = None) -> tuple[dict, list[str]]:
+def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]]:
+    """Ownership and layout of one tree. `shrink` (the CLI) also refuses layout lists this change grew
+    against the merge base with origin/main; in-process readers of one revision leave it off."""
     paths, read = inventory(rev)
     tracked = set(paths)
     manifests = [p for p in paths if p.endswith(SUFFIX)]
@@ -280,7 +287,7 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
     root = modules.get(ROOT_MANIFEST, {}).get("data", {})
     if "layout" in root:
         import layout  # sibling module; only repositories that declare a layout need it
-        errors.extend(layout.problems(root["layout"], paths, modes_of(rev), read, base_layout(rev)))
+        errors.extend(layout.problems(root["layout"], paths, modes_of(rev), read, base_layout(rev) if shrink else None))
 
     def listed(module: dict, key: str) -> list:
         value = module["data"].get(key)
@@ -308,7 +315,7 @@ def main(argv: list[str]) -> int:
         print(USAGE, file=sys.stderr)
         return 2
     try:
-        result, errors = check(args[0] if args else None)
+        result, errors = check(args[0] if args else None, shrink=True)
     except GitError as error:
         print(f"ownership: {error}", file=sys.stderr)
         return 2

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Verifies the pinned pi-subagents source, lockfile and offline closure against pi-subagents-pin.json (build, payload staging).
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, posix, resolve, sep } from "node:path";

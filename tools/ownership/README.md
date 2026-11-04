@@ -100,20 +100,21 @@ checks it in the same pass, and each message names the fix:
   Gateway, or the Mac replace orchestrator at another revision). They must exist;
   change their content, never their path.
 - **Purpose.** Tooling (`.py`, `.sh`, `.mjs`, `.js`, `.ts` or executable files under
-  `scripts/`, `tools/` and `packages/*/scripts/`, except tests) states what it does in
+  `scripts/`, `tools/` and `packages/<pkg>/scripts/`, except tests) states what it does in
   a comment or docstring in its first 12 lines. Directives such as `# shellcheck`
   do not count. `--ledger` prints that line.
 - **Tests** sit beside the code they prove: none in the root, `docs/`, `config/`,
   `.agents/` or `.github/`; Swift `*Tests.swift` only in `UITests/`, `E2ETests/`,
-  `ProfilingTests/`, `SwiftAppUITests/` or `Tests/`; Gateway tests are
-  `*.integration.test.ts` or `*.e2e.test.ts` beside their module, never in `tests/`.
-- **`unmigrated`** lists, per rule (`purpose`, `gateway-test-name`,
-  `gateway-test-dir`), the files that broke it when the layout was declared.
+  `ProfilingTests/`, `SwiftAppUITests/` or `Tests/`.
 
-`root`, `scriptsTop` and every `unmigrated` list only shrink. An entry with nothing
-left to allow is stale and must be removed, and an entry that is not in
-`root.module.json` at the merge base with `origin/main` is refused: put the file
-where it belongs instead. A repository without `layout` gets ownership checks only.
+`root` and `scriptsTop` were seeded from the tree that declared them and only
+shrink. An entry with nothing left to allow is stale and must be removed. The CLI
+also compares the layout with `root.module.json` at the merge base with
+`origin/main`: an entry this change added to either list is refused (put the file
+where it belongs instead), and so is removing a frozen path together with its entry.
+Without `origin/main` that comparison cannot run and the CLI exits 2. In-process
+readers of one revision (verify selection, docs, layers, the batch) check the tree
+without the comparison. A repository without `layout` gets ownership checks only.
 
 ## Workspace hygiene
 
@@ -128,8 +129,9 @@ registered worktrees; a pre-commit hook that differs from what
 HEAD activity; and branches merged into `origin/main` or idle over 14 days. Exit 1
 means something needs a decision; `--json` prints the same report.
 
-`--prune` deletes only expired scratch and evidence, bytecode, branches merged into
-`origin/main` that no worktree has checked out (printing `git branch <name> <sha>`
+`--prune` deletes only expired scratch and evidence (never through a symlinked
+`.scratch` or `test-results`), bytecode, branches merged into `origin/main` (not
+merely into a local main) that no worktree has checked out (printing `git branch <name> <sha>`
 to restore each), and merged worktrees with no untracked, modified or
 non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
 working directory is inside, and no HEAD activity for 3 days. Without `lsof` it
@@ -139,8 +141,8 @@ reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-ownership.py scripts/test-tron-layout.py
-scripts/test-tron-tidy.py` runs the CLIs against disposable Git repositories:
+`scripts/tron test tooling scripts/test-tron-ownership.py tools/ownership/tests/test-layout.py
+tools/ownership/tests/test-tidy.py` runs the CLIs against disposable Git repositories:
 ownership (valid layouts, coverage and schema violations, placement, Git-only
 discovery), one case per layout rule and the shrink-only lists, and tidy's report
 and prune safety. The last runs are kept under `test-results/{ownership,layout,tidy}-cli/`.

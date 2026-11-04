@@ -15,7 +15,8 @@ and `tools/ownership/*.py`, and runs the command as a worker would:
    worktrees with no local files, no process inside and no HEAD activity for 3 days.
    Unmerged work, ignored local files such as `.env.local`, a live process, recent
    activity, residue and orphan directories are kept.
-4. Without `lsof` no worktree is pruned.
+4. Without `lsof` no worktree is pruned, and a `.scratch` symlink to a directory outside
+   the checkout is neither aged nor pruned.
 
 The last run's output is kept in `test-results/tidy-cli/` for review.
 """
@@ -31,7 +32,7 @@ import time
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "tidy-cli"
 DAY = 86400
 IGNORE = ".scratch/\ntest-results/\n__pycache__/\n.env.local\njunk/\ntmp/\n*.log\n"
@@ -238,6 +239,16 @@ class PruneTests(TidyCase):
         for kept in ("wip", "local-only", "unmerged", "merged-local", "merged-live", "merged-recent"):
             self.assertIn(kept, branches)
         self.assertIn("tidy: branches: ", out)
+
+    def test_a_symlinked_scratch_directory_is_never_followed(self) -> None:
+        f = self.f
+        outside = f.base / "outside"
+        age(f.write("old.txt", root=outside), 30)
+        (f.repo / ".scratch").rename(f.base / "scratch-moved")
+        (f.repo / ".scratch").symlink_to(outside, target_is_directory=True)
+        result = f.tidy("--prune")
+        self.assertTrue((outside / "old.txt").exists(), result.stdout + result.stderr)
+        self.assertNotIn("old.txt", result.stdout)
 
     def test_without_lsof_no_worktree_is_pruned(self) -> None:
         f = self.f

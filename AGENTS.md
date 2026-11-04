@@ -140,7 +140,7 @@ owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the 
   repo tooling lives beside its tests in `tools/<tool>/` (moving to `scripts/<area>/`), runs as `scripts/tron <command>`
   and opens with a purpose line. Search `scripts/tron ownership --ledger` before adding a script and extend its owner;
   remove a tool with its tests, owner entry and `scripts/tron` arm. Scratch (workflow scripts, notes, drafts) goes only
-  in `.scratch/`; `scripts/tron tidy` reports drift and prunes it.
+  in `.scratch/`; `scripts/tron tidy` reports drift, and `--prune` clears what main already has.
 
 ## Documentation
 - Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,

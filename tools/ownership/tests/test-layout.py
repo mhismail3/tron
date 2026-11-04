@@ -9,10 +9,10 @@ worker would. One case per rule, each failing with the message that names its fi
 2. Tooling under `scripts/`, `tools/` and package `scripts/` states its purpose in its
    first lines; directive comments (shellcheck, coding, eslint) do not count.
 3. Tests sit beside the code they prove: never in the root, `docs/`, `config/`,
-   `.agents/` or `.github/`; Swift tests only in test targets; Gateway tests are
-   `*.integration.test.ts` / `*.e2e.test.ts` beside their module, not in `tests/`.
-4. The seeded lists only shrink: an entry with nothing left to allow is stale, and an
-   entry missing at the merge base with origin/main is refused.
+   `.agents/` or `.github/`; Swift tests only in test targets.
+4. The seeded lists only shrink: an entry with nothing left to allow is stale, an entry
+   missing at the merge base with origin/main is refused, and a frozen path cannot be
+   unfrozen and removed in one change. Without origin/main the check exits 2.
 5. `--ledger` lists every tracked path once with its module, layer and purpose.
 6. `layout` is accepted only in root.module.json and its keys are checked.
 
@@ -29,14 +29,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "layout-cli"
 PURPOSE = "#!/usr/bin/env bash\n# Fixture tool that a test runs to prove one layout rule.\n"
 LAYOUT = {
     "root": [".gitignore", "docs", "packages", "root.module.json", "scripts", "tools"],
     "scriptsTop": ["scripts/tron", "scripts/tron-frozen"],
     "frozen": ["scripts/tron", "scripts/tron-frozen"],
-    "unmigrated": {},
 }
 
 
@@ -62,7 +61,6 @@ class Repo:
         self.write(".gitignore", "test-results/\n")
         self.write("docs/guide.md", "# Guide\n")
         self.write("packages/gateway/src/home/home.ts", "export const home = 1;\n")
-        self.write("packages/gateway/src/home/home.integration.test.ts", "test\n")
         self.layout = json.loads(json.dumps(LAYOUT))
         self.save_root()
         self.write("tooling.module.json", json.dumps({"layer": "L5", "owns": [
@@ -149,9 +147,11 @@ class PurposeRuleTests(LayoutCase):
     def test_tooling_without_a_purpose_line_is_refused(self) -> None:
         self.repo.write("tools/ownership/helper.py", "import sys\nprint(sys.argv)\n")
         self.repo.write("packages/gateway/scripts/check.mjs", "#!/usr/bin/env node\nimport fs from 'node:fs';\n")
+        self.repo.write("packages/gateway/src/scripts/source.ts", "export const value = 1;\n")  # source, not tooling
         out = self.refused("layout: tools/ownership/helper.py: add a one-line purpose comment",
                            "layout: packages/gateway/scripts/check.mjs: add a one-line purpose comment")
         self.assertNotIn("tools/ownership/ownership.py", out)
+        self.assertNotIn("source.ts", out)
 
     def test_directive_comments_are_not_a_purpose(self) -> None:
         self.repo.write("tools/ownership/helper.sh", "#!/bin/bash\n# shellcheck disable=SC2034\n# -*- coding: utf-8 -*-\nset -e\n")
@@ -174,47 +174,18 @@ class TestPlacementRuleTests(LayoutCase):
         out = self.refused("layout: packages/ios/Sources/ChatTests.swift: Swift tests belong in a test target")
         self.assertNotIn("UITests/ChatUITests.swift:", out)
 
-    def test_gateway_test_names_say_integration_or_e2e(self) -> None:
-        self.repo.write("packages/gateway/src/home/home.test.ts", "test\n")
-        self.repo.write("packages/gateway/src/home/home.e2e.test.ts", "test\n")
-        out = self.refused("layout: packages/gateway/src/home/home.test.ts: Gateway tests are named "
-                           "*.integration.test.ts or *.e2e.test.ts")
-        self.assertNotIn("home.e2e.test.ts:", out)
-
-    def test_gateway_tests_sit_beside_their_module(self) -> None:
-        self.repo.write("packages/gateway/src/home/tests/home.integration.test.ts", "test\n")
-        self.refused("layout: packages/gateway/src/home/tests/home.integration.test.ts: "
-                     "Gateway tests sit beside their subject")
-
 
 class RatchetTests(LayoutCase):
-    def test_unmigrated_entries_allow_exactly_their_violation(self) -> None:
-        r = self.repo
-        r.write("packages/gateway/src/home/tests/old.integration.test.ts", "test\n")
-        r.write("tools/ownership/old.py", "import sys\n")
-        r.layout["unmigrated"] = {"gateway-test-dir": ["packages/gateway/src/home/tests/old.integration.test.ts"],
-                                  "purpose": ["tools/ownership/old.py"]}
-        r.save_root()
-        r.git("add", "-A")
-        r.git("commit", "-q", "-m", "seed")
-        r.git("update-ref", "refs/remotes/origin/main", "HEAD")  # main already carries the seeded lists
-        self.clean()
-        r.write("tools/ownership/new.py", "import sys\n")
-        self.refused("layout: tools/ownership/new.py: add a one-line purpose comment")
-
     def test_stale_entries_must_be_removed(self) -> None:
         r = self.repo
         r.layout["root"].append("gone")
         r.layout["scriptsTop"].append("scripts/gone.sh")
-        r.layout["unmigrated"] = {"purpose": ["tools/ownership/ownership.py"]}
         r.save_root()
         r.git("add", "-A")
         r.git("commit", "-q", "-m", "seed")
         r.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.refused("layout: root.module.json layout.root lists 'gone', which is not tracked; remove it",
-                     "layout: root.module.json layout.scriptsTop lists 'scripts/gone.sh', which is not tracked; remove it",
-                     "layout: root.module.json layout.unmigrated.purpose lists 'tools/ownership/ownership.py', "
-                     "which no longer breaks that rule; remove it")
+                     "layout: root.module.json layout.scriptsTop lists 'scripts/gone.sh', which is not tracked; remove it")
 
     def test_lists_only_shrink_against_the_merge_base(self) -> None:
         r = self.repo
@@ -228,6 +199,37 @@ class RatchetTests(LayoutCase):
         r.git("commit", "-q", "-m", "grow")
         r.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.clean()  # once main has the entry, a later branch sees no growth
+
+    def test_a_frozen_path_cannot_be_unfrozen_and_removed_in_one_change(self) -> None:
+        r = self.repo
+        (r.path / "scripts/tron-frozen").unlink()
+        r.layout["frozen"].remove("scripts/tron-frozen")
+        r.layout["scriptsTop"].remove("scripts/tron-frozen")
+        r.save_root()
+        self.refused("layout: scripts/tron-frozen was frozen at origin/main and this change unfreezes and removes it")
+        r.write("scripts/tron-frozen", PURPOSE, mode=0o755)  # unfreezing alone, keeping the file, passes
+        r.layout["scriptsTop"].append("scripts/tron-frozen")
+        r.save_root()
+        self.clean()
+
+    def test_without_origin_main_the_shrink_check_cannot_run(self) -> None:
+        r = self.repo
+        r.git("update-ref", "-d", "refs/remotes/origin/main")
+        result = r.run()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("ownership: cannot find the merge base with origin/main", result.stderr)
+
+    def test_invalid_layout_at_the_merge_base_is_an_error_not_a_skip(self) -> None:
+        r = self.repo
+        r.write("root.module.json", "{not json")
+        r.git("add", "-A")
+        r.git("commit", "-q", "-m", "broken base")
+        r.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        r.save_root()
+        result = r.run()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("root.module.json at merge base", result.stderr)
+        self.assertIn("is not valid JSON", result.stderr)
 
     def test_a_shrunk_list_passes(self) -> None:
         r = self.repo
