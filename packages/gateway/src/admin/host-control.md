@@ -132,11 +132,12 @@ not the worker session being resumed.
   no progress for 180 s (then exact cancellation and grace); only-suspect
   `terminal-receipt-persistence` blockers proceed at once. The stop drain has no stall
   bound: a stop exits 0 and nothing relaunches to recover cut work, so it waits for
-  every accepted owner and the caller's own deadline decides. Both name their blockers
+  every accepted owner; a caller needing a deadline stops waiting itself (Mac Quit waits
+  unbounded while the drain is reachable, `packages/mac-app/README.md`). Both name their blockers
   every 15 s: `gateway.restart-drain.waiting`, `gateway.stop-drain.waiting`.
 - A `detached-extension-run` blocker is only work a watched lifecycle settles. That is
-  a row owned by the installed delegated provider, a row the Gateway attributed from a
-  provider artifact, or any tool's run bound to its own tool call with an admitted
+  a row owned by the installed delegated provider, an ownerless row (the Gateway's
+  provider attribution for artifact-discovered runs), or any tool's run bound to its own tool call with an admitted
   provider artifact directory (`asyncDir`). The last is live, self-settling work: the
   directory's terminal state settles it. `runId`/`state` result fields without an
   admitted directory (a `schedule` runNow) never block a drain.
