@@ -20,7 +20,8 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         link.tap()
         let heading = app.navigationBars.staticTexts["Extensions"].firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 10), app.debugDescription)
+        // The built-in group is a lone section, so its heading is hidden; its first switch marks it rendered.
+        XCTAssertTrue(app.switches["Codemode"].waitForExistence(timeout: 10), app.debugDescription)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
         return app
     }
@@ -35,7 +36,8 @@ final class TronExtensionsSettingsUITests: XCTestCase {
 
     /// Installed is the one package list: the bundled provider the Gateway appends
     /// is labelled and has no Update/Remove menu, there is no Sources summary row,
-    /// and the npm command sits in the Install Package card.
+    /// no native install form (agents propose installs through the exact card), and
+    /// the npm command keeps its own card between Installed and the search paths.
     @MainActor
     func testInstalledIsTheOnePackageList() {
         let app = openExtensions()
@@ -48,17 +50,16 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         XCTAssertTrue(bundled.label.hasSuffix(". Bundled with Tron"), "bundled row label: \(bundled.label)")
         XCTAssertFalse(bundled.buttons["More"].exists, "the bundled provider has no Update/Remove menu")
 
-        let searchPaths = app.staticTexts["Search paths"]
+        // The search-path rows carry the renderer's row identities; the group's
+        // heading text is not a stable anchor.
+        let searchPaths = app.descendants(matching: .any)["settings-row-sources.extensions"]
         for _ in 0..<6 where !(searchPaths.exists && searchPaths.isHittable) { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(searchPaths.exists, app.debugDescription)
         XCTAssertFalse(app.staticTexts["Sources"].exists, "no Sources group: \(app.debugDescription)")
         XCTAssertFalse(app.descendants(matching: .any)["settings-row-sources.packages"].exists, "no second package summary row")
-        let install = app.buttons["Install Package"].firstMatch
+        XCTAssertFalse(app.buttons["Install Package"].exists, "no native install form: \(app.debugDescription)")
         let npm = app.descendants(matching: .any)["settings-row-sources.npmCommand"]
-        XCTAssertTrue(install.exists && npm.exists, app.debugDescription)
-        // Same card: the npm row starts where the Install Package row ends,
-        // and both precede Search paths.
-        XCTAssertEqual(npm.frame.minY, install.frame.maxY, accuracy: 4, "npm command is in the Install Package card: \(app.debugDescription)")
+        XCTAssertTrue(npm.exists, app.debugDescription)
         XCTAssertLessThan(npm.frame.maxY, searchPaths.frame.minY)
     }
 
@@ -67,7 +68,7 @@ final class TronExtensionsSettingsUITests: XCTestCase {
     func testExtensionsSheetCaptures() {
         for (name, dark, large) in [("light", false, false), ("dark", true, false), ("large", false, true)] {
             let app = openExtensions(dark: dark, large: large)
-            let searchPaths = app.staticTexts["Search paths"]
+            let searchPaths = app.descendants(matching: .any)["settings-row-sources.themes"]
             var reachedEnd = false
             for page in 0..<(large ? 14 : 6) {
                 keep(app, "1482-extensions-\(name)-\(page)")
