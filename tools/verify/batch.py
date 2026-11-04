@@ -14,6 +14,7 @@ import shlex
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 
 import timing
@@ -32,6 +33,14 @@ FULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.
 IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
+# The lanes run as two concurrent chains under their existing owners, each in plan order:
+# Node (verifier, Gateway Vitest under the full-Gateway lock, Mac, relay) and Apple (the
+# iOS lanes under host slots). Both join before freeze, attribution and verdict.
+CHAINS = ('node', 'apple')
+# The real-UI journey lane runs its journeys on this many owned simulator lanes at once, one
+# host slot each, longest first by the previous batch's per-journey seconds.
+UI_JOURNEY_LANES = 3
+UI_JOURNEY_LANE = 'real Gateway UI journeys'
 
 
 def save(path: Path, value: dict) -> None:
@@ -43,23 +52,23 @@ def save(path: Path, value: dict) -> None:
 def lanes(root: Path, base: str) -> list[dict]:
     """Compose existing owners, not a second test catalog."""
     # Required lanes never disappear when a checkout/tool is missing.
-    result = [{'name': 'full verify', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
+    result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
-        result.append({'name': name, 'command': ['python3', 'tools/verify/gateway.py', *config],
+        result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/gateway.py', *config],
                        'vitest': True, 'gatewayLock': True, 'requires': 'packages/gateway/package-lock.json'})
     result.extend([
-        {'name': 'Mac integration', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData -showBuildTimingSummary && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
+        {'name': 'Mac integration', 'chain': 'node', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData -showBuildTimingSummary && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
          'requires': 'packages/mac-app/project.yml'},
-        {'name': 'relay', 'command': ['scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/push-relay', 'test', '--'],
+        {'name': 'relay', 'chain': 'node', 'command': ['scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/push-relay', 'test', '--'],
          'vitest': True, 'testRoot': 'packages/push-relay', 'requires': 'packages/push-relay/package-lock.json'},
-        {'name': 'shipping iOS compile', 'command': ['scripts/tron-ios-device', 'compile'],
+        {'name': 'shipping iOS compile', 'chain': 'apple', 'command': ['scripts/tron-ios-device', 'compile'],
          'requires': 'packages/ios-app/project.yml', 'ios': True},
-        {'name': 'iOS smoke', 'command': ['scripts/tron-ios-test', 'checkpoint'],
+        {'name': 'iOS smoke', 'chain': 'apple', 'command': ['scripts/tron-ios-test', 'checkpoint'],
          'requires': 'scripts/tron-ios-test', 'ios': True},
-        {'name': 'real Gateway boundary', 'command': ['scripts/ios-gateway-e2e-test', 'all'],
+        {'name': 'real Gateway boundary', 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'all'],
          'requires': 'scripts/ios-gateway-e2e-test', 'ios': True},
-        {'name': 'real Gateway UI journeys', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui'],
-         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True},
+        {'name': UI_JOURNEY_LANE, 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui'],
+         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True, 'env': {'TRON_IOS_E2E_UI_LANES': str(UI_JOURNEY_LANES)}},
     ])
     return result
 
@@ -91,13 +100,100 @@ def signature(message: str, failures: list[str], output: str, root: Path) -> dic
 
 
 def host_slots_busy(root: Path) -> bool | None:
+    """Whether other work holds every host slot. A slot this batch's own other chain holds
+    (a job in `root`) frees when that lane ends, so a lane admitted then waits for it."""
     owner = root / 'scripts/ios-test-lock.py'
     if not owner.is_file():
         return None
     spec = importlib.util.spec_from_file_location('batch_ios_lock', owner)
     locker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(locker)
-    return all(locker.read_slot_holders())
+    worktrees = locker.slot_worktrees()
+    return (all(worktree is not None for worktree in worktrees)
+            and not any(worktree and Path(worktree).resolve() == root.resolve() for worktree in worktrees))
+
+
+def previous_journey_seconds(state: Path, current: Path) -> dict[str, int]:
+    """Per-journey seconds from the newest earlier batch whose UI journey lane logged any, the
+    journey lines the lane owner prints (`timing.JOURNEY`); empty when none did."""
+    batches = sorted((path for path in (state / 'batches').glob('*/report.json') if path.parent != current),
+                     key=lambda path: int(path.parent.name.rsplit('-', 1)[-1]), reverse=True)
+    for path in batches:
+        try:
+            lane = next(item for item in json.loads(path.read_text()).get('results', []) if item.get('name') == UI_JOURNEY_LANE)
+            log = Path(lane['log']).read_text(errors='replace')
+        except (OSError, ValueError, KeyError, StopIteration):
+            continue
+        seconds = {test: int(value) for kind, test, value, _ in timing.JOURNEY.findall(log) if kind == 'Real-UI journey'}
+        if seconds:
+            return seconds
+    return {}
+
+
+# Lane process groups running now, so an interrupted or failed chain set can stop both chains.
+RUNNING: set[int] = set()
+RUNNING_LOCK = threading.Lock()
+
+
+def stop_running(grace: float = 30) -> None:
+    """Terminate every running lane's process group, then kill what outlives the grace."""
+    with RUNNING_LOCK:
+        groups = list(RUNNING)
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        with RUNNING_LOCK:
+            if not RUNNING & set(groups):
+                return
+        time.sleep(0.05)
+    with RUNNING_LOCK:
+        groups = list(RUNNING & set(groups))
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
+    """Run each chain's lanes in order on its own thread and join them all.
+
+    A chain that raises stops the other chain's running lane and starts no further lane;
+    an interrupt (SIGINT, or SIGTERM through the verifier's handler) does the same. Either way
+    every chain has ended before this returns or re-raises, so nothing writes the report after."""
+    stop, errors = threading.Event(), []
+
+    def chain(items):
+        try:
+            for index, lane in items:
+                if stop.is_set():
+                    return
+                run_lane(index, lane)
+        except BaseException as error:  # re-raised on the main thread after both chains joined
+            errors.append(error)
+            stop.set()
+
+    threads = [threading.Thread(target=chain, args=(items,), daemon=True) for items in chains if items]
+    for thread in threads:
+        thread.start()
+    try:
+        while any(thread.is_alive() for thread in threads):
+            if stop.is_set():
+                stop_running()
+            for thread in threads:
+                thread.join(timeout=0.1)
+    except BaseException:
+        stop.set()
+        stop_running()
+        for thread in threads:
+            thread.join()
+        raise
+    if errors:
+        raise errors[0]
 
 
 def execute(root: Path, lane: dict, directory: Path) -> dict:
@@ -139,6 +235,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         (root / 'test-results/verify' / f'{sha}.json').unlink(missing_ok=True)
     env = {key: value for key, value in os.environ.items() if key != FULL_GATEWAY_LOCK_HELD}
     env['TRON_IOS_E2E_NO_INSTALL'] = '1'
+    env.update(lane.get('env', {}))
     held, window = None, None
     if lane.get('gatewayLock'):
         record = {'pid': os.getpid(), 'worktree': str(root), 'purpose': f"verify --batch: {lane['name']}"}
@@ -155,6 +252,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         with log.open('w') as output:
             process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
                                        stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+            with RUNNING_LOCK:
+                RUNNING.add(process.pid)
             try:
                 code = process.wait()
             except BaseException:
@@ -165,6 +264,9 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
                 raise
+            finally:
+                with RUNNING_LOCK:
+                    RUNNING.discard(process.pid)
     finally:
         if held:
             held.close()
@@ -1005,10 +1107,26 @@ def main(argv: list[str]) -> int:
                             setup = {'exit': 2, 'error': str(error), 'name': f'{package} dependencies'}
                         report['setup'].append(setup)
                         save(path, report)
-                for index, lane in enumerate(plan['lanes']):
+                # `results` stays in plan order whichever chain finishes a lane first.
+                outcomes, active, report_lock = {}, {}, threading.Lock()
+
+                def record(change):
+                    with report_lock:
+                        change()
+                        report['activeLane'] = ' + '.join(active[chain] for chain in CHAINS if chain in active) or report.get('activeLane')
+                        report['results'] = [outcomes[index] for index in sorted(outcomes)]
+                        save(path, report)
+
+                def run_lane(index, lane):
                     source_unchanged()
-                    report['activeLane'] = lane['name']
-                    save(path, report)
+                    record(lambda: active.update({lane['chain']: lane['name']}))
+                    if lane['name'] == UI_JOURNEY_LANE:
+                        seconds = previous_journey_seconds(state, directory)
+                        if seconds:
+                            durations = directory / f'lane-{index}' / 'previous-journey-seconds.json'
+                            durations.parent.mkdir(parents=True, exist_ok=True)
+                            save(durations, seconds)
+                            lane = {**lane, 'env': {**lane.get('env', {}), 'TRON_IOS_E2E_UI_JOURNEY_SECONDS': str(durations)}}
                     try:
                         outcome = execute(ROOT, lane, directory / f'lane-{index}')
                     except (OSError, ValueError, KeyError, verify.VerifyError, subprocess.SubprocessError) as error:
@@ -1017,9 +1135,13 @@ def main(argv: list[str]) -> int:
                         outcome['timing'] = timing.lane_timing(outcome, directory / f'lane-{index}', ROOT)
                     except Exception as error:  # observation only: never a verdict input
                         outcome['timing'] = {'errors': [f'{type(error).__name__}: {error}']}
-                    report['results'].append(outcome)
-                    save(path, report)
+                    record(lambda: (outcomes.update({index: outcome}), active.pop(lane['chain'], None)))
                     source_unchanged()
+
+                chains = [[(index, lane) for index, lane in enumerate(plan['lanes']) if lane['chain'] == chain] for chain in CHAINS]
+                print('batch: concurrent chains: ' + '; '.join(f"{name}: " + ' → '.join(lane['name'] for _, lane in items)
+                                                               for name, items in zip(CHAINS, chains)), flush=True)
+                run_chains(chains, run_lane)
                 report['fixtureCleanup'] = stop_fixture(ROOT, directory / 'fixture-stop')
                 save(path, report)
                 # Finish coverage and freeze it before spending any host time on attribution.

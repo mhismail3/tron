@@ -140,8 +140,8 @@ def host_slot_path(index: int) -> Path:
     return host_slot_directory() / f"slot-{index}.lock"
 
 
-def read_slot_holders() -> list[str | None]:
-    """Who holds each slot (None when it is free), without taking any.
+def read_slot_metadata() -> list[str | None]:
+    """The metadata each slot's holder wrote (None when the slot is free), without taking any.
 
     A shared, non-blocking probe: it never keeps a slot from a job taking it,
     which retries within HOST_SLOT_POLL_SECONDS in any case.
@@ -157,11 +157,32 @@ def read_slot_holders() -> list[str | None]:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
             except BlockingIOError:
-                holders.append(describe_holder(handle.read().strip()))
+                holders.append(handle.read().strip())
                 continue
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             holders.append(None)
     return holders
+
+
+def read_slot_holders() -> list[str | None]:
+    """Who holds each slot (None when it is free), without taking any."""
+    return [None if text is None else describe_holder(text) for text in read_slot_metadata()]
+
+
+def slot_worktrees() -> list[str | None]:
+    """The worktree each held slot's job runs in ("" when its holder named none); None when free."""
+    worktrees: list[str | None] = []
+    for text in read_slot_metadata():
+        if text is None:
+            worktrees.append(None)
+            continue
+        try:
+            metadata = json.loads(text)
+        except ValueError:
+            metadata = None
+        worktree = metadata.get("worktree") if isinstance(metadata, dict) else None
+        worktrees.append(worktree if isinstance(worktree, str) else "")
+    return worktrees
 
 
 def format_slots(holders: list[str | None]) -> str:
