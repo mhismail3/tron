@@ -91,6 +91,8 @@ class MacPlatform:
     helper_label = 'com.tron.mac.native-host'
     port = 9847
     quit_timeout = 45 * 60
+    # How long accepted Gateway work may take to settle before replacement refuses to stop it.
+    drain_settle_timeout = 5 * 60
     start_timeout = 5 * 60
 
     def __init__(self, home=None):

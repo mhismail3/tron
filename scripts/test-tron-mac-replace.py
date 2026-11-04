@@ -19,9 +19,12 @@ Journeys, in order, on one fixture:
 Run: python3 scripts/test-tron-mac-replace.py   (writes test-results/mac-replace-e2e.json)
 RPC boundary only: python3 scripts/test-tron-mac-replace.py --rpc-only
 (writes test-results/mac-replace-rpc-e2e.json; no build, app or launchd effects).
+It also drives the runner loop against a Gateway reporting a drain blocker (#2257).
+Launch Services only: --launch-services-only (writes test-results/mac-replace-launch-services-e2e.json;
+swaps a uniquely identified fixture app and asks Launch Services which copies it would open).
 AppKit handoff only: --quit-only (writes test-results/mac-replace-quit-e2e.json;
 compiles a standalone app using the production termination/handoff owners).
-The full command runs all three journeys.
+The full command runs every journey.
 """
 import json
 import os
@@ -553,6 +556,11 @@ server.on("connection", (ws, request) => {
       return ws.send(JSON.stringify({ type: "hello", protocolVersion: 8, minProtocolVersion: 8 }));
     }
     fs.appendFileSync(process.argv[1], frame.method + "\n");
+    if (frame.type === "request" && frame.method === "gateway.drain.status") {
+      // The snapshot file names this fixture's drain state (#2257).
+      return ws.send(JSON.stringify({ type: "response", id: frame.id, ok: true,
+        result: JSON.parse(fs.readFileSync(process.argv[1] + ".drain", "utf8")) }));
+    }
     if (frame.type !== "request" || frame.method !== "home.taskList") return ws.close(1008, "unexpected request");
     const scenario = frame.params.scenario;
     if (scenario === "closed") return ws.close(1008, "fixture refused request");
@@ -633,6 +641,7 @@ def rpc_journey():
                             check(time.monotonic() - began < 3, 'socket closure is reported without waiting for the request deadline', evidence)
                     check(calls.read_text().splitlines() == ['home.taskList'] * 6,
                           'the no-worker and diagnostic journeys never send a stop or any other method', evidence)
+                    drain_blocker_journey(RpcPlatform, home, root, calls, evidence)
                     passed = True
                 finally:
                     server.terminate()
@@ -644,6 +653,165 @@ def rpc_journey():
                     server.stdout.close()
     except Exception as error:  # noqa: BLE001 - retain RED evidence as well as GREEN.
         evidence.append({'check': 'error', 'pass': False, 'detail': f'{type(error).__name__}: {error}'})
+    report.parent.mkdir(exist_ok=True)
+    report.write_text(json.dumps({'passed': passed, 'seconds': round(time.time() - started, 1), 'checks': evidence}, indent=1) + '\n')
+    for item in evidence:
+        print(f'{"PASS" if item["pass"] else "FAIL"}  {item["check"]}{" - " + item["detail"] if "detail" in item else ""}')
+    print(f'report: {report}')
+    return 0 if passed else 1
+
+
+def drain_blocker_journey(base, home, root, calls, evidence):
+    """#2257: the real runner loop reads `gateway.drain.status` over the real socket before Quit.
+
+    A blocked Gateway fails the operation naming the blocker without quitting,
+    swapping or stopping anything; an idle one proceeds to Quit as before.
+    The app-lifecycle boundary only records: this must never reach a live Tron app.
+    """
+    lifecycle = []
+
+    class DrainPlatform(base):
+        bundle_id = f'com.tron.test.replace-drain.{os.getpid()}'
+        drain_settle_timeout = 0
+
+        def quit_app(self, log):
+            lifecycle.append('quit')
+            raise Failure('fixture: Quit reached')
+
+        def launch_app(self, log):
+            lifecycle.append('launch')
+
+        def offline_blocker(self):
+            return 'fixture app is running'
+
+    platform = DrainPlatform(home)
+    snapshot = calls.with_name(calls.name + '.drain')
+
+    def operation(name, blocker_snapshot):
+        snapshot.write_text(json.dumps(blocker_snapshot))
+        journal = replace.Journal.create(root / name, name, 'full', 'drain fixture', {'root': str(REPO)})
+        # The build and preflight boundaries have their own journeys; start at the first live step.
+        journal.data['steps'] = [step for step in journal.data['steps']
+                                 if step['name'] not in ('preflight', 'build', 'verify-signature')]
+        journal.save()
+        lifecycle.clear()
+        before = len(calls.read_text().splitlines())
+        replace.Runner(platform, journal).run()
+        return journal.load().data, calls.read_text().splitlines()[before:]
+
+    blocked = {'drainId': 'drain-fixture', 'revision': 3, 'phase': 'idle', 'blockerCount': 2,
+               'blockerCounts': {'detached-extension-run': 1, 'rpc-mutation': 1}, 'omittedCount': 0,
+               'suspectProjectionCount': 0, 'blockers': [
+                   {'id': 'blocker-a', 'category': 'detached-extension-run', 'sessionId': 'sess-phantom-run',
+                    'state': 'active', 'admittedAt': '2026-11-04T01:44:00.000Z', 'ageMs': 2_712_000},
+                   {'id': 'blocker-b', 'category': 'rpc-mutation', 'sessionId': 'sess-other', 'method': 'schedule.runNow',
+                    'state': 'suspect', 'ageMs': 42_000}]}
+    data, sent = operation('blocked', blocked)
+    message = (data.get('error') or {}).get('message', '')
+    check(data['state'] == 'failed' and data['error']['step'] == 'stop-gateway',
+          f'a drain blocker fails the replacement at stop-gateway: {data["state"]} {data.get("error")}', evidence)
+    check('detached-extension-run in session sess-phantom-run (active) for 45m 12s' in message
+          and 'rpc-mutation schedule.runNow in session sess-other (suspect) for 42s' in message,
+          f'the failure names each blocker by category, session and age: {message}', evidence)
+    check(lifecycle == [] and not data.get('stopRequested') and not data['swap'],
+          f'nothing is quit, relaunched or swapped while the drain is blocked: {lifecycle}', evidence)
+    check(sent == ['home.taskList', 'gateway.drain.status', 'mac.replace.complete'],
+          f'the runner reads drain status before any stop and sends no stop: {sent}', evidence)
+
+    idle = dict(blocked, blockerCount=0, blockerCounts={}, blockers=[])
+    data, sent = operation('idle', idle)
+    check(data['error']['step'] == 'stop-gateway' and 'fixture: Quit reached' in data['error']['message']
+          and lifecycle == ['quit'] and data.get('stopRequested'),
+          f'an idle Gateway proceeds to Quit as before: {data.get("error")} {lifecycle}', evidence)
+    check(sent[:2] == ['home.taskList', 'gateway.drain.status'], f'idle drain status is read before Quit: {sent}', evidence)
+
+
+LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
+
+
+def launch_services_urls(bundle_id):
+    """Every app URL Launch Services resolves for a bundle id: the candidates `open -b` chooses from."""
+    script = ("ObjC.import('AppKit'); var a = $.NSWorkspace.sharedWorkspace.URLsForApplicationsWithBundleIdentifier("
+              f"{json.dumps(bundle_id)}); var r = []; for (var i = 0; i < Number(a.count); i++) "
+              "r.push(ObjC.unwrap(a.objectAtIndex(i).path)); JSON.stringify(r)")
+    code, out, err = capture(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script])
+    if code != 0:
+        raise AssertionError(f'Launch Services query failed: {err.strip()}')
+    return {str(Path(path).resolve()) for path in json.loads(out)}
+
+
+def launch_services_journey():
+    """#2257: the app the swap keeps for rollback is not launchable through Launch Services.
+
+    Runs the real swap step on a fixture app with a unique bundle id, then
+    registers the kept copy as Finder or Spotlight would on discovering it. Launch
+    Services ignores apps under the temporary directories, so this fixture lives
+    in the user's Caches and unregisters every path it registered.
+    """
+    evidence, started, passed = [], time.time(), False
+    report = REPO / 'test-results/mac-replace-launch-services-e2e.json'
+    caches = Path.home() / 'Library/Caches'
+    caches.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(prefix='tron-mac-replace-ls-', dir=caches)).resolve()
+    registered = []
+
+    def register(path):
+        registered.append(path)
+        capture([LSREGISTER, '-f', path], timeout=60)
+
+    try:
+        bundle_id = f'com.tron.test.replace-kept.{os.getpid()}'
+
+        def bundle(app, marker):
+            (app / 'Contents/MacOS').mkdir(parents=True)
+            (app / 'Contents/MacOS/launch').write_text('#!/bin/sh\nexit 0\n')
+            (app / 'Contents/MacOS/launch').chmod(0o755)
+            (app / 'Contents/marker').write_text(marker)
+            with (app / 'Contents/Info.plist').open('wb') as stream:
+                plistlib.dump({'CFBundleIdentifier': bundle_id, 'CFBundleExecutable': 'launch',
+                               'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '0.1.0', 'CFBundleVersion': '8'}, stream)
+            subprocess.run(['/usr/bin/codesign', '-s', '-', '--force', '--deep', app], check=True, capture_output=True)
+
+        home = root / 'home'
+        (home / '.tron').mkdir(parents=True)
+        platform = MacPlatform(home)
+        platform.installed = home / 'Applications/Tron.app'
+        platform.bundle_id = bundle_id
+        platform.gateway_label = bundle_id + '.gateway'
+        platform.helper_label = bundle_id + '.helper'
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1', 0)); platform.port = sock.getsockname()[1]
+        bundle(platform.installed, 'previous')
+        candidate = root / 'build/Tron.app'
+        bundle(candidate, 'candidate')
+        previous_cdhash = platform.codesign_identity(platform.installed)['cdhash']
+        register(platform.installed)  # as /Applications/Tron.app always is
+        check(launch_services_urls(bundle_id) == {str(platform.installed)},
+              'Launch Services resolves the installed fixture app before the swap', evidence)
+
+        for directory in (platform.maintenance, platform.store):  # as `start` creates them
+            replace.private_mkdir(directory)
+        journal = replace.Journal.create(platform.store / 'fixture', 'fixture', 'full', 'Launch Services fixture', {'revision': 'fixture'})
+        journal.begin_attempt({'pid': os.getpid()})
+        journal.data['artifact'] = {'path': str(candidate)}
+        replace.Runner(platform, journal).step_swap_app()
+        kept = Path(journal.data['swap']['previousApp'])
+        check((platform.installed / 'Contents/marker').read_text() == 'candidate', 'the swap installed the candidate', evidence)
+        register(kept)  # Finder or Spotlight discovering the kept copy
+        register(platform.installed)  # the new app at the installed path
+        resolved = launch_services_urls(bundle_id)
+        check(resolved == {str(platform.installed)},
+              f'Launch Services opens only the installed app, never the kept copy at {kept}: {sorted(resolved)}', evidence)
+        check(kept.is_dir() and (kept / 'Contents/marker').read_text() == 'previous'
+              and platform.codesign_identity(kept)['cdhash'] == previous_cdhash,
+              'the kept previous app stays intact and verifiable for rollback', evidence)
+        passed = True
+    except Exception as error:  # noqa: BLE001 - retain RED evidence as well as GREEN.
+        evidence.append({'check': 'error', 'pass': False, 'detail': f'{type(error).__name__}: {error}'})
+    finally:
+        for path in registered:
+            capture([LSREGISTER, '-u', path], timeout=60)
+        shutil.rmtree(root, ignore_errors=True)
     report.parent.mkdir(exist_ok=True)
     report.write_text(json.dumps({'passed': passed, 'seconds': round(time.time() - started, 1), 'checks': evidence}, indent=1) + '\n')
     for item in evidence:
@@ -745,12 +913,16 @@ if __name__ == '__main__':
         sys.exit(fixture_main())
     if '--quit-only' in sys.argv:
         sys.exit(quit_journey())
+    if '--launch-services-only' in sys.argv:
+        sys.exit(launch_services_journey())
     checkout_result = checkout_journey()
     if checkout_result or '--checkout-only' in sys.argv:
         sys.exit(checkout_result)
     rpc_result = rpc_journey()
     if rpc_result or '--rpc-only' in sys.argv:
         sys.exit(rpc_result)
+    if launch_services_journey():
+        sys.exit(1)
     if quit_journey():
         sys.exit(1)
     # The fixture launches dist/index.js. A fresh worktree has no dist, and a

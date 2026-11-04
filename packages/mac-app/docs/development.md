@@ -223,14 +223,23 @@ scripts/tron mac replace --status --follow
   An unchanged payload lock alone does not prove the checkout is ready to compile.
 - **Workers** stop through Home's task stop path and can be resumed in place; **Stop** is the
   app's coordinated Quit through the replacement handoff.
+- **Drain check.** Before Quit (full) or the source update (quick), the runner reads
+  `gateway.drain.status` and waits up to 5 minutes for accepted work to settle. Any blocker left
+  fails the step naming its category, session and age; Tron is not quit and nothing is swapped.
+  Workers it already stopped stay resumable. A drain already in progress is joined.
 - **Swap** clones `~/.tron` (`state-snapshot`), moves the Stable payload channel and old app into
   the operation directory and installs the verified build. A failure after the swap restores and
   verifies the previous app and payloads; the snapshot is never restored over newer data.
+  Kept apps (`previous-app-<n>/Tron.app.kept`, `failed-app-<n>/Tron.app.kept`) are not `.app`
+  bundles: Launch Services drops them on the rename and refuses to register them, so Finder,
+  Spotlight and `open -b com.tron.mac` reach only `/Applications/Tron.app`. Rollback renames
+  the kept copy back and verifies it.
 - **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac
   verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`
   (current and previous kept); git and builds run with Homebrew's bin on `PATH` for git-lfs.
 - E2E: `python3 scripts/test-tron-mac-replace.py` (fixture app and job, never Stable;
-  `--rpc-only`, `--quit-only`, `--checkout-only` for single boundaries; artifacts under
+  `--rpc-only` (includes the drain-blocker runner), `--launch-services-only`, `--quit-only`,
+  `--checkout-only` for single boundaries; artifacts under
   `test-results/mac-replace-*.json`).
 
 ## Debug Gateway
