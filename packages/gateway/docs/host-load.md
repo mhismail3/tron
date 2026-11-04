@@ -31,7 +31,8 @@ command keeps default priority. Subagent child processes are launched by the pin
 ## Task command scopes
 
 Binding a Home task to its worker gives that session a command scope
-(`kernel/run/task-command-scope.ts`): each foreground shell gets the scope's `TMPDIR`,
+(`kernel/run/task-command-scope.ts`): each foreground shell gets the scope's short
+`TMPDIR` (`$TMPDIR/tron-tc/<session digest>`),
 a recorded process group and an inherited anchor descriptor (fd 19). Settling the task
 (report, Stop, deadline or failure) unbinds the session and reaps everything the scope
 owns, including background children re-parented to launchd and `setsid` children that

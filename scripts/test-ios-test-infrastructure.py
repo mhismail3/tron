@@ -970,6 +970,10 @@ if args[:1] == ['simctl'] and args[1:2] in (['boot'], ['shutdown'], ['delete']):
     inventory_path.write_text(json.dumps(doc)); raise SystemExit(0)
 if args[:2] == ['simctl', 'bootstatus']:
     raise SystemExit(0)
+if args[:3] == ['xcresulttool', 'get', 'build-results']:
+    print(os.environ.get('FAKE_BUILD_RESULTS', '{}')); raise SystemExit(0)
+if args[:4] == ['xcresulttool', 'get', 'test-results', 'tests']:
+    print(os.environ.get('FAKE_TESTS', '{}')); raise SystemExit(0)
 if args[:2] == ['xcresulttool', 'get']:
     if os.environ.get('FAKE_SUMMARY_MODE') == 'extract-failure': raise SystemExit(9)
     if os.environ.get('FAKE_SUMMARY_MODE') == 'missing': raise SystemExit(9)
@@ -1005,6 +1009,8 @@ if [[ \" $* \" == *' test-without-building '* ]]; then
   exit \"${FAKE_XCODE_STATUS:-0}\"
 fi
 if [[ \" $* \" == *' build-for-testing '* ]]; then
+  if [[ -n \"$bundle\" ]]; then mkdir -p \"$bundle\"; fi
+  if [[ -n \"${FAKE_BUILD_STATUS:-}\" ]]; then exit \"$FAKE_BUILD_STATUS\"; fi
   for ((i=1; i<=$#; i++)); do
     if [[ \"${!i}\" == -derivedDataPath ]]; then j=$((i + 1)); mkdir -p \"${!j}/Build/Products\"; fi
   done
@@ -1236,6 +1242,36 @@ shutil.copytree(source, clone)
         self.assertEqual(result.returncode, 65, result.stderr)
         latest = self.latest_run()
         self.assertEqual(json.loads((latest / "summary.json").read_text())["error"], "xcresult result bundle is missing")
+
+    def test_failed_build_prints_its_errors_as_file_line_and_keeps_the_raw_log(self) -> None:
+        source = f"file://{self.checkout}/packages/ios-app/Sources/A%20B.swift"
+        errors = [{"issueType": "Swift Compiler Error", "message": "Cannot find 'x'\n  in scope",
+                   "sourceURL": f"{source}#EndingLineNumber=311&StartingColumnNumber=4&StartingLineNumber=311"}]
+        errors += [{"issueType": "Swift Compiler Error", "message": f"error {index}"} for index in range(21)]
+        result = self.invoke(command="build", override={
+            "FAKE_BUILD_STATUS": "1", "FAKE_BUILD_RESULTS": json.dumps({"errors": errors}),
+        })
+        self.assertEqual(result.returncode, 70, result.stdout + result.stderr)
+        lines = result.stderr.splitlines()
+        start = lines.index("build errors (22):")
+        self.assertEqual(lines[start + 1:start + 3], [
+            "  error: packages/ios-app/Sources/A B.swift:312: Cannot find 'x' in scope",
+            "  error: error 0",
+        ])
+        self.assertEqual(lines[start + 21], "  ... 2 more in the result bundle")
+        self.assertIn(f"iOS build failed with status 70: {self.latest_run()}/build.log", result.stderr)
+        self.assertTrue((self.latest_run() / "build.log").is_file())
+        self.assertTrue((self.latest_run() / "Build.xcresult").is_dir())
+
+    def test_failed_run_prints_each_failure_message_under_its_test(self) -> None:
+        tests = {"testNodes": [{"nodeType": "Test Plan", "name": "Plan", "children": [
+            {"nodeType": "Test Case", "name": "testA()", "result": "Failed", "children": [
+                {"nodeType": "Failure Message", "name": "A.swift:16: XCTAssertEqual failed"}]},
+            {"nodeType": "Test Case", "name": "testB()", "result": "Passed"}]}]}
+        result = self.invoke(xcode_status=65, summary='{"passedTests":1,"failedTests":1,"skippedTests":0,"totalTestCount":2}',
+                             override={"FAKE_TESTS": json.dumps(tests)})
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn("test failures (1):\n  failure: testA(): A.swift:16: XCTAssertEqual failed\n", result.stderr)
 
     def test_process_failure_and_timeout_take_precedence(self) -> None:
         result = self.invoke(summary='{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}', xcode_status=7)
