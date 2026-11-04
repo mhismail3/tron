@@ -28,11 +28,11 @@ in plan order: **Node** (`verify --all`, Gateway default, nested, Mac integratio
 **Apple** (compile, smoke, boundary, UI journeys under host slots); the console prints both
 chains, each lane's live log and its result, and `report.json` keeps `results` in plan order
 with `activeLane` naming every running lane. The Apple chain's simulator lanes run on their own
-persistent named lane (`batch-apple-<hash of the git common directory>`, smoke products in its own
-DerivedData), so they never contend with the verifier's iOS steps for this worktree's lane lease.
-The repository owns that lane and its UI journey lanes (`TRON_IOS_TEST_LANE_REPOSITORY`), so each
-batch's fresh worktree reuses the same warm simulators; they are reaped only with the repository
-or after the idle TTL, never with a batch worktree. A chain that errors (for
+persistent named lane (`batch-apple-<hash of the git common directory>`, smoke products in this
+worktree's own DerivedData), so they never contend with the verifier's iOS steps for this worktree's
+lane lease. The repository owns that lane and its UI journey lanes (`TRON_IOS_TEST_LANE_REPOSITORY`),
+so any worktree a batch runs in reuses the same warm simulators; they are reaped only with the
+repository or after the idle TTL, never with a batch worktree. A chain that errors (for
 example changed source) or an interrupt stops the other chain's running lane and cancels a lane
 waiting for the full-Gateway lock (uncovered, never started); both join before fixture cleanup,
 freeze, attribution and verdict. iOS lanes release host slots between lanes; all slots held by other

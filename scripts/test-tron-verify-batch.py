@@ -1387,8 +1387,9 @@ class AppleLaneTests(unittest.TestCase):
         self.assertEqual(len(names), 1, names)
         self.assertTrue(all(env['TRON_IOS_TEST_LANE_REPOSITORY'] == common
                             for environment in environments for env in environment.values()), environments)
+        # Smoke products stay each worktree's own: products prune follows their worktree.
         smoke = {environment['iOS smoke']['TRON_IOS_TEST_DERIVED_DATA'] for environment in environments}
-        self.assertEqual(len(smoke), 1, smoke)
+        self.assertEqual(len(smoke), 3, smoke)
         theirs = self.apple_environments(other)['real Gateway UI journeys']
         self.assertNotIn(theirs['TRON_IOS_TEST_LANE'], names)
         self.assertEqual(theirs['TRON_IOS_TEST_LANE_REPOSITORY'], os.path.realpath(other / '.git'))

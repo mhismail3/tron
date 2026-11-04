@@ -51,15 +51,18 @@ def save(path: Path, value: dict) -> None:
 
 def apple_lane(root: Path) -> dict[str, str]:
     """The Apple chain's own simulator lane and smoke products, so its iOS lanes never contend with
-    the verifier's iOS steps (the Node chain) for this worktree's lane lease or DerivedData. Named
-    per repository (its git common directory), not per batch worktree, and owned by it
-    (TRON_IOS_TEST_LANE_REPOSITORY), so each batch's fresh worktree reuses the same warm lanes:
+    the verifier's iOS steps (the Node chain) for this worktree's lane lease or DerivedData. The
+    lane is named per repository (its git common directory), not per batch worktree, and owned by
+    it (TRON_IOS_TEST_LANE_REPOSITORY), so each batch's worktree reuses the same warm simulators:
     one set per repository, reaped only with the repository or after the idle TTL (#2268)."""
     repository = os.path.realpath(subprocess.check_output(
         ['git', '-C', str(root), 'rev-parse', '--path-format=absolute', '--git-common-dir'], text=True).strip())
     name = 'batch-apple-' + hashlib.sha256(repository.encode()).hexdigest()[:12]
+    # Smoke products stay the batch worktree's: their stamp names it, and products prune deletes
+    # a gone worktree's products, so a shared directory could be deleted beneath a later build.
+    products = 'batch-apple-' + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]
     return {'TRON_IOS_TEST_LANE': name, 'TRON_IOS_TEST_LANE_REPOSITORY': repository,
-            'TRON_IOS_TEST_DERIVED_DATA': str(Path.home() / 'Library/Developer/Tron/ios/test-derived-data' / name)}
+            'TRON_IOS_TEST_DERIVED_DATA': str(Path.home() / 'Library/Developer/Tron/ios/test-derived-data' / products)}
 
 
 def lanes(root: Path, base: str) -> list[dict]:

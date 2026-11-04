@@ -5993,6 +5993,21 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
                 self.assertFalse(lanes[label].exists())
                 self.assertFalse(self.present(udids[label]))
 
+    def test_an_unusable_lane_repository_refuses_before_any_simulator_exists(self) -> None:
+        """#2268 review: a relative or missing repository is refused before the lane's simulator is
+        created, so it never leaves an unmarked device that blocks the lane."""
+        worktree = self.linked("bad-repository")
+        self.stamp_products(worktree)
+        for repository in ("relative/.git", str(self.root / "missing" / ".git")):
+            with self.subTest(repository=repository):
+                environment = {**self.environment, "TRON_IOS_TEST_LANE_REPOSITORY": repository}
+                result = self.tool(worktree, "tron-ios-test", "run", "--lane", "batch-apple-bad",
+                                   "--only-testing", "TronMobileUITests/StubTests", environment=environment)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("TRON_IOS_TEST_LANE_REPOSITORY must name an existing directory", result.stdout + result.stderr)
+                self.assertEqual(self.simctl_commands().count("create"), 0)
+                self.assertFalse((self.lane_root / "ios-test-batch-apple-bad" / "simulator.json").exists())
+
     def test_status_names_the_newest_run_of_this_worktree_and_lane(self) -> None:
         """Failure mode 9: the latest run is this worktree's and lane's own."""
         first, second = self.linked("first-worktree"), self.linked("second-worktree")

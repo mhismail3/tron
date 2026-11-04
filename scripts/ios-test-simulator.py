@@ -771,7 +771,7 @@ def lane_rows(arguments: argparse.Namespace) -> list[list[str]]:
             rows.append([label, "-", "not-provisioned", lease, "-", "-"])
             continue
         device, state = lane_device(document, marker)
-        worktree = marker.get("worktree")
+        worktree = marker.get("repository") or marker.get("worktree")
         last_used = marker.get("last_used_epoch_seconds")
         size = device.get("dataPathSize") if device is not None else None
         rows.append([
@@ -836,7 +836,7 @@ def simulator_rows(arguments: argparse.Namespace) -> list[list[str]]:
             continue
         claimed.add(marker["udid"])
         device, state = lane_device(document, marker)
-        worktree = marker.get("worktree")
+        worktree = marker.get("repository") or marker.get("worktree")
         rows.append([
             marker["name"],
             state,
@@ -1488,6 +1488,15 @@ def clean_runs(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def lane_repository() -> str | None:
+    """The repository TRON_IOS_TEST_LANE_REPOSITORY gives a lane, refused unless it is an existing
+    absolute directory. Read before any simulator is created, so a bad value never leaves one unmarked."""
+    repository = os.environ.get(LANE_REPOSITORY_ENVIRONMENT) or None
+    if repository is not None and (not os.path.isabs(repository) or not os.path.isdir(repository)):
+        raise DestinationError(f"{LANE_REPOSITORY_ENVIRONMENT} must name an existing directory: {repository}")
+    return os.path.realpath(repository) if repository is not None else None
+
+
 def stamp_lane_use(arguments: argparse.Namespace, marker: dict[str, Any]) -> dict[str, Any]:
     """Record the lane's creating worktree and this use in the lane's marker.
 
@@ -1502,17 +1511,16 @@ def stamp_lane_use(arguments: argparse.Namespace, marker: dict[str, Any]) -> dic
     updated = dict(marker)
     if arguments.worktree is not None and "worktree" not in updated:
         updated["worktree"] = os.path.realpath(arguments.worktree)
-    repository = os.environ.get(LANE_REPOSITORY_ENVIRONMENT) or None
+    repository = lane_repository()
     if repository is not None and "repository" not in updated:
-        if not os.path.isabs(repository) or not os.path.isdir(repository):
-            raise DestinationError(f"{LANE_REPOSITORY_ENVIRONMENT} must name an existing directory: {repository}")
-        updated["repository"] = os.path.realpath(repository)
+        updated["repository"] = repository
     updated["last_used_epoch_seconds"] = int(time.time())
     atomic_write(arguments.marker, updated)
     return updated
 
 
 def provision(arguments: argparse.Namespace) -> dict[str, Any]:
+    lane_repository()
     document = inventory()
     runtime = exact_runtime(document, arguments.runtime)
     device_type = exact_device_type(document, arguments.device_type)
