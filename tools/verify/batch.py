@@ -421,7 +421,9 @@ def attribute(base: str, head: str, failed: dict, prober: Prober) -> dict:
     if octopus:
         result['unsupportedHistory'] = octopus
         return unresolved('octopus landing on main first-parent history')
-    if not prober.controls(head, 'bad', selection_required=True):
+    # Only an exact-case Vitest recipe names one case known to exist; other recipes may select
+    # nothing for real reasons (a file that fails to load), which stays an ordinary outcome.
+    if not prober.controls(head, 'bad', selection_required=bool(failed['probe'].get('vitest'))):
         return unresolved('head did not reproduce the exact failure in two fresh executions')
     # `base` is the last raw-green batch; the search assumes it, the parent control proves it.
     low, high = -1, len(commits) - 1

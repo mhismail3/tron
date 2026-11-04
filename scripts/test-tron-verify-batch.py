@@ -1224,6 +1224,29 @@ class ShardedIosProbeTests(unittest.TestCase):
             result = batch.execute(root, lane, root / 'probe')
         self.assertEqual(result['exit'], 0, result)
 
+    def test_only_an_exact_case_vitest_head_control_requires_a_selection(self):
+        # A verifier-step recipe can select nothing for a real, reproducible reason (a file that
+        # fails to load); only the exact-case Vitest recipe turns an empty head selection into an error.
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+
+        class Controls:
+            def __init__(self):
+                self.record, self.required = {}, []
+
+            def controls(self, sha, expected, selection_required=False):
+                self.required.append(selection_required)
+                return False
+        head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        base = subprocess.check_output(['git', 'rev-parse', 'HEAD~1'], cwd=ROOT, text=True).strip()
+        for probe, required in (({'name': 'Gateway default', 'vitest': True, 'command': ['x']}, True),
+                                ({'name': 'tests: gateway', 'command': ['x']}, False)):
+            with self.subTest(probe=probe['name']):
+                prober = Controls()
+                batch.attribute(base, head, {'name': probe['name'], 'probe': probe, 'signature': {'x': 1}}, prober)
+                self.assertEqual(prober.required, [required])
+
     def test_a_verifier_gateway_step_probe_records_how_many_tests_it_selected(self):
         # A full-verify Gateway step probe counts failed as well as passed cases as selected, so a
         # reproducing failure is never mistaken for an empty selection, and an empty one is visible.
