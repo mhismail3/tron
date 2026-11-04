@@ -204,7 +204,7 @@ changes keep its store, cursors and spend.
   never weaken confirmed standing authority. See [profile contract](profile.md).
   Storage is one hierarchical `workspace/files/Profile.json`, current heads and exact
   linked Correction anchors only. Shared Changes alone owns audit/Undo; unavailable
-  historical revisions refuse. Legacy namespaces require explicit offline cutover.
+  historical revisions refuse.
   Oversized references use `profile` exact revision reads and bounded `nextOffset`
   continuations; they never silently truncate or resolve through a retired tool.
 

@@ -140,49 +140,7 @@ stages at the next serialized mutation; stages are never alternate read inputs.
 Files are private, bounded to 64 MiB, and checked for unsafe paths. This is owned
 storage, not a sandbox against concurrent same-user filesystem modification.
 
-## Offline cutover boundary
+## Missing data
 
-Runtime refuses existing `state/profile`, `state/knowledge` or
-`state/knowledge.retiring`; it never converts them on open. A missing initialized
-current file also refuses instead of creating an empty replacement. Reads perform
-no conversion, domain replay or archive access.
-
-A dedicated maintainer-approved offline cutover must stop writers, preserve the
-old namespace/receipts and inventories, build and validate the current hierarchy
-with every exact current Correction anchor, and reconstruct required shared-audit
-references without changing facts. Archive all other old revisions outside runtime
-storage, verify the candidate and receipt fences, then publish it and remove the
-retired namespace from the runtime path. No archive path enters Profile control.
-The runtime replacement alone is not cutover admission proof or permission to run it.
-
-### Maintainer Terminal command
-
-`scripts/tron profile cutover --plan` validates the bound prepared backup and
-prints before/after, hashes, paths and recovery. `--apply` is the explicit Terminal
-approval: it uses the existing coordinated Mac Quit/drain, takes canonical Gateway
-and workspace writer leases plus the legacy SQLite exclusive transaction, publishes
-the validated candidate, restarts the installed app and verifies real Profile and
-Changes RPCs, native index/exact-record reads and new-process Profile diagnostics.
-It installs no app or payload. The one-shot binding requires the prepared
-`2138-profile-cutover-20261031T180029Z` backup and source `905e0510a6`.
-The source guard excludes only the cutover implementation, its ownership manifest
-and this documentation; executable Profile reader changes still refuse.
-Backups remain strictly owner-only 0600. Live Changes may retain exact hash-bound
-original 0600/0644 file modes beneath owner-only 0700 directories; cutover never
-changes their permissions. Failures print a bounded cause chain to Terminal;
-full diagnostics remain in the private controller log.
-
-`scripts/tron profile cutover --rollback` quits/drains again, restores exact backup
-files/SQL and restarts. A failed live check performs that recovery automatically.
-Changed Profile or Changes bytes refuse destructive rollback and retain the data
-for forward reconciliation; the command reports failure, never successful recovery.
-Interrupted operations retain a private receipt and preserved namespace under
-`~/.tron-maintenance/profile-cutover/`. This data-only rollback restores the original
-legacy-Profile offline refusal under the current runtime, not a compatible old build.
-Agents may prepare/test this path but never invoke its live apply/rollback.
-
-Restoring legacy Profile functionality, rather than just its data, requires the
-preserved namespace and matching old runtime together before resuming Profile
-writers. After new writes, do not overwrite the file with an older snapshot: stop
-and plan an explicit forward reconciliation. Offline conversion,
-archive writes, rollback and live activation each remain maintainer actions.
+A missing initialized current file refuses instead of creating an empty
+replacement. Reads perform no conversion, domain replay or archive access.

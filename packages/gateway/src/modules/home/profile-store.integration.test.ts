@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, open, readFile, readdir, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, open, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -62,15 +62,13 @@ it("keeps Not now until a new note, never reinstating it through receipt replay 
   expect((await f.store.profileMetadata()).sorting.deferred).toBe(false);
 });
 
-it("retains Prior placement as current data and refuses automatic conversion or an empty replacement for lost initialized data", async () => {
+it("retains Prior placement as current data and refuses an empty replacement for lost initialized data", async () => {
   const f = await fixture(), record = draft("Prior exact data"); delete record.content.profile; record.content.tags!.push("home-file-home");
   const prior = await legacyProfileFixture(f.workspace, "prior-fixture-command", record);
   expect(await f.store.read(prior.id)).toEqual(prior);
   expect((await readProfileFile(f.workspace))!.sections.prior!.notes).toHaveLength(1);
   await rm(f.path);
   await expect(f.store.list()).rejects.toThrow(/missing/);
-  await mkdir(join((await f.workspace.describe()).root, "state", "profile"), { recursive: true, mode: 0o700 });
-  await expect(f.store.list()).rejects.toThrow(/offline Profile cutover/);
   await expect(stat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
 });
 

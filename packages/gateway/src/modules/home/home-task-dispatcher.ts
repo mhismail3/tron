@@ -134,7 +134,7 @@ function interruptedQuestion(run: readonly FileEntry[]): InterruptedQuestion | u
 /** The resumed operation's brief. The authorized intent is this exact text. `instructions` are
  * oldest first: those of earlier resumes refused before they started (#959), then this one's. */
 function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], pending: InterruptedQuestion | undefined): string {
-  const parts = [`Continue Home task ${previous.taskId} in place. It stopped (${previous.terminalEvidence?.outcome ?? "unknown"}: ${previous.terminalEvidence?.reason ?? "unknown"}); this is the same worker session, so its worktree, branch and work claim are still yours. Pick up exactly where it stopped: re-check the state you were in before acting.`];
+  const parts = [`Continue Home task ${previous.taskId} in place. It stopped (${previous.terminalEvidence?.outcome ?? "unknown"}: ${previous.terminalEvidence?.reason ?? "unknown"}); this is the same worker session, so its worktree and branch are still yours. Pick up exactly where it stopped: re-check the state you were in before acting.`];
   if (instructions.length === 1) parts.push(`Instruction:\n${instructions[0]}`);
   else if (instructions.length > 1) parts.push(`Instructions, oldest first (the earlier ones never reached you because a previous resume was refused):\n\n${instructions.join("\n\n---\n\n")}`);
   if (pending) {
@@ -418,7 +418,7 @@ export class HomeTaskDispatcher {
   }
 
   /** Continues a settled task in place (#929): a successor task bound to the same worker
-   * session, so its worktree and work claim stay with it. The stopped task's record stays
+   * session, so its worktree stays with it. The stopped task's record stays
    * immutable; each task has at most one started successor, so a lineage never forks. A
    * successor refused before it started is not one (#959): the stopped task stays resumable
    * and the refused successor's instruction is carried into the next resume's brief. `text`

@@ -36,8 +36,7 @@ Local admission errors remain local, not an invented uncertain remote outcome.
 partial writes, reverse-completion reservations and refusal/recovery; auth has
 its real isolated-Keychain fixture in `scripts/test-work-auth.py`.
 
-`.github/work.json` declares labels, Project fields, claim/cleanup rules and issue
-classification. `work bootstrap [--apply [--prune]]` plans/converges that vocabulary,
+`.github/work.json` declares labels, Project fields and issue classification. `work bootstrap [--apply [--prune]]` plans/converges that vocabulary,
 not repository protection or required checks. Explicit prune keeps values used
 by open issues/Project items. Read the plan before destructive changes.
 
@@ -55,58 +54,14 @@ Useful writes (`--help` owns exact arguments):
   replacement. Removal detaches only the relation. `block --blocked-by` is advisory.
 - `work project add|set`: Project membership/status/priority, never approval.
 
-## Existing claim preservation
+## Preservation
 
-One writer per issue; preserve parked/unpublished and active foreign work. Branch
-names and historical claim trailers do not prove a running worker. The ordinary
-Git workflow needs no new claim. Existing claim operations remain explicit
-preservation/coordination tools, not prerequisites to landing:
-
-- `work start <issue> [--area PATH]` can create a claimed isolated worktree without
-  dependencies/tests. Actual live foreign claims require handoff. Ordinary parked
-  checkpoints and released work are retained; a collision gets a fresh path, not
-  adoption. Areas are advisory, never locks. A push race needs an observed competitor,
-  not an inference from any Git error. Creation/handoff admission is exercised by
-  `scripts/test-work-start.py` and `scripts/test-work-coordination.py`.
-- `work handoff <issue> --session RECEIVER --reason TEXT` transfers coordination,
-  preserving index/files/processes. Unknown/live owner states refuse; no TTY or
-  lifecycle override. Exact local/remote publication fences remain. Handoff cannot
-  prevent the prior owner from using plain Git; coordinate explicitly.
-- `work recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT`
-  publishes an exact clean settled-owner descendant as **unverified** work; not
-  acceptance or ownership transfer. `scripts/test-work-handoff.py` covers exact
-  heads, owner-state uncertainty, live owners and refusal/preservation.
-- `work release <issue> --reason TEXT` backs up local/published heads and a snapshot
-  of tracked/untracked/non-regenerable ignored data under the Git common directory's
-  `work/releases/`. It deletes only the exact leased remote claim ref. Every local
-  branch/worktree/index/file/process remains intact, including the caller's checkout.
-  No cleanup hooks run. Published work and live/unverifiable owners are not refusals
-  for this explicit preservation operation. Accepted remote release can resume its
-  audit/Project finish without replaying the deletion. Backup/privacy/ambiguous-claim
-  and remote-race failures stop it. Optional `--stale [--dry-run]` is older-than-72h,
-  absent-owner only, re-proven before writing, and keeps published unlanded changes.
-  `scripts/test-work-release.py` covers real Git/socket/API boundaries. Already-landed
-  remote-only heads need no empty bundle and stay reachable through preservation refs.
-
-## Exact-head cleanup
-
-`scripts/tron work cleanup [--dry-run]` is the existing destructive cleanup owner,
-not part of landing. Use it only for your own completed task with explicit removal
-authority; `--all` is a separate broad operation, never an automatic follow-up.
-It recognizes a closed issue whose **exact head** is reachable on origin/main, a
-closed issue with only its unchanged claim commit, or an exact-head historical
-merged PR (not a fork's same-named branch). A squash with identical files does not
-prove a unique head landed. Open/unknown owner, dirty/untracked files, non-regenerable
-ignored data, unpublished nested checkouts, active processes, locks or moved heads
-keep the worktree. No snapshot/content-subset trick discards unique work.
-
-Cleanup owns operation-in-progress checks and remote exact-head deletion leases.
-Release hooks run only after eligibility, then local/head/process checks repeat
-before removal. A remote refusal keeps the moved branch; no broad kills or forced
-cleanup. Unclaimed/unrecognized worktrees remain protected, not silently admitted.
-`scripts/test-work-cleanup.py` crosses real CLI/Git/process boundaries for these
-preservation cases and writes `test-results/work-cleanup.json`. Closing an issue
-never deletes branches/worktrees or authorizes bypassing this owner.
+There are no claims: a branch name or worktree is not proof its owner is running.
+One writer per worktree; preserve parked/unpublished and active foreign work.
+Remove only your own finished worktree, after its exact head is reachable from
+origin/main and it holds no dirty, untracked or unpublished data. Everything else
+follows the [housekeeping skill](../../.agents/skills/tron-workspace-housekeeping/SKILL.md).
+Closing an issue never deletes branches or worktrees.
 
 ## Validation and lifecycle
 
