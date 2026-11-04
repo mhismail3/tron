@@ -497,7 +497,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     },
     {
       tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
-      writers: ["ui"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
+      writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       // pi runs the first value as the program and passes the rest before its own npm arguments.
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
