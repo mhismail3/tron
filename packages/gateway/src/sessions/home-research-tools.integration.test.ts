@@ -384,7 +384,9 @@ describe("Tron Home research tools", () => {
     const start = Date.now();
     const [partial] = await toolAnswers(f, "bounded read expansion", [{ name: "web_search", args: { op: "search", query: "deadline", depth: "fast", fetch: "top3" } }]);
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(4000);
+    // Whole Home turn around a 2000 ms tool deadline; the hung source waits 30 s. Disk-write load
+    // adds ~2-3 s outside the tool (#2274), so 10 s still proves the deadline without flaking.
+    expect(elapsed).toBeLessThan(10_000);
     const bounded = JSON.parse(partial!.text);
     expect(bounded.status).toBe("partial"); expect(bounded.reason).toBe("timeout"); expect(partial!.isError).toBe(false);
     expect(bounded.sources.some((source: { freshness: string }) => source.freshness === "provider-cache-allowed")).toBe(true);
