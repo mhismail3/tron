@@ -82,16 +82,19 @@ export function extensionActivityOwnsOwnLiveWork(turns: OwnedTurnOwner, activity
 }
 
 
-/** Only the delegated provider's lifecycle can settle a detached row, so only it can
- * make one live. Every tool row carries the owner the extension boundary attributed;
- * an origin without one is the Gateway's own provider attribution
- * (`delegatedProviderOrigin`'s fallback for artifact-discovered runs). A row with an
- * attributed owner other than the installed provider is live only when its run is
- * bound to this exact tool call with a provider artifact directory the Gateway
- * admitted and watches. Another owner's `runId`/`state` result fields (a `schedule`
- * runNow's queued automation run) describe state that owner keeps; nothing here ever
- * settles them, so they never become live work, a drain blocker or a running
- * dashboard phase. */
+/** A detached row is live only while a lifecycle the Gateway watches can settle it.
+ * Three routes qualify:
+ * - The row's owner is the installed delegated provider.
+ * - The row has no owner: an ownerless origin is the Gateway's own provider
+ *   attribution (`delegatedProviderOrigin`'s fallback for artifact-discovered runs).
+ * - Any tool's row whose run is bound to that exact tool call with a provider artifact
+ *   directory the Gateway admitted. Its watcher reads that directory's lifecycle files,
+ *   and their terminal state settles the row, so it is live, self-settling work. This
+ *   is the accepted rule and the behaviour locks pin it.
+ * Result fields `runId`/`state` without an admitted directory (a `schedule` runNow's
+ * queued automation run) describe state another owner keeps. Nothing here would ever
+ * settle them, so they never become live work, a drain blocker or a running dashboard
+ * phase. */
 function delegatedLifecycleOwner(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
   const ownerId = activity.source.owner?.id;
   if (ownerId === undefined || ownerId === turns.subagentExtensionOrigin().owner?.id) return true;

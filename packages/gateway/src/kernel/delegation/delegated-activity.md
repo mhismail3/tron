@@ -217,6 +217,11 @@ releases its claims.
   `<tronHome>/internal/subagents/` is scanned under one work budget; a synthetic
   `subagent:<runId>` identity is rekeyed when the tool call arrives; terminal status is
   authoritative; historical artifacts settle only with an exact tool-call/`asyncDir` binding.
+  Liveness (drain blocker, dashboard phase, task runs) requires one of three things: the
+  installed provider's owner, the Gateway's ownerless provider attribution, or any tool's
+  run bound to its own call with an admitted `asyncDir`. The last is self-settling through
+  the watched artifact. Result-shaped `runId`/`state` alone (a `schedule` runNow) is never
+  live (#2256).
   `subagent_supervisor` receipts reference runs and never claim launches
   (`managed-attribution.integration.test.ts`, `runtime-registry.integration.test.ts`).
 

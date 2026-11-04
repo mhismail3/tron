@@ -134,10 +134,12 @@ not the worker session being resumed.
   bound: a stop exits 0 and nothing relaunches to recover cut work, so it waits for
   every accepted owner and the caller's own deadline decides. Both name their blockers
   every 15 s: `gateway.restart-drain.waiting`, `gateway.stop-drain.waiting`.
-- A `detached-extension-run` blocker is only work whose lifecycle the delegated provider
-  settles: a row authored by the installed provider's owner, or a run bound to its tool
-  call with an admitted provider artifact directory. Another tool's `runId`/`state`
-  result fields (a `schedule` runNow) never block a drain.
+- A `detached-extension-run` blocker is only work a watched lifecycle settles. That is
+  a row owned by the installed delegated provider, a row the Gateway attributed from a
+  provider artifact, or any tool's run bound to its own tool call with an admitted
+  provider artifact directory (`asyncDir`). The last is live, self-settling work: the
+  directory's terminal state settles it. `runId`/`state` result fields without an
+  admitted directory (a `schedule` runNow) never block a drain.
 - `GatewayWorkRegistry` is the bounded process-local drain authority (normal and
   derived-settlement capacity, never expiry by age). Preflight transfers one token into
   foreground, queue or command ownership; an orphaned foreground token is cleaned only
