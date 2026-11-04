@@ -2388,7 +2388,7 @@ export class GatewayService {
     if (resourceInvocations !== undefined) slot.assertInvocableResources(resourceInvocations);
     if (slot.homeTaskWorkerState === "settled") {
       // A message to a Home worker whose task stopped or settled continues that task in place
-      // (#929): same session, worktree and claim, with this message as its instruction.
+      // (#929): same session and worktree, with this message as its instruction.
       if (resourceInvocations !== undefined) {
         throw new GatewayError("invalid_request", "A stopped Home worker continues from a message, not a command");
       }
