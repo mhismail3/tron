@@ -78,3 +78,4 @@ packages/push-relay/node_modules	deps	push-relay npm deps	npm ci	residue	keep	-	
 scripts/__pycache__	residue	Python bytecode	python3 without PYTHONDONTWRITEBYTECODE	residue	delete	-	set PYTHONDONTWRITEBYTECODE in scripts/tron hooks/tests
 test-results	evidence	retained tool/test evidence (1.0G) plus ~279 loose agent scratch files	tools/verify, scripts/test-*	residue	gitignore	test-results/ (auto-prune 14d); scratch -> .scratch/	single evidence root
 tools/work/__pycache__	residue	Python bytecode incl. orphan pyc	python3	residue	delete	-	auto-prune
+tmp	residue	empty root tmp/ (git status hides empty dirs)	none	residue	delete	-	no writer; /tmp is used instead

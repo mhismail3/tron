@@ -9,7 +9,7 @@ before writing a new script: extend the owner instead of adding a parallel one.
 | Command | Area | Job |
 |---|---|---|
 | `scripts/tron dev …` | `dev/` | Debug Gateway lifecycle (port 9848) |
-| `scripts/tron fsevents-guard …` | `dev/` | fseventsd monitor (LaunchAgent embeds its source) |
+| `scripts/tron-fsevents-guard …` | top level (frozen) | fseventsd monitor (LaunchAgent embeds its source) |
 | `scripts/tron test gateway\|ios\|tooling …` | `verify/`, `ios/` | run one suite directly |
 | `scripts/tron verify …`, `mutate`, `health` | `verify/` | affected checks, post-land batch, mutation, scorecard |
 | `scripts/tron ownership [--layout\|--ledger\|--modules]` | `structure/` | owners, layout rules, per-file ledger |
@@ -23,12 +23,13 @@ before writing a new script: extend the owner instead of adding a parallel one.
 | `scripts/tron version`, `bundle gateway`, `build`, `chat`, `diagnose` | `toolchain/`, packages | version, payload, Gateway build/chat/diagnose |
 | `scripts/tron-node exec …` | top level | pinned development Node |
 
-`scripts/tron-ios-device` and `scripts/tron_mac_replace.py` stay at this exact path: the
-installed Gateway executes them from this checkout. Change their content, never their path.
+`scripts/tron-ios-device`, `scripts/tron_mac_replace.py` and `scripts/tron-fsevents-guard` stay
+at this exact path: the installed Gateway or the replace orchestrator runs them from this
+checkout (the guard at older revisions). Change their content, never their path.
 
 ## Layout rules
 
-- Top level: only `tron`, `tron-node`, the two frozen paths, this README and
+- Top level: only `tron`, `tron-node`, the three frozen paths, this README and
   `scripts.module.json`.
 - `scripts/<area>/` holds the area's commands, libraries, tests and `<area>.module.json`.
   Tests are `test-<subject>.py|sh` or `<subject>.test.mjs` beside the file they prove and run

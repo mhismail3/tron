@@ -25,7 +25,7 @@ scripts/test-main-source.py	move	scripts/ios/test-main-source.py	ios-share	-
 scripts/tron-dev	move	scripts/dev/tron-dev	dev	dispatched by scripts/tron dev
 scripts/tron-dev-state.mjs	move	scripts/dev/tron-dev-state.mjs	dev	-
 scripts/tron-dev-state.test.mjs	move	scripts/dev/tron-dev-state.test.mjs	dev	-
-scripts/tron-fsevents-guard	move	scripts/dev/tron-fsevents-guard	dev	LaunchAgent embeds its source; add scripts/tron fsevents-guard arm
+scripts/tron-fsevents-guard	keep	scripts/tron-fsevents-guard	dev	frozen: tron_mac_replace_platform.py:487 reads it via git show <rev>:path, tron_mac_reinstall.py:481 by path
 scripts/test-tron-fsevents-guard.py	move	scripts/dev/test-tron-fsevents-guard.py	dev	-
 scripts/dev.module.json	move	scripts/dev/dev.module.json	manifest	-
 scripts/gateway-install-inputs.mjs	move	packages/mac-app/scripts/gateway-install-inputs.mjs	gateway-payload	one payload-build home with bundle-gateway.sh (gateway-payload module)

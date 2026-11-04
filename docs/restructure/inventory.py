@@ -115,6 +115,10 @@ def ignored_paths() -> list[tuple[str, str]]:
         code, path = line[:2], line[3:].strip('"')
         if code in ("!!", "??"):
             rows.append((path.rstrip("/"), "ignored" if code == "!!" else "untracked"))
+    tops = {p.split("/", 1)[0] for p in git("ls-files").splitlines()}
+    for entry in sorted(primary_tree().iterdir()):  # git status hides empty ignored directories
+        if entry.is_dir() and entry.name not in tops | {".git"} and not any(entry.iterdir()):
+            rows.append((entry.name, "ignored"))
     return rows
 
 
@@ -222,7 +226,7 @@ def check() -> int:
         print(f"no verdict: {p}")
     print(f"inventory check: {len(tracked)} tracked + {len(expected) - len(tracked)} ignored/untracked expected; "
           f"{len(ledger)} ledger rows; {len(missing)} unaccounted; {len(no_verdict)} without verdict; {len(stale)} stale rows")
-    return 1 if missing or no_verdict else 0
+    return 1 if missing or no_verdict or stale else 0
 
 
 if __name__ == "__main__":

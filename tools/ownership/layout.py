@@ -18,9 +18,11 @@ ROOT_ENTRIES = {
 # Executables other programs run by repo path. scripts/ top level holds only these and the
 # commands listed in scripts/README.md; everything else lives in scripts/<area>/.
 SCRIPT_TOP_FILES = {"README.md", "scripts.module.json"}
-# Paths the installed (older) Gateway executes from this checkout. Moving one breaks the
+# Paths the installed (older) Gateway or the replace orchestrator executes from this checkout. Moving one breaks the
 # shipped app until the next Mac/Gateway checkpoint, so they never move and never vanish.
-FROZEN = {"scripts/tron", "scripts/tron-ios-device", "scripts/tron_mac_replace.py"}
+FROZEN = {"scripts/tron", "scripts/tron-ios-device", "scripts/tron_mac_replace.py",
+          # read by path at arbitrary revisions (`git show <rev>:scripts/tron-fsevents-guard`)
+          "scripts/tron-fsevents-guard"}
 SCRIPT_ENTRIES = FROZEN | {"scripts/tron-node"}
 TEST_NAME = re.compile(r"(^test[-_].+\.(py|sh|js|mjs)$)|(\.test\.(ts|mjs|js)$)|(Tests?\.swift$)")
 SWIFT_TEST_ROOTS = ("/UITests/", "/E2ETests/", "/ProfilingTests/", "/SwiftAppUITests/", "/Tests/")
@@ -44,7 +46,7 @@ def problems(paths: list[str], modes: dict[str, str], read) -> list[str]:
         if len(parts) == 1 and name.endswith(".module.json") and name != "root.module.json":
             out.append(f"layout: {path}: only root.module.json lives at the root; move the manifest beside the files it owns")
         if parts[0] == "scripts":
-            if len(parts) == 2 and name not in SCRIPT_TOP_FILES and path not in SCRIPT_ENTRIES:
+            if len(parts) == 2 and name not in SCRIPT_TOP_FILES and path not in SCRIPT_ENTRIES and not TEST_NAME.search(name):
                 out.append(f"layout: {path}: scripts/ top level holds only scripts/tron, tron-node and the frozen "
                            f"entry points; put it in scripts/<area>/ and add a scripts/tron subcommand if people run it")
             if len(parts) == 2 and TEST_NAME.search(name):
@@ -71,6 +73,7 @@ def problems(paths: list[str], modes: dict[str, str], read) -> list[str]:
     return out
 
 
+DIRECTIVE = re.compile(r"^(shellcheck |-\*-|eslint|@ts-|noqa|type: |pylint|coding[:=]|vim?:|SPDX-|Copyright|swiftlint)", re.I)
 COMMENT = re.compile(r"^(#|//|\*|/\*\*?|\"\"\"|''')\s*")
 
 
@@ -80,7 +83,9 @@ def purpose(blob: bytes) -> str:
         if line.startswith("#!") or not COMMENT.match(line.strip()):
             continue
         text = COMMENT.sub("", line.strip()).strip().strip('"').strip()
-        if len(text) > 8:
+        if DIRECTIVE.match(text):
+            continue
+        if len(text) > 8 and " " in text:
             return text[:140]
     return ""
 

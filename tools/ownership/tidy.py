@@ -24,14 +24,19 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 DAY = 86400
 SCRATCH, SCRATCH_DAYS = ".scratch", 7
 EVIDENCE, EVIDENCE_DAYS = "test-results", 14
-# Ignored paths with a known owner (generated, cache, dependency or local config). Anything
-# else ignored is residue: delete it, or give it an owner here and in .gitignore.
-KNOWN_IGNORED = (
-    ".scratch", "test-results", ".ci-tools", ".claude", "node_modules", "dist", ".build", "build",
-    "TronMobile.xcodeproj", "TronMac.xcodeproj", ".env.local", "Sources/Resources/Gateway",
-    "Tron Agent.app/Contents/MacOS", "Tron Agent.app/Contents/Resources", "dist-sandbox", ".wrangler",
-    "Package.resolved",
-)
+# Ignored paths with a named writer, as exact repo-relative paths. Anything else ignored is
+# residue: delete it, or add its writer here and to .gitignore in the same change.
+REGENERABLE = {  # deleting loses nothing; the writer recreates it
+    ".scratch", "test-results", ".ci-tools", "packages/gateway/node_modules", "packages/gateway/dist",
+    "packages/push-relay/node_modules", "packages/push-relay/dist", "packages/push-relay/dist-sandbox",
+    "packages/push-relay/.wrangler", "packages/ios-app/TronMobile.xcodeproj", "packages/mac-app/TronMac.xcodeproj",
+    "packages/ios-app/MacTerminalSSH/.build", "packages/mac-app/.build", "packages/mac-app/build",
+    "packages/mac-app/native-computer-control/.build", "packages/mac-app/native-computer-control/build",
+    "packages/mac-app/Sources/Resources/Gateway",
+    "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS",
+    "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources",
+}
+LOCAL = {".claude", "packages/mac-app/.env.local"}  # per-user state: never pruned, blocks worktree removal
 PROTECTED_BRANCHES = {"main"}
 
 
@@ -44,10 +49,36 @@ def git(*args: str, cwd: Path = ROOT, check: bool = True) -> str:
 
 
 def age_days(path: Path) -> float:
+    """Days since anything under path last changed (a rewritten file keeps its folder young)."""
+    newest = 0.0
     try:
-        return (time.time() - path.lstat().st_mtime) / DAY
+        newest = path.lstat().st_mtime
+        if path.is_dir() and not path.is_symlink():
+            for base, _dirs, files in os.walk(path):
+                for name in files:
+                    try:
+                        newest = max(newest, os.lstat(os.path.join(base, name)).st_mtime)
+                    except OSError:
+                        pass
     except OSError:
         return 0.0
+    return (time.time() - newest) / DAY
+
+
+def activity_days(worktree: Path) -> float:
+    """Days since the worktree's HEAD or reflog last changed (its .git file only records creation)."""
+    gitdir = Path(git("rev-parse", "--absolute-git-dir", cwd=worktree, check=False).strip() or worktree / ".git")
+    # Not the index: `git status` refreshes it. Uncommitted edits already make a worktree dirty.
+    times = [(gitdir / name).stat().st_mtime for name in ("HEAD", "logs/HEAD") if (gitdir / name).exists()]
+    return round((time.time() - max(times)) / DAY, 1) if times else 0.0
+
+
+def known(rel: str) -> str | None:
+    if rel in LOCAL or any(rel.startswith(k + "/") for k in LOCAL):
+        return "local"
+    if rel in REGENERABLE or rel.endswith("__pycache__") or (rel.startswith("packages/") and rel.endswith("/test-results")):
+        return "regenerable"
+    return None
 
 
 def worktrees() -> list[dict]:
@@ -63,9 +94,12 @@ def worktrees() -> list[dict]:
     return rows
 
 
-def live_cwds() -> set[str]:
-    """Directories some process is running in; a worktree with a live process is never pruned."""
-    done = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fn"], capture_output=True, text=True, check=False)
+def live_cwds() -> set[str] | None:
+    """Directories this user's processes run in, or None when lsof is unavailable (then nothing is pruned)."""
+    try:
+        done = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fn"], capture_output=True, text=True, check=False)
+    except OSError:
+        return None
     return {line[1:] for line in done.stdout.splitlines() if line.startswith("n")}
 
 
@@ -86,7 +120,7 @@ def dead_tooling() -> list[str]:
     pattern = re.compile("|".join(sorted((re.escape(n) for n in names), key=len, reverse=True)))
     seen: dict[str, set] = {}
     for path in tracked:
-        if path.endswith((".md", ".module.json", ".png", ".tgz", ".jpg", ".pdf", ".caf", ".ttf", ".icns")):
+        if path.endswith((".md", ".tsv", ".module.json", ".png", ".tgz", ".jpg", ".pdf", ".caf", ".ttf", ".icns")):
             continue
         try:
             text = (ROOT / path).read_text(errors="ignore")
@@ -114,9 +148,12 @@ def report(prune: bool) -> dict:
             elif code == "!!":
                 if rel.endswith("__pycache__"):
                     out["bytecode"].append(where)
-                elif not any(rel == k or rel.endswith("/" + k) or rel.startswith(k + "/") or ("/" + k + "/") in rel
-                             for k in KNOWN_IGNORED):
+                elif known(rel) is None:
                     out["residue"].append(where)
+        tracked_tops = {p.split("/", 1)[0] for p in git("ls-files", cwd=tree, check=False).splitlines()}
+        for entry in tree.iterdir():  # git status hides empty ignored directories such as tmp/
+            if entry.is_dir() and entry.name not in tracked_tops | {".git"} and not any(entry.iterdir()):
+                out["residue"].append(str(entry))
         for folder, days in ((SCRATCH, SCRATCH_DAYS), (EVIDENCE, EVIDENCE_DAYS)):
             for base in [tree / folder] + list(tree.glob(f"packages/*/{folder}")):
                 if base.is_dir():
@@ -125,10 +162,14 @@ def report(prune: bool) -> dict:
     for w in worktrees()[1:]:
         path, head, branch = w["worktree"], w.get("HEAD", ""), str(w.get("branch", "")).removeprefix("refs/heads/")
         merged = bool(main) and subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", head, main]).returncode == 0
-        dirty = bool(git("status", "--porcelain", cwd=Path(path), check=False).strip())
-        live = any(c == path or c.startswith(path + "/") for c in cwds)
+        status = git("status", "--porcelain", "--ignored", "--untracked-files=normal", cwd=Path(path), check=False)
+        # Anything but regenerable output counts as local data: `git worktree remove` would delete
+        # ignored files (e.g. .env.local) silently, so such a worktree is never pruned.
+        dirty = any(not line.startswith("!! ") or known(line[3:].strip('"').rstrip("/")) != "regenerable"
+                    for line in status.splitlines())
+        live = cwds is None or any(c == path or c.startswith(path + "/") for c in cwds)
         out["worktrees"].append({"path": path, "branch": branch, "merged": merged, "dirty": dirty, "live": live,
-                                 "idleDays": round(age_days(Path(path) / ".git"), 1)})
+                                 "idleDays": activity_days(Path(path))})
     registered = {w["worktree"] for w in worktrees()}
     sibling = primary.parent / f"{primary.name}-worktrees"
     if sibling.is_dir():
@@ -148,9 +189,8 @@ def report(prune: bool) -> dict:
 
     out["dead_tooling"] = dead_tooling()
 
-    expected = (ROOT / "scripts" / "install-hooks.sh")
     hook = Path(git("rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-commit").strip())
-    if expected.exists() and (not hook.exists() or "scripts/tron hook" not in hook.read_text(errors="replace")):
+    if not hook.exists() or "scripts/tron hook" not in hook.read_text(errors="replace"):
         out["hook"].append(f"{hook} is not the managed hook; run scripts/install-hooks.sh")
 
     if prune:
@@ -159,7 +199,8 @@ def report(prune: bool) -> dict:
             out["pruned"].append(path)
         for w in out["worktrees"]:
             if w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= 3:
-                if subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", w["path"]]).returncode == 0:
+                # --force only because regenerable ignored output (node_modules, build) is all that remains.
+                if subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", w["path"]]).returncode == 0:
                     out["pruned"].append(f"worktree {w['path']} (branch {w['branch']} is on main)")
                     checked_out.discard(w["branch"])
         for b in out["branches"]:
@@ -181,7 +222,7 @@ def main(argv: list[str]) -> int:
     fixes = {
         "dead_tooling": "no code, config or test names it: wire it into scripts/tron or delete it",
         "untracked": "commit it with an owner, move it to .scratch/, or delete it",
-        "residue": "ignored path with no owner: delete it, or add its writer to tidy KNOWN_IGNORED",
+        "residue": "ignored path with no named writer: delete it, or add its writer to tidy REGENERABLE/LOCAL",
         "expired": f"older than {SCRATCH_DAYS}d scratch / {EVIDENCE_DAYS}d evidence: scripts/tron tidy --prune",
         "bytecode": "scripts/tron tidy --prune (scripts/tron sets PYTHONDONTWRITEBYTECODE)",
         "orphan_worktree_dirs": "not a registered worktree: inspect, then remove it by hand",
