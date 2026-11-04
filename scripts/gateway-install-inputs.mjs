@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Fingerprints, checks and records the Gateway install inputs that decide whether a payload rebuild is needed.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, writeFile } from "node:fs/promises";

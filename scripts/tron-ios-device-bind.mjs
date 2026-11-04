@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Lists paired iPhones or binds one to a CoreDevice target for Gateway-driven installs.
 
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";

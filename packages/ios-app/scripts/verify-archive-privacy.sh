@@ -1,4 +1,5 @@
 #!/bin/bash
+# Checks a Release .xcarchive's app and extension privacy manifests before upload (manual release step).
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 

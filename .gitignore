@@ -73,3 +73,6 @@ progress.md
 !.pi/prompts/*.md
 !.pi/agents/
 !.pi/agents/*.md
+
+# Agent scratch: workflow scripts, notes and drafts (AGENTS.md "Where things go"; pruned by scripts/tron tidy)
+.scratch/
