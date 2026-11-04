@@ -36,17 +36,13 @@ afterAll(async () => { await mkdir(dirname(artifact), { recursive: true }); awai
 let command = 0;
 const phone = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
 
-async function fixture(github = false) {
+async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-project-lifecycle-")));
   roots.push(root);
   const workspace = join(root, "Workspace");
   await mkdir(workspace);
-  const executable = join(root, "gh-fixture");
-  // A spawned fixture executable, not a mocked settings/TrustService method.
-  // It records the real CLI arguments and emulates only GitHub's external port.
-  await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(join(root, "gh-args"))}\n[ "$1" = repo ] && [ "$2" = create ] && [ "$4" = --private ] || exit 2\ngit -C "$6" remote add origin "https://github.invalid/fixture/$3.git"\n`, { mode: 0o700 });
   let clock = Date.now();
-  const f = await homeFixture(false, false, undefined, false, undefined, { projectOptions: { workspace, ...(github ? { githubExecutable: executable } : {}) }, settingsNow: () => new Date(clock) });
+  const f = await homeFixture(false, false, undefined, false, undefined, { projectOptions: { workspace }, settingsNow: () => new Date(clock) });
   const changes = f.settings.settingsChanges;
   await setHomeMemoryModels(f.registry, [f.model]);
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
@@ -76,11 +72,21 @@ async function fixture(github = false) {
   f.faux.setResponses(Array.from({ length: 100 }, () => responder as never));
   const settled = () => waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && home.snapshot().phase === "idle" || undefined, "Home idle");
   const cards = new Map<string, { key: string; interaction: Extract<ExtensionInteraction, { method: "change" }> }>();
-  async function request(args: Record<string, unknown>) {
+  // The agent tool only creates. Trust and untrust are paired-native project
+  // reviews (agents change trust through the settings tool).
+  async function request(args: { action: string; name: string }) {
+    if (args.action !== "create") {
+      const native = await service.invoke(phone, "projects.change", { commandId: `native-request-${++command}`,
+        action: args.action, name: args.name, reason: "Lifecycle boundary proof" }).then(
+        details => ({ isError: false, text: "Exact native review", details: details as unknown as ChangeResult }),
+        (error: Error) => ({ isError: true, text: error.message, details: { status: "review" as const, changes: [] } as ChangeResult }));
+      evidence.push({ args, ...native });
+      return native;
+    }
     await (homeOwnerOf(f.registry) as unknown as { wakeDrain?: Promise<void> }).wakeDrain;
     await settled();
     const key = `project request ${++command}`;
-    calls.set(key, { reason: "Lifecycle boundary proof", ...args });
+    calls.set(key, { reason: "Lifecycle boundary proof", name: args.name });
     await home.prompt(key);
     const result = await waitFor(() => results.get(key) ?? (() => {
       const interaction = home.snapshot().extensionPresentation.pendingInteractions[0];
@@ -105,15 +111,14 @@ async function fixture(github = false) {
       return answer.details;
     }
     if (!approved) throw new Error("Direct native review cancellation sends no mutation");
-    const intent = result.intent as { operation: string; name: string; destination?: string; github?: boolean };
+    const intent = result.intent as { operation: string; name: string };
     return service.invoke(phone, "projects.change", { commandId: `project-native-${++command}`, action: intent.operation,
-      name: intent.name, reason: result.review!.reason, ...(intent.operation === "rename" ? { newName: intent.destination } : {}),
-      ...(intent.github ? { github: true } : {}), confirmation: { digest: result.review!.digest, intent } }) as unknown as Promise<ChangeResult>;
+      name: intent.name, reason: result.review!.reason, confirmation: { digest: result.review!.digest, intent } }) as unknown as Promise<ChangeResult>;
   };
   const path = (name: string) => join(workspace, name);
   const git = async (name: string, args: string[]) => (await exec("git", ["-C", path(name), ...args])).stdout.trim();
-  async function create(name: string, github = false) {
-    const result = await request({ action: "create", name, github });
+  async function create(name: string) {
+    const result = await request({ action: "create", name });
     expect(result.isError, result.text).toBe(false);
     expect(result.details.status).toBe("review");
     return result.details;
@@ -122,7 +127,7 @@ async function fixture(github = false) {
 }
 
 type NativeRow = { name: string; path: string; trust: { effectiveDecision: boolean | null; savedDecision: boolean | null } | null;
-  eligibility: Record<"trust" | "github" | "rename" | "archive" | "untrust", { allowed: boolean; code?: string; reason?: string }> };
+  eligibility: Record<"trust" | "untrust", { allowed: boolean; code?: string; reason?: string }> };
 type NativePage = { workspace: string; projects: NativeRow[]; nextCursor: string | null };
 
 describe("Gateway project lifecycle", () => {
@@ -140,31 +145,22 @@ describe("Gateway project lifecycle", () => {
     expect(await f.service.invoke(phone, "projects.change", { ...args, reason: "Different payload" })).toEqual(pending);
     expect((await f.decide(pending)).status).toBe("applied");
     await writeFile(f.path("native-original/data"), "retained native bytes");
-    const rename = await ask("rename", "native-original", { newName: "native-renamed" });
+    // A review alone changes nothing; only the separate confirmation applies it.
+    const unconfirmed = await ask("untrust", "native-original");
+    expect(unconfirmed.status).toBe("review");
+    expect((await list()).projects.find(row => row.name === "native-original")?.trust?.effectiveDecision).toBe(true);
+    await f.decide(await ask("untrust", "native-original"));
+    expect((await list()).projects.find(row => row.name === "native-original")?.trust?.effectiveDecision).toBe(false);
+    await f.decide(await ask("trust", "native-original"));
+    expect((await list()).projects.find(row => row.name === "native-original")?.trust?.effectiveDecision).toBe(true);
     expect(await readFile(f.path("native-original/data"), "utf8")).toBe("retained native bytes");
-    await f.decide(rename);
-    expect(await readFile(f.path("native-renamed/data"), "utf8")).toBe("retained native bytes");
-    const denied = (await f.request({ action: "untrust", name: "native-renamed" })).details;
-    await f.decide(denied, false);
-    expect((await list()).projects.find(row => row.name === "native-renamed")?.trust?.effectiveDecision).toBe(true);
-    await f.decide(await ask("untrust", "native-renamed"));
-    expect((await list()).projects.find(row => row.name === "native-renamed")?.trust?.effectiveDecision).toBe(false);
-    await f.decide(await ask("trust", "native-renamed"));
-    const archive = await ask("archive", "native-renamed");
-    expect(await readFile(f.path("native-renamed/data"), "utf8")).toBe("retained native bytes");
-    await f.decide(archive);
-    expect((await list()).projects.some(row => row.name === "native-renamed")).toBe(false);
-    const archived = (await readdir(join(f.workspace, ".archive")))[0]!;
-    expect(await readFile(join(f.workspace, ".archive", archived, "data"), "utf8")).toBe("retained native bytes");
-    expect((await f.trust.inspect(join(f.workspace, ".archive", archived))).effectiveDecision).toBe(false);
-    evidence.push({ nativeJourney: { pending, rename, denied, archive } });
+    evidence.push({ nativeJourney: { pending, unconfirmed } });
   });
 
-  it.each(["create", "rename", "archive"] as const)("confirms the exact %s review after JSON object keys are reordered", async action => {
+  it.each(["create", "untrust"] as const)("confirms the exact %s review after JSON object keys are reordered", async action => {
     const f = await fixture();
     if (action !== "create") await f.decide(await f.create("wire-source"));
-    const fields = { action, name: "wire-source", reason: "Native JSON round trip",
-      ...(action === "rename" ? { newName: "wire-renamed" } : {}) };
+    const fields = { action, name: "wire-source", reason: "Native JSON round trip" };
     const pending = await f.service.invoke(phone, "projects.change", {
       ...fields, commandId: `wire-review-${++command}`,
     }) as unknown as ChangeResult;
@@ -176,14 +172,13 @@ describe("Gateway project lifecycle", () => {
     const result = await f.service.invoke(phone, "projects.change", { ...fields, commandId: `wire-confirm-${++command}`,
       confirmation: { digest: pending.review!.digest, intent } }) as unknown as ChangeResult;
     expect(result.status).toBe("applied");
-    const destination = action === "archive" ? join(f.workspace, ".archive", intent.destination)
-      : f.path(action === "rename" ? "wire-renamed" : "wire-source");
+    const destination = f.path("wire-source");
     expect(await readFile(join(destination, ".git/HEAD"), "utf8")).toBe("ref: refs/heads/main\n");
-    expect((await f.trust.inspect(destination)).effectiveDecision).toBe(action !== "archive");
+    expect((await f.trust.inspect(destination)).effectiveDecision).toBe(action === "create");
     evidence.push({ reorderedNativeIntent: { action, pending, result } });
   });
 
-  it("native eligibility reads preserve trust, explain actual idle-session move refusal and unsupported saved folders", async () => {
+  it("native eligibility reads preserve trust and an idle session, and refuse unsupported saved folders", async () => {
     const f = await fixture();
     await f.decide(await f.create("native-idle"));
     const slot = await f.registry.create(f.path("native-idle"));
@@ -192,10 +187,7 @@ describe("Gateway project lifecycle", () => {
     const row = await inspect(slot.cwd);
     expect(row.trust).toMatchObject({ savedDecision: true, effectiveDecision: true });
     expect(row.eligibility.untrust.allowed).toBe(true);
-    expect(row.eligibility.archive).toMatchObject({ allowed: false, code: "busy" });
-    expect(row.eligibility.rename.reason).toMatch(/session/i);
-    await expect(f.service.invoke(phone, "projects.change", { commandId: `native-busy-${++command}`, action: "archive",
-      name: "native-idle", reason: "Must retain canonical refusal" })).rejects.toMatchObject({ code: "busy", message: row.eligibility.archive.reason });
+    expect(row.eligibility.trust.allowed).toBe(true);
     await mkdir(f.path("not a supported name"));
     await symlink(f.root, f.path("linked-native"));
     const unsupported = await inspect(f.root);
@@ -295,6 +287,41 @@ if (args.includes("worktree")) {
     expect((await f.changes.record.page({ limit: 50 })).entries).toEqual(before);
   });
 
+  it("retains the native response fence when a failed create's audit publication also fails", async () => {
+    const f = await fixture(), audit = f.changes.record.path, retained = audit + "-retained";
+    const realGit = (await exec("/usr/bin/which", ["git"])).stdout.trim();
+    const bin = join(f.root, "failing-init-bin"), counter = join(f.root, "init-calls");
+    await mkdir(bin);
+    // Real Git for every read; `init` blocks the canonical audit file, then fails.
+    await writeFile(join(bin, "git"), `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = init ]; then
+    printf attempt >> ${JSON.stringify(counter)}
+    mv ${JSON.stringify(audit)} ${JSON.stringify(retained)}
+    printf blocked > ${JSON.stringify(audit)}
+    exit 7
+  fi
+done
+exec ${JSON.stringify(realGit)} "$@"
+`, { mode: 0o700 });
+    const reviewed = await f.create("uncertain-init");
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    try {
+      await expect(f.decide(reviewed)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+    } finally { vi.unstubAllEnvs(); }
+    expect((await f.trust.inspect(f.path("uncertain-init"))).effectiveDecision).toBe(false);
+    await rm(audit); await rename(retained, audit);
+    const directory = join(f.tronHome, "gateway", "command-receipts");
+    const receipts = await Promise.all((await readdir(directory)).filter(name => name.endsWith(".json")).map(async name =>
+      JSON.parse(await readFile(join(directory, name), "utf8"))));
+    const pending = receipts.filter(receipt => receipt.method === "extension.respond" && receipt.status === "pending");
+    expect(pending).toHaveLength(1);
+    await expect(f.service.invoke(phone, "extension.respond", { commandId: pending[0].commandId })).rejects.toMatchObject({
+      code: "conflict", details: { outcomeUnknown: true } });
+    expect(await readFile(counter, "utf8")).toBe("attempt");
+    evidence.push({ failedAuditReceipt: pending[0], partialCreateRetained: true });
+  });
+
   it("native folder paths and cursors are exact and never trim into another project", async () => {
     const f = await fixture();
     await f.decide(await f.create("exact-native"));
@@ -359,7 +386,7 @@ if (args.includes("worktree")) {
     });
     const withHistory = await best(list);
     expect(withHistory.page.projects.map(row => row.name)).toEqual(names);
-    expect(withHistory.page.projects.every(row => row.eligibility.untrust.allowed && row.eligibility.rename.allowed)).toBe(true);
+    expect(withHistory.page.projects.every(row => row.eligibility.untrust.allowed && row.eligibility.trust.allowed)).toBe(true);
     evidence.push({ projectsListHistory: { projects: names.length, tasks: 300, bareMs: Math.round(bare.ms), oneTaskPassMs: Math.round(pass.ms), listMs: Math.round(withHistory.ms) } });
     // A task pass per project eligibility check (and per page of tasks) is the measured defect: one pass is the whole budget.
     expect(withHistory.ms).toBeLessThan(bare.ms + 8 * pass.ms);
@@ -406,7 +433,7 @@ if (args.includes("worktree")) {
     expect(completed.reportRef?.resultId, JSON.stringify(completed)).toBe("project-ready");
   });
 
-  it("refuses traversal, existing files/directories, project symlinks and archive symlink escape", async () => {
+  it("refuses traversal, existing files/directories and project symlinks", async () => {
     const f = await fixture();
     for (const name of ["../escape", "/tmp/escape", ".archive", "a/b", "a b"]) expect((await f.request({ action: "create", name })).isError).toBe(true);
     await f.decide(await f.create("existing"));
@@ -415,42 +442,13 @@ if (args.includes("worktree")) {
     expect((await f.request({ action: "create", name: "existing-file" })).isError).toBe(true);
     await symlink(f.path("existing"), f.path("linked"));
     expect((await f.request({ action: "trust", name: "linked" })).isError).toBe(true);
-    await symlink(f.root, f.path(".archive"));
-    expect((await f.request({ action: "archive", name: "existing" })).isError).toBe(true);
     expect(await readFile(f.path("existing-file"), "utf8")).toBe("preserve");
   });
 
-  it("rename, archive and untrust require taps, retain data and leave no stale trusted source name", async () => {
-    const f = await fixture();
-    await f.decide(await f.create("original"));
-    await writeFile(f.path("original/data"), "keep this");
-    await mkdir(f.path("occupied"));
-    expect((await f.request({ action: "rename", name: "original", newName: "occupied" })).isError).toBe(true);
-    const rename = await f.request({ action: "rename", name: "original", newName: "renamed" });
-    expect(rename.isError, rename.text).toBe(false);
-    expect(await readFile(f.path("original/data"), "utf8")).toBe("keep this");
-    await f.decide(rename.details);
-    expect(await readFile(f.path("renamed/data"), "utf8")).toBe("keep this");
-    expect((await f.trust.inspect(f.path("renamed"))).effectiveDecision).toBe(true);
-    const untrust = await f.request({ action: "untrust", name: "renamed" });
-    expect(untrust.isError, untrust.text).toBe(false);
-    expect((await f.trust.inspect(f.path("renamed"))).effectiveDecision).toBe(true);
-    await f.decide(untrust.details);
-    expect((await f.trust.inspect(f.path("renamed"))).effectiveDecision).toBe(false);
-    const archive = await f.request({ action: "archive", name: "renamed" });
-    expect(archive.isError, archive.text).toBe(false);
-    await f.decide(archive.details);
-    const [name] = await readdir(f.path(".archive"));
-    expect(await readFile(f.path(`.archive/${name}/data`), "utf8")).toBe("keep this");
-    expect((await f.trust.inspect(f.path(`.archive/${name}`))).effectiveDecision).toBe(false);
-    await mkdir(f.path("original"));
-    expect((await f.trust.inspect(f.path("original"))).effectiveDecision).toBe(false);
-  });
-
-  it("busy real project sessions and linked worktrees refuse archive, including work starting after submission", async () => {
+  it("busy real project work and linked worktrees refuse trust changes, including work starting after submission", async () => {
     const f = await fixture();
     await f.decide(await f.create("busy"));
-    const pending = await f.request({ action: "archive", name: "busy" });
+    const pending = await f.request({ action: "untrust", name: "busy" });
     expect(pending.isError, pending.text).toBe(false);
     let release!: () => void;
     let entered = false;
@@ -458,7 +456,7 @@ if (args.includes("worktree")) {
     f.faux.setResponses([async () => { entered = true; await held; return fauxAssistantMessage("Worker finished"); }]);
     const worker = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "busy-worker", target: f.path("busy"), intent: "Hold this real worker active" });
     await waitFor(() => entered || undefined, "worker model entered");
-    const direct = () => projectsOwnerOf(f.registry)!.request({ action: "archive", name: "busy", reason: "Busy boundary" }, { kind: "home", id: f.home.sessionId, sessionId: f.home.sessionId }, `busy-request-${++command}`);
+    const direct = () => projectsOwnerOf(f.registry)!.request({ action: "trust", name: "busy", reason: "Busy boundary" }, { kind: "home", id: f.home.sessionId, sessionId: f.home.sessionId }, `busy-request-${++command}`);
     try {
       await expect(f.decide(pending.details)).rejects.toThrow(/superseded|session|busy/i);
       await expect(direct()).rejects.toThrow(/session|busy|worker/i);
@@ -469,7 +467,7 @@ if (args.includes("worktree")) {
     await expect(projectsOwnerOf(f.registry)!.request({ action: "untrust", name: "busy", reason: "Worktree boundary" }, { kind: "home", id: f.home.sessionId }, `worktree-request-${++command}`)).rejects.toThrow(/worktree/i);
   });
 
-  it("pins new exact roots under an enclosing repository and default-always trust; partial relocation stays untrusted", async () => {
+  it("pins new exact roots under an enclosing repository and default-always trust", async () => {
     const f = await fixture();
     await maintainerChange(f.service, phone, "settings.change", { commandId: `default-trust-${++command}`, target: { kind: "global" },
       changes: [{ key: "permissions.defaultProjectTrust", layer: "global", op: "set", value: "always" }] });
@@ -480,33 +478,11 @@ if (args.includes("worktree")) {
     await f.decide(pending);
     expect((await f.trust.inspect(f.path("nested"))).projectDir).toBe(f.path("nested"));
     expect((await f.trust.inspect(f.workspace)).savedDecision).toBe(ancestor.savedDecision);
-    const destination = f.path("retained");
-    await mkdir(destination);
-    let release!: () => void;
-    let entered = false;
-    const held = new Promise<void>(resolve => { release = resolve; });
-    const relocating = f.trust.relocate(f.path("nested"), destination, false, async () => {
-      entered = true;
-      await held;
-      await rename(f.path("nested"), destination);
-      throw new Error("fixture interrupted after filesystem effect");
-    }, inspection => f.registry.reloadProject(inspection.projectDir, false, false), inspection => f.registry.commitProjectReload(inspection.projectDir),
-    inspection => f.registry.abortProjectReload(inspection.projectDir));
-    try {
-      await waitFor(() => entered || undefined, "relocation fence acquired");
-      await expect(f.registry.create(f.path("nested"))).rejects.toMatchObject({ code: "busy" });
-      expect((await f.trust.inspect(destination)).effectiveDecision).toBe(false);
-    } finally { release(); }
-    await expect(relocating).rejects.toThrow(/fixture interrupted/);
-    expect((await f.trust.inspect(destination)).effectiveDecision).toBe(false);
-    await mkdir(f.path("nested"));
-    await exec("git", ["-C", f.path("nested"), "init", "--initial-branch=main"]);
-    expect((await f.trust.inspect(f.path("nested"))).effectiveDecision).toBe(false);
     const slot = await f.registry.create(f.path("nested"));
     expect(slot.cwd).toBe(f.path("nested"));
   });
 
-  it("identity replacement supersedes approval, workspace symlinks refuse and retained claim branches block effects", async () => {
+  it("identity replacement supersedes approval and workspace symlinks refuse", async () => {
     const f = await fixture();
     await f.decide(await f.create("replaced"));
     const pending = (await f.request({ action: "trust", name: "replaced" })).details;
@@ -515,76 +491,12 @@ if (args.includes("worktree")) {
     await symlink(join(f.root, "outside"), f.path("replaced"));
     await expect(f.decide(pending)).rejects.toThrow(/superseded|symlink/i);
     expect((await f.trust.inspect(join(f.root, "outside"))).savedDecision).toBe(null);
-    const claimed = await f.create("claimed");
-    await f.decide(claimed);
-    await f.git("claimed", ["checkout", "-b", "feat/42-worker"]);
-    await f.git("claimed", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "claim\n\nWork-Claim-Session: fixture-worker"]);
-    expect((await f.request({ action: "archive", name: "claimed" })).isError).toBe(true);
     await rename(f.workspace, join(f.root, "relocated-workspace"));
     await symlink(join(f.root, "relocated-workspace"), f.workspace);
     expect((await f.request({ action: "create", name: "escaped" })).isError).toBe(true);
   });
 
-  it("inspection of untrusted claim refs never runs repository-configured signature programs", async () => {
-    const f = await fixture();
-    await f.decide(await f.create("signature-config"));
-    await f.decide((await f.request({ action: "untrust", name: "signature-config" })).details);
-    const marker = join(f.root, "signature-program-ran");
-    const executable = join(f.root, "gpg-fixture");
-    await writeFile(executable, `#!/bin/sh\nprintf ran > ${JSON.stringify(marker)}\nexit 1\n`, { mode: 0o700 });
-    const tree = await f.git("signature-config", ["write-tree"]);
-    const object = join(f.root, "signed-commit");
-    await writeFile(object, `tree ${tree}\nauthor Fixture <fixture@example.invalid> 1 +0000\ncommitter Fixture <fixture@example.invalid> 1 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n fixture\n -----END PGP SIGNATURE-----\n\nClaim fixture\n\nWork-Claim-Session: fixture-worker\n`);
-    const commit = await f.git("signature-config", ["hash-object", "-t", "commit", "-w", object]);
-    await f.git("signature-config", ["update-ref", "refs/heads/feat/42-worker", commit]);
-    await f.git("signature-config", ["config", "--local", "log.showSignature", "true"]);
-    await f.git("signature-config", ["config", "--local", "gpg.program", executable]);
-    const refused = await f.request({ action: "trust", name: "signature-config" });
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toMatch(/retains a work claim branch/i);
-    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    expect((await f.trust.inspect(f.path("signature-config"))).effectiveDecision).toBe(false);
-  });
-
-  it("retains the native response fence when partial GitHub effects are followed by a real failed-audit I/O failure", async () => {
-    const f = await fixture(true), audit = f.changes.record.path, retained = audit + "-retained";
-    const counter = join(f.root, "github-calls"), executable = join(f.root, "gh-fixture");
-    await writeFile(executable, `${await readFile(executable, "utf8")}
-printf attempt >> ${JSON.stringify(counter)}
-mv ${JSON.stringify(audit)} ${JSON.stringify(retained)}
-printf blocked > ${JSON.stringify(audit)}
-exit 7
-`);
-    const reviewed = await f.create("uncertain-remote", true);
-    await expect(f.decide(reviewed)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
-    expect(await f.git("uncertain-remote", ["remote", "get-url", "origin"])).toBe("https://github.invalid/fixture/uncertain-remote.git");
-    expect((await f.trust.inspect(f.path("uncertain-remote"))).effectiveDecision).toBe(false);
-    await rm(audit); await rename(retained, audit);
-    const directory = join(f.tronHome, "gateway", "command-receipts");
-    const receipts = await Promise.all((await readdir(directory)).filter(name => name.endsWith(".json")).map(async name =>
-      JSON.parse(await readFile(join(directory, name), "utf8"))));
-    const pending = receipts.filter(receipt => receipt.method === "extension.respond" && receipt.status === "pending");
-    expect(pending).toHaveLength(1);
-    await expect(f.service.invoke(phone, "extension.respond", { commandId: pending[0].commandId })).rejects.toMatchObject({
-      code: "conflict", details: { outcomeUnknown: true } });
-    expect(await readFile(counter, "utf8")).toBe("attempt");
-    evidence.push({ failedAuditReceipt: pending[0], partialRemoteRetained: true });
-  });
-
-  it("partial GitHub failure retains an untrusted project and refuses to silently recreate an existing remote", async () => {
-    const f = await fixture(true);
-    const executable = join(f.root, "gh-fixture");
-    await writeFile(executable, `${await readFile(executable, "utf8")}\nexit 7\n`);
-    const pending = await f.create("partial-remote", true);
-    await expect(f.decide(pending)).rejects.toThrow(/GitHub.*inspect/i);
-    expect(await f.git("partial-remote", ["remote", "get-url", "origin"])).toBe("https://github.invalid/fixture/partial-remote.git");
-    expect((await f.trust.inspect(f.path("partial-remote"))).effectiveDecision).toBe(false);
-    expect((await f.request({ action: "trust", name: "partial-remote", github: true })).isError).toBe(true);
-    await f.decide((await f.request({ action: "trust", name: "partial-remote" })).details);
-    expect((await f.trust.inspect(f.path("partial-remote"))).effectiveDecision).toBe(true);
-  });
-
-  it("a busy refusal before reload never reports a nonexistent acquired fence or runs move effects", async () => {
+  it("a busy refusal before reload never reports a nonexistent acquired fence or changes trust", async () => {
     const f = await fixture();
     await f.decide(await f.create("busy-reload"));
     const project = await f.registry.create(f.path("busy-reload"));
@@ -593,85 +505,43 @@ exit 7
     const held = new Promise<void>(resolve => { release = resolve; });
     f.faux.setResponses([async () => { entered = true; await held; return fauxAssistantMessage("Released"); }]);
     const prompt = project.prompt("Hold the real runtime");
-    let effects = 0;
     try {
       await waitFor(() => entered || undefined, "busy reload runtime entered");
-      const destination = f.path("busy-destination");
-      await mkdir(destination);
-      const error = await f.trust.relocate(project.cwd, destination, true, async () => { effects++; },
-        inspection => f.registry.reloadProject(inspection.projectDir, false, false),
+      const error = await f.trust.setAndApply(project.cwd, false,
+        inspection => f.registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
         inspection => f.registry.commitProjectReload(inspection.projectDir),
         inspection => f.registry.abortProjectReload(inspection.projectDir)).catch(error => error as Error);
       expect(error).toMatchObject({ code: "internal", details: { failure: "Stop active sessions before changing project trust", rollbackFailure: "Stop active sessions before changing project trust" } });
-      expect(effects).toBe(0);
+      expect((await f.trust.inspect(project.cwd)).effectiveDecision).toBe(true);
       expect((await f.registry.create(project.cwd)).cwd).toBe(project.cwd);
       expect((error as Error).message).not.toMatch(/remains fenced/);
     } finally { release(); await prompt; }
   });
 
-  it("a move refused before filesystem effects preserves the exact trusted source decision", async () => {
+  it("a failed trust application with successful compensation restores trusted project resources without retiring the session", async () => {
     const f = await fixture();
-    await f.decide(await f.create("refused-source"));
-    const source = f.path("refused-source");
-    const destination = f.path("refused-target");
-    await writeFile(join(source, "data"), "retained source");
-    await mkdir(destination);
-    const before = await f.trust.inspect(source);
-    await expect(f.trust.relocate(source, destination, true, async () => {
-      throw new Error("Real admission refused before filesystem mutation");
-    }, inspection => f.registry.reloadProject(inspection.projectDir, false, false),
-    inspection => f.registry.commitProjectReload(inspection.projectDir),
-    inspection => f.registry.abortProjectReload(inspection.projectDir))).rejects.toThrow(/admission refused/);
-    expect(await readFile(join(source, "data"), "utf8")).toBe("retained source");
-    expect((await f.trust.inspect(source)).savedDecision).toBe(before.savedDecision);
-    expect((await f.trust.inspect(source)).effectiveDecision).toBe(true);
-    expect((await f.registry.create(source)).cwd).toBe(source);
-    expect((await f.trust.inspect(destination)).effectiveDecision).toBe(false);
-  });
-
-  it("a real idle admission before the relocation fence restores trusted project resources after move refusal", async () => {
-    const f = await fixture();
-    await f.decide(await f.create("resource-source"));
-    await f.decide(await f.create("resource-gate"));
-    const source = f.path("resource-source");
+    await f.decide(await f.create("restored-source"));
+    const source = f.path("restored-source");
     await mkdir(join(source, ".pi", "extensions"), { recursive: true });
     await writeFile(join(source, ".pi", "extensions", "restoration-probe.ts"), `export default function(pi) {
   pi.registerTool({ name: "restoration_probe", label: "Restoration", description: "Trusted resource proof",
     parameters: { type: "object", properties: {} },
     execute: async () => ({ content: [{ type: "text", text: "trusted resource" }] }) });
 }`);
-    const pending = await f.request({ action: "rename", name: "resource-source", newName: "resource-destination" });
-    expect(pending.isError, pending.text).toBe(false);
-    let release!: () => void;
-    let entered = false;
-    const held = new Promise<void>(resolve => { release = resolve; });
-    // Hold the real K4 mutation owner on an unrelated project. Lifecycle's final
-    // inspection can finish, but its relocation cannot acquire the fence yet.
-    const holding = f.trust.setAndApply(f.path("resource-gate"), false, async inspection => {
-      await f.registry.reloadProject(inspection.projectDir, false, false);
-      entered = true;
-      await held;
+    const slot = await f.registry.create(source);
+    const tools = () => (slot as unknown as { runtime: { session: { getAllTools(): Array<{ name: string }> } } }).runtime.session.getAllTools().map(tool => tool.name);
+    expect(tools()).toContain("restoration_probe");
+    let applications = 0;
+    await expect(f.trust.setAndApply(source, false, async inspection => {
+      await f.registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false);
+      if (++applications === 1) throw new Error("Fixture failure after the first native reload");
     }, inspection => f.registry.commitProjectReload(inspection.projectDir),
-    inspection => f.registry.abortProjectReload(inspection.projectDir));
-    let moving: Promise<{ error?: unknown }> | undefined;
-    try {
-      await waitFor(() => entered || undefined, "unrelated native transition held");
-      moving = f.decide(pending.details).then(() => ({}), error => ({ error }));
-      await waitFor(async () => (await readdir(f.workspace)).includes("resource-destination") || undefined, "lifecycle destination reserved before native fence");
-      const slot = await f.registry.create(source);
-      const tools = () => (slot as unknown as { runtime: { session: { getAllTools(): Array<{ name: string }> } } }).runtime.session.getAllTools().map(tool => tool.name);
-      expect(tools()).toContain("restoration_probe");
-      release();
-      await holding;
-      expect((await moving).error).toBeInstanceOf(Error);
-      expect((await f.trust.inspect(source)).effectiveDecision).toBe(true);
-      expect(slot.isDisposed).toBe(false);
-      expect(tools()).toContain("restoration_probe");
-    } finally {
-      release();
-      await holding;
-      await moving;
-    }
+    inspection => f.registry.abortProjectReload(inspection.projectDir))).rejects.toThrow(/first native reload/);
+    expect(applications).toBe(2);
+    expect((await f.trust.inspect(source)).effectiveDecision).toBe(true);
+    expect(slot.isDisposed).toBe(false);
+    expect(tools()).toContain("restoration_probe");
+    expect((await f.registry.create(source)).cwd).toBe(source);
   });
 
   it("failed application and compensation retire uncertain runtimes and release native project admission", async () => {
@@ -679,17 +549,13 @@ exit 7
     await f.decide(await f.create("aborted-reload"));
     const source = f.path("aborted-reload");
     const slot = await f.registry.create(source);
-    const destination = f.path("aborted-destination");
-    await mkdir(destination);
-    let effects = 0;
     const start = f.events.length;
     try {
-      await expect(f.trust.relocate(source, destination, true, async () => { effects++; }, async inspection => {
+      await expect(f.trust.setAndApply(source, false, async inspection => {
         await f.registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false);
         throw new Error("Fixture failure after native reload, including compensation");
       }, inspection => f.registry.commitProjectReload(inspection.projectDir),
       inspection => f.registry.abortProjectReload(inspection.projectDir))).rejects.toMatchObject({ code: "internal" });
-      expect(effects).toBe(0);
       expect((await f.registry.create(source)).cwd).toBe(source);
       expect(slot.isDisposed).toBe(true);
       await expect(slot.prompt("An aborted frame must not execute")).rejects.toMatchObject({ code: "conflict" });
@@ -701,36 +567,5 @@ exit 7
     }
   });
 
-  it("a spawned unauthenticated GitHub refusal retains the local repository without remotes or trust, even with no installed gh", async () => {
-    const executableRoot = await mkdtemp(join(tmpdir(), "tron-project-cli-"));
-    roots.push(executableRoot);
-    // Keep real Git, but no host gh/auth/Keychain dependency. The external port
-    // is the same spawned executable seam as the successful creation journey.
-    await symlink((await exec("/usr/bin/which", ["git"])).stdout.trim(), join(executableRoot, "git"));
-    vi.stubEnv("PATH", executableRoot);
-    await expect(exec("/usr/bin/which", ["gh"])).rejects.toMatchObject({ code: 1 });
-    const f = await fixture(true);
-    const argsPath = join(f.root, "gh-args");
-    await writeFile(join(f.root, "gh-fixture"), `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argsPath)}\nprintf 'fixture: authentication required\\n' >&2\nexit 4\n`);
-    const pending = await f.create("github-unauthed", true);
-    await expect(readFile(argsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(f.decide(pending)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("GitHub command did not complete") });
-    expect((await readFile(argsPath, "utf8")).split("\n")).toEqual(["repo", "create", "github-unauthed", "--private", "--source", f.path("github-unauthed"), "--remote", "origin", ""]);
-    expect(await f.git("github-unauthed", ["rev-parse", "--is-inside-work-tree"])).toBe("true");
-    expect(await f.git("github-unauthed", ["remote"])).toBe("");
-    expect((await f.trust.inspect(f.path("github-unauthed"))).effectiveDecision).toBe(false);
-    evidence.push({ githubRefusal: "spawned exit 4", installedGh: false, remotes: [], trusted: false });
-  });
 
-  it("optional private GitHub creation crosses only the approved spawned fixture boundary and sets origin without a push", async () => {
-    const f = await fixture(true);
-    const pending = await f.create("private-project", true);
-    await expect(readFile(join(f.root, "gh-args"))).rejects.toThrow();
-    await f.decide(pending);
-    const args = await readFile(join(f.root, "gh-args"), "utf8");
-    expect(args.split("\n")).toEqual(["repo", "create", "private-project", "--private", "--source", f.path("private-project"), "--remote", "origin", ""]);
-    expect(await f.git("private-project", ["remote", "get-url", "origin"])).toBe("https://github.invalid/fixture/private-project.git");
-    expect((await f.trust.inspect(f.path("private-project"))).effectiveDecision).toBe(true);
-    await expect(f.decide(pending)).rejects.toThrow(/no longer|approved/i);
-  });
 });

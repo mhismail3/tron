@@ -62,7 +62,7 @@ All rows below were executed on `7964f6dd9` (clean worktree). Raw logs, xcresult
 | `packages/gateway/src/modules/apps/apps-install.integration.test.ts` › … › offers without installing, reviews exact source/config, installs once… | Registry | Offer → `apps.list` empty; reviewed install creates once, same command idempotent | Stale install `conflict`; crash-cut cases without replay | G1 pass |
 | `TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight` | Native | Real `swift_app` offer → no app directory through review; explicit confirm tap creates `app.json`, pending row leaves | — | N pass |
 | `…/testTrustedProjectsListsAndAddsProjectsUntrusted` | Native | Trust changes only after the card's exact digest tap | — | N pass |
-| `…/testProjectLifecycleDenialRetainsUntrustedRepository` | Native | Deny → no repository or trust; denied rename keeps source | Denial path | N pass |
+| `…/testProjectLifecycleDenialRetainsUntrustedRepository` | Native | Deny → no repository or trust; denied trust keeps the repository untrusted | Denial path | N pass |
 
 **GAP #2232:** stale/wrong-digest/double-tap refusals are proven only through in-process
 `GatewayService.invoke`; no socket or native case for the shared change card.

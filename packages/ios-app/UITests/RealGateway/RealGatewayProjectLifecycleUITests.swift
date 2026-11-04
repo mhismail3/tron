@@ -2,16 +2,15 @@ import Foundation
 import XCTest
 
 /// Production pages → real socket → lifecycle owner/Git/trust store. No scripted
-/// responses or live GitHub publication; every decision is a separate toolbar tap.
+/// responses; every decision is a separate toolbar tap.
 extension RealGatewayPairAndChatUITests {
     @MainActor
-    func testProjectLifecycleApproveMovesAndArchives() throws {
+    func testProjectLifecycleApproveCreatesUntrustsAndTrusts() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let app = try lifecycleSettings(fixture)
         defer { app.terminate() }
         let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("lifecycle-approved")
-        let destination = source.deletingLastPathComponent().appendingPathComponent("lifecycle-renamed")
         try lifecycleCreate(app, name: source.lastPathComponent)
         // The review alone has no effects: only the exact tap creates and trusts.
         XCTAssertFalse(FileManager.default.fileExists(atPath: source.path), "The review alone must not create the project")
@@ -22,74 +21,15 @@ extension RealGatewayPairAndChatUITests {
         lifecycleClose(app)
         lifecycleBackToList(app)
         lifecycleTap(app, source.lastPathComponent)
-        lifecycleTap(app, "Rename Project")
-        lifecycleName(app, destination.lastPathComponent)
-        lifecycleTap(app, "Request Rename")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path), "A request alone must not move files")
-        lifecycleDecide(app, approve: true)
-        XCTAssertTrue(waitUntil(timeout: 15) { FileManager.default.fileExists(atPath: destination.path) })
-        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
-        XCTAssertEqual(try lifecycleTrust(fixture, path: destination.path), true)
-        lifecycleClose(app)
-        lifecycleBackToList(app)
-        lifecycleTap(app, destination.lastPathComponent)
         lifecycleTap(app, "project-lifecycle-untrust")
         lifecycleDecide(app, approve: true)
-        XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: destination.path)) == false })
+        XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == false })
         // Approve retires the review and returns to the requesting details page.
-        lifecycleTap(app, "project-lifecycle-archive")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        lifecycleTap(app, "Request Trust")
         lifecycleDecide(app, approve: true)
-        XCTAssertTrue(waitUntil(timeout: 15) { !FileManager.default.fileExists(atPath: destination.path) })
-        let archives = try FileManager.default.contentsOfDirectory(at: destination.deletingLastPathComponent().appendingPathComponent(".archive"), includingPropertiesForKeys: nil)
-        let retained = try XCTUnwrap(archives.first { $0.lastPathComponent.hasPrefix("lifecycle-renamed-") })
-        XCTAssertTrue(FileManager.default.fileExists(atPath: retained.appendingPathComponent(".git/HEAD").path), "Archive must retain the repository")
-        XCTAssertEqual(try lifecycleTrust(fixture, path: retained.path), false)
-        keepScreenshot(app, name: "2023-real-gateway-approved-archive")
-    }
-
-    @MainActor
-    func testProjectLifecycleListOmitsArchivedAndDepartedProjects() throws {
-        continueAfterFailure = false
-        let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = try lifecycleSettings(fixture)
-        defer { app.terminate() }
-        let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("departed-project")
-        let destination = source.deletingLastPathComponent().appendingPathComponent("archived-project")
-        func row(_ name: String) -> XCUIElement {
-            app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + ", ")).firstMatch
-        }
-        // A cancelled Create has no effects (Denial journey); approve a real source.
-        try lifecycleCreate(app, name: source.lastPathComponent)
-        lifecycleDecide(app, approve: true)
-        lifecycleClose(app)
-        lifecycleBackToList(app)
-        XCTAssertTrue(row(source.lastPathComponent).waitForExistence(timeout: 15), "The list selector must find the live source before testing its removal: \(app.debugDescription)")
-        lifecycleTap(app, source.lastPathComponent)
-        lifecycleTap(app, "Rename Project")
-        lifecycleName(app, destination.lastPathComponent)
-        lifecycleTap(app, "Request Rename")
-        lifecycleDecide(app, approve: true)
-        XCTAssertTrue(waitUntil(timeout: 15) { FileManager.default.fileExists(atPath: destination.path) })
-        lifecycleClose(app)
-        lifecycleBackToList(app)
-        lifecycleTap(app, destination.lastPathComponent)
-        lifecycleTap(app, "project-lifecycle-archive")
-        lifecycleDecide(app, approve: true)
-        XCTAssertTrue(waitUntil(timeout: 15) { !FileManager.default.fileExists(atPath: destination.path) })
-        let archives = try FileManager.default.contentsOfDirectory(at: destination.deletingLastPathComponent().appendingPathComponent(".archive"), includingPropertiesForKeys: nil)
-        let retained = try XCTUnwrap(archives.first { $0.lastPathComponent.hasPrefix("archived-project-") })
-        XCTAssertTrue(FileManager.default.fileExists(atPath: retained.appendingPathComponent(".git/HEAD").path))
-        lifecycleClose(app)
-        lifecycleBackToList(app)
-        // Observe the actual refreshed list after both filesystem effects. Keep
-        // all three failures so one run distinguishes tombstones from archives.
-        continueAfterFailure = true
-        for name in [source.lastPathComponent, destination.lastPathComponent, retained.lastPathComponent] {
-            XCTAssertTrue(waitUntil(timeout: 15) { !row(name).exists },
-                          "Departed and archived projects must not return as saved-decision ghost rows: \(name)")
-        }
-        keepScreenshot(app, name: "2023-real-gateway-list-after-archive")
+        XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == true })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git/HEAD").path), "Trust changes keep the repository")
+        keepScreenshot(app, name: "2023-real-gateway-approved-trust")
     }
 
     @MainActor
@@ -106,7 +46,7 @@ extension RealGatewayPairAndChatUITests {
         lifecycleClose(app)
         lifecycleBackToList(app)
         // A real repository, explicitly untrusted through its own exact tap,
-        // must survive a denied rename with no move and no new authority.
+        // must survive a denied trust request with no new authority.
         try lifecycleCreate(app, name: source.lastPathComponent)
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == true })
@@ -117,14 +57,11 @@ extension RealGatewayPairAndChatUITests {
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == false })
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git/HEAD").path))
-        lifecycleTap(app, "Rename Project")
-        lifecycleName(app, "must-not-exist")
-        lifecycleTap(app, "Request Rename")
+        lifecycleTap(app, "Request Trust")
         lifecycleDecide(app, approve: false)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: source.deletingLastPathComponent().appendingPathComponent("must-not-exist").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git/HEAD").path))
         XCTAssertEqual(try lifecycleTrust(fixture, path: source.path), false)
-        keepScreenshot(app, name: "2023-real-gateway-denied-rename")
+        keepScreenshot(app, name: "2023-real-gateway-denied-trust")
     }
 
     /// #2206: a confirmed action the Gateway refuses right away (the path appeared
@@ -150,15 +87,15 @@ extension RealGatewayPairAndChatUITests {
     }
 
     @MainActor
-    func testProjectLifecycleBusyArchiveUsesCanonicalReason() throws {
+    func testProjectLifecycleBusyTrustUsesCanonicalReason() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let app = try lifecycleSettings(fixture)
         defer { app.terminate() }
         lifecycleTap(app, "busy-project")
-        let archive = app.buttons["project-lifecycle-archive"]
-        XCTAssertTrue(archive.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertFalse(archive.isEnabled)
+        let trust = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Request Trust", "Request Trust, ")).firstMatch
+        XCTAssertTrue(trust.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(trust.isEnabled)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "linked worktrees")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(FileManager.default.fileExists(atPath: URL(fileURLWithPath: fixture.workspace).appendingPathComponent("busy-project/.git/HEAD").path))
         XCTAssertNotEqual(try lifecycleTrust(fixture, path: URL(fileURLWithPath: fixture.workspace).appendingPathComponent("busy-project").path), true)

@@ -142,7 +142,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   overrides the Global list), the switch is dimmed, shows Off and says why; the saved entry is kept,
   and the row explains why.
 - **Extensions.** Inventory counts, installed packages (Tron's bundled subagents provider without
-  Update/Remove), Install Package, read-only Tron Modules and search paths. A package's detail lists
+  Update/Remove), the npm command, read-only Tron Modules and search paths. There is no native
+  install form: an agent proposes `sources.packages` (and `sources.npmCommand`) through the exact
+  install/trust card (#2172). A package's detail lists
   what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks reads
   `hooks.list` (`hooks.v1`) per scope; an untrusted project says its hooks are not loaded.
 - **MCP.** MCP Servers uses the Providers row layout and edits Pi's global `mcp.json`
@@ -217,18 +219,19 @@ and switch profile: no untouched inherited setting may become an override.
 
 ## Project lifecycle presentation
 
-`ProjectLifecyclePages.swift` owns the project list, Add/Create, details and Rename
-presentation. Lists use `TronListGroup`/`TronListRow` without chevrons; fields keep
+`ProjectLifecyclePages.swift` owns the project list, Add/Create and details (Request Trust,
+Untrust) presentation. Renames, archives and GitHub repositories are ordinary Git/`gh`
+work, not app routes. Lists use `TronListGroup`/`TronListRow` without chevrons; fields keep
 shared settings controls. Drill-ins use managed sub-sheets, never push routes.
-Callers supply project paths, effective trust, archive refusal reasons, form bindings,
+Callers supply project paths, effective trust, trust refusal reasons, form bindings,
 destinations and effect closures. The views do not infer eligibility or submit RPCs.
 `TrustedProjectsSettingsView` is the single Global entrypoint into these sheets, using
 `TronProgressiveSheetLink`'s medium-first/large-expandable presentation.
 `ProjectLifecycleView` refreshes disposable `projects.list`/`projects.inspect`
 projections on re-entry, reconnect and existing settings/trust/approval revisions;
 profile, activity and generation fences retire stale reads. Saved outside folders
-remain visible/read-only with Gateway reasons. The list omits the Gateway's hidden
-archive namespace and saved deny tombstones whose inspection returns `not_found`;
+remain visible/read-only with Gateway reasons. The list omits saved decisions under
+the hidden `~/Workspace/.archive` folder and those whose inspection returns `not_found`;
 these trust records remain untouched. Choose Existing only inspects: it never writes
 an untrusted decision or creates a second project store.
 `SettingsTrustCoordinator` sends `projects.change` through its existing receipt
@@ -239,13 +242,13 @@ which the Gateway revalidates before effects. No agent-tool fallback is used.
 `TronProjectLifecyclePreviewUITests` exercises these production-owned views through
 `HOSTED_TEST`'s `HostedProjectLifecyclePreview` in light/dark at Large and XXXL.
 Sample paths, drafts, busy reasons and the preview-only disclaimer stay in the fixture.
-Archive, Untrust, Trust and Rename review reuse `ChangeReviewSheet` with synthetic
-reviews; the preview sends no command. The route journey
-opens and dismisses detail, rename, approval, Add/Create and folder sub-sheets.
+Untrust and Trust review reuse `ChangeReviewSheet` with synthetic reviews; the preview
+sends no command. The route journey opens and dismisses detail, approval, Add/Create
+and folder sub-sheets.
 Captures and route checks are not real-Gateway lifecycle acceptance.
-`RealGatewayProjectLifecycleUITests` owns separate approve/move/archive, denial,
-post-archive/departed-list and linked-worktree busy journeys through the real socket
-and canonical filesystem/trust store. The harness seeds only its isolated busy repository; no real GitHub is created.
+`RealGatewayProjectLifecycleUITests` owns separate create/untrust/trust approval, denial,
+refused-approval and linked-worktree busy journeys through the real socket and canonical
+filesystem/trust store. The harness seeds only its isolated busy repository.
 
 ## Not here
 
