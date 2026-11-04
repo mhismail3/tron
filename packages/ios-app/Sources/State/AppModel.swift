@@ -454,6 +454,9 @@ final class AppModel {
     private var recoveryDisplayProfileID: String?
     private var recoveryDisplayTask: Task<Void, Never>?
     private var recoveryDisplayNoticeEpisode: Int?
+    /// The recovery notice text this episode last posted. The title status carries
+    /// the lasting reason; a notice is posted again only when its text changes (#2273).
+    private var recoveryDisplayNoticeText: [String]?
 #if HOSTED_TEST
     var hostedDisplayArtifactFile: (@Sendable (String, String, String, Int, Int64) async throws -> URL)?
 #endif
@@ -1400,6 +1403,14 @@ extension AppModel {
     }
 
     private func postRecoveryNotice() {
+        let title = lifecycle.noPathPresentation?.label ?? "Gateway connection unavailable"
+        // App-scoped recovery may appear during a first open, before
+        // this route ever received a transcript. Do not promise retention.
+        let message = "Retry Connection and Logs are available in Settings."
+        // A changed failure classification can repeat the same words; an identical
+        // notice would only cover the title's Retry again after the first expired.
+        guard recoveryDisplayNoticeText != [title, message] else { return }
+        recoveryDisplayNoticeText = [title, message]
         noticeCenter.post(
             .init(
                 id: uuidSource.next(),
@@ -1407,10 +1418,8 @@ extension AppModel {
                 scope: .app,
                 role: .warning,
                 priority: .high,
-                title: lifecycle.noPathPresentation?.label ?? "Gateway connection unavailable",
-                // App-scoped recovery may appear during a first open, before
-                // this route ever received a transcript. Do not promise retention.
-                message: "Retry Connection and Logs are available in Settings.",
+                title: title,
+                message: message,
                 lifetime: .automatic(.seconds(8))
             )
         )
@@ -1422,6 +1431,7 @@ extension AppModel {
         recoveryDisplayTask = nil
         recoveryDisplayProfileID = nil
         recoveryDisplayNoticeEpisode = nil
+        recoveryDisplayNoticeText = nil
         removeNotice(.gatewayRecovery, scope: .app)
     }
 

@@ -78,6 +78,8 @@ struct TronMobileApp: App {
                 HostedChatHapticsFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-notification-inbox-fixture") {
                 HostedNotificationInboxFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-recovery-notice-fixture") {
+                HostedRecoveryNoticeFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-readonly-attachment-fixture") {
                 HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
