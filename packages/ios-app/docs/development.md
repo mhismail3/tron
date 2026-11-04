@@ -170,7 +170,13 @@ means each command keeps its existing default sequence; foreign, class, suite an
 removed native vendor-setup selectors refuse before any build, fixture or lease.
 
 `run-ui` pairs the production scene against a fresh fixture per journey, leaving
-`results/<utc>-ui.*`. The invitation journey requires the full accepted prompt
+`results/<utc>-ui.*`. `TRON_IOS_E2E_UI_LANES=N` (1 to the 3 host slots) runs the
+journeys on N lanes at once: the command's own lane plus `<lane>-uiK` lanes, each
+with its own lease, host slot, simulator and fixture (`laneK/results/`), taking
+journeys from one queue, longest first by `TRON_IOS_E2E_UI_JOURNEY_SECONDS` (JSON
+journey to seconds). After a failure no lane starts another journey; each journey's
+output prints whole when it ends. An extra lane that cannot be leased or booted runs
+nothing and is named; the others cover its journeys. The invitation journey requires the full accepted prompt
 label before and after foreground, independent of AX role: overflowing prompts
 are reader buttons. Generated navigation-title snippets are not transcript
 retention evidence and cannot satisfy the full-label query. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run

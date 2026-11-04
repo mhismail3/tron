@@ -311,8 +311,8 @@ Environment:
   TRON_IOS_E2E_UI_LANES         lanes run-ui runs its journeys on at once, 1 to the host
                                 slot cap (default: 1). Each extra lane is its own leased
                                 lane (this lane's name + -uiN) with its own host slot,
-                                simulator and fixture under the fixture directory's
-                                lanes/; all take journeys from one queue. After a
+                                simulator and fixture (the fixture directory's laneK);
+                                all take journeys from one queue. After a
                                 failure no lane starts another journey; running ones
                                 finish with their evidence. Each journey's output is
                                 printed whole when it ends.
@@ -1185,9 +1185,11 @@ ui_extra_lane() {
 # Start one extra lane as its own leased command: the same lease and host-slot
 # owner as every lane command, never this command's lease or slot, whose
 # descriptors it closes. It runs `run-ui-lane` against this command's queue,
-# built products and Gateway build, with its own fixture directory.
+# built products and Gateway build, with its own fixture directory: a short
+# `laneK` beside this command's, since the fixture's paths must stay short.
 spawn_ui_lane() {
-  local lane_name="$1"
+  local index="$1" lane_name
+  lane_name="$(ui_extra_lane "$index")"
   (
     for held_descriptor in "${TRON_IOS_TEST_LEASE_FD:-}" "${TRON_IOS_TEST_SLOT_FD:-}"; do
       [[ -z "$held_descriptor" ]] || eval "exec ${held_descriptor}>&-"
@@ -1196,7 +1198,7 @@ spawn_ui_lane() {
       TRON_IOS_TEST_LANE TRON_IOS_TEST_STATE_DIR TRON_IOS_TEST_DEVICE_NAME
     # A named lane lives under the same lane root as this command's lane.
     export TRON_IOS_TEST_DISCOVERY_ROOT="$test_discovery_root"
-    export TRON_IOS_E2E_STATE_DIR="$run_root/lanes/$lane_name"
+    export TRON_IOS_E2E_STATE_DIR="$run_root/lane$index"
     export TRON_IOS_E2E_DERIVED_DATA="$derived_data"
     export TRON_IOS_E2E_UI_QUEUE="$ui_queue"
     export TRON_IOS_E2E_UI_LANES="$ui_lanes"
@@ -1291,7 +1293,7 @@ run_ui() {
   # E2E lane expects, and it joins every extra lane before the command ends.
   trap finish_e2e_run EXIT
   for ((index = 2; index <= ui_lanes; index++)); do
-    spawn_ui_lane "$(ui_extra_lane "$index")"
+    spawn_ui_lane "$index"
   done
   lane_run="$(lane_xctestrun "$xctestrun")"
   run_ui_lane "$lane_run" || status=$?
@@ -1306,7 +1308,7 @@ run_ui() {
     exit "$status"
   fi
   local evidence="$run_root/results"
-  ((ui_lanes == 1)) || evidence+=" and $run_root/lanes/*/results"
+  ((ui_lanes == 1)) || evidence+=" and $run_root/lane*/results"
   echo "Real-UI journeys completed in $((SECONDS - started))s on $ui_lanes lane(s) (status 0); evidence: $evidence"
 }
 

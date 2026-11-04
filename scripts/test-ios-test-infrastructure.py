@@ -4401,7 +4401,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         """Every journey report run-ui left, by journey: its own lane's and each extra lane's."""
         state = self.root / "e2e-state"
         reports: dict[str, list[tuple[Path, dict[str, Any]]]] = {}
-        for path in sorted([*state.glob("results/*/report.json"), *state.glob("lanes/*/results/*/report.json")]):
+        for path in sorted([*state.glob("results/*/report.json"), *state.glob("lane*/results/*/report.json")]):
             if path.parent.is_symlink():
                 continue  # `latest-ui` names one of the directories already listed
             report = json.loads(path.read_text())
