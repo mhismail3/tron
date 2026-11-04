@@ -57,7 +57,7 @@ Commands:
                                     --prepare-reinstall writes a manual maintenance receipt, never installs
   version                           Print the canonical Tron version
   metrics [<rev>] [--compare <base>]
-                                    Read-only restructure metrics of a commit's Git
+                                    Read-only repository metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]

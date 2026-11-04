@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMA = "tron-metrics/2"
+SCHEMA = "tron-metrics/1"
 SIZE_THRESHOLD = 500
 HOTSPOT_WINDOW_DAYS = 30
 HOTSPOT_TOP = 10

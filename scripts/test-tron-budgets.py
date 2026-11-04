@@ -115,7 +115,7 @@ class ErrorTests(BudgetCase):
     def test_unknown_revision_is_an_error(self) -> None:
         unknown = self.repo.budgets("nope")
         self.assertEqual(unknown.returncode, 2)
-        self.assertIn("budgets: ", unknown.stderr)
+        self.assertIn("budgets: unknown revision: nope", unknown.stderr)
         self.assertNotIn("no doc over", unknown.stdout)
 
 
