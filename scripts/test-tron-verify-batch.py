@@ -96,7 +96,7 @@ class BatchTests(unittest.TestCase):
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.git('init', '-q', '-b', 'main')
-        for file in ('batch.py', 'verify.py'):
+        for file in ('batch.py', 'verify.py', 'timing.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.
@@ -117,6 +117,9 @@ if sys.argv[1:3] == ['work','issue'] or sys.argv[1:3] == ['work','comment']:
     print('created issue #100')
     sys.exit(0)
 Path('test-results').mkdir(exist_ok=True)
+# The verifier and the candidate's affected checks run their Gateway groups through the real runner,
+# which skips the host lock when this marker is set; only a batch Gateway lane may pass it on.
+if os.environ.get('TRON_FULL_GATEWAY_LOCK_HELD'): sys.exit('verify ran marked as holding the full-Gateway lock')
 with Path('test-results/executed').open('a') as f: f.write(' '.join(sys.argv[1:3])+'\\n')
 import subprocess
 affected = '--changed' in sys.argv and os.environ.get('FIXTURE_AFFECTED')
@@ -135,7 +138,7 @@ if affected == 'red': verdict = 'failed'
 Path('test-results/verify',sha+'.json').write_text(json.dumps({'commit':sha,'verdict':verdict,'message':'locks passed','passingTests':1,'steps':[],'selection':{},'skipped':[]}))
 sys.exit(1 if verdict == 'failed' else 0)
 ''', True)
-        self.write('tools/verify/gateway.py', '''import json,os,sys,time,subprocess
+        self.write('tools/verify/gateway.py', '''import json,os,re,sys,time,subprocess
 from pathlib import Path
 # A batch lane runs under the batch's full-Gateway lock and must say so, or the real
 # runner would wait on the lock its own batch holds.
@@ -160,14 +163,18 @@ if (root/'unstable-repeat').exists() and '-t' in args and failed:
     count=int(counter.read_text()) if counter.exists() else 0
     counter.write_text(str(count+1))
     if count: failed=False
-if '-t' in args and args[args.index('-t')+1] != '^suite\\\\ case$':
-    raise SystemExit('wrong exact case filter')
+# Like Vitest 5: the reporter's fullName joins titles with spaces, but -t matches them joined with ' > '
+# (createTaskName), and a case it does not match is skipped.
+titles=['suite','group','other' if (root/'renamed-probe').exists() and '-t' in args else 'case']
+selected='-t' not in args or re.search(args[args.index('-t')+1],' > '.join(titles))
+failed=failed and bool(selected)
 output=Path(next(a.split('=',1)[1] for a in args if a.startswith('--outputFile.json=')))
 output.parent.mkdir(parents=True,exist_ok=True)
-data={'numPassedTests':0 if failed else 1,'numFailedTests':1 if failed else 0,
-      'testResults':[{'name':str(root/'packages/gateway/src/example.test.ts'),
+status='failed' if failed else 'passed' if selected else 'skipped'
+data={'numPassedTests':int(status=='passed'),'numFailedTests':int(failed),'numPendingTests':int(not selected),
+      'testResults':[{'name':str(root/'packages/gateway/src/example.test.ts'),'startTime':1000,'endTime':2500,
        'status':'failed' if failed else 'passed','assertionResults':[
-        {'fullName':'suite case','status':'failed' if failed else 'passed',
+        {'ancestorTitles':titles[:-1],'title':titles[-1],'fullName':' '.join(titles),'status':status,
          'failureMessages':['AssertionError: stable failure'] if failed else []}]}]}
 if (root/'changed-signature').exists() and '-t' in args and failed:
     data['testResults'][0]['assertionResults'][0]['failureMessages']=['AssertionError: different failure']
@@ -306,6 +313,16 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)
 
+    def test_an_inherited_held_lock_marker_reaches_only_the_gateway_lanes(self):
+        # A batch started under a caller's marker must not pass it to lanes that do not hold the lock.
+        self.land('good', 'yes')
+        self.env['TRON_FULL_GATEWAY_LOCK_HELD'] = '1'
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'green')
+        self.assertEqual([lane['name'] for lane in report['results'] if lane.get('fullGatewayLock')], ['Gateway default', 'Gateway nested'])
+
     def test_repeat_requires_explicit_flag_and_executes_all_lanes(self):
         self.land('good', 'yes')
         first = self.run_batch('--base', self.base)
@@ -379,7 +396,8 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(fresh.count((head, 'bad')), 2)
         self.assertEqual(fresh.count((culprit, 'bad')), 2)
         self.assertEqual(fresh.count((proof['parent'], 'good')), 2)
-        self.assertTrue(all('-t' in p['command'] for p in proof['probes']))
+        self.assertTrue(all(p['command'][-2:] == ['-t', '^suite\\ >\\ group\\ >\\ case$'] for p in proof['probes']))
+        self.assertTrue(all(p['selectedTests'] == 1 for p in proof['probes'] if p.get('fresh')))
         repair = failure['repair']
         self.assertEqual(repair['state'], 'publication-disabled')
         self.assertEqual(self.git('rev-parse', 'revert/' + culprit), repair['candidate'])
@@ -466,6 +484,76 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(proof['status'], 'unresolved')
         self.assertEqual([p['outcome'] for p in proof['probes'] if p['commit'] == self.base], ['unknown'])
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
+
+    def test_head_probe_selecting_no_tests_fails_loudly_instead_of_unresolved(self):
+        # The case failed at head, so an exact-case recipe that runs nothing there is a broken selector.
+        self.land('bad', 'yes')
+        self.land('renamed-probe', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('selected no tests', result.stdout)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'error')
+        self.assertIn('attribution probe for Gateway default selected no tests', report['error'])
+        self.assertEqual(report['activeLane'], 'attribution: Gateway default')
+        self.assertEqual(report['results'][1]['exit'], 1)
+        self.assertTrue((Path(report['evidence'])).is_file())
+        [progress] = (self.root / '.git/verify/batches').glob('*/attribution-1-0/progress.json')
+        probes = json.loads(progress.read_text())['probes']
+        self.assertEqual([(p['outcome'], p['selectedTests']) for p in probes], [('selector-error', 0)])
+        self.assertFalse(list((self.root / '.git/verify/attributions').glob('*.json')), 'a selector error is never memoized')
+        self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
+
+    def test_lane_timing_is_recorded_and_never_changes_the_verdict(self):
+        results = Path(self.temporary.name) / 'results'
+        bin = Path(self.temporary.name) / 'bin'
+        (bin / 'xcrun').write_text('''#!/usr/bin/env python3
+import json,sys
+args=sys.argv[1:]
+path=args[args.index('--path')+1]
+if 'broken' in path: sys.exit('xcresulttool: cannot open result bundle')
+if args[:4]==['xcresulttool','get','test-results','tests']:
+    print(json.dumps({'testNodes':[{'nodeType':'Test Plan','children':[{'nodeType':'Test Suite','children':[
+        {'nodeType':'Test Case','nodeIdentifier':'Journeys/testFlow()','result':'Passed','durationInSeconds':4.5}]}]}]}))
+elif args[:4]==['xcresulttool','get','test-results','activities'] and args[args.index('--test-id')+1]=='Journeys/testFlow()':
+    print(json.dumps({'testRuns':[{'activities':[
+        {'title':'Start Test','startTime':100.0},
+        {'title':'Tap "Send" Button','startTime':100.5,'childActivities':[{'title':'Wait for app to idle','startTime':100.6}]},
+        {'title':'Tap "Done" Button','startTime':102.0,'childActivities':[{'title':'Wait for app to idle','startTime':102.1}]},
+        {'title':'Tear Down','startTime':102.75}]}]}))
+else: sys.exit('unexpected xcrun '+' '.join(args))
+''')
+        (bin / 'xcrun').chmod(0o755)
+        self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
+                  f'if [ "$1" = run-ui ]; then for j in good broken; do mkdir -p {results}/$j/Journeys.xcresult; '
+                  'echo "Real-UI journey Tron/Journeys/test-$j completed in 7s (status 0); evidence: ' + str(results) + '/$j"; '
+                  f'printf "\\t%s\\n" {results}/$j/Journeys.xcresult; done; fi\n')
+        self.land('scripts/tron-xcodebuild', '#!/bin/sh\necho mac-build >> test-results/executed\n'
+                  'printf "Build Timing Summary\\n\\nSwiftCompile (12 tasks) | 40.5 seconds\\n\\nLd (2 tasks) | 1.25 seconds\\n\\n** TEST BUILD SUCCEEDED **\\n"\n')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'green')
+        lanes = {lane['name']: lane for lane in report['results']}
+        self.assertTrue(all(lane['timing']['seconds'] == lane['seconds'] for lane in lanes.values()))
+        self.assertEqual(lanes['Gateway default']['timing']['vitestFiles'], {'vitest.json': [
+            {'file': 'packages/gateway/src/example.test.ts', 'seconds': 1.5, 'cases': 1, 'status': 'passed'}]})
+        self.assertEqual(lanes['Mac integration']['timing']['buildTiming'], [{'log': 'output.log', 'buckets': [
+            {'bucket': 'SwiftCompile', 'tasks': 12, 'seconds': 40.5}, {'bucket': 'Ld', 'tasks': 2, 'seconds': 1.25}]}])
+        ui = lanes['real Gateway UI journeys']['timing']
+        self.assertEqual(ui['journeys'], [{'kind': 'Real-UI journey', 'test': f'Tron/Journeys/test-{name}', 'seconds': 7, 'status': 0}
+                                          for name in ('good', 'broken')])
+        self.assertEqual(ui['xcresults'], [{'bundle': str(results / 'good/Journeys.xcresult'), 'cases': [{
+            'test': 'Journeys/testFlow()', 'result': 'Passed', 'seconds': 4.5, 'runs': [{
+                'activities': 4, 'idleWaits': 2,
+                'slowest': [{'title': 'Tap "Send" Button', 'seconds': 1.5}, {'title': 'Tap "Done" Button', 'seconds': 0.75},
+                            {'title': 'Start Test', 'seconds': 0.5}],
+                'byKind': {'Tap … Button': {'count': 2, 'seconds': 2.25}, 'Start Test': {'count': 1, 'seconds': 0.5}}}]}]}])
+        # An unreadable bundle is an observation error, not a coverage or verdict input.
+        [error] = ui['errors']
+        self.assertEqual(error, f"tests {results / 'broken/Journeys.xcresult'}: xcresulttool exit 1: "
+                                'xcresulttool: cannot open result bundle')
 
     def test_second_culprit_reproduction_is_required(self):
         self.land('unstable-repeat', 'yes')
@@ -889,19 +977,24 @@ if sys.argv[1] == 'clean':
         self.assertIn('packages/gateway/src/auth/token.ts', repair['reason'])
         self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
 
-    def test_a_batch_records_itself_as_the_full_gateway_lock_holder(self):
+    def test_a_batch_records_its_gateway_lanes_as_the_full_gateway_lock_holder(self):
         self.land('good', 'yes')
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         holder = json.loads((Path(self.temporary.name) / 'full-gateway.lock').read_text())
-        self.assertEqual(holder['purpose'], 'verify --batch')
+        self.assertEqual(holder['purpose'], 'verify --batch: Gateway nested')
+        windows = {lane['name']: lane.get('fullGatewayLock') for lane in self.reports()[-1]['results']}
+        self.assertEqual([name for name, window in windows.items() if window], ['Gateway default', 'Gateway nested'])
+        default, nested = windows['Gateway default'], windows['Gateway nested']
+        self.assertLessEqual(default['acquiredAt'], default['releasedAt'])
+        self.assertLessEqual(default['releasedAt'], nested['acquiredAt'], 'batch Gateway lanes never overlap')
 
     def gateway_runs(self):
         runs = GatewayRuns(Path(self.temporary.name) / 'full-gateway.lock')
         self.addCleanup(runs.close)
         return runs
 
-    def test_held_full_gateway_lock_keeps_coverage_pending_after_the_capped_wait(self):
+    def test_held_full_gateway_lock_leaves_gateway_lanes_uncovered_after_the_capped_wait(self):
         self.land('good', 'yes')
         # The shipped cap is 45 minutes; this fixture's copy of the batch waits 2 seconds.
         source = (self.root / 'tools/verify/batch.py').read_text()
@@ -910,29 +1003,44 @@ if sys.argv[1] == 'clean':
         runs = self.gateway_runs()
         holder = runs.start('holder')
         runs.wait_holding('holder')
-        started = time.monotonic()
         result = self.run_batch('--base', self.base)
-        waited = time.monotonic() - started
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn('full-Gateway run holds', result.stdout)
-        self.assertIn(f'"pid": {holder.pid}', result.stdout)
-        self.assertIn('gateway vitest holder', result.stdout)
-        self.assertRegex(result.stdout, r'waited \d+s')
-        self.assertGreaterEqual(waited, 2)
-        self.assertFalse(self.reports())
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'uncovered')
+        lanes = {lane['name']: lane for lane in report['results']}
+        self.assertEqual(len(lanes), 9)
+        for name in ('Gateway default', 'Gateway nested'):
+            lane = lanes[name]
+            self.assertEqual((lane['status'], lane['exit']), ('uncovered', None))
+            self.assertIn('full-Gateway run held', lane['reason'])
+            self.assertIn(f'"pid": {holder.pid}', lane['reason'])
+            self.assertIn('gateway vitest holder', lane['reason'])
+            self.assertRegex(lane['reason'], r'waited \d+s')
+            self.assertGreaterEqual(lane['seconds'], 2)
+        self.assertNotIn('default', (self.root / 'test-results/executed').read_text().split())
+        self.assertTrue(all(lane['exit'] == 0 for name, lane in lanes.items() if not name.startswith('Gateway ')))
         self.assertFalse((self.root / '.git/verify/green.json').exists())
-        self.assertIsNone(holder.poll(), 'a capped batch never interrupts the holder')
-        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped batch leaves no ticket')
-        # The capped batch left the line: the next run follows the holder.
+        self.assertIsNone(holder.poll(), 'a capped lane never interrupts the holder')
+        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped lane leaves no ticket')
+        # The capped lanes left the line: the next run follows the holder.
         runs.start('next')
         runs.wait_queued('next')
         runs.release('holder')
         runs.wait_all()
         self.assertEqual(runs.names(), ['holder', 'next'])
 
-    def test_a_due_batch_waits_its_turn_ahead_of_later_gateway_runs(self):
+    def land_gateway_lane_marker(self, order):
+        """The fixture Gateway lane also records itself in `order` once its lane holds the lock."""
+        source = (self.root / 'tools/verify/gateway.py').read_text()
+        self.land('tools/verify/gateway.py', source.replace(
+            "with (root/'test-results/executed').open('a') as f: f.write(name+' '+repr(args)+'\\n')\n",
+            "with (root/'test-results/executed').open('a') as f: f.write(name+' '+repr(args)+'\\n')\n"
+            f"with open({str(order)!r}, 'a') as f: f.write('batch-'+name+'\\n')\n", 1))
+        self.assertIn('batch-', (self.root / 'tools/verify/gateway.py').read_text())
+
+    def test_due_gateway_lanes_wait_their_turn_in_arrival_order_with_other_gateway_runs(self):
         runs = self.gateway_runs()
-        self.land('scripts/tron-xcodebuild', f'#!/bin/sh\necho mac-build >> test-results/executed\necho batch >> {runs.order}\n')
+        self.land_gateway_lane_marker(runs.order)
         runs.start('holder')
         runs.wait_holding('holder')
         output = Path(self.temporary.name) / 'batch.out'
@@ -940,15 +1048,42 @@ if sys.argv[1] == 'clean':
             batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
                                      env=self.env, stdout=stream, stderr=subprocess.STDOUT)
         self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
-        wait_until(lambda: batch.poll() is not None or 'waiting for' in output.read_text(), 'the batch neither waited nor exited')
-        self.assertIsNone(batch.poll(), 'a due batch waits behind the holder instead of refusing:\n' + output.read_text())
+        wait_until(lambda: batch.poll() is not None or 'Gateway default waiting for' in output.read_text(),
+                   'the Gateway lane neither waited nor exited')
+        self.assertIsNone(batch.poll(), 'a due Gateway lane waits behind the holder instead of refusing:\n' + output.read_text())
         for name in ('later-1', 'later-2'):
             runs.start(name)
             runs.wait_queued(name)
         runs.release('holder')
         self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
         runs.wait_all()
-        self.assertEqual(runs.names(), ['holder', 'batch', 'later-1', 'later-2'])
+        # The nested lane queues again after its default lane releases, so earlier arrivals go first.
+        self.assertEqual(runs.names(), ['holder', 'batch-default', 'later-1', 'later-2', 'batch-nested'])
+
+    def test_pre_land_gateway_runs_do_not_wait_for_the_ui_journey_lane(self):
+        runs = self.gateway_runs()
+        self.land_gateway_lane_marker(runs.order)
+        gate = Path(self.temporary.name) / 'ui-gate'
+        gate.mkdir()
+        self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
+                  f'if [ "$1" = run-ui ]; then touch {gate}/started; while [ ! -e {gate}/release ]; do sleep 0.05; done; fi\n')
+        output = Path(self.temporary.name) / 'batch.out'
+        with output.open('w') as stream:
+            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
+                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
+        self.addCleanup(lambda: gate.is_dir() and (gate / 'release').touch())
+        wait_until(lambda: (gate / 'started').exists() or batch.poll() is not None, 'the UI journey lane never started', timeout=60)
+        self.assertIsNone(batch.poll(), output.read_text())
+        # While the batch's UI journeys run, a pre-land Gateway run takes the free lock at once.
+        runs.start('pre-land')
+        runs.wait_all(['pre-land'])
+        self.assertNotIn('waiting for', runs.stderr('pre-land'))
+        (gate / 'release').touch()
+        self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
+        self.assertEqual(runs.names(), ['batch-default', 'batch-nested', 'pre-land'])
+        lanes = {lane['name']: lane for lane in self.reports()[-1]['results']}
+        self.assertLessEqual(lanes['Gateway nested']['fullGatewayLock']['releasedAt'], lanes['real Gateway UI journeys']['startedAt'])
 
     def test_red_while_disabled_publishes_after_the_enable_step(self):
         self.remote(publish=False)
@@ -1088,6 +1223,48 @@ class ShardedIosProbeTests(unittest.TestCase):
             lane = {'name': 'tests: ios 2/3', 'command': ['python3', str(stub), str(root / 'run')], 'cwd': '.', 'probe': True}
             result = batch.execute(root, lane, root / 'probe')
         self.assertEqual(result['exit'], 0, result)
+
+    def test_only_an_exact_case_vitest_head_control_requires_a_selection(self):
+        # A verifier-step recipe can select nothing for a real, reproducible reason (a file that
+        # fails to load); only the exact-case Vitest recipe turns an empty head selection into an error.
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+
+        class Controls:
+            def __init__(self):
+                self.record, self.required = {}, []
+
+            def controls(self, sha, expected, selection_required=False):
+                self.required.append(selection_required)
+                return False
+        head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        base = subprocess.check_output(['git', 'rev-parse', 'HEAD~1'], cwd=ROOT, text=True).strip()
+        for probe, required in (({'name': 'Gateway default', 'vitest': True, 'command': ['x']}, True),
+                                ({'name': 'tests: gateway', 'command': ['x']}, False)):
+            with self.subTest(probe=probe['name']):
+                prober = Controls()
+                batch.attribute(base, head, {'name': probe['name'], 'probe': probe, 'signature': {'x': 1}}, prober)
+                self.assertEqual(prober.required, [required])
+
+    def test_a_verifier_gateway_step_probe_records_how_many_tests_it_selected(self):
+        # A full-verify Gateway step probe counts failed as well as passed cases as selected, so a
+        # reproducing failure is never mistaken for an empty selection, and an empty one is visible.
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        for passed, failed, selected in ((0, 1, 1), (0, 0, 0)):
+            with self.subTest(passed=passed, failed=failed), tempfile.TemporaryDirectory(prefix='tron-batch-probe-') as temporary:
+                root = Path(temporary)
+                stub = root / 'vitest.py'
+                stub.write_text('import json, pathlib, sys\n'
+                                'out = pathlib.Path(sys.argv[1].split("=", 1)[1])\n'
+                                f'out.write_text(json.dumps({{"numPassedTests": {passed}, "numFailedTests": {failed}, "testResults": []}}))\n'
+                                f'sys.exit({failed})\n')
+                lane = {'name': 'tests: gateway', 'command': ['python3', str(stub), f'--outputFile.json={root / "step-vitest.json"}'],
+                        'cwd': '.', 'probe': True}
+                result = batch.execute(root, lane, root / 'probe')
+                self.assertEqual(result['selectedTests'], selected, result)
 
 
 class BrowserForkProvisionTests(unittest.TestCase):
