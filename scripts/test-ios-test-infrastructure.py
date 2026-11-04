@@ -5953,6 +5953,46 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
                 self.assertEqual(self.lane_marker(lane)["worktree"], os.path.realpath(worktree))
                 self.assertTrue(self.present(str(self.lane_marker(lane)["udid"])))
 
+    def test_a_repository_lane_outlives_its_worktree_and_goes_with_its_repository_or_ttl(self) -> None:
+        """#2268: verify --batch reuses its Apple lane from each batch's fresh worktree. A lane
+        created with TRON_IOS_TEST_LANE_REPOSITORY stays warm when its creating worktree is
+        deleted, and is still reaped once that repository is gone or it idles past the TTL."""
+        holder = Path(tempfile.mkdtemp(prefix="repository-", dir=self.root))
+        gone_repository = holder / ".git"
+        gone_repository.mkdir()
+        common = Path(self.git(self.primary, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+        lanes: dict[str, Path] = {}
+        for label, repository in (("warm", common), ("orphaned", gone_repository), ("idle", common)):
+            worktree = self.linked(f"batch-{label}")
+            self.stamp_products(worktree)
+            environment = {**self.environment, "TRON_IOS_TEST_LANE_REPOSITORY": str(repository)}
+            result = self.tool(worktree, "tron-ios-test", "run", "--lane", f"batch-apple-{label}",
+                               "--only-testing", "TronMobileUITests/StubTests", environment=environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lanes[label] = self.lane_root / f"ios-test-batch-apple-{label}"
+            marker = self.lane_marker(lanes[label])
+            self.assertEqual(marker["repository"], os.path.realpath(repository))
+            self.assertEqual(marker["worktree"], os.path.realpath(worktree))
+            # Each batch's worktree is removed after it runs.
+            self.git(self.primary, "worktree", "remove", "--force", str(worktree))
+        idle = self.lane_marker(lanes["idle"])
+        idle["last_used_epoch_seconds"] = int(time.time()) - 8 * 24 * 3600
+        (lanes["idle"] / "simulator.json").write_text(json.dumps(idle))
+        udids = {label: str(self.lane_marker(lane)["udid"]) for label, lane in lanes.items()}
+        shutil.rmtree(holder)
+
+        reap = self.tool(self.primary, "tron-ios-test", "reap")
+        self.assertEqual(reap.returncode, 0, reap.stderr)
+        self.assertTrue(lanes["warm"].exists(), reap.stdout)
+        self.assertTrue(self.present(udids["warm"]))
+        self.assertIn("removed lane batch-apple-orphaned", reap.stdout)
+        self.assertIn("its repository no longer exists", reap.stdout)
+        self.assertIn("removed lane batch-apple-idle", reap.stdout)
+        for label in ("orphaned", "idle"):
+            with self.subTest(reaped=label):
+                self.assertFalse(lanes[label].exists())
+                self.assertFalse(self.present(udids[label]))
+
     def test_status_names_the_newest_run_of_this_worktree_and_lane(self) -> None:
         """Failure mode 9: the latest run is this worktree's and lane's own."""
         first, second = self.linked("first-worktree"), self.linked("second-worktree")

@@ -158,7 +158,8 @@ reclaim simulators yourself.
   process leases is never disturbed, by the tooling or by an agent.
 - Every command that provisions a lane's simulator first sweeps: orphaned owned
   lanes (booted with no live lease) are shut down, and lanes unused for 7 days
-  or whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows
+  or whose creating worktree was deleted (never the default lane; a lane created with
+  `TRON_IOS_TEST_LANE_REPOSITORY`, as `verify --batch`'s Apple lanes are, goes only with its repository) are removed. The runner's sweep also prunes runs beyond the retention windows
   and the products of worktrees that no longer exist. `scripts/tron-ios-test
   reap` runs that same sweep on demand, and `prune` reclaims disk alone.
 - Up to 3 simulator-heavy jobs run at once across all worktrees and workers.

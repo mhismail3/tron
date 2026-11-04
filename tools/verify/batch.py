@@ -52,15 +52,20 @@ def save(path: Path, value: dict) -> None:
 def apple_lane(root: Path) -> dict[str, str]:
     """The Apple chain's own simulator lane and smoke products, so its iOS lanes never contend with
     the verifier's iOS steps (the Node chain) for this worktree's lane lease or DerivedData. Named
-    per batch worktree and persistent, so its builds stay incremental across batches."""
-    name = 'batch-apple-' + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]
-    return {'TRON_IOS_TEST_LANE': name,
+    per repository (its git common directory), not per batch worktree, and owned by it
+    (TRON_IOS_TEST_LANE_REPOSITORY), so each batch's fresh worktree reuses the same warm lanes:
+    one set per repository, reaped only with the repository or after the idle TTL (#2268)."""
+    repository = os.path.realpath(subprocess.check_output(
+        ['git', '-C', str(root), 'rev-parse', '--path-format=absolute', '--git-common-dir'], text=True).strip())
+    name = 'batch-apple-' + hashlib.sha256(repository.encode()).hexdigest()[:12]
+    return {'TRON_IOS_TEST_LANE': name, 'TRON_IOS_TEST_LANE_REPOSITORY': repository,
             'TRON_IOS_TEST_DERIVED_DATA': str(Path.home() / 'Library/Developer/Tron/ios/test-derived-data' / name)}
 
 
 def lanes(root: Path, base: str) -> list[dict]:
     """Compose existing owners, not a second test catalog."""
     apple = apple_lane(root)
+    lane_only = {key: apple[key] for key in ('TRON_IOS_TEST_LANE', 'TRON_IOS_TEST_LANE_REPOSITORY')}
     # Required lanes never disappear when a checkout/tool is missing.
     result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
@@ -77,10 +82,10 @@ def lanes(root: Path, base: str) -> list[dict]:
          'requires': 'scripts/tron-ios-test', 'ios': True, 'env': apple},
         # The E2E harness keeps its own DerivedData and fixture; only its lane moves.
         {'name': 'real Gateway boundary', 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'all'],
-         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True, 'env': {'TRON_IOS_TEST_LANE': apple['TRON_IOS_TEST_LANE']}},
+         'requires': 'scripts/ios-gateway-e2e-test', 'ios': True, 'env': lane_only},
         {'name': UI_JOURNEY_LANE, 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui'],
          'requires': 'scripts/ios-gateway-e2e-test', 'ios': True,
-         'env': {'TRON_IOS_TEST_LANE': apple['TRON_IOS_TEST_LANE'], 'TRON_IOS_E2E_UI_LANES': str(UI_JOURNEY_LANES)}},
+         'env': {**lane_only, 'TRON_IOS_E2E_UI_LANES': str(UI_JOURNEY_LANES)}},
     ])
     return result
 

@@ -60,8 +60,9 @@ Commands:
   reap                 Shut down this repository's owned simulators that are booted
                        with no live lease (orphans of a crash, a kill or --keep-booted),
                        delete lanes no command has used for 7 days or whose creating
-                       worktree no longer exists (never the default lane), and prune
-                       results and products.
+                       worktree no longer exists (never the default lane; a lane created
+                       with TRON_IOS_TEST_LANE_REPOSITORY instead goes with that
+                       repository), and prune results and products.
   prune                Reclaim disk only: keep the newest 50 runs of each worktree plus
                        everything younger than 7 days, and delete the test products of
                        worktrees that no longer exist. Touches no simulator, so it takes
