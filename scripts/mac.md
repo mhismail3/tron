@@ -39,7 +39,10 @@ Results, including failures, go to `test-results/mac-reinstall/report.json`.
 
 `python3 scripts/test-tron-mac-replace.py --checkout-only` exercises real Git/LFS
 under the launchd PATH; `--quit-only` compiles a standalone AppKit fixture using the
-production nonce-bound handoff and termination owners. The full replacement suite
+production nonce-bound handoff and termination owners; `--rpc-only` also runs the
+runner loop against a Gateway reporting a drain blocker; `--launch-services-only`
+swaps a uniquely identified fixture app under `~/Library/Caches` (Launch Services
+ignores temporary directories) and checks the kept copy is unlaunchable. The full replacement suite
 also builds a private Gateway and swaps a fixture app under its own launchd jobs;
 that heavier lane is distinct from the offline preparation lock.
 
