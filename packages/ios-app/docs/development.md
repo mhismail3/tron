@@ -180,11 +180,11 @@ are reader buttons. Generated navigation-title snippets are not transcript
 retention evidence and cannot satisfy the full-label query. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
 `clean` before deleting a worktree. DTO changes need Gateway tests and Swift decoding.
 The fixture's canonical lifecycle root is its isolated `HOME/Workspace` (exact spelling).
-`testProjectLifecycleApproveMovesAndArchives`, `testProjectLifecycleDenialRetainsUntrustedRepository`,
-`testProjectLifecycleRefusedApprovalShowsItsReason` and `testProjectLifecycleBusyArchiveUsesCanonicalReason`
+`testProjectLifecycleApproveCreatesUntrustsAndTrusts`, `testProjectLifecycleDenialRetainsUntrustedRepository`,
+`testProjectLifecycleRefusedApprovalShowsItsReason` and `testProjectLifecycleBusyTrustUsesCanonicalReason`
 exercise the native project pages;
 the busy journey seeds an empty trust store and a real linked-worktree repository only in
-that fixture. It never publishes a GitHub repository. Run these selectors individually;
+that fixture. Run these selectors individually;
 `TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS=300` bounds a journey without changing XCTest oracles.
 
 ## Manual iOS release validation and delivery

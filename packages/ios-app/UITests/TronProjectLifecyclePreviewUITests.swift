@@ -7,7 +7,7 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
         continueAfterFailure = false
         for size in ["normal", "xxxl"] {
             for mode in ["light", "dark"] {
-                for surface in ["list", "add", "create", "trusted", "untrusted", "rename", "busy"] {
+                for surface in ["list", "add", "create", "trusted", "untrusted", "busy"] {
                     let app = XCUIApplication()
                     app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-expanded-review",
                         "-settings-sheet-theme-review", "-project-lifecycle-preview", surface]
@@ -31,7 +31,7 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
         continueAfterFailure = false
         for size in ["normal", "xxxl"] {
             for mode in ["light", "dark"] {
-                for surface in ["archive", "untrust", "trust-review", "rename-review"] {
+                for surface in ["untrust", "trust-review"] {
                     let app = launch(surface: surface, mode: mode, size: size)
                     XCTAssertTrue(app.buttons["change-review-approve"].waitForExistence(timeout: 15), app.debugDescription)
                     capture(app, "project-\(surface)-\(mode)-\(size)-top")
@@ -50,12 +50,7 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
         open(app, "Example")
         title(app, "Example")
         capture(app, "project-route-detail-sub-sheet")
-        open(app, "Rename Project")
-        title(app, "Rename Project")
-        capture(app, "project-route-rename-sub-sheet")
-        close(app)
-        title(app, "Example")
-        for operation in ["archive", "untrust"] {
+        for operation in ["untrust"] {
             open(app, "project-preview-\(operation)")
             XCTAssertTrue(app.buttons["change-review-approve"].waitForExistence(timeout: 10))
             capture(app, "project-route-\(operation)-approval-sub-sheet")

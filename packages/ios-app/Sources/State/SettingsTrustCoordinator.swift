@@ -75,12 +75,10 @@ final class SettingsTrustCoordinator {
 
     /// The exact review of one typed project action. The Gateway plans it without
     /// effects; only `confirmProject` with this review's digest and intent applies it.
-    func reviewProject(_ operation: ProjectLifecycleOperation, name: String, newName: String? = nil, github: Bool = false) async throws -> ProjectLifecycleReview {
+    func reviewProject(_ operation: ProjectLifecycleOperation, name: String) async throws -> ProjectLifecycleReview {
         let admission = profileGeneration
-        var params: [String: JSONValue] = ["action": .string(operation.rawValue), "name": .string(name),
+        let params: [String: JSONValue] = ["action": .string(operation.rawValue), "name": .string(name),
             "reason": .string("Requested \(operation.rawValue) from iPhone Trusted Projects")]
-        if let newName { params["newName"] = .string(newName) }
-        if operation == .create || operation == .trust { params["github"] = .bool(github) }
         let value = try await projectChange(params)
         try requireProfile(admission)
         let planned = try value.decode(ProjectLifecycleReviewResult.self)
