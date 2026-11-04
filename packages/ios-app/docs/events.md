@@ -64,8 +64,10 @@ state, reconnect, foreground reconciliation, serial retire/close transitions and
   (`reconnect.parked`) and probes again at 30 s; every refusing guard logs `reconnect.skipped`.
 - **Stops.** Only unauthenticated, forbidden, protocol-mismatch and identity-mismatch failures stop
   automatic recovery until explicit Retry. Two consecutive failed opens that never opened a socket
-  read **Mac unreachable** (with the interface when known). Retry Connection is a client transport
-  action, never a Gateway restart or command replay.
+  read **Mac unreachable** (with the interface when known). Within one recovery episode the
+  transient notice is posted again only when its text changes; the chat title's status keeps the
+  lasting reason. Retry Connection is a client transport action, never a Gateway restart or
+  command replay.
 - **Attempt boundary.** An attempt ends at authenticated handshake plus event activation, which
   publishes Connected. Mounted restoration, terminal reattachment and catalog, provider, settings
   and device reads run beneath that socket and are cancelled by its loss; a slow restoration never
