@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat } from "node:fs/promises";
-import { join } from "node:path";
 import type { ResourceRoot } from "../../kernel/resources/resource-root.js";
 import type { SubjectAuditReference } from "../../kernel/settings/settings-change.js";
 import { GatewayError } from "../../errors.js";
@@ -46,10 +44,6 @@ export class ProfileStore {
   private async load(discardStages = false): Promise<State> {
     const descriptor = await this.workspace.describe();
     if (!descriptor.available) throw new ProfileStoreError("unsafe", "Tron workspace is unavailable or closed");
-    for (const retired of ["profile", "knowledge", "knowledge.retiring"]) {
-      const present = await lstat(join(descriptor.root, "state", retired)).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
-      if (present) throw new ProfileStoreError("invalid", "Maintainer-approved offline Profile cutover is required; no live storage was converted");
-    }
     let file = await readProfileFile(this.workspace);
     if (!file) {
       if (await this.workspace.featureInitialized("profile")) throw new ProfileStoreError("invalid", "Initialized Profile file is missing; restore it explicitly");
