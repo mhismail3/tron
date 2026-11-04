@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
@@ -70,6 +71,19 @@ describe("Home task command scope", () => {
     expect(await reapTaskCommandScope(scope, "stale-task")).toEqual({ outcome: "reaped", processes: 0, survivors: 0 });
     expect(processTerminal(unrelated.pid!)).toBe(false);
     expect(existsSync(join(taskCommandRoot(), "stale-session"))).toBe(false);
+  });
+
+  it("gives a worker's commands a short TMPDIR that the reap removes (#2260)", async () => {
+    await fixture();
+    const sessionId = "01a1a5a6-4d9f-708a-85fa-e01383b0117b";
+    const scope = bindTaskCommandScope(sessionId, "short-task");
+    // Fixtures nest their own roots under it and embed it in byte-bounded data.
+    expect(scope.tmp.length - tmpdir().length).toBeLessThanOrEqual(20);
+    expect(existsSync(scope.tmp)).toBe(true);
+    expect(settleTaskCommandScope(scope, "short-task")).toBe(true);
+    expect(await reapTaskCommandScope(scope, "short-task")).toEqual({ outcome: "reaped", processes: 0, survivors: 0 });
+    expect(existsSync(scope.tmp)).toBe(false);
+    expect(existsSync(join(taskCommandRoot(), sessionId))).toBe(false);
   });
 
   it("keeps a group recorded after the process table it prunes against", async () => {
