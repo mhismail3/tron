@@ -753,20 +753,7 @@ PY
 # The failure lines of a finished result bundle, when one exists. Optional
 # evidence: extracting it never changes the case's own status.
 report_result_bundle_failures() {
-  local result_bundle="$1"
-  [[ -d "$result_bundle" ]] || return 0
-  xcrun xcresulttool get test-results tests --path "$result_bundle" 2>/dev/null \
-    | python3 -c 'import json,sys
-try: document=json.load(sys.stdin)
-except Exception: raise SystemExit(0)
-def walk(value):
-    if isinstance(value, dict):
-        if value.get("nodeType") == "Failure Message":
-            print("failure: {}".format(value.get("name", "assertion failed")))
-        for child in value.values(): walk(child)
-    elif isinstance(value, list):
-        for child in value: walk(child)
-walk(document)' 2>/dev/null || true
+  python3 "$repo_root/scripts/xcresult-failures.py" --tests --root "$repo_root" "$1" || true
 }
 
 # One directory per journey: the result bundle, the fixture Gateway's canonical

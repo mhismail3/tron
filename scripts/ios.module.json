@@ -27,6 +27,7 @@
     "tron-ios-test",
     "tron-xcodebuild",
     "validate-ios-artifact.py",
-    "validate-push-service-config.sh"
+    "validate-push-service-config.sh",
+    "xcresult-failures.py"
   ]
 }
