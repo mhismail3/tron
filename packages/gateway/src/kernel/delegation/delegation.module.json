@@ -15,6 +15,7 @@
     "locks/delegation-*.golden.json",
     "managed-attribution.integration.test.ts",
     "managed-producer.ts",
+    "managed-run-stop-drain.e2e.test.ts",
     "managed-subagents.install.integration.test.ts",
     "managed-subagents.integration.test.ts",
     "managed-subagents.invalid-entry.integration.test.ts",
