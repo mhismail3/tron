@@ -72,11 +72,12 @@ actual K3 host; native frames do not select product modules or keep another list
   niceness for the bash tool (`nice -n 10` before the shell execs; user `!` commands keep
   default priority; docs/host-load.md).
 - `task-command-scope.ts`: a bound Home task worker's command scope under
-  `$TMPDIR/tron-task-commands/<session>`: the commands' `TMPDIR`, each shell's recorded
-  process group and an inherited anchor descriptor (fd 19). Owned processes are recorded-group
-  members started after recording, anchor holders and their descendants, so background
+  `$TMPDIR/tron-task-commands/<session>`: each shell's recorded process group and an
+  inherited anchor descriptor (fd 19). Owned processes are recorded-group members started after recording, anchor holders and their descendants, so background
   and `setsid` children stay owned after re-parenting to launchd; the reap freezes, re-reads
-  and kills them, then removes the scope. Interactive sessions have no scope.
+  and kills them, then removes the scope and the commands' short `TMPDIR`,
+  `$TMPDIR/tron-tc/<10-hex session digest>` (fixtures nest under it and embed it in
+  byte-bounded data, #2260). Interactive sessions have no scope.
 
 - `context-delivery.ts`: canonical inbox delivery; Run owns terminal decisions and writes.
   Pure parsing/folding and encoded bounds live in [Receipts](../receipts/README.md); persisted bytes remain stable.
