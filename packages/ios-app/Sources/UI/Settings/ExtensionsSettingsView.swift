@@ -27,6 +27,7 @@ struct ExtensionsSettingsView: View {
     @PresentationState private var activeMutations: [PackageMutationOperation: OwnedMutation] = [:]
 
     private static let packagesKey = "sources.packages"
+    private static let npmCommandKey = "sources.npmCommand"
     private var settingsTarget: JSONValue {
         projectCWD.map { SettingsTarget.project(cwd: $0).gatewayTarget } ?? SettingsTarget.global.gatewayTarget
     }
@@ -91,18 +92,24 @@ struct ExtensionsSettingsView: View {
                         )
                     }
                 }
-                .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
+
+                // The npm command is how Pi installs the packages listed above; it keeps
+                // its own card beside them, without a second heading.
+                SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
+                                     presentation: .keys([Self.npmCommandKey]), detailedKeys: true)
+                    .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.06)
+                    .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
 
                 if supportsModules {
                     modulesSection
                 }
 
-                // The schema's remaining Sources keys (npm command and search paths), with
-                // where each comes from. Installed above is the one package list: the
-                // `packages` setting omits the bundled provider the inventory includes.
+                // The schema's remaining Sources keys (search paths), with where each
+                // comes from. Installed above is the one package list: the `packages`
+                // setting omits the bundled provider the inventory includes.
                 SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
                                      presentation: .section("sources"), embedded: true,
-                                     selection: .editable(excluding: [Self.packagesKey]))
+                                     selection: .editable(excluding: [Self.packagesKey, Self.npmCommandKey]))
 
                 if let inventory {
                     localThemesGroup(inventory)

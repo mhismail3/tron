@@ -142,7 +142,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   overrides the Global list), the switch is dimmed, shows Off and says why; the saved entry is kept,
   and the row explains why.
 - **Extensions.** Inventory counts, installed packages (Tron's bundled subagents provider without
-  Update/Remove), read-only Tron Modules, the npm command and search paths. There is no native
+  Update/Remove), the npm command, read-only Tron Modules and search paths. There is no native
   install form: an agent proposes `sources.packages` (and `sources.npmCommand`) through the exact
   install/trust card (#2172). A package's detail lists
   what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks reads

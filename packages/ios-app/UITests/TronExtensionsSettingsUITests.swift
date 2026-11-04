@@ -37,7 +37,7 @@ final class TronExtensionsSettingsUITests: XCTestCase {
     /// Installed is the one package list: the bundled provider the Gateway appends
     /// is labelled and has no Update/Remove menu, there is no Sources summary row,
     /// no native install form (agents propose installs through the exact card), and
-    /// the npm command leads the Sources settings above the search paths.
+    /// the npm command keeps its own card between Installed and the search paths.
     @MainActor
     func testInstalledIsTheOnePackageList() {
         let app = openExtensions()
