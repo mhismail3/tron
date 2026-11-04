@@ -19,12 +19,14 @@ import time
 import verify
 
 ROOT = verify.ROOT
-# The host's one full-Gateway run at a time. A batch and every other Gateway Vitest run
-# (tools/verify/gateway.py, same path) take it in arrival order; batch subprocesses carry
-# FULL_GATEWAY_LOCK_HELD so their own Gateway runs do not wait on this batch.
+# The host's one full-Gateway run at a time. A batch takes it only around each lane or probe
+# marked `gatewayLock` (a full Gateway Vitest run), in arrival order with every other Gateway
+# Vitest run (tools/verify/gateway.py, same path), and marks that subprocess
+# FULL_GATEWAY_LOCK_HELD so its runner does not wait on the batch. Every other subprocess runs
+# unmarked: Gateway runs inside it (the verifier's Gateway groups) queue for the lock themselves.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 FULL_GATEWAY_LOCK_HELD = 'TRON_FULL_GATEWAY_LOCK_HELD'
-# A due batch waits its turn this long, then refuses loudly; coverage stays pending, never skipped.
+# A Gateway lane waits its turn this long, then is uncovered naming the holder; never skipped.
 FULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.
@@ -43,7 +45,7 @@ def lanes(root: Path, base: str) -> list[dict]:
     result = [{'name': 'full verify', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
         result.append({'name': name, 'command': ['python3', 'tools/verify/gateway.py', *config],
-                       'vitest': True, 'requires': 'packages/gateway/package-lock.json'})
+                       'vitest': True, 'gatewayLock': True, 'requires': 'packages/gateway/package-lock.json'})
     result.extend([
         {'name': 'Mac integration', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
          'requires': 'packages/mac-app/project.yml'},
@@ -101,7 +103,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     log = directory / 'output.log'
     print(f"batch: {lane['name']} … live log: {log}", flush=True)
-    start = time.monotonic()
+    start, started_at = time.monotonic(), time.time()
     if lane.get('requires') and not (root / lane['requires']).is_file():
         return {**lane, 'exit': None, 'status': 'uncovered', 'reason': 'missing required owner', 'seconds': 0}
     if lane.get('ios'):
@@ -134,22 +136,42 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     if lane['name'] == 'full verify':
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         (root / 'test-results/verify' / f'{sha}.json').unlink(missing_ok=True)
-    with log.open('w') as output:
-        process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
-                                   stdout=output, stderr=subprocess.STDOUT,
-                                   env={**os.environ, 'TRON_IOS_E2E_NO_INSTALL': '1', FULL_GATEWAY_LOCK_HELD: '1'},
-                                   start_new_session=True)
+    env = {key: value for key, value in os.environ.items() if key != FULL_GATEWAY_LOCK_HELD}
+    env['TRON_IOS_E2E_NO_INSTALL'] = '1'
+    held, window = None, None
+    if lane.get('gatewayLock'):
+        record = {'pid': os.getpid(), 'worktree': str(root), 'purpose': f"verify --batch: {lane['name']}"}
         try:
-            code = process.wait()
-        except BaseException:
-            os.killpg(process.pid, signal.SIGTERM)
+            held = wait_for_full_gateway_lock(record, FULL_GATEWAY_LOCK_WAIT_SECONDS,
+                                              lambda line: print(f"batch: {lane['name']} {line}", flush=True))
+        except TimeoutError as error:
+            return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
+                    'reason': f'a full-Gateway run held or preceded this lane at {FULL_GATEWAY_LOCK} past the '
+                              f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); not run'}
+        env[FULL_GATEWAY_LOCK_HELD] = '1'
+        window = {'waitSeconds': round(time.monotonic() - start, 3), 'acquiredAt': time.time()}
+    try:
+        with log.open('w') as output:
+            process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
+                                       stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
             try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            raise
-    result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'log': str(log), 'executedCommand': command}
+                code = process.wait()
+            except BaseException:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                raise
+    finally:
+        if held:
+            held.close()
+            window['releasedAt'] = time.time()
+    result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'startedAt': started_at, 'endedAt': time.time(),
+              'log': str(log), 'executedCommand': command}
+    if window:
+        result['fullGatewayLock'] = window
     if deferred_ios:
         result.update(status='uncovered', reason='deferred: verifier iOS consumers; all host slots held')
     # Preserve the owning verifier's exact selection, failed tests and partial step logs.
@@ -670,7 +692,7 @@ def failure_cases(outcome: dict) -> list[dict]:
                 continue
             command = outcome['command']
             cases.append({**outcome, 'signature': {'failures': {identity: digest}},
-                          'probe': {'name': outcome['name'], 'vitest': True,
+                          'probe': {'name': outcome['name'], 'vitest': True, 'gatewayLock': bool(outcome.get('gatewayLock')),
                                     'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(' > '.join(names)) + '$']}})
     # Other owners may only be probed if the recorded invocation is already a case filter.
     elif outcome.get('xctestCases') and outcome.get('signature'):
@@ -801,35 +823,22 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce):
 
 
 class Locks:
-    """The nonwaiting repository batch lock, then the host's full-Gateway lock in arrival order."""
+    """The nonwaiting repository batch lock. The host's full-Gateway lock is per Gateway lane (`execute`)."""
 
     def __init__(self, state: Path):
         state.mkdir(exist_ok=True)
-        self.handles = [(state / 'batch.lock').open('a')]
+        self.handle = (state / 'batch.lock').open('a')
 
     def __enter__(self):
         try:
-            fcntl.flock(self.handles[0], fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             self.__exit__()
             raise verify.VerifyError('another batch owns this repository; no queue or wait') from None
-        # Waiting Gateway runs print the recorded holder; name this batch, not a previous run.
-        record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'verify --batch'}
-        try:
-            self.handles.append(wait_for_full_gateway_lock(record, FULL_GATEWAY_LOCK_WAIT_SECONDS,
-                                                           lambda line: print(f'batch: {line}', flush=True)))
-        except TimeoutError as error:
-            self.__exit__()
-            raise verify.VerifyError(f'a full-Gateway run holds or precedes this batch at {FULL_GATEWAY_LOCK} past the '
-                                     f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); nothing ran') from None
-        except BaseException:
-            self.__exit__()
-            raise
         return self
 
     def __exit__(self, *_):
-        for handle in self.handles:
-            handle.close()
+        self.handle.close()
 
 
 def review(args, state: Path) -> int:

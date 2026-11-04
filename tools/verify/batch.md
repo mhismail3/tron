@@ -10,11 +10,13 @@ line with head, report path and each repair's state and next step; the caller de
 **Coverage.** First use needs `--base <main-anchor>`, not a claim of green.
 `<git-common-dir>/verify/green.json` names the last raw-green head and is the next base;
 `--base` cannot override it. Every run takes the nonwaiting repository `batch.lock` (held refuses,
-exit 2), then waits its turn for `/tmp/tron-full-gateway.lock` in the same first-come queue as every
-other Gateway Vitest run ([runner](README.md)), so none overlaps a batch and none passes it. Holders
-are never interrupted; after 45 minutes the batch refuses (exit 2) naming the holder, earlier waiters
-and its wait, coverage still pending, never skipped. Batch lanes mark that they already hold the
-lock (`TRON_FULL_GATEWAY_LOCK_HELD=1`).
+exit 2). The host's `/tmp/tron-full-gateway.lock` is held only while a full Gateway Vitest run
+executes: each Gateway default/nested lane and each Gateway attribution probe waits its turn in the
+same first-come queue as every other Gateway Vitest run ([runner](README.md)) and marks only that
+subprocess `TRON_FULL_GATEWAY_LOCK_HELD=1`; `verify --all` and the affected-check candidate run
+unmarked, so their Gateway groups queue for themselves. Gateway runs never overlap, and a
+pre-land run waits only for the batch's own Gateway runs, never its iOS lanes. Holders are never interrupted; a lane still
+waiting after 45 minutes is uncovered naming the holder, earlier waiters and its wait, never skipped.
 Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
 required lane runs, even after failures: locks/declared consumers (`verify --all`), full
 default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned
@@ -27,14 +29,16 @@ Neither advances `green.json`. Immutable `verify/batches/<range>/` keeps command
 counts and wall times; on a red, `first-report.json` and the `evidence.json` hash manifest
 freeze the first failure after every lane joined and before any probe runs.
 
-**Attribution** probes one exact case (Vitest file plus anchored `-t`, XCTest class/method,
+**Attribution** probes one exact case (Vitest file plus `-t` anchoring the describe and test
+titles joined with ` > `, as Vitest matches them; XCTest class/method;
 or the owner's `--only-testing` selector) in one disposable worktree; it never reruns a suite.
 Main's first-parent chain is the landing history: an ordinary commit or a two-parent
 integration is one unit; octopus history is unresolved. Proof requires two fresh failing
 executions with the identical normalized signature at the head, a binary search proposal
 (cached `verify/probes/` outcomes are hints only), then two fresh passes at the culprit's
 first parent and two fresh identical failures at the culprit. Any mixed, unknown, setup,
-empty or changed-signature execution is **unresolved**: the red stays red and is
+empty or changed-signature execution is **unresolved**, except that a head control selecting
+no tests is a broken selector: the batch errors (exit 2) naming the command. Unresolved, the red stays red and is
 root-caused; nothing is guessed or reverted. `verify/attributions/` memoizes per range.
 
 **Repair** (`verify/repairs/<culprit>.json`, one journal per landing, written before each
@@ -77,5 +81,7 @@ rebind; uncertain push, crash after remote acceptance and an owner killed mid-re
 revert each); stale red; unreadable remote; migration and `security` owner boundaries; BLOCK;
 conflict; an inverse that leaves the failure; failing affected checks; mutated frozen evidence;
 mixed controls, suite-level errors, skipped/missing coverage and octopus history; held locks
-and interrupted cleanup preservation. The fixture points the host lock at its own temporary
+(per-lane arrival order, capped waits, a pre-land run passing a running UI lane), a stand-in
+Vitest that matches `-t` like Vitest 5, a head probe selecting nothing (error, exit 2) and
+interrupted cleanup preservation. The fixture points the host lock at its own temporary
 file; the production path is not exercised by tests.

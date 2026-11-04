@@ -914,19 +914,24 @@ if sys.argv[1] == 'clean':
         self.assertIn('packages/gateway/src/auth/token.ts', repair['reason'])
         self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
 
-    def test_a_batch_records_itself_as_the_full_gateway_lock_holder(self):
+    def test_a_batch_records_its_gateway_lanes_as_the_full_gateway_lock_holder(self):
         self.land('good', 'yes')
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         holder = json.loads((Path(self.temporary.name) / 'full-gateway.lock').read_text())
-        self.assertEqual(holder['purpose'], 'verify --batch')
+        self.assertEqual(holder['purpose'], 'verify --batch: Gateway nested')
+        windows = {lane['name']: lane.get('fullGatewayLock') for lane in self.reports()[-1]['results']}
+        self.assertEqual([name for name, window in windows.items() if window], ['Gateway default', 'Gateway nested'])
+        default, nested = windows['Gateway default'], windows['Gateway nested']
+        self.assertLessEqual(default['acquiredAt'], default['releasedAt'])
+        self.assertLessEqual(default['releasedAt'], nested['acquiredAt'], 'batch Gateway lanes never overlap')
 
     def gateway_runs(self):
         runs = GatewayRuns(Path(self.temporary.name) / 'full-gateway.lock')
         self.addCleanup(runs.close)
         return runs
 
-    def test_held_full_gateway_lock_keeps_coverage_pending_after_the_capped_wait(self):
+    def test_held_full_gateway_lock_leaves_gateway_lanes_uncovered_after_the_capped_wait(self):
         self.land('good', 'yes')
         # The shipped cap is 45 minutes; this fixture's copy of the batch waits 2 seconds.
         source = (self.root / 'tools/verify/batch.py').read_text()
@@ -935,29 +940,44 @@ if sys.argv[1] == 'clean':
         runs = self.gateway_runs()
         holder = runs.start('holder')
         runs.wait_holding('holder')
-        started = time.monotonic()
         result = self.run_batch('--base', self.base)
-        waited = time.monotonic() - started
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn('full-Gateway run holds', result.stdout)
-        self.assertIn(f'"pid": {holder.pid}', result.stdout)
-        self.assertIn('gateway vitest holder', result.stdout)
-        self.assertRegex(result.stdout, r'waited \d+s')
-        self.assertGreaterEqual(waited, 2)
-        self.assertFalse(self.reports())
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'uncovered')
+        lanes = {lane['name']: lane for lane in report['results']}
+        self.assertEqual(len(lanes), 9)
+        for name in ('Gateway default', 'Gateway nested'):
+            lane = lanes[name]
+            self.assertEqual((lane['status'], lane['exit']), ('uncovered', None))
+            self.assertIn('full-Gateway run held', lane['reason'])
+            self.assertIn(f'"pid": {holder.pid}', lane['reason'])
+            self.assertIn('gateway vitest holder', lane['reason'])
+            self.assertRegex(lane['reason'], r'waited \d+s')
+            self.assertGreaterEqual(lane['seconds'], 2)
+        self.assertNotIn('default', (self.root / 'test-results/executed').read_text().split())
+        self.assertTrue(all(lane['exit'] == 0 for name, lane in lanes.items() if not name.startswith('Gateway ')))
         self.assertFalse((self.root / '.git/verify/green.json').exists())
-        self.assertIsNone(holder.poll(), 'a capped batch never interrupts the holder')
-        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped batch leaves no ticket')
-        # The capped batch left the line: the next run follows the holder.
+        self.assertIsNone(holder.poll(), 'a capped lane never interrupts the holder')
+        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped lane leaves no ticket')
+        # The capped lanes left the line: the next run follows the holder.
         runs.start('next')
         runs.wait_queued('next')
         runs.release('holder')
         runs.wait_all()
         self.assertEqual(runs.names(), ['holder', 'next'])
 
-    def test_a_due_batch_waits_its_turn_ahead_of_later_gateway_runs(self):
+    def land_gateway_lane_marker(self, order):
+        """The fixture Gateway lane also records itself in `order` once its lane holds the lock."""
+        source = (self.root / 'tools/verify/gateway.py').read_text()
+        self.land('tools/verify/gateway.py', source.replace(
+            "with (root/'test-results/executed').open('a') as f: f.write(name+' '+repr(args)+'\\n')\n",
+            "with (root/'test-results/executed').open('a') as f: f.write(name+' '+repr(args)+'\\n')\n"
+            f"with open({str(order)!r}, 'a') as f: f.write('batch-'+name+'\\n')\n", 1))
+        self.assertIn('batch-', (self.root / 'tools/verify/gateway.py').read_text())
+
+    def test_due_gateway_lanes_wait_their_turn_in_arrival_order_with_other_gateway_runs(self):
         runs = self.gateway_runs()
-        self.land('scripts/tron-xcodebuild', f'#!/bin/sh\necho mac-build >> test-results/executed\necho batch >> {runs.order}\n')
+        self.land_gateway_lane_marker(runs.order)
         runs.start('holder')
         runs.wait_holding('holder')
         output = Path(self.temporary.name) / 'batch.out'
@@ -965,15 +985,42 @@ if sys.argv[1] == 'clean':
             batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
                                      env=self.env, stdout=stream, stderr=subprocess.STDOUT)
         self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
-        wait_until(lambda: batch.poll() is not None or 'waiting for' in output.read_text(), 'the batch neither waited nor exited')
-        self.assertIsNone(batch.poll(), 'a due batch waits behind the holder instead of refusing:\n' + output.read_text())
+        wait_until(lambda: batch.poll() is not None or 'Gateway default waiting for' in output.read_text(),
+                   'the Gateway lane neither waited nor exited')
+        self.assertIsNone(batch.poll(), 'a due Gateway lane waits behind the holder instead of refusing:\n' + output.read_text())
         for name in ('later-1', 'later-2'):
             runs.start(name)
             runs.wait_queued(name)
         runs.release('holder')
         self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
         runs.wait_all()
-        self.assertEqual(runs.names(), ['holder', 'batch', 'later-1', 'later-2'])
+        # The nested lane queues again after its default lane releases, so earlier arrivals go first.
+        self.assertEqual(runs.names(), ['holder', 'batch-default', 'later-1', 'later-2', 'batch-nested'])
+
+    def test_pre_land_gateway_runs_do_not_wait_for_the_ui_journey_lane(self):
+        runs = self.gateway_runs()
+        self.land_gateway_lane_marker(runs.order)
+        gate = Path(self.temporary.name) / 'ui-gate'
+        gate.mkdir()
+        self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
+                  f'if [ "$1" = run-ui ]; then touch {gate}/started; while [ ! -e {gate}/release ]; do sleep 0.05; done; fi\n')
+        output = Path(self.temporary.name) / 'batch.out'
+        with output.open('w') as stream:
+            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
+                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
+        self.addCleanup(lambda: gate.is_dir() and (gate / 'release').touch())
+        wait_until(lambda: (gate / 'started').exists() or batch.poll() is not None, 'the UI journey lane never started', timeout=60)
+        self.assertIsNone(batch.poll(), output.read_text())
+        # While the batch's UI journeys run, a pre-land Gateway run takes the free lock at once.
+        runs.start('pre-land')
+        runs.wait_all(['pre-land'])
+        self.assertNotIn('waiting for', runs.stderr('pre-land'))
+        (gate / 'release').touch()
+        self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
+        self.assertEqual(runs.names(), ['batch-default', 'batch-nested', 'pre-land'])
+        lanes = {lane['name']: lane for lane in self.reports()[-1]['results']}
+        self.assertLessEqual(lanes['Gateway nested']['fullGatewayLock']['releasedAt'], lanes['real Gateway UI journeys']['startedAt'])
 
     def test_red_while_disabled_publishes_after_the_enable_step(self):
         self.remote(publish=False)
