@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """scripts/tron probe: remove or move one unit in a scratch worktree and see which checks go red.
 
-A unit is a tracked file, a directory or a module id. The probe checks out HEAD in a private
-worktree, runs the unit's guardians there once unchanged (baseline), applies the change (delete,
-or `--move` without updating any caller), commits it and runs the same checks again. Guardians are
+A unit is a tracked file, a directory or a module id. The probe runs the unit's guardians on HEAD
+(baseline), applies the change in a private worktree (delete, or `--move` without updating any
+caller), commits it and runs the same checks again; every test runs in its own private checkout. Guardians are
 the tests `scripts/tron verify` selects for the unit plus the tests of every module whose files
 name it (tools/ownership/cards.py), and the static `scripts/tron ownership` check. The verdict:
 
@@ -131,7 +131,27 @@ def stop_running() -> None:
             pass
 
 
-def run_tests(scratch: Path, tests: list[str], logs: Path, jobs: int, timeout: float) -> dict[str, dict]:
+def checkout(commit: str, dependencies: Path | None) -> Path:
+    """A private worktree of `commit`, with a copy-on-write clone of the installed Gateway dependencies: a
+    guardian may reinstall them (bundle-gateway.sh runs `npm ci`) or write into its checkout, and neither
+    may reach another checkout or a guardian running beside it."""
+    tree = Path(tempfile.mkdtemp(prefix="tron-probe-")) / "tree"
+    git(verify.ROOT, "worktree", "add", "--detach", "-q", str(tree), commit)
+    if dependencies:
+        (tree / verify.GATEWAY).mkdir(parents=True, exist_ok=True)
+        subprocess.run(["cp", "-c", "-R", str(dependencies), str(tree / verify.GATEWAY / "node_modules")], check=True)
+    return tree
+
+
+def discard(tree: Path) -> None:
+    git(verify.ROOT, "worktree", "remove", "--force", str(tree), check=False)
+    remove_tree(tree.parent)
+    git(verify.ROOT, "worktree", "prune", check=False)
+
+
+def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Path, jobs: int,
+              timeout: float) -> dict[str, dict]:
+    """Each test in its own checkout of `commit`, as `scripts/tron verify` runs it in a clean worktree."""
     nested, mac_terminal = verify.nested_files()
     logs.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +161,7 @@ def run_tests(scratch: Path, tests: list[str], logs: Path, jobs: int, timeout: f
             return test, {"outcome": "not-run", "why": f"{runner} needs Xcode; run it through scripts/tron verify"}
         if STOPPING.is_set():
             return test, {"outcome": "not-run", "why": "the probe was stopped"}
+        scratch = checkout(commit, dependencies)
         argv, cwd = command(scratch, test, runner)
         private = Path(tempfile.mkdtemp(prefix="probe-test-"))
         started = time.time()
@@ -161,6 +182,7 @@ def run_tests(scratch: Path, tests: list[str], logs: Path, jobs: int, timeout: f
             except ProcessLookupError:
                 pass
             remove_tree(private)
+            discard(scratch)
         log = logs / (test.replace("/", "__") + ".log")
         log.write_text(output)
         return test, {"outcome": "pass" if code == 0 else "fail", "exit": code, "seconds": round(time.time() - started, 1),
@@ -254,22 +276,18 @@ def main(argv: list[str]) -> int:
     out.mkdir(parents=True)
     action = f"move to {args.move}" if args.move else "delete"
     print(f"probe {unit} ({len(files)} file(s), {action}) at {sha[:12]}: {len(tests)} guardian test file(s)", flush=True)
-    scratch = Path(tempfile.mkdtemp(prefix="tron-probe-")) / "tree"
-    git(verify.ROOT, "worktree", "add", "--detach", "-q", str(scratch), sha)
+    # Installed Gateway dependencies: this checkout's, else the primary checkout's; each test gets a clone.
+    common = Path(git(verify.ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    dependencies = next((candidate.resolve() for candidate in (verify.ROOT / verify.GATEWAY / "node_modules",
+                                                               common.parent / verify.GATEWAY / "node_modules")
+                         if (candidate / ".bin").is_dir()), None)
+    scratch = checkout(sha, None)
     try:
-        # Installed Gateway dependencies are cloned (APFS copy-on-write), never linked: a guardian may
-        # reinstall them (bundle-gateway.sh runs `npm ci`), which must not touch another checkout's copy.
-        common = Path(git(verify.ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
-        modules_dir = next((candidate.resolve() for candidate in (verify.ROOT / verify.GATEWAY / "node_modules",
-                                                                   common.parent / verify.GATEWAY / "node_modules")
-                            if (candidate / ".bin").is_dir()), None)
-        if modules_dir:
-            (scratch / verify.GATEWAY).mkdir(parents=True, exist_ok=True)
-            subprocess.run(["cp", "-c", "-R", str(modules_dir), str(scratch / verify.GATEWAY / "node_modules")], check=True)
         # A guardian's baseline depends only on the commit, so probes of one commit share it.
         cache = out.parent / "baseline.json"
         known = json.loads(cache.read_text()) if cache.exists() else {}
-        fresh = run_tests(scratch, [test for test in tests if test not in known], out.parent / "baseline", args.jobs, args.timeout)
+        fresh = run_tests(sha, dependencies, [test for test in tests if test not in known], out.parent / "baseline",
+                          args.jobs, args.timeout)
         if fresh:
             known = {**(json.loads(cache.read_text()) if cache.exists() else {}), **fresh}
             cache.write_text(json.dumps(known, indent=2, sort_keys=True) + "\n")
@@ -297,12 +315,11 @@ def main(argv: list[str]) -> int:
         git(scratch, "add", "-A")
         git(scratch, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid", "commit", "-q", "--no-verify",
             "-m", f"probe: {action} {unit}")
+        changed = git(scratch, "rev-parse", "HEAD").strip()
         static = [line for line in static_check(scratch) if line not in before]
-        after = run_tests(scratch, tests, out / "after", args.jobs, args.timeout)
+        after = run_tests(changed, dependencies, tests, out / "after", args.jobs, args.timeout)
     finally:
-        git(verify.ROOT, "worktree", "remove", "--force", str(scratch), check=False)
-        remove_tree(scratch.parent)
-        git(verify.ROOT, "worktree", "prune", check=False)
+        discard(scratch)
     names = names_of(unit, files)
     failing = {test: (verify.ROOT / outcome["log"]).read_text() for test, outcome in after.items()
                if outcome["outcome"] == "fail" and baseline[test]["outcome"] == "pass"}

@@ -13,7 +13,8 @@ helper verify imports into a disposable Git repository and probes one unit as a 
 5. A guardian already red at HEAD is left out and reported; with no green guardian left the probe
    stops with exit 1 before any change.
 6. SIGTERM stops every running test's process group and removes the scratch worktree.
-7. A guardian that seals a tree read-only leaves no scratch behind.
+7. A guardian that seals a tree read-only leaves no scratch behind, and guardians running side by
+   side each get their own checkout: one writing into its tree never dirties another's.
 8. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
    checkout's (bundle-gateway.sh runs `npm ci`).
 
@@ -88,7 +89,7 @@ class Repo:
         self.git("commit", "-q", "-m", message)
 
     def probe(self, *args: str) -> tuple[subprocess.CompletedProcess, dict]:
-        result = subprocess.run([str(self.path / "scripts/tron"), "probe", *args, "--jobs", "2"], cwd=self.path,
+        result = subprocess.run([str(self.path / "scripts/tron"), "probe", "--jobs", "2", *args], cwd=self.path,
                                 env=self.env, capture_output=True, text=True)
         ARTIFACTS.mkdir(parents=True, exist_ok=True)
         with (ARTIFACTS / "runs.txt").open("a") as log:
@@ -197,6 +198,18 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "precise", result.stdout + result.stderr)
         left = sorted(path.name for path in Path(self.temp.name).iterdir() if path.name.startswith(("probe-test-", "tron-probe-")))
         self.assertEqual(left, [], result.stderr)
+
+    def test_guardians_side_by_side_never_share_a_checkout(self) -> None:
+        r = self.repo
+        r.write("tools/tool/tests/test-greeting-0.sh", "#!/usr/bin/env bash\n# Writes into its checkout.\n"
+                "touch stray-output.txt\nsleep 2\nbash tools/tool/tool.sh >/dev/null\n")
+        r.write("tools/tool/tests/test-greeting-1.sh", "#!/usr/bin/env bash\n# Needs a clean checkout.\nsleep 1\n"
+                "[[ -z $(git status --porcelain) ]] || { echo \"dirty checkout: $(git status --porcelain)\"; exit 1; }\n"
+                "[[ $(bash tools/tool/tool.sh) == hello ]] || { echo 'tools/tool/tool.sh failed'; exit 1; }\n")
+        r.commit("a writer and a reader of the checkout")
+        result, report = r.probe("tools/tool/tool.sh", "--jobs", "8")
+        self.assertEqual(report.get("baselineRed", []), [], result.stdout + result.stderr)
+        self.assertIn("tools/tool/tests/test-greeting-1.sh", report["failing"])
 
     def test_a_guardian_that_reinstalls_dependencies_leaves_the_checkouts_copy_alone(self) -> None:
         r = self.repo
