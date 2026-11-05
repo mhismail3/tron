@@ -242,13 +242,15 @@ def main(argv: list[str]) -> int:
     scratch = Path(tempfile.mkdtemp(prefix="tron-probe-")) / "tree"
     git(verify.ROOT, "worktree", "add", "--detach", "-q", str(scratch), sha)
     try:
-        # Installed Gateway dependencies are reused read-only: this checkout's, else the primary checkout's.
+        # Installed Gateway dependencies are cloned (APFS copy-on-write), never linked: a guardian may
+        # reinstall them (bundle-gateway.sh runs `npm ci`), which must not touch another checkout's copy.
         common = Path(git(verify.ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
-        modules_dir = next((candidate for candidate in (verify.ROOT / verify.GATEWAY / "node_modules",
-                                                         common.parent / verify.GATEWAY / "node_modules")
-                            if candidate.is_dir()), None)
+        modules_dir = next((candidate.resolve() for candidate in (verify.ROOT / verify.GATEWAY / "node_modules",
+                                                                   common.parent / verify.GATEWAY / "node_modules")
+                            if (candidate / ".bin").is_dir()), None)
         if modules_dir:
-            (scratch / verify.GATEWAY / "node_modules").symlink_to(modules_dir)
+            (scratch / verify.GATEWAY).mkdir(parents=True, exist_ok=True)
+            subprocess.run(["cp", "-c", "-R", str(modules_dir), str(scratch / verify.GATEWAY / "node_modules")], check=True)
         # A guardian's baseline depends only on the commit, so probes of one commit share it.
         cache = out.parent / "baseline.json"
         known = json.loads(cache.read_text()) if cache.exists() else {}

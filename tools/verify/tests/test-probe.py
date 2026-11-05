@@ -12,6 +12,8 @@ helper verify imports into a disposable Git repository and probes one unit as a 
    which names the tool.
 5. A guardian already red at HEAD stops the probe with exit 1 before any change.
 6. SIGTERM stops every running test's process group and removes the scratch worktree.
+7. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
+   checkout's (bundle-gateway.sh runs `npm ci`).
 
 Every run leaves no scratch worktree behind. The last run's output is kept in `test-results/probe-cli/`.
 """
@@ -171,6 +173,17 @@ class ProbeTests(unittest.TestCase):
         self.assertNotEqual(process.returncode, 0, output)
         self.assertEqual(subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode, 1,
                          "a guardian's process outlived the probe")
+
+    def test_a_guardian_that_reinstalls_dependencies_leaves_the_checkouts_copy_alone(self) -> None:
+        r = self.repo
+        r.write(".gitignore", "test-results/\nnode_modules/\n")
+        r.write("packages/gateway/node_modules/.bin/tool", "installed\n")
+        r.write("tools/caller/tests/test-caller.sh", CALLER_TEST.replace(
+            "out=$(", "rm -rf packages/gateway/node_modules/.bin\nout=$("))
+        r.commit("a guardian that reinstalls")
+        result, report = r.probe("tools/caller/caller.sh")
+        self.assertEqual(report["verdict"], "precise", result.stdout + result.stderr)
+        self.assertEqual((r.path / "packages/gateway/node_modules/.bin/tool").read_text(), "installed\n")
 
 
 if __name__ == "__main__":

@@ -61,7 +61,8 @@ its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and e
 records itself there, so Gateway runs never overlap each other or a `verify --batch` Gateway lane,
 which holds it only while that lane runs ([batch](batch.md)). Waiters, batch included, take the lock first-come first-served: each holds the
 flock of a numbered ticket in `/tmp/tron-full-gateway.lock.queue/` while it waits, so a dead
-waiter's ticket is pruned, and only the earliest live ticket tries the lock.
+waiter's ticket is pruned, and only the earliest live ticket tries the lock. `host_lock.py` is
+the lock's one owner; the runner and the batch import it.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
 user's settings or profile. Test input and output must not depend on live stores.
 
@@ -244,8 +245,8 @@ deferred until a known-kill probe proves activation with pinned Vitest.
 
 `scripts/tron probe <path|module-id> [--move <new-path>] [--jobs 4] [--timeout 900]` asks what
 would break if a unit (file, directory or module) were removed, or moved without updating its
-callers. It checks out HEAD in a private worktree (reusing installed Gateway dependencies
-read-only), runs the unit's guardians unchanged, applies the change with the manifests kept
+callers. It checks out HEAD in a private worktree (with a copy-on-write clone of installed Gateway
+dependencies, which a guardian may reinstall), runs the unit's guardians unchanged, applies the change with the manifests kept
 true to the tree, commits it and runs them again. Guardians are the tests `verify` selects for
 the unit, every test that names it, and the tests that name a file of their own module that names
 it (one hop through a consumer; references as in [purpose cards](../ownership/README.md#purpose-cards)).

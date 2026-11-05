@@ -27,13 +27,12 @@ checker and the metrics report cannot drift. It reads Git objects only: commit f
 | any other `README.md` | 150 | 300 |
 | other docs | 300 | 600 |
 
-The root `README.md` (250) and `AGENTS.md` (150) keep their hard budgets in
-`scripts/check-documentation-policy.py`, which the charter names. Manifests
-carry no size exceptions.
+The root `README.md` (250) and `AGENTS.md` (150) fail at their budget itself:
+the front door and the charter stay short. Manifests carry no size exceptions.
 
 ## Verify
 
 `scripts/tron test tooling tools/budgets/tests/test-budgets.py` runs the CLI on
 disposable repositories: docs at twice their budget pass and one line more
-fails, code of any size is ignored, and an unknown revision exits 2. Output is
+fails, the root README and AGENTS.md fail one line over their budget, code of any size is ignored, and an unknown revision exits 2. Output is
 kept in `test-results/budgets-cli/`.

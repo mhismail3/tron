@@ -155,12 +155,6 @@ def main() -> None:
     files = repository_files()
     paths = markdown_paths(files)
     sources = {path: path.read_text() for path in paths}
-    # Line budgets for the root front door and the agent charter (AGENTS.md).
-    for name, budget in (("README.md", 250), ("AGENTS.md", 150)):
-        lines = len(sources[ROOT / name].splitlines())
-        if lines > budget:
-            fail(f"{name} has {lines} lines; maximum is {budget}")
-
     anchors = {path: heading_anchors(source) for path, source in sources.items()}
     for path, source in sources.items():
         relative_source = path.relative_to(ROOT)

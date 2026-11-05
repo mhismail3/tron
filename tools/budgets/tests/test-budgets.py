@@ -5,8 +5,8 @@ Each case copies the real `scripts/tron`, `tools/budgets` and `tools/metrics`
 into a disposable Git repository and commits a change:
 
 1. Docs fail only above twice their budget (package README 200, other README
-   150, other docs 300); the root README is not this checker's. Code files of
-   any size are not this checker's either.
+   150, other docs 300); the root README (250) and AGENTS.md (150) fail one line
+   over their budget. Code files of any size are not this checker's.
 2. An unknown revision is an error (exit 2), never clean.
 
 The last run's output is kept in `test-results/budgets-cli/`.
@@ -45,7 +45,7 @@ class Repo:
         for relative in TOOLS:
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.path / relative)
-        self.write("README.md", lines(400))  # root README: the documentation policy's budget
+        self.write("README.md", lines(250))  # root README: at its hard budget
         self.write(f"{APP}/big.ts", lines(600))
         self.write(f"{APP}/huge.ts", lines(900))  # code of any size is not this checker's
         self.commit("base")
@@ -95,7 +95,7 @@ class DocTests(BudgetCase):
         r.write("packages/gateway/README.md", lines(400))
         r.write("docs/tool/README.md", lines(300))
         r.write("docs/fine.md", lines(600))
-        r.write("README.md", lines(900))
+        r.write("AGENTS.md", lines(150))
         r.commit("docs within twice their budget")
         self.assertEqual(self.problems(0), [])
         self.assertIn("3 docs over budget (reported)", r.budgets().stdout)
@@ -109,6 +109,18 @@ class DocTests(BudgetCase):
             "doc over 2x budget: packages/gateway/README.md has 401 lines; budget is 200, limit 400 (split it by "
             "owner)",
         ])
+
+
+    def test_root_readme_and_charter_fail_one_line_over_their_budget(self) -> None:
+        r = self.repo
+        r.write("AGENTS.md", lines(150))
+        r.commit("at budget")
+        self.assertEqual(self.problems(0), [])
+        r.write("README.md", lines(251))
+        r.write("AGENTS.md", lines(151))
+        r.commit("one line over")
+        self.assertEqual(self.problems(1), ["AGENTS.md has 151 lines; maximum is 150",
+                                            "README.md has 251 lines; maximum is 250"])
 
 
 class ErrorTests(BudgetCase):
