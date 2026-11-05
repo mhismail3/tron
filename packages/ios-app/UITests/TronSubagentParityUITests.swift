@@ -88,8 +88,8 @@ final class TronSubagentParityUITests: XCTestCase {
             app.launch()
             defer { app.terminate() }
             XCTAssertTrue(app.staticTexts["The requested changes are ready for review."].waitForExistence(timeout: 10))
-            XCTAssertTrue(app.buttons["Task, Completed, 42ms"].exists, app.debugDescription)
-            XCTAssertTrue(app.buttons["Notify, Completed, 18ms"].exists, app.debugDescription)
+            XCTAssertTrue(app.buttons["Manage task, Completed, 42ms"].exists, app.debugDescription)
+            XCTAssertTrue(app.buttons["Send notification, Completed, 18ms"].exists, app.debugDescription)
             XCTAssertTrue(app.buttons["Worker · Simplify Home chip labels, Reported"].exists, app.debugDescription)
             XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Home ·")).firstMatch.exists)
             XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Notify ·")).firstMatch.exists)
