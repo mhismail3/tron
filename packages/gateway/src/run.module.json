@@ -27,7 +27,6 @@
     "sessions/home-provider-runtime.e2e.test.ts",
     "sessions/home-request-seam.integration.test.ts",
     "sessions/home-research-tools.integration.test.ts",
-    "sessions/locks/run-*.golden.json",
     "kernel/run/locks/store-run-markers.golden.json",
     "sessions/multi-resource-message.e2e.test.ts",
     "sessions/native-tool-settlement.integration.test.ts",
