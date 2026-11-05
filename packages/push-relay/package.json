@@ -11,7 +11,7 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@peculiar/x509": "1.14.3",
+    "@peculiar/x509": "3.1.0",
     "cbor-x": "1.6.0"
   },
   "devDependencies": {
