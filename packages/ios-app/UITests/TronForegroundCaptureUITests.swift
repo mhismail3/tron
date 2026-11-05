@@ -75,8 +75,10 @@ final class TronForegroundCaptureUITests: XCTestCase {
                         ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList", "home.memory.view"])
         app.buttons["home-sheet-done-memory-item"].tap(); app.buttons["home-sheet-done-memory"].tap()
         try capture(app, name: "manage-revealed-\(dark ? "dark" : "light")",
-                    reads: ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1, "home.taskList": 1],
-                    forbidden: ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.memory.view"])
+                    reads: ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1, "home.taskList": 1,
+                            // The on-screen Manage Home model card is a foremost SettingsRendererView: one read.
+                            "settings.resolve": 1],
+                    forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.memory.view"])
         app.buttons["home-sheet-done-manage"].tap(); app.buttons["Back"].tap()
         try finish(app, initial: initial, name: "memory-stack-retired")
     }
