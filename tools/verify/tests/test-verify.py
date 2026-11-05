@@ -41,11 +41,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
 HEALTH_ARTIFACTS = ROOT / "test-results" / "health-cli"
 COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
-          "scripts/ios-test-build-identity.py", ".github/work.json",
+          "scripts/ios-test-build-identity.py", "tools/work/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs")
             for p in (ROOT / d).glob("*.py")]]
 PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\nunittest.main()\n"
@@ -78,7 +78,7 @@ class Repo:
                    "Agent simulator paths (xcrun mcpbridge) take the same leases.\n")
         self.write("tooling.module.json", json.dumps({"layer": "L5", "owns": [
             "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
-            "scripts/ios-test-build-identity.py", ".github/**", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
+            "scripts/ios-test-build-identity.py", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
             "tooling.module.json"]}))
         for name, layer in (("alpha", "L3"), ("beta", "L3"), ("core", "L1"), ("untested", "L5")):
             self.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": layer, "owns": ["**"]}))

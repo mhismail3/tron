@@ -53,7 +53,7 @@ the table in place.
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-docs.py` runs the real CLI against
+`scripts/tron test tooling tools/docs/tests/test-docs.py` runs the real CLI against
 this repository (the module map equals the tracked manifests, the RPC and
 settings lists cover what the protocol answered and settings change receipts applied) and against
 disposable fixture repositories, where a deleted manifest or an added settings

@@ -22,7 +22,7 @@ HELD_BY_CALLER = 'TRON_FULL_GATEWAY_LOCK_HELD'
 
 
 # tools/verify/batch.py carries this same function (its test fixture replaces this file);
-# scripts/test-tron-verify-batch.py keeps the two identical.
+# tools/verify/tests/test-verify-batch.py keeps the two identical.
 def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
     """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
 

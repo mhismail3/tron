@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`work bootstrap` drift journeys through the real CLI and a process-level gh fixture (#993).
 
-GitHub holds labels, a Project field and Status options that `.github/work.json` no longer
+GitHub holds labels, a Project field and Status options that `tools/work/work.json` no longer
 declares. Plain bootstrap reports each as drift and exits 2; `--apply --prune` deletes only
 labels no open issue uses, unused options and undeclared fields (with their values), and keeps
 reporting labels and options still in use.
@@ -16,7 +16,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def fixture_gh() -> None:
@@ -71,7 +71,7 @@ def run() -> None:
     evidence = []
     artifact = ROOT / "test-results" / "work-bootstrap.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
-    config = json.loads((ROOT / ".github/work.json").read_text())
+    config = json.loads((ROOT / "tools/work/work.json").read_text())
     try:
         with tempfile.TemporaryDirectory(prefix="tron-work-bootstrap-") as temporary:
             root = Path(temporary)
@@ -82,8 +82,8 @@ def run() -> None:
                    "WORK_BOOTSTRAP_FIXTURE": str(root / "github.json"), "PYTHONDONTWRITEBYTECODE": "1",
                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
             subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, env=env, check=True)
-            (repo / ".github").mkdir()
-            (repo / ".github/work.json").write_text(json.dumps({**config, "rulesets": []}))
+            (repo / "tools/work").mkdir(parents=True)
+            (repo / "tools/work/work.json").write_text(json.dumps({**config, "rulesets": []}))
 
             # GitHub as the declaration left it before the cut: every declared item, plus drift.
             labels = [{"name": l["name"], "color": l["color"], "description": l["description"]} for l in config["labels"]]

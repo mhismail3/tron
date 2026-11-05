@@ -9,7 +9,7 @@ required. `gh issue list`, `gh issue view --comments`, `gh pr list`,
 current source state without inferring another worker's liveness.
 
 The skill's executable Integrate/Publish blocks run against disposable Git remotes
-in `scripts/test-work-skill.py`: concurrent main, conflict/unpublished preservation,
+in `tools/work/tests/test-skill.py`: concurrent main, conflict/unpublished preservation,
 dirty/untracked files, shared tracking-ref lock and a push race. No copied landing
 implementation lives in that test. A committed review uses ordinary `git diff
 --binary --full-index <base> HEAD --`; privacy-check any patch before sharing it.
@@ -32,11 +32,11 @@ rewritten. Full (16 MiB), unreadable or unowned audit history refuses before
 network dispatch, without truncation/rotation. Linked worktrees share the common
 Git directory journal; reservations retain space for every accepted result.
 Local admission errors remain local, not an invented uncertain remote outcome.
-`scripts/test-work-close.py` exercises real CLI/API/subprocess boundaries,
+`tools/work/tests/test-close.py` exercises real CLI/API/subprocess boundaries,
 partial writes, reverse-completion reservations and refusal/recovery; auth has
-its real isolated-Keychain fixture in `scripts/test-work-auth.py`.
+its real isolated-Keychain fixture in `tools/work/tests/test-auth.py`.
 
-`.github/work.json` declares labels, Project fields and issue classification. `work bootstrap [--apply [--prune]]` plans/converges that vocabulary,
+`tools/work/work.json` declares labels, Project fields and issue classification. `work bootstrap [--apply [--prune]]` plans/converges that vocabulary,
 not repository protection or required checks. Explicit prune keeps values used
 by open issues/Project items. Read the plan before destructive changes.
 
@@ -65,7 +65,7 @@ Closing an issue never deletes branches or worktrees.
 
 ## Validation and lifecycle
 
-Tests run directly with `scripts/tron test tooling scripts/test-work-<name>.py`.
+Tests run directly with `scripts/tron test tooling tools/work/tests/test-<name>.py`.
 Fresh worktrees prepare their own pinned Gateway development dependencies before
 Gateway checks; see [verify](../verify/README.md#worktree-dependencies). No shared
 install or global compiler substitutes. Affected checks run before plain-Git push;

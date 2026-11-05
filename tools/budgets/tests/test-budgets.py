@@ -21,7 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "budgets-cli"
 TOOLS = ("scripts/tron", "tools/metrics/metrics.py", "tools/budgets/budgets.py")
 APP = "packages/gateway/src/app"

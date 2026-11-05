@@ -27,7 +27,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "docs-cli"
 TOOL_FILES = ("scripts/tron", "scripts/tron-node", ".node-version", "tools/docs/docs.py",
               "tools/docs/settings-keys.mjs", "tools/ownership/ownership.py")

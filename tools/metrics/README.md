@@ -114,6 +114,6 @@ under the threshold) or `entered`.
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-metrics.py` runs the CLI against
+`scripts/tron test tooling tools/metrics/tests/test-metrics.py` runs the CLI against
 disposable Git repositories and keeps the last fixture comparison under
 `test-results/metrics-cli/`.

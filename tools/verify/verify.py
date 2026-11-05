@@ -233,7 +233,8 @@ def declared_files(command: str, tracked: list[str]) -> set[str]:
     prefix, arguments = words[:3], words[3:]
     files: set[str] = set()
     if prefix == ["scripts/tron", "test", "tooling"] and arguments:
-        if all(path.startswith(("scripts/test-", "scripts/verify-")) and path.endswith(".py") for path in arguments):
+        if all(path.endswith(".py") and (path.startswith(("scripts/test-", "scripts/verify-"))
+                                         or re.fullmatch(r"tools/[^/]+/tests/test-[^/]+", path)) for path in arguments):
             files = set(arguments)
     elif prefix == ["scripts/tron", "test", "gateway"] and arguments:
         if all(path.endswith(".test.mjs") or (path.startswith("src/") and path.endswith(".test.ts")) for path in arguments):

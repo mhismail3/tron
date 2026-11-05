@@ -113,7 +113,7 @@ allowances shrink with each slice that removes one, rather than being copied her
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-layers.py` builds fixture
+`scripts/tron test tooling tools/layers/tests/test-layers.py` builds fixture
 TypeScript projects with the real `tsconfig.json` and installed compiler, and
 fixture Swift packages indexed by `swiftc -index-store-path` and stamped by the
 real identity script. It covers:

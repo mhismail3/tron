@@ -134,7 +134,7 @@ collection below must expose missing data before any implementation is accepted.
 One host script in `tools/verify/health.py` (`repo/verify`) consumes
 existing exact-SHA reports and approved aggregate projections. No Gateway service,
 new database, queue, model judge or parallel runner. Its command is wired in
-`scripts/tron`; `verify.module.json` owns that directory.
+`scripts/tron`; `tools/verify/verify.module.json` owns that directory.
 `tools/verify/batch.py` remains the sole owner of batch children/cancellation/logs
 and last-green state. Do not duplicate its process manager or cleanup journal.
 

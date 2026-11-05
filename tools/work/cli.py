@@ -27,7 +27,7 @@ def main(argv: list) -> int:
     parser = argparse.ArgumentParser(prog="work", description="Guarded GitHub writes for agent work")
     commands = parser.add_subparsers(dest="command", required=True)
     boot = commands.add_parser("bootstrap", help="plan or apply labels and the tracking Project")
-    boot.add_argument("--apply", action="store_true", help="converge GitHub to .github/work.json")
+    boot.add_argument("--apply", action="store_true", help="converge GitHub to tools/work/work.json")
     boot.add_argument("--prune", action="store_true",
                       help="with --apply: also delete drifted labels, fields and options no open issue uses")
     boot.add_argument("--report", type=Path, help="write the result as JSON to this path")
@@ -86,7 +86,7 @@ def main(argv: list) -> int:
     args = parser.parse_args(argv)
 
     root = repository_root()
-    config_path = root / ".github" / "work.json"
+    config_path = root / "tools" / "work" / "work.json"
     try:
         config = json.loads(config_path.read_text())
         if args.command == "bootstrap":

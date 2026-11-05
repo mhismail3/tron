@@ -1,8 +1,0 @@
-{
-  "layer": "L5",
-  "owns": [
-    "metrics.module.json",
-    "scripts/test-tron-metrics.py",
-    "tools/metrics/**"
-  ]
-}
