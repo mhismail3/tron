@@ -15,7 +15,7 @@ import { scanReservedHomeSession } from "./home-session-recovery.js";
 import { HOME_SESSION_PROFILE_NAME } from "./home-session-profile.js";
 
 /** Home's reserved-successor procedure: claim, recover or create the chapter's
- * session, then publish the observed materialization (k0-kernel.md §5). */
+ * session, then publish the observed materialization (kernel.md §5). */
 export class HomeChapterMaterializer {
   constructor(
     private readonly owner: HomeOwner,

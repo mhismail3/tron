@@ -41,11 +41,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
 HEALTH_ARTIFACTS = ROOT / "test-results" / "health-cli"
 COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
-          "scripts/ios-test-build-identity.py", ".github/work.json",
+          "scripts/ios-test-build-identity.py", "tools/work/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs")
             for p in (ROOT / d).glob("*.py")]]
 PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\nunittest.main()\n"
@@ -78,7 +78,7 @@ class Repo:
                    "Agent simulator paths (xcrun mcpbridge) take the same leases.\n")
         self.write("tooling.module.json", json.dumps({"layer": "L5", "owns": [
             "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
-            "scripts/ios-test-build-identity.py", ".github/**", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
+            "scripts/ios-test-build-identity.py", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
             "tooling.module.json"]}))
         for name, layer in (("alpha", "L3"), ("beta", "L3"), ("core", "L1"), ("untested", "L5")):
             self.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": layer, "owns": ["**"]}))
@@ -134,9 +134,9 @@ class VerifyCase(unittest.TestCase):
 
 
 class ExternalVerificationTests(VerifyCase):
-    def external(self, name: str, body: str | None = None) -> str:
+    def external(self, name: str, body: str | None = None, path: str | None = None) -> str:
         r = self.repo
-        path = f"scripts/test-{name}.py"
+        path = path or f"scripts/test-{name}.py"
         r.write(path, body if body is not None else
                 f"from pathlib import Path\np=Path('test-results/{name}')\np.parent.mkdir(exist_ok=True)\n"
                 "with p.open('a') as stream: stream.write('executed\\n')\n")
@@ -186,6 +186,23 @@ class ExternalVerificationTests(VerifyCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse((r.path / "test-results/direct").exists())
             self.assertFalse((r.path / "test-results/dependent").exists())
+
+    def test_a_tool_suite_beside_its_tool_is_a_declarable_consumer(self) -> None:
+        r = self.repo
+        declared = self.external("tool", path="tools/fixture/tests/test-tool.py")
+        self.declare("alpha", [declared])
+        r.commit("tool-owned consumer")
+        planned = r.verify("--all", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        selection = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
+        self.assertIn("tools/fixture/tests/test-tool.py", selection)
+        # Only a tool's own tests/ directory is admitted, not any Python file under tools/.
+        self.declare("alpha", ["scripts/tron test tooling tools/fixture/helper.py"])
+        r.write("tools/fixture/helper.py", "VALUE = 1\n")
+        r.commit("undeclarable helper")
+        refused = r.verify("--all", "--plan")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("unsupported verify declaration", refused.stdout + refused.stderr)
 
     def test_gateway_declarations_keep_existing_runner_classification(self) -> None:
         r = self.repo

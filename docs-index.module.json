@@ -1,8 +1,0 @@
-{
-  "layer": "L5",
-  "owns": [
-    "docs-index.module.json",
-    "scripts/test-tron-docs.py",
-    "tools/docs/**"
-  ]
-}

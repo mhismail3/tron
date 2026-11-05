@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 import unittest
 
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location('verify_cli_fixture', ROOT / 'scripts/test-tron-verify.py')
+ROOT = Path(__file__).resolve().parents[3]
+spec = importlib.util.spec_from_file_location('verify_cli_fixture', ROOT / 'tools/verify/tests/test-verify.py')
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
@@ -282,7 +282,7 @@ class TierTests(fixture.VerifyCase):
                         process.communicate(timeout=30)
 
 
-# Batch process/Git regressions live in test-tron-verify-batch.py: required lanes,
+# Batch process/Git regressions live in test-verify-batch.py: required lanes,
 # exact-case merge attribution, cleanup preservation, signals and source fencing.
 
 if __name__ == '__main__':

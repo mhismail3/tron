@@ -274,7 +274,7 @@ scheduler or a settled cadence decision. No new release loop is implemented here
 ## Minimal first implementation
 
 Start hardware-free in the existing `batch.py` attribution owner and
-`scripts/test-tron-verify-batch.py` real-Git fixture. Support one deterministic
+`tools/verify/tests/test-verify-batch.py` real-Git fixture. Support one deterministic
 Gateway case, ordinary commit and integration-merge landing, through reviewer-gated
 publication to a disposable bare remote. No Automation/schema/service addition.
 Extend existing progress/push evidence rather than create a second store. Explicitly

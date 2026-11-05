@@ -82,8 +82,8 @@ stale and reported, so manifests move with their code.
 The current manifests describe today's owners, not the target tree. The
 default owner is one manifest per directory with `"owns": ["**"]`. Mixed
 directories are split by explicit lists, and cross-directory owners sit at the
-common parent (for example `work.module.json` at the root owns
-`tools/work/**`, its `scripts/test-work-*.py` tests and `.github/work.json`).
+common parent. A repo tool keeps its code, `tests/` and configuration in
+`tools/<tool>/` beside its one manifest (for example `tools/work/work.module.json`).
 Edges, capabilities, risk classes and verification declarations are optional
 fields checked by their owning tools. `--modules` prints the current map.
 
@@ -146,7 +146,7 @@ reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-ownership.py tools/ownership/tests/test-layout.py
+`scripts/tron test tooling tools/ownership/tests/test-ownership.py tools/ownership/tests/test-layout.py
 tools/ownership/tests/test-tidy.py tools/ownership/tests/test-tidy-scope.py` runs the CLIs against disposable Git repositories:
 ownership (valid layouts, coverage and schema violations, placement, Git-only
 discovery), one case per layout rule and the shrink-only lists, and tidy's report,

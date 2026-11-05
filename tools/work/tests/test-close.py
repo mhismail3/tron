@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 OPTIONS = {"done": "Done", "ready": "Ready", "in-progress": "In progress"}
 
 
@@ -154,8 +154,8 @@ def run() -> None:
             git("init", "--bare", str(remote))
             git("remote", "add", "origin", str(remote))
             git("push", "origin", "main")
-            (repo / ".github").mkdir()
-            shutil.copy(ROOT / ".github/work.json", repo / ".github/work.json")
+            (repo / "tools/work").mkdir(parents=True)
+            shutil.copy(ROOT / "tools/work/work.json", repo / "tools/work/work.json")
             (repo / "scripts").mkdir()
             shutil.copy(ROOT / "scripts/personal-info-guard.sh", repo / "scripts/personal-info-guard.sh")
             comment = root / "close.md"
@@ -281,7 +281,7 @@ def run() -> None:
             audit_path = repo / ".git/work/github-writes.jsonl"
             linked = root / "audit-linked"
             git("worktree", "add", "-b", "audit-linked", str(linked), "main")
-            for relative in (".github/work.json", "scripts/personal-info-guard.sh"):
+            for relative in ("tools/work/work.json", "scripts/personal-info-guard.sh"):
                 target = linked / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(repo / relative, target)

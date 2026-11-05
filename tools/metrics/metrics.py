@@ -43,7 +43,7 @@ TEST_DIRS = {
     "test-support", "test-fixtures", "tests", "Tests", "fixtures", "Fixtures",
     "E2ETests", "ProfilingTests",
 }
-TOOLING_ROOTS = {"scripts", "tools", ".agents", ".github", ".codex", ".pi"}
+TOOLING_ROOTS = {"scripts", "tools", ".agents", ".github", ".pi"}
 # Explicit exceptions to the path rules until 0.4 manifests own classification.
 # Shipped source beside tooling: the Mac bundle compiles this launcher.
 PRODUCTION_PATHS = {"packages/mac-app/scripts/tron-gateway-launcher.c"}

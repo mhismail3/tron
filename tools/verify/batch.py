@@ -886,7 +886,7 @@ def next_action(journal: dict) -> dict:
 
 
 # tools/verify/gateway.py owns this same function; this copy exists because the batch fixture
-# replaces that file. scripts/test-tron-verify-batch.py keeps the two identical.
+# replaces that file. tools/verify/tests/test-verify-batch.py keeps the two identical.
 def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
     """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
 

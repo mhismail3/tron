@@ -182,14 +182,14 @@ Modules may declare extra consumer verification using explicit tracked inputs:
 
 ```json
 "verify": [
-  "scripts/tron test tooling scripts/test-tron-verify.py scripts/verify-gateway-protocol-contract.py",
+  "scripts/tron test tooling tools/verify/tests/test-verify.py scripts/verify-gateway-protocol-contract.py",
   "scripts/tron test gateway src/transport/command-receipts.lock.integration.test.ts",
   "scripts/tron test ios run --only-testing TronMobileUITests/SnapshotCachePersistenceContractTests"
 ]
 ```
 
 These strings select files for the existing runners; verify never executes them
-as shell commands. Tooling accepts only `scripts/test-*.py` / `scripts/verify-*.py`;
+as shell commands. Tooling accepts only `scripts/test-*.py`, `scripts/verify-*.py` and `tools/<tool>/tests/test-*.py`;
 Gateway accepts `src/**/*.test.ts` and Gateway-relative `*.test.mjs`. iOS accepts one or
 more `--only-testing Target/Class` pairs, resolved to tracked UIValidation test
 files; method selectors, broad runs, build flags, unknown classes/paths and
@@ -247,7 +247,7 @@ deferred until a known-kill probe proves activation with pinned Vitest.
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-verify.py scripts/test-tron-verify-tiers.py scripts/test-tron-verify-batch.py`
+`scripts/tron test tooling tools/verify/tests/test-verify.py tools/verify/tests/test-verify-tiers.py tools/verify/tests/test-verify-batch.py`
 drives real Git/CLI fixtures: affected selection, known-bad small changes, zero-test
 refusal, reproducible digests, dirty planning, descendant cleanup, batch ranges/overlap,
 bisection, causal revert publication and refused issue authority. The iOS stand-in compiles real Swift indexes

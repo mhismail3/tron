@@ -178,7 +178,7 @@ next startup; it is not treated as a successful cleanup.
   steering, typed waits, billing and non-task health joins are unavailable with reasons.
   A changed namespace/write count, more than 10,000 records or a response above 256 KiB
   refuses; reduce the page or name a task. No session acquisition, new state or logs.
-  Blocker text stays Home-private. See the [loop design](../../../../../tools/home-retro/DESIGN.md).
+  Blocker text stays Home-private. See the [loop design](improvement-loop.md).
 - Interrupt aborts only in-flight tool calls (bash: SIGINT, SIGTERM, SIGKILL 5 s apart, abandoned
   after 15 s) and queues `text` as steering. Stop persists `stopIntent`, aborts and joins the
   root prompt; an orphan active task is reconciled from its file at once.

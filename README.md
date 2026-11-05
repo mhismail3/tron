@@ -78,7 +78,7 @@ packages/mac-app/   macOS installer, menu bar, pairing, and gateway packaging
 packages/push-relay/ closed Cloudflare/APNs transport
 scripts/tron        contributor entry point
 tools/web/          shared static-webpage CSS, page/app source and previews; no hosting runtime
-tools/work/         GitHub work tracking for parallel agents (.github/work.json)
+tools/work/         GitHub work tracking for parallel agents (tools/work/work.json)
 ```
 
 The custom Rust backend, Engine/Activity protocol, agent workers, event journals

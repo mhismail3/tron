@@ -104,7 +104,7 @@ Commands:
                                     main already has (tools/ownership/tidy.py)
   work bootstrap [--apply [--prune]] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
-                                    Project to .github/work.json (tools/work); reports
+                                    Project to tools/work/work.json (tools/work); reports
                                     undeclared labels, fields and options as drift;
                                     --prune deletes the ones no open work uses
   work comment <issue> --body-file <md>
@@ -166,7 +166,7 @@ case "$cmd" in
         ;;
       ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
       tooling)
-        if (($# == 0)); then set -- "$ROOT"/scripts/test-work-*.py; fi
+        if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
         for suite in "$@"; do python3 "$suite"; done
         ;;
       *) usage >&2; exit 64 ;;

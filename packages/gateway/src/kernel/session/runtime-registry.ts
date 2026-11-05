@@ -1448,7 +1448,7 @@ export class RuntimeRegistry implements SessionOperations {
     throw new GatewayError("not_found", "Tron session was not found");
   }
 
-  /** Lifecycle observers in composition order, resolved at each phase (k0-kernel.md §2.1). */
+  /** Lifecycle observers in composition order, resolved at each phase (kernel.md §2.1). */
   private lifecycles(): KernelLifecycleObserver[] {
     return this.options.modules.observers("kernelLifecycle").map(hook => hook());
   }
@@ -1459,7 +1459,7 @@ export class RuntimeRegistry implements SessionOperations {
     return hook();
   }
 
-  /** The composed lineage owner (Home), resolved at each call (k0-kernel.md §2.1). */
+  /** The composed lineage owner (Home), resolved at each call (kernel.md §2.1). */
   private lineage(): SessionLineagePolicy {
     const hook = this.options.modules.policy("sessionLineage");
     if (!hook) throw new Error("No session lineage owner is composed");

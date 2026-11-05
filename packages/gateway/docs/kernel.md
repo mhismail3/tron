@@ -2,7 +2,7 @@
 
 The kernel contract (#1524) defines ports, module hosting and the Pi seam. **Approved by the maintainer on 2026-10-20 with decisions D1–D7 (§10).**
 References are `file:line` at base `096b35f8a`, relative to the Gateway's `src/`. Invariants
-in [the charter](../../AGENTS.md#architecture-invariants) bind every step: each port sits at a call site that exists today, with the
+in [the charter](../../../AGENTS.md#architecture-invariants) bind every step: each port sits at a call site that exists today, with the
 same ordering, sync/async shape and failure handling.
 
 ## 1. Starting point

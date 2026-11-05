@@ -15,7 +15,7 @@ export interface SessionLineageState {
   expectedPath?: string;
 }
 
-/** The `sessionLineage` policy hook (k0-kernel.md §2.1): chapter state,
+/** The `sessionLineage` policy hook (kernel.md §2.1): chapter state,
  * reserved successors and publication gating, read at each call. */
 export interface SessionLineagePolicy {
   state(sessionId: string): SessionLineageState;

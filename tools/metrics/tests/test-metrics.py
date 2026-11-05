@@ -30,7 +30,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "metrics-cli"
 TOOL_FILES = ("scripts/tron", "tools/metrics/metrics.py")
 DAY = 86400
