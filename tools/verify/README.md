@@ -42,7 +42,8 @@ selections that do not use the Gateway need no Gateway compiler.
 Both `scripts/tron test gateway` and verify's Gateway Vitest groups use
 `tools/verify/gateway.py`. It resolves pinned development Node first, then gives
 one test process its own temporary HOME, TMPDIR, Tron data directory and agent
-resource directory. It waits for Vitest before removing those directories, also
+resource directory, under `/tmp` rather than the caller's TMPDIR, so fixture and socket path
+lengths do not depend on who runs the suite. It waits for Vitest before removing those directories, also
 forwarding cancellation to the owned child. It never installs this checkout's missing packages.
 One test fixture is the exception: when the selection can include
 `browser-fork-receipts.integration.test.ts` (the default config with no file filter, or one it

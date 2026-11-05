@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gateway test CLI and actual migration fixture, with a synthetic caller HOME."""
+"""Gateway test CLI and actual migration fixture, with a synthetic caller HOME and TMPDIR."""
 from pathlib import Path
 import importlib.util
 import os
@@ -17,11 +17,13 @@ class GatewayTestHomeIsolation(unittest.TestCase):
     def run_gateway(self, root: Path, arguments: list[str]) -> subprocess.CompletedProcess:
         caller_home = root / "caller-home"
         caller_home.mkdir()
-        scratch = root / "scratch"
-        scratch.mkdir()
+        # A long caller TMPDIR, like a Home task worker's (#2260): the suite's scratch must not live under it.
+        scratch = root / "scratch" / ("caller-tmpdir-" * 5)
+        scratch.mkdir(parents=True)
         node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
         env = {**os.environ, "HOME": str(caller_home), "TMPDIR": str(scratch),
-               "TRON_NODE_BIN": node, "ISOLATION_CALLER_HOME": str(caller_home)}
+               "TRON_NODE_BIN": node, "ISOLATION_CALLER_HOME": str(caller_home),
+               "ISOLATION_CALLER_TMPDIR": str(scratch)}
         # The runner waits for the host's full-Gateway lock without a bound; take it here first
         # through the runner's own owner (waiting likewise, recording this holder) so the bound
         # below covers only this run, which then holds it.
@@ -54,6 +56,8 @@ test('HOME resolution and filesystem writes stay outside caller HOME',()=>{
  writeFileSync(owned,'synthetic fixture');
  expect(readFileSync(owned,'utf8')).toBe('synthetic fixture');
  expect(process.env.TMPDIR).not.toBe(process.env.HOME);
+ const fromCallerTmp=relative(process.env.ISOLATION_CALLER_TMPDIR,process.env.TMPDIR);
+ expect(fromCallerTmp.startsWith('..') || isAbsolute(fromCallerTmp)).toBe(true);
 });
 ''')
             result = self.run_gateway(root, ["--root", str(root), "--config", str(config)])
