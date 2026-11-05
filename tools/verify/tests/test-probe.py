@@ -11,6 +11,7 @@ helper verify imports into a disposable Git repository and probes one unit as a 
    every file still using the old path; the caller's test is chosen because it names the caller,
    which names the tool.
 5. A guardian already red at HEAD stops the probe with exit 1 before any change.
+6. SIGTERM stops every running test's process group and removes the scratch worktree.
 
 Every run leaves no scratch worktree behind. The last run's output is kept in `test-results/probe-cli/`.
 """
@@ -20,8 +21,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -150,6 +153,24 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(report["baselineRed"], ["tools/caller/tests/test-caller.sh"])
         self.assertIn("already fail at HEAD", result.stderr)
+
+    def test_sigterm_stops_running_tests_and_removes_the_worktree(self) -> None:
+        r = self.repo
+        marker = "61.25"  # a sleep this probe alone starts
+        r.write("tools/caller/tests/test-caller.sh", f"#!/usr/bin/env bash\n# Slow guardian.\nsleep {marker}\n")
+        r.commit("slow")
+        process = subprocess.Popen([str(r.path / "scripts/tron"), "probe", "tools/caller/caller.sh"], cwd=r.path, env=r.env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        deadline = time.time() + 30
+        while time.time() < deadline and subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode:
+            time.sleep(0.1)
+        self.assertEqual(subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode, 0,
+                         "the slow guardian never started")
+        process.send_signal(signal.SIGTERM)
+        output, _ = process.communicate(timeout=30)
+        self.assertNotEqual(process.returncode, 0, output)
+        self.assertEqual(subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode, 1,
+                         "a guardian's process outlived the probe")
 
 
 if __name__ == "__main__":

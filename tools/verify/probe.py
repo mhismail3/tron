@@ -27,7 +27,9 @@ import re
 import shutil
 import subprocess
 import sys
+import signal
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -101,6 +103,19 @@ def command(scratch: Path, test: str, runner: str) -> tuple[list[str], Path]:
     return ["bash", test], scratch
 
 
+RUNNING: set = set()  # test process groups this probe started; stopped on interrupt or SIGTERM
+STOPPING = threading.Event()
+
+
+def stop_running() -> None:
+    STOPPING.set()
+    for process in list(RUNNING):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def run_tests(scratch: Path, tests: list[str], logs: Path, jobs: int, timeout: float) -> dict[str, dict]:
     nested, mac_terminal = verify.nested_files()
     logs.mkdir(parents=True, exist_ok=True)
@@ -109,26 +124,41 @@ def run_tests(scratch: Path, tests: list[str], logs: Path, jobs: int, timeout: f
         runner = verify.runner_of(test, nested, mac_terminal)
         if runner in XCODE_RUNNERS:
             return test, {"outcome": "not-run", "why": f"{runner} needs Xcode; run it through scripts/tron verify"}
+        if STOPPING.is_set():
+            return test, {"outcome": "not-run", "why": "the probe was stopped"}
         argv, cwd = command(scratch, test, runner)
         private = Path(tempfile.mkdtemp(prefix="probe-test-"))
-        env = {**os.environ, "TMPDIR": str(private) + "/"}
         started = time.time()
+        process = subprocess.Popen(argv, cwd=cwd, env={**os.environ, "TMPDIR": str(private) + "/"}, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)
+        RUNNING.add(process)
         try:
-            done = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
-                                  start_new_session=True)
-            output, code = done.stdout + done.stderr, done.returncode
-        except subprocess.TimeoutExpired as expired:
-            output = f"{expired.stdout or ''}{expired.stderr or ''}\nprobe: timed out after {timeout}s"
-            code = 124
+            output, _ = process.communicate(timeout=timeout)
+            code = process.returncode
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            output, _ = process.communicate()
+            output, code = f"{output}\nprobe: timed out after {timeout}s", 124
         finally:
+            RUNNING.discard(process)
+            try:  # a test's own descendants belong to its group, also after a clean exit
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             shutil.rmtree(private, ignore_errors=True)
         log = logs / (test.replace("/", "__") + ".log")
-        log.write_text(output if isinstance(output, str) else output.decode(errors="replace"))
+        log.write_text(output)
         return test, {"outcome": "pass" if code == 0 else "fail", "exit": code, "seconds": round(time.time() - started, 1),
                       "log": str(log.relative_to(verify.ROOT))}
 
-    with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as pool:
+    pool = concurrent.futures.ThreadPoolExecutor(max(1, jobs))
+    try:
         return dict(pool.map(one, tests))
+    except BaseException:
+        stop_running()
+        raise
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 def static_check(scratch: Path) -> list[str]:
@@ -188,6 +218,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout", type=float, default=900, help="seconds one test file may take")
     args = parser.parse_args(argv)
+    # SIGTERM unwinds like an interrupt, so the scratch worktree and every test group are removed.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         result, _ = verify.ownership.check()
         modules, tracked = result["modules"], result["tracked"]
