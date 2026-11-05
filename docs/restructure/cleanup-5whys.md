@@ -71,6 +71,13 @@ rollback set + migration archives awaiting a decision.
 
 ## Repository layout and backlog
 
-Repository layout: the approved structure plan (#2276); each slice re-asks why each move serves "agents find and own code fast, with fewer collisions".
-Backlog (#2193): a tracking issue is a second ledger of scope its children already own (P6);
-it closes once every child is closed or stands alone.
+Repository layout: [structure plan](structure-plan.md) (#2276) re-asks each slice. Why did
+layout drift? Nothing refused a new root entry, root manifest or flat script, and tests were put
+beside the dispatcher rather than the tool. Prevention: the S1 layout guard (shrink-only
+allowlists at commit); S3' puts each tool's tests and manifest in its directory. Metric: root
+manifests 8 to 1; `scripts/` top level only shrinks.
+
+Backlog (#2193): why does a deferred backlog persist? A tracking issue restates scope its
+children already own (P6), and `scripts/tron work issue close` refuses an epic with open
+sub-issues. Prevention: none new; each child carries its own scope and the epic closes with
+the last child. Metric: open children of #2193 (6 on 2026-11-05, all standalone).
