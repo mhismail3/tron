@@ -50,6 +50,7 @@
     "gateway/extension-activity",
     "gateway/host",
     "gateway/pi",
-    "gateway/receipts"
+    "gateway/receipts",
+    "gateway/projection"
   ]
 }

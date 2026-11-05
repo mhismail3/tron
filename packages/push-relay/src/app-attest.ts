@@ -17,6 +17,9 @@ const ALLOWED_CRITICAL_EXTENSIONS = new Set([APP_ATTEST_NONCE_OID, "2.5.29.15", 
 const DEVELOPMENT_AAGUID = utf8("appattestdevelop");
 const PRODUCTION_AAGUID = concatBytes(utf8("appattest"), new Uint8Array(7));
 
+/** A presented attestation or assertion that does not verify: the client's failure, answered as a rejected proof. */
+export class AttestationRejected extends Error {}
+
 export interface VerifiedAttestation {
   publicKeySpki: string;
   counter: number;
@@ -50,6 +53,12 @@ export async function verifyAttestationAgainstTrustedRoot(
   trustedRootPem: string,
 ): Promise<VerifiedAttestation> {
   cryptoProvider.set(crypto);
+  // The trusted root is server configuration: a failure to read it is a server fault.
+  const root = new X509Certificate(trustedRootPem);
+  return presented(() => verifyPresentedAttestation(input, root));
+}
+
+async function verifyPresentedAttestation(input: AttestationVerificationInput, root: X509Certificate): Promise<VerifiedAttestation> {
   const object = cborObject(decode(decodeBase64Url(input.attestationObject)));
   if (object.fmt !== "apple-appattest") throw new Error("invalid_attestation_format");
   const authData = bytes(object.authData);
@@ -60,7 +69,6 @@ export async function verifyAttestationAgainstTrustedRoot(
   if (chainValues.length < 2 || chainValues.length > 3) throw new Error("invalid_attestation_chain");
 
   const certificates = chainValues.map((value) => new X509Certificate(ownedBuffer(value)));
-  const root = new X509Certificate(trustedRootPem);
   const now = input.now ?? new Date();
   for (const certificate of [...certificates, root]) {
     if (now < certificate.notBefore || now > certificate.notAfter) throw new Error("expired_attestation_certificate");
@@ -133,14 +141,7 @@ export async function verifyAssertion(input: {
   appId: string;
   previousCounter: number;
 }): Promise<number> {
-  const object = cborObject(decode(decodeBase64Url(input.assertionObject)));
-  const authenticatorData = bytes(object.authenticatorData);
-  const signature = bytes(object.signature);
-  const parsed = decodeAuthenticatorData(authenticatorData, false);
-  const expectedRpId = await sha256(utf8(input.appId));
-  if (!constantTimeEqual(parsed.rpIdHash, expectedRpId)) throw new Error("invalid_relying_party");
-  if (parsed.counter <= input.previousCounter) throw new Error("assertion_replay");
-
+  // The stored key is server state: one that cannot be imported is a server fault, not a rejected proof.
   const publicKey = await crypto.subtle.importKey(
     "spki",
     decodeBase64Url(input.publicKeySpki).buffer as ArrayBuffer,
@@ -148,14 +149,33 @@ export async function verifyAssertion(input: {
     false,
     ["verify"],
   );
-  const valid = await crypto.subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
-    publicKey,
-    ownedBuffer(derEcdsaToRaw(signature)),
-    ownedBuffer(concatBytes(authenticatorData, input.clientDataHash)),
-  );
-  if (!valid) throw new Error("invalid_assertion_signature");
-  return parsed.counter;
+  return presented(async () => {
+    const object = cborObject(decode(decodeBase64Url(input.assertionObject)));
+    const authenticatorData = bytes(object.authenticatorData);
+    const signature = bytes(object.signature);
+    const parsed = decodeAuthenticatorData(authenticatorData, false);
+    const expectedRpId = await sha256(utf8(input.appId));
+    if (!constantTimeEqual(parsed.rpIdHash, expectedRpId)) throw new Error("invalid_relying_party");
+    if (parsed.counter <= input.previousCounter) throw new Error("assertion_replay");
+
+    const valid = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      publicKey,
+      ownedBuffer(derEcdsaToRaw(signature)),
+      ownedBuffer(concatBytes(authenticatorData, input.clientDataHash)),
+    );
+    if (!valid) throw new Error("invalid_assertion_signature");
+    return parsed.counter;
+  });
+}
+
+/** Everything read from the presented object is the client's: any failure to parse or verify it is a rejection. */
+async function presented<T>(verify: () => Promise<T>): Promise<T> {
+  try {
+    return await verify();
+  } catch (error) {
+    throw new AttestationRejected(error instanceof Error ? error.message : "invalid_attestation");
+  }
 }
 
 function decodeAuthenticatorData(value: Uint8Array, requireAttestation: boolean): DecodedAuthenticatorData {

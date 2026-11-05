@@ -242,6 +242,7 @@ export class RunAbortOwner {
         && (this.operations.hasActiveAgentRun
           || this.operations.pendingPrompt?.id === agentOperationId
           || this.operations.operation?.id === agentOperationId));
+    // Polled: the condition spans several owners (direct bash, operation, agent run, pending prompt) with no single settlement event; the deadline bounds the wait.
     while (stillActive() && performance.now() < deadline) {
       await new Promise<void>((resolveDelay) => { setTimeout(resolveDelay, 20); });
     }

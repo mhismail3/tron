@@ -4,6 +4,7 @@
     "README.md",
     "bundle-gateway.sh",
     "ensure-gateway-bundle.sh",
+    "gateway-payload-contract.json",
     "gateway-payload.module.json",
     "hash-gateway-payload.sh",
     "stage-gateway-app.sh",

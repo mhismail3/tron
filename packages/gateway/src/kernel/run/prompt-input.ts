@@ -10,7 +10,8 @@ import type { ImageContent } from "../pi/ai.js";
 import type { ChatOrigin} from "../../protocol/types.js";
 import { makeInvocationReceipt, type InvocationProjection } from "../receipts/invocation-receipts.js";
 import type { OwnedOperationTerminal } from "../delegation/owned-operation-terminal.js";
-import { MAXIMUM_PROMPT_ATTACHMENTS, type PromptQueueDisplay, type QueueBehavior, type RuntimeQueuedMessage } from "./queue-input.js";
+import { MAXIMUM_PROMPT_ATTACHMENTS } from "../resources/prompt-bounds.js";
+import type { PromptQueueDisplay, QueueBehavior, RuntimeQueuedMessage } from "./queue-input.js";
 
 
 interface AutomationPromptOwnership<TaskFence> {

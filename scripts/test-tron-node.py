@@ -349,5 +349,18 @@ class TronNodeResolver(unittest.TestCase):
         self.assertEqual((self.checkout / ".node-version").read_text().strip(), VERSION)
 
 
+class CompiledInNodePins(unittest.TestCase):
+    """The real checkout's compiled-in Node pins, the one check that reads them against the authority.
+
+    The fixture cases above drift a copy to prove `check` names it; this runs the
+    shipped `check` over this repository, so verify fails when a real copy drifts.
+    """
+
+    def test_every_compiled_in_pin_matches_the_authority(self) -> None:
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/node-pin-mirrors.py"), "check"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -580,6 +580,42 @@ test("Debug stop terminates and reaps an exactly owned child", async () => {
   }
 });
 
+// A lifecycle file the helper cannot transition must fail the stop loudly and
+// name the transition that failed, while the owned child is still signalled.
+// The real helper runs here (the fake Node only answers --version and execs it).
+test("Debug stop reports a stopping transition it cannot record and still signals the child", async () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-stop-state-"));
+  const home = join(root, "home");
+  const fakeBin = join(root, "bin");
+  const fakeNode = join(fakeBin, "node");
+  const childProcess = spawn("/bin/sleep", ["30"], { detached: true, stdio: "ignore" });
+  const exited = once(childProcess, "exit");
+  try {
+    mkdirSync(join(home, ".tron-dev", "gateway"), { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(fakeNode, `#!/bin/sh\nif [ "${"$"}{1:-}" = "--version" ]; then echo v${PINNED_NODE}; exit 0; fi\nexec ${process.execPath} "$@"\n`);
+    execFileSync("/bin/chmod", ["+x", fakeNode]);
+    writeFileSync(join(fakeBin, "npm"), "#!/bin/sh\nexit 0\n");
+    execFileSync("/bin/chmod", ["+x", join(fakeBin, "npm")]);
+    const identity = execFileSync("ps", ["-o", "lstart=", "-p", String(childProcess.pid)], { encoding: "utf8" }).trim();
+    const state = join(home, ".tron-dev", "gateway", "lifecycle.json");
+    writeFileSync(state, `${JSON.stringify({ lifecycle: "bogus", childPid: childProcess.pid, childStartIdentity: identity })}\n`);
+    const stop = await new Promise((resolveStop) => execFile("bash", [new URL("./tron-dev", import.meta.url).pathname, "stop"], {
+      env: { PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode },
+    }, (error, stdout, stderr) => resolveStop({ error, stderr })));
+    assert.ok(stop.error, "stop must not report success over an unrecorded lifecycle");
+    assert.match(stop.stderr, /stopping transition could not be recorded/u);
+    await exited;
+    assert.notEqual(childProcess.signalCode, null);
+  } finally {
+    if (childProcess.exitCode === null && childProcess.signalCode === null) {
+      try { childProcess.kill("SIGTERM"); } catch {}
+      await exited.catch(() => {});
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // Issue #144. Failure modes:
 // 1. An agent shell inherits the Stable Gateway's environment, and a Stable
 //    value (PI_SUBAGENTS_TEMP_ROOT pointing at Stable's subagent store,

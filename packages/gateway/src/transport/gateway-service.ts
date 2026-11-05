@@ -9,7 +9,7 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
-import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
+import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY, type HomeTaskStatusResult, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../episodic/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
@@ -600,7 +600,8 @@ export class GatewayService {
       }
       case "home.taskStatus": {
         rejectUnknownFields(params, ["taskId"], method);
-        return safeJson(await this.requireHome().taskStatus(string(params.taskId, "taskId", { max: 160 })));
+        const status: HomeTaskStatusResult = await this.requireHome().taskStatus(string(params.taskId, "taskId", { max: 160 }));
+        return safeJson(status);
       }
       case "home.redeliverTaskResult":
         return this.mutation(client, method, params, async () => {

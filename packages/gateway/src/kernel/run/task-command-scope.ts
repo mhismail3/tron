@@ -222,6 +222,7 @@ export async function reapTaskCommandScope(scope: TaskCommandScope, taskId: stri
   const running = () => [...owned].filter(pid => { try { process.kill(pid, 0); return true; } catch { return false; } });
   // A killed process stays a zombie until its parent (often launchd) reaps it; a zombie runs
   // nothing, so the live table, not `kill(pid, 0)`, decides survivors.
+  // Polled: the owned processes are not this process's children, so the OS offers no exit event to await.
   for (const deadline = Date.now() + EXIT_WAIT_MS; running().length > 0 && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 50));
   const after = owned.size === 0 ? new Map<number, ProcessRow>() : await readProcessTable();
   const survivors = after ? [...owned].filter(pid => after.has(pid)).length : owned.size;

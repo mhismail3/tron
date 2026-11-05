@@ -55,7 +55,10 @@ promotion: `scripts/gateway-payload-deploy.mjs` ([host control](../../gateway/sr
 
 One fail-closed manifest policy, enforced by the launcher, `GatewayPayloadStore.swift` and
 `gateway-payload-deploy.mjs`; none is wider than the launcher, which parses with a bounded flat
-parser (no escapes):
+parser (no escapes). The key sets, `schema`, `kind` and the coverage string are pinned once in
+`gateway-payload-contract.json`. The launcher test, the bundle test and the deploy test assert
+their literals against it; the Swift store is not yet asserted against it. Product code keeps its
+own literals and never reads the file:
 
 | Field | Rule |
 |---|---|

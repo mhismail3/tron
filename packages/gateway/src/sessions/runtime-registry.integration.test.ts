@@ -75,10 +75,24 @@ const statusJsonReplace = vi.hoisted(() => ({
   insideRetryInvocation: (): boolean => false,
 }));
 
+/** Test-owned window for one deletion whose quarantine can neither be removed
+ * nor restored: when armed, the quarantined file's folder is made read-only
+ * just before its removal, so the real `rm` and the restoring `rename` both
+ * fail with the operating system's own EACCES. */
+const quarantineLock = vi.hoisted(() => ({ armed: false, directory: "" }));
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    rm: async (path: Parameters<typeof actual.rm>[0], ...rest: unknown[]) => {
+      if (quarantineLock.armed && String(path).includes(".tron-delete-")) {
+        quarantineLock.armed = false;
+        quarantineLock.directory = dirname(String(path));
+        await actual.chmod(quarantineLock.directory, 0o500);
+      }
+      return (actual.rm as unknown as (target: unknown, ...args: unknown[]) => Promise<void>)(path, ...rest);
+    },
     open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
       const handle = await (actual.open as unknown as (target: unknown, ...args: unknown[]) => Promise<unknown>)(path, ...rest);
       if (statusJsonReplace.armed && statusJsonReplace.losses === 0
@@ -2360,6 +2374,27 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     } finally {
       admission.mockRestore();
     }
+  });
+
+  it("reports a deletion whose session file could not be restored instead of a retryable conflict", async () => {
+    const fixture = await coldFixture("delete-restore-refused");
+    await settleCatalog(fixture.registry);
+    quarantineLock.armed = true;
+    let outcome: unknown;
+    try {
+      outcome = await fixture.registry.delete(fixture.manager.getSessionId()).then(() => "deleted", error => error);
+    } finally {
+      quarantineLock.armed = false;
+      if (quarantineLock.directory) await fsPromises.chmod(quarantineLock.directory, 0o700);
+    }
+    expect(quarantineLock.directory).toBe(await realpath(dirname(fixture.sessionFile)));
+    expect(outcome).toMatchObject({ code: "conflict", retryable: false,
+      message: "Tron session deletion failed and its file could not be restored; it remains beside the original as a .tron-delete file" });
+    // Both failures stay diagnosable: the refused removal and the refused restore.
+    expect(((outcome as Error).cause as AggregateError).errors.map(error => (error as NodeJS.ErrnoException).code)).toEqual(["EACCES", "EACCES"]);
+    // The transcript bytes are kept, never removed by the failed deletion.
+    expect(existsSync(fixture.sessionFile)).toBe(false);
+    expect((await readdir(dirname(fixture.sessionFile))).filter(name => name.startsWith(`${basename(fixture.sessionFile)}.tron-delete-`))).toHaveLength(1);
   });
 
   it("does not follow a session path replaced by a symlink during delete", async () => {

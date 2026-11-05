@@ -114,7 +114,7 @@ actual K3 host; native frames do not select product modules or keep another list
 - `queue-commands.ts`: serialized clear/replace, receipt settlement, resource validation
   and shared text/resource/queue bounds; public run ports return its promises directly.
 - `held-prompt-queue.ts`: accepted compaction/Stop-time input and its ordered deferred
-  admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types/bounds.
+  admission, edit/removal and flush lifetime; `queue-input.ts` owns shared input types; `kernel/resources/prompt-bounds.ts` owns the attachment bound.
 - `completion-facts.ts` / `run-attention.ts`: canonical completion evidence,
   runtime ownership lane, full settlement/reconciliation and rebind scope.
 - `run-terminal.ts`: operation observation and the bounded presentation latch,

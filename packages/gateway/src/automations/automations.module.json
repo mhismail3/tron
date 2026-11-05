@@ -8,6 +8,10 @@
     "gateway/host",
     "gateway/pi",
     "gateway/receipts",
-    "gateway/session-catalog"
+    "gateway/session-catalog",
+    "gateway/delegation",
+    "gateway/notifications",
+    "gateway/resources",
+    "gateway/run"
   ]
 }

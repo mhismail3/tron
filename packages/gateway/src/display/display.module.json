@@ -8,6 +8,8 @@
     "gateway/projection",
     "gateway/host",
     "gateway/workspace",
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/machine",
+    "gateway/session-catalog"
   ]
 }

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
-import { NaturalLanguageEmbeddingClient } from "./session-search-embedding.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import {
   boundedQuery,
@@ -122,9 +121,7 @@ export class SessionSearchService {
   constructor(
     private readonly sessions: RuntimeRegistry,
     private readonly index: SessionSearchIndex,
-    semanticClient?: SessionSearchEmbeddingClient,
   ) {
-    this.semanticClient = semanticClient ?? (process.env.TRON_SEARCH_EMBEDDING_HELPER ? new NaturalLanguageEmbeddingClient(process.env.TRON_SEARCH_EMBEDDING_HELPER) : undefined);
     this.sessions.setSearchInvalidator((sessionID, nextSessionID) => {
       this.semanticGeneration += 1;
       // This runs inside another owner's summary publication, so it stays
@@ -160,6 +157,8 @@ export class SessionSearchService {
     return { reusedSessions: this.indexReused, parsedSessions: this.indexParsed };
   }
 
+  /** The only way semantic search is armed: the Gateway composition passes the
+   * helper it admitted (gateway-main.ts), never an unadmitted environment path. */
   setSemanticClient(client: SessionSearchEmbeddingClient): void {
     if (!this.semanticClient) {
       this.semanticClient = client;

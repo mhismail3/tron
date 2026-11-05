@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "payloadKind": "tron-gateway-payload",
+  "selectionKind": "tron-gateway-selection",
+  "dependencyTreeCoverage": "app/** and runtime/** regular files",
+  "manifestKeys": [
+    "schema",
+    "kind",
+    "gatewayVersion",
+    "protocolVersion",
+    "minProtocolVersion",
+    "nodeVersion",
+    "sourceRevision",
+    "runtimeEpoch",
+    "channel",
+    "version",
+    "payloadFingerprint",
+    "dependencyTreeCoverage"
+  ],
+  "selectionKeys": [
+    "schema",
+    "kind",
+    "channel",
+    "version",
+    "payloadFingerprint"
+  ]
+}

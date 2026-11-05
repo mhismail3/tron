@@ -642,6 +642,37 @@ describe("settings.change", () => {
     transcript.push({ case: "cross-store rollback", detail: failed });
   });
 
+  caseIt("records the store whose compensating write failed instead of reporting it rolled back", async owner => {
+    const f = await fixture(owner);
+    const project = join(f.root, "rollback-refused");
+    await mkdir(project);
+    // The trust writer accepts the change and refuses its compensating write.
+    let trustWrites = 0;
+    const changes = new SettingsChangePath(f.settingsModel, f.record, { setTrust: async (path, decision) => {
+      trustWrites += 1;
+      if (trustWrites > 1) throw new Error("trust store unavailable");
+      return f.trust.set(path, decision);
+    } });
+    const request = [
+      { key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project } },
+      { key: "model.thinking[role=worker]", layer: "session", op: "set", value: "low" },
+    ] as Parameters<SettingsChangePath["change"]>[1];
+    const context = { actor: { kind: "ui" as const, id: "device:phone" }, reason: "Trust the project and lower worker thinking" };
+    // Home's saved-settings directory refuses the replacement write; trust (an earlier store) lands first.
+    const homeDirectory = join(f.tronHome, "gateway", "home");
+    await mkdir(homeDirectory, { recursive: true });
+    await writeFile(join(homeDirectory, "profile.json"), "{}\n");
+    await chmod(homeDirectory, 0o500);
+    try {
+      await expect(changes.change({ kind: "home" }, request, context)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    } finally { await chmod(homeDirectory, 0o700); }
+    expect(trustWrites).toBe(2);
+    expect((await f.trust.inspect(project)).savedDecision).toBe(true);
+    const failed = await f.history({ status: "failed" });
+    expect(failed.find(entry => entry.key === "permissions.projectTrust")!.failure)
+      .toBe("Not rolled back: the trust store refused its compensating write (trust store unavailable); it may still hold the new value");
+  });
+
   caseIt("refuses every Project write without touching the repository, and badges its git state", async owner => {
     const f = await fixture(owner);
     const transport = (value: string) => [{ key: "run.transport", layer: "project", op: "set", value }] as Parameters<SettingsChangePath["change"]>[1];

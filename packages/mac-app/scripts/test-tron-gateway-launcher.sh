@@ -10,6 +10,27 @@ APP_ROOT="$TMP/Contents"
 BUNDLE="$APP_ROOT/Resources/Gateway"
 HELPER="$APP_ROOT/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 HASH="$SCRIPT_DIR/hash-gateway-payload.sh"
+# The launcher's literal key sets, kinds, schema and coverage must equal the
+# shared payload contract that the deploy and bundle tests also assert.
+python3 - "$SCRIPT_DIR" <<'PY'
+import json, re, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+contract = json.loads((root / "gateway-payload-contract.json").read_text(encoding="utf-8"))
+source = (root / "tron-gateway-launcher.c").read_text(encoding="utf-8")
+# String-array literals that name the schema key. The pending-attempt marker has its
+# own key set, outside this contract, so the manifest and selection sets must be present.
+key_sets = {tuple(sorted(re.findall(r'"([^"]*)"', body)))
+            for body in re.findall(r'const char \*\w+\[\] = \{([^}]*)\}', source)
+            if '"schema"' in body}
+expected = {tuple(sorted(contract["manifestKeys"])), tuple(sorted(contract["selectionKeys"]))}
+if not expected <= key_sets:
+    sys.exit(f"launcher lacks a key set from gateway-payload-contract.json: {sorted(key_sets)}")
+for literal in (f'strcmp(kind, "{contract["payloadKind"]}")', f'strcmp(kind, "{contract["selectionKind"]}")',
+                f'strcmp(coverage, "{contract["dependencyTreeCoverage"]}")', f"*cursor == '{contract['schema']}'"):
+    if literal not in source:
+        sys.exit(f"launcher does not contain the contract literal {literal}")
+PY
 NODE_ROOT="${TRON_NODE_ROOT:-}"
 if [[ -z "$NODE_ROOT" ]]; then
   "$REPO_ROOT/scripts/install-ci-tools.sh" node

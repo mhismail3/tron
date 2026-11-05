@@ -7,7 +7,8 @@ import type { ImageContent } from "../pi/ai.js";
 import type { QueuedMessageState } from "../../protocol/types.js";
 import { GatewayError, isUncertainOutcome } from "../../errors.js";
 import { safeJson } from "../projection/projection.js";
-import { MAXIMUM_PROMPT_ATTACHMENTS, type HeldPrompt, type QueueBehavior, type PromptQueueDisplay } from "./queue-input.js";
+import { MAXIMUM_PROMPT_ATTACHMENTS } from "../resources/prompt-bounds.js";
+import type { HeldPrompt, QueueBehavior, PromptQueueDisplay } from "./queue-input.js";
 
 
 /** Owns accepted pre-admission prompts and the one deferred ordered flush. */

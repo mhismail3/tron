@@ -6,6 +6,7 @@
     "README.md"
   ],
   "dependsOn": [
-    "gateway/resources"
+    "gateway/resources",
+    "gateway/pi"
   ]
 }
