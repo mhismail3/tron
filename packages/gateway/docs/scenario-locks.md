@@ -10,8 +10,10 @@ behavior trace, `session-shapes`). A converted lock asserts its behavior (accept
 effects, refusals, ordering, identity, persistence and recovery) inline. Two keep a
 narrowed golden: `notifications-waiting` its provider requests, and `notifications-push`
 its provider requests and event shapes (the latter also pinned by
-`client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`
-and the store mutation-path tests in the paragraph after the table assert inline only. The other scenario locks in
+`client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock`
+scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`,
+`run-extension-ui`) and the store mutation-path tests in the paragraph after the table
+assert inline only. The other scenario locks in
 the table below compare whole-scenario goldens.
 
 ## Framework
@@ -54,11 +56,11 @@ the `computer` module registers only on darwin.
 
 | Module | Lock | Scenario |
 |---|---|---|
-| `gateway/run` | `run-prompt-stream` | streamed thinking and text, a `read` round trip |
-| `gateway/run` | `run-steer` | steer and follow-up admitted into a live run, in order |
-| `gateway/run` | `run-abort` | the client aborts the live operation; the turn settles aborted |
-| `gateway/run` | `run-compaction` | manual compaction: summary and split-turn prefix requests |
-| `gateway/run` | `run-extension-ui` | an extension tool's `select` waits for `extension.respond` |
+| `gateway/run` | `run-prompt-stream` | streamed thinking and text, a `read` round trip. Inline checks: the projected transcript, canonical messages and entry order, invocation receipts and provider conversations (and the idle snapshot a client opens) |
+| `gateway/run` | `run-steer` | steer and follow-up admitted into a live run, in order. Inline checks: the projected transcript, canonical messages and entry order, invocation receipts and provider conversations |
+| `gateway/run` | `run-abort` | the client aborts the live operation; the turn settles aborted. Inline checks: the projected transcript, canonical messages and entry order, invocation receipts and provider conversations |
+| `gateway/run` | `run-compaction` | manual compaction: summary and split-turn prefix requests. Inline checks: the projected transcript, canonical messages and entry order, invocation receipts and provider conversations and the exact compaction entry |
+| `gateway/run` | `run-extension-ui` | an extension tool's `select` waits for `extension.respond`. Inline checks: the projected transcript, canonical messages and entry order, invocation receipts and provider conversations |
 | `gateway/run` | `run-cold-load-eviction` | under a one-runtime cap an open session is never reclaimed; once closed, a settled session is evicted for capacity, stays listed with its unread attention, and `session.open` cold-loads it with its JSONL and context |
 | `gateway/run` | `run-drain-snapshot` | the administrative drain (`waitUntilIdle`) through `gateway.drain.status`: a live run and its queued follow-up block it, new work is refused, it completes after both |
 | `gateway/run` | `run-queue-control` | three follow-ups queue behind a held run and a retried `commandId` replays; `session.queue.replace` refuses a stale revision and an unknown item, then reorders and drops; `session.abort` refuses a stale operation; `session.clearQueue` clears queued follow-ups; a steer queued at Stop becomes the next turn |
