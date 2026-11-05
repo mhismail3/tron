@@ -27,7 +27,7 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   const view = (...ids: string[]) => ({ revision: store.revision, archivedAt: Object.fromEntries(ids.map((id) => [id, store.archivedAt(id) ?? null])) });
 
   expect(view("a"), "read before initialize").toEqual({ revision: 0, archivedAt: { a: null } });
-  await expect(store.archive("a"), "archive before initialize").rejects.toThrow("Session archive store is not initialized");
+  await expect(store.archive("a"), "archive before initialize").rejects.toThrow(expect.objectContaining({ message: "Session archive store is not initialized" }));
   expect(await committed()).toBeUndefined();
   await mkdir(join(home, "gateway"), { recursive: true });
   await store.initialize();
@@ -50,8 +50,8 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   expect(await store.rekey("a", "c"), "rekey the absent a again").toBe(false);
   expect(await store.rekey("c", "c"), "rekey c to itself").toBe(false);
   expect(store.revision).toBe(4);
-  await expect(store.rekey("c", "b"), "rekey c onto b").rejects.toThrow("Replacement session already has archive state");
-  await expect(store.assertAbsent("b")).rejects.toThrow("New session identity already has archive state");
+  await expect(store.rekey("c", "b"), "rekey c onto b").rejects.toThrow(expect.objectContaining({ message: "Replacement session already has archive state" }));
+  await expect(store.assertAbsent("b")).rejects.toThrow(expect.objectContaining({ message: "New session identity already has archive state" }));
   await expect(store.assertAbsent("d")).resolves.toBeUndefined();
   expect(await committed(), "refusals commit nothing").toEqual(sessions({ b: T1, c: T0 }));
 
@@ -83,12 +83,12 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   expect(await reopen(sessions({ x: T0 })), "admit a valid hand-written record").toBe(T0);
   for (const document of [{ version: 2, sessions: {} }, { version: 1, sessions: [] }, [1], null, "sessions",
     { version: 1, sessions: null }, { version: 1, sessions: "x" }]) {
-    await expect(reopen(document), JSON.stringify(document)).rejects.toThrow("Invalid session archive document");
+    await expect(reopen(document), JSON.stringify(document)).rejects.toThrow(expect.objectContaining({ message: "Invalid session archive document" }));
     expect(await committed(), "a refused document is kept, never reset to empty").toEqual(document);
   }
   for (const record of [{ x: { archivedAt: "never" } }, { x: { archivedAt: T0, by: "me" } }, { "": { archivedAt: T0 } },
     { x: null }, { x: [] }, { x: T0 }]) {
-    await expect(reopen({ version: 1, sessions: record }), JSON.stringify(record)).rejects.toThrow("Invalid session archive record");
+    await expect(reopen({ version: 1, sessions: record }), JSON.stringify(record)).rejects.toThrow(expect.objectContaining({ message: "Invalid session archive record" }));
     expect(await committed(), "a refused document is kept, never reset to empty").toEqual({ version: 1, sessions: record });
   }
 });

@@ -65,7 +65,7 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
     ["an oversized completion id", () => store.markAssistantCompletion("s1", "op-1", "c".repeat(257), at(1)), bound],
     ["an oversized completion time", () => store.markAssistantCompletion("s1", "op-1", "c-1", "t".repeat(129)), bound],
     ["an empty completion id", () => store.markAssistantCompletion("s1", "op-1", "", at(1)), bound],
-  ] as const) await expect(run(), label).rejects.toThrow(message);
+  ] as const) await expect(run(), label).rejects.toThrow(expect.objectContaining({ message: message }));
   expect(await markers(), "a repeated completion and every refusal commit nothing").toEqual({ s1: s1Completed });
 
   await store.reassertAssistantCompletion("s1", "op-1", "c-1", at(3));
@@ -74,22 +74,22 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   const reassertedInode = await inode("s1");
   await store.reassertAssistantCompletion("s1", "op-1", "c-1", at(3));
   expect(await inode("s1"), "reassert s1 op-1 again does not republish the marker").toBe(reassertedInode);
-  await expect(store.reassertAssistantCompletion("s1", "op-1", "c-4", at(3)), "reassert with another completion").rejects.toThrow(ownership);
-  await expect(store.reassertAssistantCompletion("s2", "op-r", "c-r", "t".repeat(129)), "reassert with an oversized completion time").rejects.toThrow(bound);
+  await expect(store.reassertAssistantCompletion("s1", "op-1", "c-4", at(3)), "reassert with another completion").rejects.toThrow(expect.objectContaining({ message: ownership }));
+  await expect(store.reassertAssistantCompletion("s2", "op-r", "c-r", "t".repeat(129)), "reassert with an oversized completion time").rejects.toThrow(expect.objectContaining({ message: bound }));
   expect(await markers(), "a repeated reassertion and its refusals commit nothing").toEqual({ s1: s1Reasserted });
   advance(1_000);
   await store.reassertAssistantCompletion("s2", "op-r", "c-r", at(4));
   const s2 = doc("s2", [op("op-r", second(2), ["c-r", at(4)])]);
   expect(await markers(), "reassert an unmarked s2 operation recreates it").toEqual({ s1: s1Reasserted, s2 });
-  for (const id of ["o".repeat(257), ""]) await expect(store.mark("s2", id), `mark ${JSON.stringify(id.slice(0, 8))}`).rejects.toThrow("Run marker operation identifier exceeds its bound");
+  for (const id of ["o".repeat(257), ""]) await expect(store.mark("s2", id), `mark ${JSON.stringify(id.slice(0, 8))}`).rejects.toThrow(expect.objectContaining({ message: "Run marker operation identifier exceeds its bound" }));
   for (let index = 1; index <= 15; index += 1) await store.mark("s3", `op-${index}`);
   expect((await store.evidenceFor("s3")).length, "s3 holds fifteen operations").toBe(15);
   await store.reassertAssistantCompletion("s3", "op-16", "c-16", at(5));
   const s3Operations = () => [...Array.from({ length: 15 }, (_v, index) => op(`op-${index + 1}`, second(2))), op("op-16", second(2), ["c-16", at(5)])];
   expect(await markers(), "reassert a sixteenth s3 operation").toEqual({ s1: s1Reasserted, s2, s3: doc("s3", s3Operations()) });
-  await expect(store.mark("s3", "op-17"), "mark a seventeenth s3 operation").rejects.toThrow("Run marker operation bound reached before durable admission");
+  await expect(store.mark("s3", "op-17"), "mark a seventeenth s3 operation").rejects.toThrow(expect.objectContaining({ message: "Run marker operation bound reached before durable admission" }));
   await expect(store.reassertAssistantCompletion("s3", "op-17", "c-17", at(5)), "reassert a seventeenth s3 operation")
-    .rejects.toThrow("Run marker operation bound reached before terminal ownership reassertion");
+    .rejects.toThrow(expect.objectContaining({ message: "Run marker operation bound reached before terminal ownership reassertion" }));
   await store.reassertAssistantCompletion("s3", "op-1", "c-1", at(5));
   const s3Held = s3Operations();
   s3Held[0] = op("op-1", second(2), ["c-1", at(5)]);
