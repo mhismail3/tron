@@ -490,12 +490,17 @@ export class SettingsChangePath {
       }
     }
     if (failure) {
-      // Roll back the stores already changed, newest first (doc 5.2).
+      // Roll back the stores already changed, newest first (doc 5.2). A store
+      // that refuses its compensating write is recorded as such, never as rolled back.
+      const unrestored = new Map<string, string>();
       for (const done of [...applied].reverse()) {
-        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers).catch(() => undefined);
+        await this.model.owner.applyStore(target, stores, done.plan, done.plan.before, context, this.writers).catch((error: unknown) => {
+          unrestored.set(done.plan.changeId, `Not rolled back: the ${done.plan.binding.store} store refused its compensating write (${error instanceof Error ? error.message : String(error)}); it may still hold the new value`);
+        });
       }
       await this.record.append(ordered.filter(plan => !plan.target).map(plan => shape(this.entry(target, plan, context, "failed",
-        plan.changeId === failure!.plan.changeId ? failure!.error.message : "Rolled back: another change in the same request failed"))))
+        plan.changeId === failure!.plan.changeId ? failure!.error.message
+          : unrestored.get(plan.changeId) ?? "Rolled back: another change in the same request failed"))))
         .catch(error => { throw asUncertainOutcome(error, "Settings failed after effects and its audit could not be published"); });
       throw applied.length ? asUncertainOutcome(failure.error, "Settings effects required compensation; inspect before retrying") : failure.error;
     }

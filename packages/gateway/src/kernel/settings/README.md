@@ -16,7 +16,8 @@ setting and is not an approval queue.
 - `settings-model.ts`: target resolution and fixed-direction request pins.
 - `settings-change.ts`: planning, expected-before fences, target stripes, ordered
   store application/reverse rollback, outside-write brackets, Home companion effects,
-  audit and history-consumed Undo. Store I/O and provider admission enter through
+  audit and history-consumed Undo. A store that refuses its compensating write is
+  audited as not rolled back, naming the store, never as rolled back. Store I/O and provider admission enter through
   owner ports. `SettingsReadOwner.admitModelChoice` uses the active SDK runtime,
   including borrowed views; it captures no eligibility snapshot.
 - `settings-record.ts`: durable, byte/row-bounded segments, index recovery and
