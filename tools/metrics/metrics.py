@@ -57,6 +57,41 @@ class MetricsError(Exception):
     pass
 
 
+def structure(sha: str) -> dict:
+    """M4: how much of the tree an agent can navigate by its cards (tools/ownership/README.md, "Purpose cards")."""
+    sys.path.insert(0, str(ROOT / "tools" / "ownership"))
+    import cards  # noqa: E402  (the one reference scanner)
+    import ownership  # noqa: E402  (the one ownership authority)
+    try:
+        result, _ = ownership.check(sha)
+        paths, read = ownership.inventory(sha)
+    except ownership.GitError as error:
+        raise MetricsError(str(error)) from None
+    modules = result["modules"]
+    owner = {path: key for key, module in modules.items() for path in module["owned"]}
+    root = modules.get("repo/root", {}).get("manifest") == "root.module.json" and json.loads(read("root.module.json"))
+    uncarded = ((root or {}).get("layout") or {}).get("uncarded", sorted(modules))
+    refs = cards.references(paths, read, owner)
+    folders = cards.directories(paths, owner)
+    edges = cards.module_edges(refs, owner, folders)
+    reached = {target for targets in refs.values() for target in targets}
+    # Swift resolves by type within a target, not by path; its reachability is the iOS index (`scripts/tron layers ios`).
+    unreached = sorted(path for path in paths if path in owner and cards.is_source(path) and not cards.is_test(path)
+                       and not path.endswith(".swift")
+                       and not any(cards.covers(target, path) for target in reached if target in folders or target == path))
+    return {
+        "status": "observed",
+        "modules": len(modules),
+        "uncarded": len([key for key in uncarded if key in modules]),
+        "rootEntries": len({path.split("/", 1)[0] for path in paths}),
+        "scriptsTopFiles": len([path for path in paths if path.startswith("scripts/") and path.count("/") == 1]),
+        "crossModuleReferences": sum(len(targets) for consumers in edges.values() for targets in consumers.values()),
+        "modulePairs": sum(len(consumers) for consumers in edges.values()),
+        "unreachedFiles": len(unreached),
+        "unreached": unreached,
+    }
+
+
 def git(*args: str, data: bytes | None = None) -> bytes:
     completed = subprocess.run(
         ["git", "-C", str(ROOT), "-c", "core.quotepath=false", *args],
@@ -254,6 +289,7 @@ def measure(sha: str) -> dict:
             "files": [{"path": f["path"], "category": f["category"], "lines": f["lines"]} for f in large],
         },
         "M2.hotspotShare": hotspot(sha, committed),
+        "M4.structure": structure(sha),
         "M3.size": {
             "status": "observed",
             "handWrittenLines": sum(f["lines"] for f in hand),
@@ -347,6 +383,9 @@ def compare(base: dict, head: dict) -> str:
                  f"{signed(hf['count'] - bf['count'])} |")
     lines.append(f"| Hotspot share ({HOTSPOT_WINDOW_DAYS}d, top {HOTSPOT_TOP}) | {pct(bh)} | {pct(hh)} | "
                  f"{share_pp(bh, hh)} |")
+    bt, ht = base["metrics"]["M4.structure"], head["metrics"]["M4.structure"]
+    for key, label in STRUCTURE_ROWS:
+        lines.append(f"| {label} | {fmt(bt[key])} | {fmt(ht[key])} | {signed(ht[key] - bt[key])} |")
     excluded = []
     for c in ("data", "lockfile", "thirdParty"):
         excluded.append(f"{c} lines {fmt(bs['byCategory'][c]['lines'])} → {fmt(hs['byCategory'][c]['lines'])}")
@@ -409,6 +448,12 @@ def compare(base: dict, head: dict) -> str:
     return "\n".join(lines)
 
 
+STRUCTURE_ROWS = (("modules", "Modules"), ("uncarded", "Modules without a card"), ("rootEntries", "Root entries"),
+                  ("scriptsTopFiles", "Files directly in scripts/"),
+                  ("crossModuleReferences", "Cross-module file references"), ("modulePairs", "Module pairs that reference"),
+                  ("unreachedFiles", "Source files nothing names"))
+
+
 def summary(result: dict) -> str:
     size = result["metrics"]["M3.size"]
     large = result["metrics"]["M2.fileSize"]
@@ -421,7 +466,9 @@ def summary(result: dict) -> str:
         f"Fixture data lines {fmt(cats['fixtures']['lines'])} (separate)",
         f"Hand-written files > {SIZE_THRESHOLD} lines: {large['count']} "
         + "(" + ", ".join(f"{c} {n}" for c, n in large["byCategory"].items()) + ")",
-        f"Hotspot share ({HOTSPOT_WINDOW_DAYS}d to {hot['windowEnd']}, top {HOTSPOT_TOP}): {pct(hot)}"
+        f"Hotspot share ({HOTSPOT_WINDOW_DAYS}d to {hot['windowEnd']}, top {HOTSPOT_TOP}): {pct(hot)}",
+        "Structure: " + ", ".join(f"{label.lower()} {fmt(result['metrics']['M4.structure'][key])}"
+                                  for key, label in STRUCTURE_ROWS),
     ])
 
 

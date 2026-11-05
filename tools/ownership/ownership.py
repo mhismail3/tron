@@ -44,9 +44,33 @@ def inventory(rev: str | None) -> tuple[list[str], callable]:
         sha = git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").decode().strip()
     except GitError:
         raise GitError(f"unknown revision {rev!r}") from None
-    paths = [p.decode("utf-8", "surrogateescape")
-             for p in git("ls-tree", "-r", "-z", "--name-only", sha).split(b"\0") if p]
-    return sorted(paths), lambda path: git("cat-file", "blob", f"{sha}:{path}")
+    entries = {}
+    for entry in git("ls-tree", "-r", "-z", sha).split(b"\0"):
+        if entry:
+            meta, path = entry.split(b"\t", 1)
+            entries[path.decode("utf-8", "surrogateescape")] = meta.split()[2].decode()
+    blobs: dict[str, bytes] = {}
+
+    def read(path: str) -> bytes:
+        if not blobs:  # one `git cat-file --batch` for the whole tree, on first use
+            oids = sorted(set(entries.values())) or [""]
+            raw = subprocess.run(["git", "-C", str(ROOT), "cat-file", "--batch"], input="\n".join(oids).encode() + b"\n",
+                                 stdout=subprocess.PIPE, check=True).stdout
+            at = 0
+            while at < len(raw):
+                header_end = raw.index(b"\n", at)
+                header = raw[at:header_end].split(b" ")
+                if len(header) != 3:  # "<oid> missing": a gitlink names a commit, not a blob
+                    at = header_end + 1
+                    continue
+                oid, _, size = header
+                start = header_end + 1
+                blobs[oid.decode()] = raw[start:start + int(size)]
+                at = start + int(size) + 1
+        if path not in entries or entries[path] not in blobs:
+            raise OSError(f"{path} is not a file at {sha[:12]}")
+        return blobs[entries[path]]
+    return sorted(entries), read
 
 
 def modes_of(rev: str | None) -> dict[str, str]:

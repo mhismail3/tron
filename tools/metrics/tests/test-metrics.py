@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """CLI tests for `scripts/tron metrics` (tools/metrics/README.md).
 
-Each case copies the real `scripts/tron` and `tools/metrics/metrics.py` into a
+Each case copies the real `scripts/tron`, `tools/metrics/metrics.py` and the ownership
+modules it reads structure through into a
 disposable Git repository with an isolated HOME and Git configuration, commits
 fixture files with fixed dates, and runs the command as a worker would:
 
@@ -15,6 +16,8 @@ fixture files with fixed dates, and runs the command as a worker would:
 4. `--compare` pairs renames, subtracts deletions, reports reclassification and
    follows files over 500 lines through renames; its rows sum to the total.
 5. An unknown revision fails loudly and writes nothing.
+6. Structure counts modules, the ones `layout.uncarded` exempts, root entries, files directly
+   in `scripts/`, references between modules and source files nothing names.
 
 The last comparison is kept in `test-results/metrics-cli/` for review.
 """
@@ -32,7 +35,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "metrics-cli"
-TOOL_FILES = ("scripts/tron", "tools/metrics/metrics.py")
+TOOL_FILES = ("scripts/tron", "tools/metrics/metrics.py", "tools/ownership/ownership.py", "tools/ownership/cards.py",
+              "tools/ownership/layout.py")
 DAY = 86400
 T0 = 1_700_000_000  # 2023-11-14: far from the wall clock, so clock anchoring fails loudly.
 
@@ -205,10 +209,32 @@ class ClassificationTests(RepoCase):
 
     def test_only_observed_metrics_are_reported(self) -> None:
         metrics = self.data["metrics"]
-        self.assertEqual(set(metrics), {"M2.fileSize", "M2.hotspotShare", "M3.size"})
+        self.assertEqual(set(metrics), {"M2.fileSize", "M2.hotspotShare", "M3.size", "M4.structure"})
         self.assertEqual({k for k, v in metrics.items() if v["status"] == "observed"},
-                         {"M2.fileSize", "M2.hotspotShare", "M3.size"})
+                         {"M2.fileSize", "M2.hotspotShare", "M3.size", "M4.structure"})
         self.assertNotIn("Unavailable", self.result.stdout)
+
+
+class StructureTests(RepoCase):
+    def test_structure_counts_cards_references_and_unnamed_files(self) -> None:
+        r = self.repo
+        r.write("root.module.json", json.dumps({"layer": "L5", "owns": ["root.module.json", "scripts/**", "tools/**"],
+                                                "layout": {"root": [], "scriptsTop": [], "frozen": [],
+                                                           "uncarded": ["repo/caller"]}}))
+        r.write("mods/tool/tool.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("mods/tool/tool.sh", "#!/usr/bin/env bash\necho tool\n")
+        r.write("mods/caller/caller.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("mods/caller/caller.sh", "#!/usr/bin/env bash\nbash mods/tool/tool.sh\n")
+        r.write("mods/caller/orphan.sh", "#!/usr/bin/env bash\necho nobody\n")
+        sha = r.commit("modules", T0)
+        self.measure()
+        structure = json.loads(r.output(sha).read_text())["metrics"]["M4.structure"]
+        self.assertEqual({key: structure[key] for key in ("modules", "uncarded", "rootEntries", "scriptsTopFiles",
+                                                          "crossModuleReferences", "modulePairs")},
+                         {"modules": 3, "uncarded": 1, "rootEntries": 4, "scriptsTopFiles": 1,
+                          "crossModuleReferences": 1, "modulePairs": 1})
+        self.assertIn("mods/caller/orphan.sh", structure["unreached"])
+        self.assertNotIn("mods/tool/tool.sh", structure["unreached"])
 
 
 class DeterminismTests(RepoCase):

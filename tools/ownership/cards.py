@@ -64,6 +64,16 @@ def normal(path: str) -> str | None:
     return "/".join(parts)
 
 
+def typescript_sources(candidate: str) -> tuple[str, ...]:
+    """An ES module specifier names the compiled `.js`; the tracked file is its `.ts` source or a directory index."""
+    if candidate.endswith((".js", ".mjs")):
+        stem = candidate.rsplit(".", 1)[0]
+        return (stem + ".ts", stem + ".tsx", stem + ".mts")
+    if "." not in candidate.rsplit("/", 1)[-1]:
+        return (candidate + ".ts", candidate + ".tsx", candidate + "/index.ts")
+    return ()
+
+
 def references(paths: list[str], read, owner: dict[str, str]) -> dict[str, set[str]]:
     """For each tracked source file, the tracked files and single-owner directories its text names.
 
@@ -107,10 +117,15 @@ def references(paths: list[str], read, owner: dict[str, str]) -> dict[str, set[s
             if not stripped:
                 continue
             bases = [""] + ([package + "/"] if package else []) + ([folder + "/"] if folder else [])
+            found_one = False
             for base in reversed(bases):  # nearest first: own directory, package, root
                 candidate = normal(base + stripped)
-                if candidate and (candidate in targets or candidate in folders):
-                    hits.add(candidate)
+                for name in (candidate, *typescript_sources(candidate)) if candidate else ():
+                    if name in targets or name in folders:
+                        hits.add(name)
+                        found_one = True
+                        break
+                if found_one:
                     break
         if source.endswith(".py"):
             hits.update(siblings[f"{name}.py"] for name in PY_IMPORT.findall(text) if f"{name}.py" in siblings)
