@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -274,9 +275,15 @@ def report(prune: bool) -> dict:
             # A detached worktree belongs to the tool that made it (verify batch lanes, base checks).
             if w["branch"] and w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
                 # --force only because what remains is regenerable ignored output (node_modules, build).
-                if subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", w["path"]],
-                                  capture_output=True).returncode == 0:
+                # bundle-gateway.sh seals its payload read-only, and Xcode copies it into DerivedData.
+                for directory, _, _ in os.walk(w["path"]):
+                    os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
+                removed = subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", w["path"]],
+                                         capture_output=True, text=True)
+                if removed.returncode == 0:
                     out["pruned"].append(f"worktree {w['path']} (branch {w['branch']} is on main)")
+                else:
+                    out["notes"].append(f"could not remove worktree {w['path']}: {removed.stderr.strip()}")
         for b in out["branches"]:
             if b["merged"] and subprocess.run(["git", "-C", str(ROOT), "branch", "-d", b["branch"]],
                                               capture_output=True).returncode == 0:

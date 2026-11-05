@@ -235,11 +235,18 @@ scripts/tron mac replace --status --follow
   Spotlight and `open -b com.tron.mac` reach only `/Applications/Tron.app`. Rollback renames
   the kept copy back and verifies the restored Gateway's revision.
 - **Verify** requires the running revision and protocol, the app's cdhash and `scripts/tron mac
-  verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`
-  (current and previous kept); git and builds run with Homebrew's bin on `PATH` for git-lfs.
+  verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`;
+  git and builds run with Homebrew's bin on `PATH` for git-lfs.
+- **Retention.** A finished full replacement keeps only its own operation (journal and rollback
+  set) and the build it installed. It deletes older builds and every older operation's journal
+  and rollback set (`previous-app-<n>`, `retired-stable-payloads-<n>`, `state-snapshot-<n>`,
+  `failed-*`): those are superseded, because rollback restores only this operation's set and a
+  snapshot is never restored over newer data. Other entries in an operation directory (a
+  migration's archive) stay until the maintainer retires them. A path it cannot delete is
+  named in `journal.log` and the finish step; it never rolls back a verified install.
 - E2E: `python3 scripts/test-tron-mac-replace.py` (fixture app and job, never Stable;
   `--rpc-only` (includes the drain-blocker runner), `--launch-services-only`, `--quit-only`,
-  `--checkout-only` for single boundaries; artifacts under
+  `--checkout-only`, `--retention-only` for single boundaries; artifacts under
   `test-results/mac-replace-*.json`).
 
 ## Debug Gateway

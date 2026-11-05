@@ -16,6 +16,8 @@ origin) and runs the command as a worker would:
    written by `scripts/tron-ios-device`) is split: the writer's paths are known, the
    rest is residue.
 5. A tracked file that `.gitignore` also matches is reported with its fix.
+6. A merged, idle worktree whose regenerable Gateway payload `bundle-gateway.sh` sealed
+   read-only (`chmod -R a-w`) is still pruned, not silently kept.
 
 The last run's output is kept in `test-results/tidy-cli/` for review.
 """
@@ -156,6 +158,21 @@ class OwnershipScopeTests(ScopeCase):
         f.commit(f.repo, "negate")
         self.assertEqual(self.report()["tracked_ignored"], [])
 
+
+    def test_a_sealed_read_only_payload_does_not_block_pruning(self) -> None:
+        f = self.f
+        f.write(".gitignore", (f.repo / ".gitignore").read_text() + "packages/mac-app/Sources/Resources/Gateway/\n")
+        f.write("packages/mac-app/Sources/Resources/AppIcon.txt")
+        f.commit(f.repo, "ignore the bundled payload")
+        f.git(f.repo, "push", "-q", "origin", "main")
+        f.git(f.repo, "fetch", "-q", "origin")
+        tree = f.worktree("merged-sealed", merged=True, idle_days=10)
+        payload = f.write("packages/mac-app/Sources/Resources/Gateway/app/dist/index.js", "payload", root=tree).parents[2]
+        subprocess.run(["chmod", "-R", "a-w", payload], check=True)
+        self.addCleanup(lambda: payload.exists() and subprocess.run(["chmod", "-R", "u+w", payload], check=True))
+        result = self.f.tidy("--prune")
+        self.assertFalse(tree.exists(), result.stdout + result.stderr)
+        self.assertIn(f"tidy: pruned worktree {tree} (branch merged-sealed is on main)", result.stdout)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

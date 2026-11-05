@@ -20,8 +20,10 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -53,7 +55,6 @@ def source_file(root, revision, path):
 
 def source_protocol(root, revision='HEAD'):
     text = source_file(root, revision, 'packages/gateway/src/version.ts')
-    import re
     version = re.search(r'export const PROTOCOL_VERSION = (\d+);', text)
     minimum = re.search(r'export const MIN_PROTOCOL_VERSION = (\d+);', text)
     if not version or not minimum:
@@ -480,8 +481,14 @@ class Runner:
         raise Failure('the Gateway source update did not settle within 30 minutes')
 
     def step_finish(self):
-        prune_builds(self.platform, keep=self.revision)
-        return 'replacement complete'
+        if self.data['path'] != 'full':
+            return 'replacement complete'
+        # A prune failure is reported, never raised: raising here would roll back a verified install.
+        failures = prune_store(self.platform, self.journal.directory, self.revision)
+        for failure in failures:
+            self.journal.note(f'prune: {failure}')
+        return 'replacement complete' + (f'; could not prune {len(failures)} superseded path(s), see journal.log'
+                                          if failures else '')
 
     # Failure handling ----------------------------------------------------
     def recover(self):
@@ -577,16 +584,49 @@ def format_age(seconds):
     return f'{seconds // 3600}h {seconds % 3600 // 60}m'
 
 
-def prune_builds(platform, keep):
-    """Keep the current and one previous build worktree; each holds gigabytes of DerivedData."""
+# Everything an operation directory gets from this script: the journal's files and the
+# per-attempt rollback set. Anything else there (another tool's recovery archive) stays.
+OPERATION_FILES = {'journal.json', 'journal.log', 'logs', 'runner', 'runner.lock', 'runner.out', 'runner.plist'}
+ROLLBACK_SET = re.compile(r'(state-snapshot|previous-app|retired-stable-payloads|failed-app|failed-stable-payloads)-\d+')
+
+
+def prune_store(platform, operation, revision):
+    """After a full replacement, keep only this operation and the build it installed.
+
+    Older rollback sets are superseded: rollback restores only this operation's previous app
+    and payloads, and an older ~/.tron snapshot is never restored over newer data. Returns the
+    paths it could not delete, with the reason."""
+    failures = []
     builds = platform.store / 'builds'
-    if not builds.is_dir():
-        return
-    entries = sorted((entry for entry in builds.iterdir() if entry.name != keep), key=lambda entry: entry.stat().st_mtime)
-    for entry in entries[:-1]:
-        git_succeeds(entry, 'worktree', 'remove', '--force', entry, timeout=600)
-        if entry.exists():
-            shutil.rmtree(entry, ignore_errors=True)
+    for entry in sorted(builds.iterdir()) if builds.is_dir() else []:
+        if entry.name != revision:
+            failures += remove_tree(entry, worktree=True)
+    for other in sorted(platform.store.iterdir()):
+        if other == operation or other.is_symlink() or not (other / 'journal.json').is_file():
+            continue
+        for entry in sorted(other.iterdir()):
+            if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name):
+                failures += remove_tree(entry)
+        if not any(other.iterdir()):
+            other.rmdir()
+    return failures
+
+
+def remove_tree(path, worktree=False):
+    """Delete `path`, including Gateway payloads bundle-gateway.sh sealed read-only (`chmod -R a-w`)."""
+    try:
+        if path.is_dir() and not path.is_symlink():
+            for directory, _, _ in os.walk(path):
+                os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
+            if worktree:  # also drops the build checkout's registration in the source repository
+                git_succeeds(path, 'worktree', 'remove', '--force', path, timeout=600)
+            if path.exists():
+                shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
+    except OSError as error:
+        return [f'{path}: {error.strerror or error}']
+    return []
 
 
 # Operation store -----------------------------------------------------------

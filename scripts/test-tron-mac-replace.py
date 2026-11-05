@@ -24,6 +24,8 @@ Launch Services only: --launch-services-only (writes test-results/mac-replace-la
 swaps a uniquely identified fixture app and asks Launch Services which copies it would open).
 AppKit handoff only: --quit-only (writes test-results/mac-replace-quit-e2e.json;
 compiles a standalone app using the production termination/handoff owners).
+Retention only: --retention-only (writes test-results/mac-replace-retention-e2e.json; a finished full
+replacement keeps only its operation and installed build, through real git and read-only payloads).
 The full command runs every journey.
 """
 import json
@@ -36,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -917,6 +920,75 @@ def checkout_journey():
     return 0 if passed else 1
 
 
+def retention_journey():
+    """A finished full replacement keeps only its own operation and build (#2276 cleanup): real
+    files sealed read-only as bundle-gateway.sh seals payloads, and a real build worktree."""
+    evidence, started, passed = [], time.time(), False
+    report = REPO / 'test-results/mac-replace-retention-e2e.json'
+    try:
+        with tempfile.TemporaryDirectory(prefix='tron-mac-replace-retention-') as directory:
+            root = Path(directory)
+            source, store = root / 'source', root / 'store'
+            git = ['git', '-C', source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid']
+            subprocess.run(['git', 'init', '--quiet', source], check=True)
+            (source / 'README').write_text('fixture\n')
+            subprocess.run(git + ['add', '.'], check=True)
+            subprocess.run(git + ['commit', '--quiet', '-m', 'fixture'], check=True)
+
+            def sealed(path):  # a payload tree after bundle-gateway.sh's `chmod -R a-w`
+                (path / 'app/dist').mkdir(parents=True)
+                (path / 'app/dist/index.js').write_text('payload')
+                subprocess.run(['chmod', '-R', 'a-w', path], check=True)
+
+            old_build, current_build = store / 'builds' / ('a' * 40), store / 'builds' / ('b' * 40)
+            subprocess.run(git + ['worktree', 'add', '--quiet', '--detach', old_build], check=True)
+            sealed(old_build / 'packages/mac-app/Sources/Resources/Gateway')
+            sealed(current_build / 'Gateway')
+            older, foreign, current = store / 'older-op', store / 'migration-op', store / 'current-op'
+            for operation in (older, foreign, current):
+                (operation / 'logs').mkdir(parents=True)
+                (operation / 'journal.json').write_text('{}')
+                sealed(operation / 'retired-stable-payloads-1')
+                (operation / 'state-snapshot-1').mkdir()
+                (operation / 'previous-app-1/Tron.app.kept').mkdir(parents=True)
+            (foreign / 'knowledge-cutover-1').mkdir()
+            locked = foreign / 'failed-app-2'
+            locked.mkdir()
+            (locked / 'flagged').write_text('')
+            subprocess.run(['chflags', 'uchg', locked / 'flagged'], check=True)
+            try:
+                failures = replace.prune_store(SimpleNamespace(store=store), current, 'b' * 40)
+            finally:
+                subprocess.run(['chflags', 'nouchg', locked / 'flagged'], check=True)
+
+            def record(condition, message):
+                evidence.append({'check': message, 'pass': bool(condition)})
+
+            worktrees = subprocess.run(['git', '-C', source, 'worktree', 'list', '--porcelain'],
+                                       capture_output=True, text=True, check=True).stdout
+            record(not old_build.exists() and str(old_build) not in worktrees,
+                   'a superseded build worktree with a sealed payload is deleted and unregistered')
+            record((current_build / 'Gateway/app/dist/index.js').is_file(), 'the installed build is kept')
+            record(not older.exists(), 'an older operation holding only replace-owned files is deleted whole')
+            record(sorted(p.name for p in foreign.iterdir()) == ['failed-app-2', 'knowledge-cutover-1'],
+                   f'another tool\'s archive in an older operation is kept: {sorted(p.name for p in foreign.iterdir())}')
+            record(sorted(p.name for p in current.iterdir()) == ['journal.json', 'logs', 'previous-app-1',
+                                                                  'retired-stable-payloads-1', 'state-snapshot-1'],
+                   'this operation keeps its whole rollback set')
+            record(len(failures) == 1 and 'failed-app-2' in failures[0],
+                   f'an undeletable path is reported, not swallowed: {failures}')
+            subprocess.run(['chmod', '-R', 'u+w', root], check=True)
+            passed = all(item['pass'] for item in evidence)
+    except Exception as error:  # noqa: BLE001 - retain RED evidence as well as GREEN.
+        evidence.append({'check': 'error', 'pass': False, 'detail': f'{type(error).__name__}: {error}'})
+    report.parent.mkdir(exist_ok=True)
+    report.write_text(json.dumps({'passed': passed, 'seconds': round(time.time() - started, 1), 'checks': evidence}, indent=1) + '\n')
+    for item in evidence:
+        print(f'{"PASS" if item["pass"] else "FAIL"}  {item["check"]}{" - " + item["detail"] if "detail" in item else ""}')
+    print(f'report: {report}')
+    return 0 if passed else 1
+
+
 def fixture_main():
     """`--fixture <config> ...`: the orchestrator CLI/runner against the fixture platform."""
     arguments = sys.argv[1:]
@@ -933,6 +1005,9 @@ if __name__ == '__main__':
         sys.exit(quit_journey())
     if '--launch-services-only' in sys.argv:
         sys.exit(launch_services_journey())
+    retention_result = retention_journey()
+    if retention_result or '--retention-only' in sys.argv:
+        sys.exit(retention_result)
     checkout_result = checkout_journey()
     if checkout_result or '--checkout-only' in sys.argv:
         sys.exit(checkout_result)
