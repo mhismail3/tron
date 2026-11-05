@@ -21,7 +21,6 @@
       "name": "scripts/check-documentation-policy.py",
       "kind": "exec",
       "consumers": [
-        "repo/budgets",
         "repo/verify"
       ]
     },
