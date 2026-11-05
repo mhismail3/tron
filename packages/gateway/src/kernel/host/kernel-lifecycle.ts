@@ -1,4 +1,4 @@
-/** The `kernelLifecycle` observer hook (k0-kernel.md §2.1): a module whose
+/** The `kernelLifecycle` observer hook (kernel.md §2.1): a module whose
  * state every runtime reads joins the kernel's own start and shutdown, at the
  * kernel's existing call points and in composition order. */
 export interface KernelLifecycleObserver {
@@ -13,7 +13,7 @@ export interface KernelLifecycleObserver {
 }
 
 /** The `taskLedger` policy hook: the delegating module's task ledger as a task
- * worker's runtime reads it (k0-kernel.md §2.3, K5). */
+ * worker's runtime reads it (kernel.md §2.3, K5). */
 export interface TaskLedgerPolicy {
   /** Refuses a task marker the ledger does not own. */
   validateMarker(sessionId: string, marker: unknown): Promise<void>;

@@ -33,7 +33,7 @@ carry no size exceptions.
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-budgets.py` runs the CLI on
+`scripts/tron test tooling tools/budgets/tests/test-budgets.py` runs the CLI on
 disposable repositories: docs at twice their budget pass and one line more
 fails, code of any size is ignored, and an unknown revision exits 2. Output is
 kept in `test-results/budgets-cli/`.

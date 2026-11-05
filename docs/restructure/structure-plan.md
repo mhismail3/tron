@@ -14,21 +14,22 @@ generated now (`scripts/tron ownership --ledger`), so it is not kept on main.
 |---|---|---|
 | S1 guards: layout rules in `scripts/tron ownership`, `--ledger`, `tidy`, AGENTS "Where things go" | landed `4121a32c2` | keep: 0.2 s, blocks new root entries, root manifests and flat scripts at commit |
 | S2 residue, ignore rules, first `tidy --prune` | landed `5e4bbacd1` | keep; `tidy --prune` root-fixed for read-only payloads in `3de01846d` |
-| S3 fold `tools/` into `scripts/<area>/` | **changed** to S3' | see below |
+| S3 fold `tools/` into `scripts/<area>/` | **changed** to S3', landed with this change | see below |
 | S4a/b/c flat `scripts/` into areas | **dropped** | see below |
-| S5 packages and docs | **narrowed** | deletions kept; moves re-judged below |
+| S5 packages and docs | **narrowed**; done except `tools/web` | deletions kept; moves re-judged below |
 | S6 weekly hygiene automation | maintainer decision | recommend `tidy --prune`, not report-only |
 
 ## Re-judged items
 
 **S3' instead of S3.** Why fold `tools/` into `scripts/`? So one job has one home. Why does that
-matter to an agent? A tool's tests sit elsewhere (`tools/verify` vs `scripts/test-tron-verify*.py`)
-and seven root manifests each own one tool plus its stray tests. Why are they split? Tests were
+matter to an agent? A tool's tests sat elsewhere (`tools/verify` vs its tests in `scripts/`)
+and seven root manifests each owned one tool plus its stray tests. Why were they split? Tests were
 put beside the dispatcher, not the tool. The harm is the split, not the directory name: moving
 whole tools across homes rewrites ~96 referencing files and verify's own selector for no further
 gain, since `scripts/tron` is already the one front door. S3': each tool keeps its directory and
 gains its tests (`tools/<tool>/tests/`, as `tools/ownership` already does) and its manifest; the
-root keeps only `root.module.json`.
+root keeps only `root.module.json`. `tools/work/work.json`, its configuration, moved out of `.github`
+with its tool.
 
 **S4 dropped.** Why move 108 flat scripts into areas? To find them. Agents find tooling through
 `scripts/tron --help`, `--ledger` purpose lines and grep; the shrink-only layout guard already
@@ -38,8 +39,9 @@ fingerprint inputs: the highest regression risk in the plan for no measured gain
 
 **S5.** Kept and done: delete `.codex/` (and the device helper's legacy pair only it used), the
 unreferenced pi-subagents `tron.3`-`8` archives, `tools/research` (the global x-posts skill owns
-it, D8) and the dated `tools/home-retro/FINDINGS.md`. Kept, not yet done: `docs/restructure/
-k0-kernel.md` beside its owner as `packages/gateway/docs/kernel.md` (six kernel files link it).
+it, D8) and the dated `tools/home-retro/FINDINGS.md`; the kernel design now sits beside its
+owner as `packages/gateway/docs/kernel.md`, and Home's improvement-loop design (the rest of
+`tools/home-retro/`) as `packages/gateway/src/modules/home/improvement-loop.md`.
 Dropped: `VERSION.env` to `config/` (one root entry; touches Xcode config and versioning for no
 agent gain); the Mac payload-test and iOS source-policy merges (fold into #2275 when that check
 is wired into verify). Deferred until the iOS UI-lock work settles: `tools/web` to

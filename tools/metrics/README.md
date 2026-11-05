@@ -48,7 +48,7 @@ Rules use only the path, the Git file mode and the blob bytes.
      `TEST_PATHS` (the never-shipped Mac Terminal journey probe);
    - `production` for shipped sources kept beside tooling (listed in
      `PRODUCTION_PATHS`: the Mac Gateway launcher C source);
-   - `tooling` under `scripts/`, `tools/`, `.agents/`, `.github/`, `.codex/`,
+   - `tooling` under `scripts/`, `tools/`, `.agents/`, `.github/`,
      `.pi/` or `packages/<name>/scripts/`, any `.py`/`.sh`/`.bash` file, and any
      suffixless executable;
    - otherwise `production`.
@@ -114,6 +114,6 @@ under the threshold) or `entered`.
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-metrics.py` runs the CLI against
+`scripts/tron test tooling tools/metrics/tests/test-metrics.py` runs the CLI against
 disposable Git repositories and keeps the last fixture comparison under
 `test-results/metrics-cli/`.

@@ -11,7 +11,7 @@ import { PushRelayClient } from "../../notifications/relay-client.js";
 import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
 /**
- * `gateway/home` scenario lock (restructure E0a, docs/restructure/k0-kernel.md §7):
+ * `gateway/home` scenario lock (restructure E0a, packages/gateway/docs/kernel.md §7):
  * the Home behavior kernel extraction E1-E7 must keep. Through the real Gateway
  * (`gateway-lock-harness.ts`, Home wired as gateway-main wires it) the phone
  * designates Home, sets its memory queue, opens the new chapter (its first
@@ -92,7 +92,7 @@ type Caller = "home-input" | "home-delegated" | "home-wake" | "worker";
 
 /** Each loaded extension of a live runtime, in load order: its tools, event
  * handlers (with their count) and commands. This is the profile a slot was
- * built with (k0-kernel.md §8 B1), which no request carries. */
+ * built with (kernel.md §8 B1), which no request carries. */
 async function loadedExtensions(gateway: LockGateway, sessionId: string): Promise<TraceValue> {
   const slot = await gateway.registry.acquire(sessionId) as unknown as { runtime: { session: { resourceLoader: { getExtensions(): { extensions: Array<{
     path: string; tools: Map<string, unknown>; handlers: Map<string, unknown[]>; commands: Map<string, unknown>;

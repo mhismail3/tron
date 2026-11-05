@@ -15,7 +15,7 @@ import { ORDINARY_SESSION_PROFILE } from "./session-profile.js";
 import { ModuleHost, type KernelHooks, type ModuleDescriptor, type ModuleInstance } from "./module-host.js";
 
 /**
- * Kernel contract for K3's module host (k0-kernel.md §2.1, §3): the real
+ * Kernel contract for K3's module host (kernel.md §2.1, §3): the real
  * `ModuleHost` with faux descriptors, and the production composition with a real
  * `RuntimeRegistry`. Invariants: modules start in composition order and stop in
  * reverse; a module reads only the contracts it declares; composition errors

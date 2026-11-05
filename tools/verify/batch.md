@@ -97,7 +97,7 @@ refused or interrupted resource cleanup preserve the probe worktree and `progres
 
 ## Verify
 
-`scripts/tron test tooling scripts/test-tron-verify-batch.py` drives the shipped CLI with real
+`scripts/tron test tooling tools/verify/tests/test-verify-batch.py` drives the shipped CLI with real
 Git and a disposable bare remote: merge and fast-forward culprits reverted after a bound ACCEPT
 then green; disabled publication, then enabled; innocent concurrent landing with stale-ACCEPT
 rebind; uncertain push, crash after remote acceptance and an owner killed mid-repair (one

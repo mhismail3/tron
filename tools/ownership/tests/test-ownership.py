@@ -30,7 +30,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "ownership-cli"
 TOOL_FILES = ("scripts/tron", "tools/ownership/ownership.py")
 TOOLING = {"layer": "L5", "owns": ["scripts/tron", "tools/ownership/**", "tooling.module.json"]}

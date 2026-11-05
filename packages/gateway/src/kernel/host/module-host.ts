@@ -61,7 +61,7 @@ export interface ModuleLog {
 
 /** What `start` receives: platform facts and the contracts of the modules this
  * one declares in `dependsOn`. Kernel operations join it as each kernel
- * primitive is extracted (k0-kernel.md §3); nothing module-specific is here. */
+ * primitive is extracted (kernel.md §3); nothing module-specific is here. */
 export interface GatewayHost {
   tronHome: string;
   log: ModuleLog;
@@ -126,7 +126,7 @@ export interface RpcHandler {
   handle(params: Record<string, unknown>, context: RpcContext): Promise<JsonValue>;
 }
 
-/** The K3 hooks and their dispatch kind (k0-kernel.md §2.1). A `policy` hook has
+/** The K3 hooks and their dispatch kind (kernel.md §2.1). A `policy` hook has
  * one implementer; a second fails at start. `observers` hooks run every
  * implementer in composition order. Each signature is typed by the extraction
  * step that wires its call site. */

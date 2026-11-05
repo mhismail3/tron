@@ -7,7 +7,7 @@ import { expectScenario } from "../../test-support/lock-projections.js";
 import { automationOwnedRunScenario } from "../../test-support/lock-scenarios.js";
 
 /**
- * Automation owned-run lock (restructure E0c, `docs/restructure/k0-kernel.md` §7)
+ * Automation owned-run lock (restructure E0c, `packages/gateway/docs/kernel.md` §7)
  * for the `gateway/automations` module.
  *
  * The real Gateway (`gateway-lock-harness.ts`, option `automations`) runs the

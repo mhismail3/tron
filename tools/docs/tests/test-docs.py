@@ -27,7 +27,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "docs-cli"
 TOOL_FILES = ("scripts/tron", "scripts/tron-node", ".node-version", "tools/docs/docs.py",
               "tools/docs/settings-keys.mjs", "tools/ownership/ownership.py")
@@ -81,7 +81,11 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(int(output.split(" ", 1)[0]), len(listed))
 
     def test_settings_list_holds_the_key_the_settings_lock_edited(self) -> None:
-        lock = json.loads((ROOT / "packages/gateway/src/admin/locks/admin-settings-change.golden.json").read_text())
+        # The admin settings lock asserts its real-Gateway trace against this inline JSON literal.
+        source = (ROOT / "packages/gateway/src/admin/admin.lock.integration.test.ts").read_text()
+        marker = '"admin-settings-change": '
+        self.assertEqual(source.count(marker), 1, "the admin lock's inline expectation moved")
+        lock, _ = json.JSONDecoder().raw_decode(source, source.index(marker) + len(marker))
         resolved = next(e for e in lock["exchanges"] if e["method"] == "settings.resolve")["response"]["result"]["keys"][0]
         row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{resolved['key']}` |"))
         layers = row.split(" | ")[3].split(", ")

@@ -3,7 +3,7 @@ import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } fr
 import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../test-support/lock-scenarios.js";
 
 /**
- * Push lock (restructure E0b, `docs/restructure/k0-kernel.md` §2.1 `runTerminal`
+ * Push lock (restructure E0b, `packages/gateway/docs/kernel.md` §2.1 `runTerminal`
  * and `interactionRequired`) for the `gateway/notifications` module.
  *
  * The real Gateway (`gateway-lock-harness.ts`) runs with the production

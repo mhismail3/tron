@@ -230,7 +230,7 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
         raise TrackingError("a label cannot be both added and removed")
     declared = {label["name"] for label in config["labels"]}
     if set(additions) - declared:
-        raise TrackingError("only labels declared in .github/work.json may be added")
+        raise TrackingError("only labels declared in tools/work/work.json may be added")
     if config["issues"]["epicLabel"] in (set(additions) | set(removals)):
         raise TrackingError("the epic label is fixed at creation")
     if number <= 0:

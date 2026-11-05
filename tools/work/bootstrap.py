@@ -404,7 +404,7 @@ def run(gh: Gh, root: Path, config: dict, apply: bool, report: Optional[Path], p
             raise BootstrapError("GitHub did not converge to the declaration after applying")
         return 2
     if plan.drift:
-        print(f"drifted: {len(plan.drift)} item(s) on GitHub are not in .github/work.json")
+        print(f"drifted: {len(plan.drift)} item(s) on GitHub are not in tools/work/work.json")
         return 2
     print("in sync" if not applied else f"in sync after {len(applied)} change(s)")
     return 0

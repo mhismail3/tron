@@ -18,7 +18,7 @@ TARGETS = {"gateway": (GATEWAY, "gateway/", "Gateway"), "ios": (IOS, "ios-app/",
 FOUNDATION = {"L0", "L1"}
 # Ratcheted rule kinds; `undeclared` pairs are counted and reported, never ratcheted or failed.
 RATCHETED = ("upward ", "two-way ", "unindexed ")
-PI_SEAM = "gateway/pi"  # the one module that may import or name the Pi SDK (k0-kernel.md §4, decision D2)
+PI_SEAM = "gateway/pi"  # the one module that may import or name the Pi SDK (kernel.md §4, decision D2)
 PI_PACKAGE = re.compile(r"(?:^|/)node_modules/@earendil-works/")
 REASON = re.compile(r"^\s+(?:Imported|Referenced) via (?:\"[^\"]*\"|'[^']*'|\S+) from file '([^']+)'")
 

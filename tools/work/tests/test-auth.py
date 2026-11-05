@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 CLI = ROOT / "tools/work/cli.py"
 SETUP = "scripts/tron work auth setup"
 
@@ -56,13 +56,13 @@ def run() -> None:
     keychain = base / "agents.keychain-db"
     try:
         home, tmp, bin_dir, repo = base / "home", base / "tmp", base / "bin", base / "repo"
-        for directory in (home, tmp, bin_dir, repo / ".github"):
+        for directory in (home, tmp, bin_dir, repo / "tools/work"):
             directory.mkdir(parents=True)
         log = base / "gh.jsonl"
         gh = bin_dir / "gh"
         gh.write_text(f"#!/bin/sh\nexec {sys.executable} -B {Path(__file__).resolve()} fixture-gh \"$@\"\n")
         gh.chmod(0o755)
-        (repo / ".github/work.json").write_text(json.dumps({"verify": {"scrubCommand": "cat >/dev/null"}}))
+        (repo / "tools/work/work.json").write_text(json.dumps({"verify": {"scrubCommand": "cat >/dev/null"}}))
         (repo / "comment.md").write_text("Fixture comment\n")
         env = {key: value for key, value in os.environ.items() if key not in ("WORK_GH", "GH_TOKEN", "GITHUB_TOKEN")}
         env.update({"HOME": str(home), "TMPDIR": str(tmp), "PATH": f"{bin_dir}{os.pathsep}/usr/bin:/bin",
