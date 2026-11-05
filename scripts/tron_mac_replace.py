@@ -14,14 +14,17 @@ A failure stops at its step with the exact error and log path; after the swap
 it automatically restores the previous app. A retry reuses the verified build.
 """
 import argparse
+import contextlib
 import ctypes
 import fcntl
 import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -53,7 +56,6 @@ def source_file(root, revision, path):
 
 def source_protocol(root, revision='HEAD'):
     text = source_file(root, revision, 'packages/gateway/src/version.ts')
-    import re
     version = re.search(r'export const PROTOCOL_VERSION = (\d+);', text)
     minimum = re.search(r'export const MIN_PROTOCOL_VERSION = (\d+);', text)
     if not version or not minimum:
@@ -480,8 +482,17 @@ class Runner:
         raise Failure('the Gateway source update did not settle within 30 minutes')
 
     def step_finish(self):
-        prune_builds(self.platform, keep=self.revision)
-        return 'replacement complete'
+        if self.data['path'] != 'full':
+            return 'replacement complete'
+        # Pruning reports and never raises: a raise here would roll back a verified install.
+        try:
+            failures = prune_store(self.platform, self.journal.directory, self.revision)
+        except Exception as error:  # noqa: BLE001
+            failures = [f'{self.platform.store}: {type(error).__name__}: {error}']
+        for failure in failures:
+            self.journal.note(f'prune: {failure}')
+        return 'replacement complete' + (f'; could not prune {len(failures)} superseded path(s), see journal.log'
+                                          if failures else '')
 
     # Failure handling ----------------------------------------------------
     def recover(self):
@@ -577,16 +588,49 @@ def format_age(seconds):
     return f'{seconds // 3600}h {seconds % 3600 // 60}m'
 
 
-def prune_builds(platform, keep):
-    """Keep the current and one previous build worktree; each holds gigabytes of DerivedData."""
+# Everything an operation directory gets from this script: the journal's files and the
+# per-attempt rollback set. Anything else there (another tool's recovery archive) stays.
+OPERATION_FILES = {'journal.json', 'journal.log', 'logs', 'runner', 'runner.lock', 'runner.out', 'runner.plist'}
+ROLLBACK_SET = re.compile(r'(state-snapshot|previous-app|retired-stable-payloads|failed-app|failed-stable-payloads)-\d+')
+
+
+def prune_store(platform, operation, revision):
+    """After a full replacement, keep only this operation and the build it installed.
+
+    Older rollback sets are superseded: rollback restores only this operation's previous app
+    and payloads, and an older ~/.tron snapshot is never restored over newer data. Returns the
+    paths it could not delete, with the reason."""
     builds = platform.store / 'builds'
-    if not builds.is_dir():
-        return
-    entries = sorted((entry for entry in builds.iterdir() if entry.name != keep), key=lambda entry: entry.stat().st_mtime)
-    for entry in entries[:-1]:
-        git_succeeds(entry, 'worktree', 'remove', '--force', entry, timeout=600)
-        if entry.exists():
-            shutil.rmtree(entry, ignore_errors=True)
+    targets = [entry for entry in sorted(builds.iterdir()) if entry.name != revision] if builds.is_dir() else []
+    operations = [other for other in sorted(platform.store.iterdir())
+                  if other != operation and not other.is_symlink() and (other / 'journal.json').is_file()]
+    targets += [entry for other in operations for entry in sorted(other.iterdir())
+                if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name)]
+    failures = [failure for path in targets for failure in remove_tree(path)]
+    for other in operations:
+        with contextlib.suppress(OSError):  # only a directory left empty goes
+            other.rmdir()
+    return failures
+
+
+def remove_tree(path):
+    """Delete `path`, including Gateway payloads bundle-gateway.sh sealed read-only (`chmod -R a-w`)."""
+    try:
+        if path.is_dir() and not path.is_symlink():
+            for directory, _, _ in os.walk(path):
+                os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
+            # A build checkout is a worktree of the source repository: drop its registration too.
+            registration_dropped = not (path / '.git').is_file() or git_succeeds(path, 'worktree', 'remove', '--force', path,
+                                                                         timeout=600)
+            if path.exists():
+                shutil.rmtree(path)
+            if not registration_dropped:
+                return [f'{path}: deleted, but git worktree remove failed; `git worktree prune` drops its registration']
+        else:
+            path.unlink(missing_ok=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        return [f'{path}: {getattr(error, "strerror", None) or error}']
+    return []
 
 
 # Operation store -----------------------------------------------------------
