@@ -12,16 +12,13 @@ import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, openLock
  * real Gateway over a loopback WebSocket (`gateway-lock-harness.ts`) with the
  * faux provider as the only scripted party.
  *
- * Each lock asserts, inline and exactly: every request the client made, its
- * parameters and its response (snapshots included), the transcript the client reads, the canonical
- * messages and entry order, the invocation receipts and the conversation each
- * provider request carried, all without per-run identities, times and token
- * counts (`test-support/lock-projections.ts`). Event schemas, model-visible session
- * shapes and Tron's persisted entry values are pinned once by `client-event-schemas`,
- * `session-shapes` and `session-entries`: every event topic and payload path, prompt
- * shape and Tron entry these scenarios produce is in those locks (their coverage was
- * checked against these scenarios' former goldens), though not every scenario here is
- * one those locks run.
+ * Each lock asserts its normalized trace exactly (`expectScenario`,
+ * `test-support/lock-projections.ts`): every request, its parameters and its
+ * response (snapshots included), the transcript the client reads, the canonical
+ * JSONL and each provider request, with per-run identities, times and token counts
+ * normalized. Event schemas are pinned by `client-event-schemas`, and each provider
+ * request's tools, prompt sections and hash and each system entry must equal a
+ * `session-shapes` shape.
  */
 
 const gateways: LockGateway[] = [];
