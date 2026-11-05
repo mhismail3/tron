@@ -63,6 +63,13 @@
       ]
     },
     {
+      "name": "scripts/test-tron-node.py",
+      "kind": "read",
+      "consumers": [
+        "repo/ios"
+      ]
+    },
+    {
       "name": "scripts/tron",
       "kind": "exec",
       "consumers": [
