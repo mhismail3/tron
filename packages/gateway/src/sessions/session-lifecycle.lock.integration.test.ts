@@ -2,7 +2,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
-import { expectSessionLock, projectedSnapshot, type SessionLockExpectation } from "../../test-support/lock-projections.js";
+import { expectScenario } from "../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /**
@@ -136,12 +136,7 @@ describe("session lifecycle kernel locks", () => {
         attentionRead: labelled(read.result, roles, gateway),
       },
     };
-    expectSessionLock(trace.lock, { exchanges: (trace as { exchanges?: unknown[] }).exchanges ?? [],
-      canonical: (trace as { canonicalJsonl?: unknown[] }).canonicalJsonl ?? [], items: [],
-      providers: recorded.providerRequests.map((request) => request.messages) }, EXPECTED[trace.lock]!);
-    for (const [key, value] of Object.entries(EXPECTED[trace.lock]!.extra)) {
-      expect(projectedSnapshot((trace as unknown as Record<string, unknown>)[key]), `${trace.lock}: ${key}`).toEqual(value);
-    }
+    expectScenario(trace as unknown as Record<string, unknown>, EXPECTED[trace.lock]);
     expect(trace.observed.runtimeLifecycle).toContainEqual({ event: "runtime.evicted", session: "<session:A>", reason: "capacity" });
     expect(trace.observed.runtimeLifecycle.filter((entry) => JSON.stringify(entry).includes("<session:A>") && JSON.stringify(entry).includes("runtime.loaded"))).toHaveLength(2);
     expect(refusedWhileOpen.error).toMatchObject({ code: "busy" });
@@ -211,12 +206,7 @@ describe("session lifecycle kernel locks", () => {
         refused: { prompt: label(refusedPrompt), create: label(refusedCreate) },
       },
     };
-    expectSessionLock(trace.lock, { exchanges: (trace as { exchanges?: unknown[] }).exchanges ?? [],
-      canonical: (trace as { canonicalJsonl?: unknown[] }).canonicalJsonl ?? [], items: [],
-      providers: recorded.providerRequests.map((request) => request.messages) }, EXPECTED[trace.lock]!);
-    for (const [key, value] of Object.entries(EXPECTED[trace.lock]!.extra)) {
-      expect(projectedSnapshot((trace as unknown as Record<string, unknown>)[key]), `${trace.lock}: ${key}`).toEqual(value);
-    }
+    expectScenario(trace as unknown as Record<string, unknown>, EXPECTED[trace.lock]);
     expect(completed).toBe(true);
     expect(queued.ok, JSON.stringify(queued)).toBe(true);
     expect(JSON.stringify(trace.canonicalJsonl)).toContain("Queued follow-up answered.");
@@ -232,11 +222,14 @@ describe("session lifecycle kernel locks", () => {
   });
 });
 
-/** What each converted lock in this file expects (`test-support/lock-projections.ts`), with what it observed. */
-const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, unknown> }> = {
+
+/** Each lock's expected trace (`test-support/lock-projections.ts` `expectScenario`): its normalized exchanges, canonical JSONL, provider conversations and observed state, with model-visible parts named by session shape. */
+const EXPECTED: Record<string, unknown> = {
   "run-cold-load-eviction": {
+    "lock": "run-cold-load-eviction",
     "exchanges": [
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0001",
@@ -246,14 +239,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -279,8 +273,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-cold-load-eviction"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -307,8 +301,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-cold-load-eviction"
                 },
                 "override": 128000,
                 "source": "session",
@@ -316,8 +310,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -346,9 +340,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -367,27 +361,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-cold-load-eviction"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -407,13 +401,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-cold-load-eviction"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -423,17 +417,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -443,26 +437,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -473,21 +468,23 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0002",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "remember the word lantern"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.list",
         "params": {},
         "response": {
@@ -506,7 +503,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "remember the word lantern",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
-                "id": "<present>",
+                "id": "<id>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 2,
@@ -520,6 +517,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0003",
@@ -536,10 +534,11 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.close",
         "params": {
-          "sessionId": "<present>",
-          "subscriptionToken": "<present>"
+          "sessionId": "<id>",
+          "subscriptionToken": "<id>"
         },
         "response": {
           "error": null,
@@ -550,6 +549,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0004",
@@ -559,14 +559,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -592,8 +593,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-cold-load-eviction"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -620,8 +621,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-cold-load-eviction"
                 },
                 "override": 128000,
                 "source": "session",
@@ -629,8 +630,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -659,9 +660,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -680,27 +681,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-cold-load-eviction"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -720,13 +721,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-cold-load-eviction"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -736,17 +737,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -756,26 +757,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -786,6 +788,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.list",
         "params": {},
         "response": {
@@ -804,7 +807,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
-                "id": "<present>",
+                "id": "<id>",
                 "isUnread": false,
                 "kind": "user",
                 "messageCount": 0,
@@ -821,7 +824,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "remember the word lantern",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
-                "id": "<present>",
+                "id": "<id>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 2,
@@ -835,25 +838,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0005",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "a second session turn"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.close",
         "params": {
-          "sessionId": "<present>",
-          "subscriptionToken": "<present>"
+          "sessionId": "<id>",
+          "subscriptionToken": "<id>"
         },
         "response": {
           "error": null,
@@ -864,9 +869,10 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -892,8 +898,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-cold-load-eviction"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -920,16 +926,16 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-cold-load-eviction"
                 },
                 "override": 128000,
                 "source": "session"
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -958,9 +964,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -979,27 +985,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-cold-load-eviction"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -1020,13 +1026,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-cold-load-eviction"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1036,17 +1042,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1056,59 +1062,59 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
                   "content": [
                     {
-                      "id": "<present>",
+                      "id": "<id>",
                       "ordinal": 0,
                       "text": "remember the word lantern",
                       "type": "text"
                     }
                   ],
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "message",
-                  "parentId": "<present>",
-                  "presentationId": "<present>",
+                  "parentId": "<id>",
+                  "presentationId": "<id>",
                   "role": "user",
                   "semantic": {
                     "contextEffect": "modelInput",
                     "delivery": "stored",
                     "direction": "inboundContext",
-                    "invocationId": "<present>",
+                    "invocationId": "<id>",
                     "kind": "resourcePrompt",
                     "lifecycle": "completed",
-                    "operationId": "<present>",
+                    "operationId": "<id>",
                     "origin": {
                       "confidence": "boundary",
                       "kind": "user"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
                   "content": [
                     {
-                      "id": "<present>",
+                      "id": "<id>",
                       "ordinal": 0,
                       "text": "First answer before eviction.",
                       "type": "text"
                     }
                   ],
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "message",
                   "modelId": "faux-1",
-                  "parentId": "<present>",
-                  "presentationId": "<present>",
-                  "provider": "<LOCK>",
+                  "parentId": "<id>",
+                  "presentationId": "<id>",
+                  "provider": "tron-lock-run-cold-load-eviction",
                   "role": "assistant",
                   "semantic": {
                     "contextEffect": "modelInput",
@@ -1119,29 +1125,43 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "assistant"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
                   "stopReason": "stop",
                   "thinkingLevel": "off",
-                  "timestamp": "<present>",
-                  "usage": "<present>"
+                  "timestamp": "<timestamp>",
+                  "usage": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "cost": {
+                      "cacheRead": "<value>",
+                      "cacheWrite": "<value>",
+                      "input": "<value>",
+                      "output": "<value>",
+                      "total": "<value>"
+                    },
+                    "input": "<value>",
+                    "output": "<value>",
+                    "totalTokens": "<value>"
+                  }
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 4
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -1152,9 +1172,10 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.attention.read",
         "params": {
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "throughCompletionRevision": 1
         },
         "response": {
@@ -1168,24 +1189,26 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0006",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "which word?"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.transcript",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -1194,13 +1217,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "end": 6,
             "items": [
               {
-                "id": "<present>",
+                "id": "<id>",
                 "kind": "modelChange",
                 "modelRef": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-cold-load-eviction"
                 },
-                "parentId": "<present>",
+                "parentId": "<id>",
                 "semantic": {
                   "contextEffect": "none",
                   "delivery": "stored",
@@ -1210,17 +1233,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "gateway"
                   },
-                  "sequence": "<present>",
+                  "sequence": "<n>",
                   "version": 1,
                   "visibility": "visible"
                 },
-                "timestamp": "<present>"
+                "timestamp": "<timestamp>"
               },
               {
-                "id": "<present>",
+                "id": "<id>",
                 "kind": "thinkingChange",
                 "level": "off",
-                "parentId": "<present>",
+                "parentId": "<id>",
                 "semantic": {
                   "contextEffect": "none",
                   "delivery": "stored",
@@ -1230,59 +1253,59 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "gateway"
                   },
-                  "sequence": "<present>",
+                  "sequence": "<n>",
                   "version": 1,
                   "visibility": "visible"
                 },
-                "timestamp": "<present>"
+                "timestamp": "<timestamp>"
               },
               {
                 "content": [
                   {
-                    "id": "<present>",
+                    "id": "<id>",
                     "ordinal": 0,
                     "text": "remember the word lantern",
                     "type": "text"
                   }
                 ],
-                "id": "<present>",
+                "id": "<id>",
                 "kind": "message",
-                "parentId": "<present>",
-                "presentationId": "<present>",
+                "parentId": "<id>",
+                "presentationId": "<id>",
                 "role": "user",
                 "semantic": {
                   "contextEffect": "modelInput",
                   "delivery": "stored",
                   "direction": "inboundContext",
-                  "invocationId": "<present>",
+                  "invocationId": "<id>",
                   "kind": "resourcePrompt",
                   "lifecycle": "completed",
-                  "operationId": "<present>",
+                  "operationId": "<id>",
                   "origin": {
                     "confidence": "boundary",
                     "kind": "user"
                   },
-                  "sequence": "<present>",
+                  "sequence": "<n>",
                   "version": 1,
                   "visibility": "visible"
                 },
-                "timestamp": "<present>"
+                "timestamp": "<timestamp>"
               },
               {
                 "content": [
                   {
-                    "id": "<present>",
+                    "id": "<id>",
                     "ordinal": 0,
                     "text": "First answer before eviction.",
                     "type": "text"
                   }
                 ],
-                "id": "<present>",
+                "id": "<id>",
                 "kind": "message",
                 "modelId": "faux-1",
-                "parentId": "<present>",
-                "presentationId": "<present>",
-                "provider": "<LOCK>",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-cold-load-eviction",
                 "role": "assistant",
                 "semantic": {
                   "contextEffect": "modelInput",
@@ -1293,62 +1316,75 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "assistant"
                   },
-                  "sequence": "<present>",
+                  "sequence": "<n>",
                   "version": 1,
                   "visibility": "visible"
                 },
                 "stopReason": "stop",
                 "thinkingLevel": "off",
-                "timestamp": "<present>",
-                "usage": "<present>"
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
               },
               {
                 "content": [
                   {
-                    "id": "<present>",
+                    "id": "<id>",
                     "ordinal": 0,
                     "text": "which word?",
                     "type": "text"
                   }
                 ],
-                "id": "<present>",
+                "id": "<id>",
                 "kind": "message",
-                "parentId": "<present>",
-                "presentationId": "<present>",
+                "parentId": "<id>",
+                "presentationId": "<id>",
                 "role": "user",
                 "semantic": {
                   "contextEffect": "modelInput",
                   "delivery": "stored",
                   "direction": "inboundContext",
-                  "invocationId": "<present>",
+                  "invocationId": "<id>",
                   "kind": "resourcePrompt",
                   "lifecycle": "completed",
-                  "operationId": "<present>",
+                  "operationId": "<id>",
                   "origin": {
                     "confidence": "boundary",
                     "kind": "user"
                   },
-                  "sequence": "<present>",
+                  "sequence": "<n>",
                   "version": 1,
                   "visibility": "visible"
                 },
-                "timestamp": "<present>"
+                "timestamp": "<timestamp>"
               },
               {
                 "content": [
                   {
-                    "id": "<present>",
+                    "id": "<id>",
                     "ordinal": 0,
                     "text": "Answer after the cold load.",
                     "type": "text"
                   }
                 ],
-                "id": "<present>",
+                "id": "<id>",
                 "kind": "message",
                 "modelId": "faux-1",
-                "parentId": "<present>",
-                "presentationId": "<present>",
-                "provider": "<LOCK>",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-cold-load-eviction",
                 "role": "assistant",
                 "semantic": {
                   "contextEffect": "modelInput",
@@ -1359,24 +1395,38 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "assistant"
                   },
-                  "sequence": "<present>",
+                  "sequence": "<n>",
                   "version": 1,
                   "visibility": "visible"
                 },
                 "stopReason": "stop",
                 "thinkingLevel": "off",
-                "timestamp": "<present>",
-                "usage": "<present>"
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
               }
             ],
-            "leafEntryId": "<present>",
-            "runtimeGeneration": "<present>",
+            "leafEntryId": "<id>",
+            "runtimeGeneration": "<id>",
             "start": 0,
             "total": 6
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.list",
         "params": {},
         "response": {
@@ -1395,7 +1445,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "remember the word lantern",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
-                "id": "<present>",
+                "id": "<id>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 4,
@@ -1412,7 +1462,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "a second session turn",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
-                "id": "<present>",
+                "id": "<id>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 2,
@@ -1426,426 +1476,677 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       }
     ],
-    "messages": [
+    "providerRequests": [
       {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "text": "remember the word lantern",
-            "type": "text"
+            "role": "user",
+            "text": "remember the word lantern"
           }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
+        ]
       },
       {
-        "api": "<present>",
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "text": "First answer before eviction.",
-            "type": "text"
+            "role": "user",
+            "text": "a second session turn"
           }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        ]
       },
       {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "text": "which word?",
-            "type": "text"
-          }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
+            "role": "user",
+            "text": "remember the word lantern"
+          },
           {
-            "text": "Answer after the cold load.",
-            "type": "text"
+            "role": "assistant",
+            "text": "First answer before eviction."
+          },
+          {
+            "role": "user",
+            "text": "which word?"
           }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        ]
       }
     ],
-    "types": [
-      "session",
-      "model_change",
-      "thinking_level_change",
-      "custom:tron.context-window.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:system",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1"
-    ],
-    "receipts": [
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      }
-    ],
-    "envelopes": [
-      {
-        "id": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      }
-    ],
-    "sessionEntries": [
+    "canonicalJsonl": [
       {
         "cwd": "<tmp>/workspace",
-        "id": "<present>",
-        "timestamp": "<present>",
+        "id": "<id>",
+        "timestamp": "<timestamp>",
         "type": "session",
         "version": 3
       },
       {
-        "id": "<present>",
+        "id": "<id>",
         "modelId": "faux-1",
-        "parentId": "<present>",
-        "provider": "<LOCK>",
-        "timestamp": "<present>",
+        "parentId": "<id>",
+        "provider": "tron-lock-run-cold-load-eviction",
+        "timestamp": "<timestamp>",
         "type": "model_change"
       },
       {
-        "id": "<present>",
-        "parentId": "<present>",
+        "id": "<id>",
+        "parentId": "<id>",
         "thinkingLevel": "off",
-        "timestamp": "<present>",
+        "timestamp": "<timestamp>",
         "type": "thinking_level_change"
+      },
+      {
+        "customType": "tron.context-window.v1",
+        "data": {
+          "contextWindow": 128000,
+          "modelId": "faux-1",
+          "provider": "tron-lock-run-cold-load-eviction",
+          "version": 1
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-cold-load-eviction/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-cold-load-eviction"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-cold-load-eviction/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {},
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-cold-load-eviction/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-cold-load-eviction"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-cold-load-eviction/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {
+            "context.images.block": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": false
+            }
+          },
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": "",
+          "role": "system",
+          "timestamp": "<timestamp>",
+          "sections": {
+            "cwd": "<cwd>\n<tmp>/workspace\n</cwd>",
+            "sessionShape": "chat#0"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "remember the word lantern",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "First answer before eviction.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-cold-load-eviction",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "which word?",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "Answer after the cold load.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-cold-load-eviction",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       }
     ],
-    "providers": [
-      [
+    "observed": {
+      "runtimeLifecycle": [
         {
-          "role": "user",
-          "text": "remember the word lantern"
+          "event": "runtime.loaded",
+          "reason": "create",
+          "session": "<session:A>"
+        },
+        {
+          "event": "runtime.evicted",
+          "reason": "capacity",
+          "session": "<session:A>"
+        },
+        {
+          "event": "runtime.loaded",
+          "reason": "create",
+          "session": "<session:B>"
+        },
+        {
+          "event": "runtime.evicted",
+          "reason": "capacity",
+          "session": "<session:B>"
+        },
+        {
+          "event": "runtime.loaded",
+          "reason": "open",
+          "session": "<session:A>"
         }
       ],
-      [
-        {
-          "role": "user",
-          "text": "a second session turn"
-        }
+      "liveAfterEviction": [
+        "B"
       ],
-      [
-        {
-          "role": "user",
-          "text": "remember the word lantern"
+      "liveAfterColdLoad": [
+        "A"
+      ],
+      "canonicalUnchangedByEviction": true,
+      "list": {
+        "live": {
+          "archivedCount": 0,
+          "listRevision": 1,
+          "projectionToken": "<id>",
+          "sessions": [
+            {
+              "attentionRevision": 1,
+              "completionRevision": 1,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "remember the word lantern",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:A>",
+              "isUnread": true,
+              "kind": "user",
+              "messageCount": 2,
+              "phase": "idle",
+              "summaryRevision": 7,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            }
+          ]
         },
-        {
-          "role": "assistant",
-          "text": "First answer before eviction."
+        "cold": {
+          "archivedCount": 0,
+          "listRevision": 2,
+          "projectionToken": "<id>",
+          "sessions": [
+            {
+              "attentionRevision": 0,
+              "completionRevision": 0,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:B>",
+              "isUnread": false,
+              "kind": "user",
+              "messageCount": 0,
+              "phase": "idle",
+              "summaryRevision": 1,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            },
+            {
+              "attentionRevision": 1,
+              "completionRevision": 1,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "remember the word lantern",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:A>",
+              "isUnread": true,
+              "kind": "user",
+              "messageCount": 2,
+              "phase": "idle",
+              "summaryRevision": 7,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            }
+          ]
         },
-        {
-          "role": "user",
-          "text": "which word?"
+        "final": {
+          "archivedCount": 0,
+          "listRevision": 3,
+          "projectionToken": "<id>",
+          "sessions": [
+            {
+              "attentionRevision": 3,
+              "completionRevision": 2,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "remember the word lantern",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:A>",
+              "isUnread": true,
+              "kind": "user",
+              "messageCount": 4,
+              "phase": "idle",
+              "summaryRevision": 15,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            },
+            {
+              "attentionRevision": 1,
+              "completionRevision": 1,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "a second session turn",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:B>",
+              "isUnread": true,
+              "kind": "user",
+              "messageCount": 2,
+              "phase": "idle",
+              "summaryRevision": 7,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            }
+          ]
         }
-      ]
-    ],
-    "extra": {
-      "observed": {
-        "runtimeLifecycle": [
-          {
-            "event": "runtime.loaded",
-            "reason": "create",
-            "session": "<session:A>"
-          },
-          {
-            "event": "runtime.evicted",
-            "reason": "capacity",
-            "session": "<session:A>"
-          },
-          {
-            "event": "runtime.loaded",
-            "reason": "create",
-            "session": "<session:B>"
-          },
-          {
-            "event": "runtime.evicted",
-            "reason": "capacity",
-            "session": "<session:B>"
-          },
-          {
-            "event": "runtime.loaded",
-            "reason": "open",
-            "session": "<session:A>"
-          }
-        ],
-        "liveAfterEviction": [
-          "B"
-        ],
-        "liveAfterColdLoad": [
-          "A"
-        ],
-        "canonicalUnchangedByEviction": true,
-        "list": {
-          "live": {
-            "archivedCount": 0,
-            "listRevision": 1,
-            "projectionToken": "<id>",
-            "sessions": [
-              {
-                "attentionRevision": 1,
-                "completionRevision": 1,
-                "createdAt": "<timestamp>",
-                "cwd": "<tmp>/workspace",
-                "firstMessage": "remember the word lantern",
-                "foregroundPhase": "idle",
-                "hasActiveSubagents": false,
-                "id": "<session:A>",
-                "isUnread": true,
-                "kind": "user",
-                "messageCount": 2,
-                "phase": "idle",
-                "summaryRevision": 7,
-                "updatedAt": "<timestamp>",
-                "waitingForUser": false
-              }
-            ]
-          },
-          "cold": {
-            "archivedCount": 0,
-            "listRevision": 2,
-            "projectionToken": "<id>",
-            "sessions": [
-              {
-                "attentionRevision": 0,
-                "completionRevision": 0,
-                "createdAt": "<timestamp>",
-                "cwd": "<tmp>/workspace",
-                "firstMessage": "",
-                "foregroundPhase": "idle",
-                "hasActiveSubagents": false,
-                "id": "<session:B>",
-                "isUnread": false,
-                "kind": "user",
-                "messageCount": 0,
-                "phase": "idle",
-                "summaryRevision": 1,
-                "updatedAt": "<timestamp>",
-                "waitingForUser": false
-              },
-              {
-                "attentionRevision": 1,
-                "completionRevision": 1,
-                "createdAt": "<timestamp>",
-                "cwd": "<tmp>/workspace",
-                "firstMessage": "remember the word lantern",
-                "foregroundPhase": "idle",
-                "hasActiveSubagents": false,
-                "id": "<session:A>",
-                "isUnread": true,
-                "kind": "user",
-                "messageCount": 2,
-                "phase": "idle",
-                "summaryRevision": 7,
-                "updatedAt": "<timestamp>",
-                "waitingForUser": false
-              }
-            ]
-          },
-          "final": {
-            "archivedCount": 0,
-            "listRevision": 3,
-            "projectionToken": "<id>",
-            "sessions": [
-              {
-                "attentionRevision": 3,
-                "completionRevision": 2,
-                "createdAt": "<timestamp>",
-                "cwd": "<tmp>/workspace",
-                "firstMessage": "remember the word lantern",
-                "foregroundPhase": "idle",
-                "hasActiveSubagents": false,
-                "id": "<session:A>",
-                "isUnread": true,
-                "kind": "user",
-                "messageCount": 4,
-                "phase": "idle",
-                "summaryRevision": 15,
-                "updatedAt": "<timestamp>",
-                "waitingForUser": false
-              },
-              {
-                "attentionRevision": 1,
-                "completionRevision": 1,
-                "createdAt": "<timestamp>",
-                "cwd": "<tmp>/workspace",
-                "firstMessage": "a second session turn",
-                "foregroundPhase": "idle",
-                "hasActiveSubagents": false,
-                "id": "<session:B>",
-                "isUnread": true,
-                "kind": "user",
-                "messageCount": 2,
-                "phase": "idle",
-                "summaryRevision": 7,
-                "updatedAt": "<timestamp>",
-                "waitingForUser": false
-              }
-            ]
-          }
-        },
-        "attentionRead": {
-          "attentionRevision": 2,
-          "completionRevision": 1,
-          "isUnread": false
-        }
+      },
+      "attentionRead": {
+        "attentionRevision": 2,
+        "completionRevision": 1,
+        "isUnread": false
       }
     }
   },
   "run-drain-snapshot": {
+    "lock": "run-drain-snapshot",
     "exchanges": [
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0001",
@@ -1855,14 +2156,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -1888,8 +2190,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-drain-snapshot"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -1916,8 +2218,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-drain-snapshot"
                 },
                 "override": 128000,
                 "source": "session",
@@ -1925,8 +2227,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -1955,9 +2257,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -1976,27 +2278,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-drain-snapshot"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -2016,13 +2318,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-drain-snapshot"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2032,17 +2334,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2052,26 +2354,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -2082,6 +2385,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0002",
@@ -2091,14 +2395,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -2124,8 +2429,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-drain-snapshot"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -2152,8 +2457,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-drain-snapshot"
                 },
                 "override": 128000,
                 "source": "session",
@@ -2161,8 +2466,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -2191,9 +2496,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -2212,27 +2517,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-drain-snapshot"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -2252,13 +2557,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-drain-snapshot"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2268,17 +2573,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2288,26 +2593,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -2318,6 +2624,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "gateway.drain.status",
         "params": {},
         "response": {
@@ -2330,43 +2637,46 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "idle",
-            "revision": "<present>",
+            "revision": "<n>",
             "suspectProjectionCount": 0
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0003",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "hold this run open"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "behavior": "followUp",
           "commandId": "lock-command-0004",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "queued before the drain"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "gateway.drain.status",
         "params": {},
         "response": {
@@ -2383,30 +2693,31 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "foreground-agent-operation",
-                "id": "<present>",
+                "id": "<id>",
                 "progressAt": "<timestamp>",
-                "sessionId": "<present>",
+                "sessionId": "<id>",
                 "state": "active"
               },
               {
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "queued-mutation",
-                "id": "<present>",
+                "id": "<id>",
                 "progressAt": "<timestamp>",
-                "sessionId": "<present>",
+                "sessionId": "<id>",
                 "state": "active"
               }
             ],
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "idle",
-            "revision": "<present>",
+            "revision": "<n>",
             "suspectProjectionCount": 0
           }
         }
       },
       {
+        "client": "phone",
         "method": "gateway.drain.status",
         "params": {},
         "response": {
@@ -2423,34 +2734,35 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "foreground-agent-operation",
-                "id": "<present>",
+                "id": "<id>",
                 "progressAt": "<timestamp>",
-                "sessionId": "<present>",
+                "sessionId": "<id>",
                 "state": "active"
               },
               {
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "queued-mutation",
-                "id": "<present>",
+                "id": "<id>",
                 "progressAt": "<timestamp>",
-                "sessionId": "<present>",
+                "sessionId": "<id>",
                 "state": "active"
               }
             ],
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "waiting",
-            "revision": "<present>",
+            "revision": "<n>",
             "suspectProjectionCount": 0
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0005",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "new work during the drain"
         },
         "response": {
@@ -2464,6 +2776,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0006",
@@ -2480,6 +2793,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "gateway.drain.status",
         "params": {},
         "response": {
@@ -2492,403 +2806,649 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "complete",
-            "revision": "<present>",
+            "revision": "<n>",
             "suspectProjectionCount": 0
           }
         }
       }
     ],
-    "messages": [
+    "providerRequests": [
       {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "text": "hold this run open",
-            "type": "text"
+            "role": "user",
+            "text": "hold this run open"
           }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
+        ]
       },
       {
-        "api": "<present>",
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "text": "Held run settled.",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "content": [
+            "role": "user",
+            "text": "hold this run open"
+          },
           {
-            "text": "queued before the drain",
-            "type": "text"
-          }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
+            "role": "assistant",
+            "text": "Held run settled."
+          },
           {
-            "text": "Queued follow-up answered.",
-            "type": "text"
+            "role": "user",
+            "text": "queued before the drain"
           }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        ]
       }
     ],
-    "types": [
-      "session",
-      "model_change",
-      "thinking_level_change",
-      "custom:tron.context-window.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:system",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1"
-    ],
-    "receipts": [
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      }
-    ],
-    "envelopes": [
-      {
-        "id": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      }
-    ],
-    "sessionEntries": [
+    "canonicalJsonl": [
       {
         "cwd": "<tmp>/workspace",
-        "id": "<present>",
-        "timestamp": "<present>",
+        "id": "<id>",
+        "timestamp": "<timestamp>",
         "type": "session",
         "version": 3
       },
       {
-        "id": "<present>",
+        "id": "<id>",
         "modelId": "faux-1",
-        "parentId": "<present>",
-        "provider": "<LOCK>",
-        "timestamp": "<present>",
+        "parentId": "<id>",
+        "provider": "tron-lock-run-drain-snapshot",
+        "timestamp": "<timestamp>",
         "type": "model_change"
       },
       {
-        "id": "<present>",
-        "parentId": "<present>",
+        "id": "<id>",
+        "parentId": "<id>",
         "thinkingLevel": "off",
-        "timestamp": "<present>",
+        "timestamp": "<timestamp>",
         "type": "thinking_level_change"
+      },
+      {
+        "customType": "tron.context-window.v1",
+        "data": {
+          "contextWindow": 128000,
+          "modelId": "faux-1",
+          "provider": "tron-lock-run-drain-snapshot",
+          "version": 1
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-drain-snapshot/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-drain-snapshot"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-drain-snapshot/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {},
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-drain-snapshot/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-drain-snapshot"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-drain-snapshot/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {
+            "context.images.block": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": false
+            }
+          },
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": "",
+          "role": "system",
+          "timestamp": "<timestamp>",
+          "sections": {
+            "cwd": "<cwd>\n<tmp>/workspace\n</cwd>",
+            "sessionShape": "chat#0"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "hold this run open",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "Held run settled.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-drain-snapshot",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "queued before the drain",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "Queued follow-up answered.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-drain-snapshot",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       }
     ],
-    "providers": [
-      [
-        {
-          "role": "user",
-          "text": "hold this run open"
+    "observed": {
+      "completed": true,
+      "drain": {
+        "idle": {
+          "blockerCount": 0,
+          "blockerCounts": {},
+          "blockers": [],
+          "drainId": "<id>",
+          "omittedCount": 0,
+          "phase": "idle",
+          "revision": "<n>",
+          "suspectProjectionCount": 0
+        },
+        "running": {
+          "blockerCount": 2,
+          "blockerCounts": {
+            "foreground-agent-operation": 1,
+            "queued-mutation": 1
+          },
+          "blockers": [
+            {
+              "admittedAt": "<timestamp>",
+              "ageMs": "<duration>",
+              "category": "foreground-agent-operation",
+              "id": "<id>",
+              "progressAt": "<timestamp>",
+              "sessionId": "<session:running>",
+              "state": "active"
+            },
+            {
+              "admittedAt": "<timestamp>",
+              "ageMs": "<duration>",
+              "category": "queued-mutation",
+              "id": "<id>",
+              "progressAt": "<timestamp>",
+              "sessionId": "<session:running>",
+              "state": "active"
+            }
+          ],
+          "drainId": "<id>",
+          "omittedCount": 0,
+          "phase": "idle",
+          "revision": "<n>",
+          "suspectProjectionCount": 0
+        },
+        "begun": {
+          "blockerCount": 2,
+          "blockerCounts": {
+            "foreground-agent-operation": 1,
+            "queued-mutation": 1
+          },
+          "blockers": [
+            {
+              "admittedAt": "<timestamp>",
+              "ageMs": "<duration>",
+              "category": "foreground-agent-operation",
+              "id": "<id>",
+              "progressAt": "<timestamp>",
+              "sessionId": "<session:running>",
+              "state": "active"
+            },
+            {
+              "admittedAt": "<timestamp>",
+              "ageMs": "<duration>",
+              "category": "queued-mutation",
+              "id": "<id>",
+              "progressAt": "<timestamp>",
+              "sessionId": "<session:running>",
+              "state": "active"
+            }
+          ],
+          "drainId": "<id>",
+          "omittedCount": 0,
+          "phase": "preparing",
+          "revision": "<n>",
+          "suspectProjectionCount": 0
+        },
+        "waiting": {
+          "blockerCount": 2,
+          "blockerCounts": {
+            "foreground-agent-operation": 1,
+            "queued-mutation": 1
+          },
+          "blockers": [
+            {
+              "admittedAt": "<timestamp>",
+              "ageMs": "<duration>",
+              "category": "foreground-agent-operation",
+              "id": "<id>",
+              "progressAt": "<timestamp>",
+              "sessionId": "<session:running>",
+              "state": "active"
+            },
+            {
+              "admittedAt": "<timestamp>",
+              "ageMs": "<duration>",
+              "category": "queued-mutation",
+              "id": "<id>",
+              "progressAt": "<timestamp>",
+              "sessionId": "<session:running>",
+              "state": "active"
+            }
+          ],
+          "drainId": "<id>",
+          "omittedCount": 0,
+          "phase": "waiting",
+          "revision": "<n>",
+          "suspectProjectionCount": 0
+        },
+        "complete": {
+          "blockerCount": 0,
+          "blockerCounts": {},
+          "blockers": [],
+          "drainId": "<id>",
+          "omittedCount": 0,
+          "phase": "complete",
+          "revision": "<n>",
+          "suspectProjectionCount": 0
         }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "hold this run open"
+      },
+      "refused": {
+        "prompt": {
+          "code": "busy",
+          "message": "The Gateway is draining accepted work",
+          "retryable": true
         },
-        {
-          "role": "assistant",
-          "text": "Held run settled."
-        },
-        {
-          "role": "user",
-          "text": "queued before the drain"
-        }
-      ]
-    ],
-    "extra": {
-      "observed": {
-        "completed": true,
-        "drain": {
-          "idle": {
-            "blockerCount": 0,
-            "blockerCounts": {},
-            "blockers": [],
-            "drainId": "<id>",
-            "omittedCount": 0,
-            "phase": "idle",
-            "revision": "<present>",
-            "suspectProjectionCount": 0
-          },
-          "running": {
-            "blockerCount": 2,
-            "blockerCounts": {
-              "foreground-agent-operation": 1,
-              "queued-mutation": 1
-            },
-            "blockers": [
-              {
-                "admittedAt": "<timestamp>",
-                "ageMs": "<duration>",
-                "category": "foreground-agent-operation",
-                "id": "<present>",
-                "progressAt": "<timestamp>",
-                "sessionId": "<session:running>",
-                "state": "active"
-              },
-              {
-                "admittedAt": "<timestamp>",
-                "ageMs": "<duration>",
-                "category": "queued-mutation",
-                "id": "<present>",
-                "progressAt": "<timestamp>",
-                "sessionId": "<session:running>",
-                "state": "active"
-              }
-            ],
-            "drainId": "<id>",
-            "omittedCount": 0,
-            "phase": "idle",
-            "revision": "<present>",
-            "suspectProjectionCount": 0
-          },
-          "begun": {
-            "blockerCount": 2,
-            "blockerCounts": {
-              "foreground-agent-operation": 1,
-              "queued-mutation": 1
-            },
-            "blockers": [
-              {
-                "admittedAt": "<timestamp>",
-                "ageMs": "<duration>",
-                "category": "foreground-agent-operation",
-                "id": "<present>",
-                "progressAt": "<timestamp>",
-                "sessionId": "<session:running>",
-                "state": "active"
-              },
-              {
-                "admittedAt": "<timestamp>",
-                "ageMs": "<duration>",
-                "category": "queued-mutation",
-                "id": "<present>",
-                "progressAt": "<timestamp>",
-                "sessionId": "<session:running>",
-                "state": "active"
-              }
-            ],
-            "drainId": "<id>",
-            "omittedCount": 0,
-            "phase": "preparing",
-            "revision": "<present>",
-            "suspectProjectionCount": 0
-          },
-          "waiting": {
-            "blockerCount": 2,
-            "blockerCounts": {
-              "foreground-agent-operation": 1,
-              "queued-mutation": 1
-            },
-            "blockers": [
-              {
-                "admittedAt": "<timestamp>",
-                "ageMs": "<duration>",
-                "category": "foreground-agent-operation",
-                "id": "<present>",
-                "progressAt": "<timestamp>",
-                "sessionId": "<session:running>",
-                "state": "active"
-              },
-              {
-                "admittedAt": "<timestamp>",
-                "ageMs": "<duration>",
-                "category": "queued-mutation",
-                "id": "<present>",
-                "progressAt": "<timestamp>",
-                "sessionId": "<session:running>",
-                "state": "active"
-              }
-            ],
-            "drainId": "<id>",
-            "omittedCount": 0,
-            "phase": "waiting",
-            "revision": "<present>",
-            "suspectProjectionCount": 0
-          },
-          "complete": {
-            "blockerCount": 0,
-            "blockerCounts": {},
-            "blockers": [],
-            "drainId": "<id>",
-            "omittedCount": 0,
-            "phase": "complete",
-            "revision": "<present>",
-            "suspectProjectionCount": 0
-          }
-        },
-        "refused": {
-          "prompt": {
-            "code": "busy",
-            "message": "The Gateway is draining accepted work",
-            "retryable": true
-          },
-          "create": {
-            "code": "busy",
-            "message": "The Gateway is draining accepted work",
-            "retryable": true
-          }
+        "create": {
+          "code": "busy",
+          "message": "The Gateway is draining accepted work",
+          "retryable": true
         }
       }
     }
