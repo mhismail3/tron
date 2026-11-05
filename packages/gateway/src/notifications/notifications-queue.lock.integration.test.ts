@@ -64,7 +64,7 @@ const DETACHED_RUN = `
  * shared normalization would blind, so a retry's identity stays visible. */
 interface RelayRequest { method: string; path: string; requestDigest: string; status: number; envelope: unknown }
 interface PushDocument {
-  receipts: Array<{ result: string; kind?: string }>;
+  receipts: Array<{ result: string; kind?: string; dedupeKey: string; sessionKey: string }>;
   pending: Array<{ kind: string; targets: Array<{ attempts: number; outcome: string }> }>;
   revocations: unknown[];
   inbox: unknown[];
@@ -137,7 +137,7 @@ function parsed(document: PushDocument) {
 
 /** Each entry of one dedupe key shares it, and different pushes do not. */
 function dedupeKeysJoin(document: PushDocument): void {
-  const keys = (document.receipts as Array<{ dedupeKey: string }>).map((receipt) => receipt.dedupeKey);
+  const keys = document.receipts.map((receipt) => receipt.dedupeKey);
   expect(new Set(keys).size, "one dedupe key per push").toBe(keys.length);
   expect((document.inbox as Array<{ dedupeKey: string }>).map((entry) => entry.dedupeKey), "the inbox names each push's receipt").toEqual(keys);
   for (const intent of document.pending as unknown as Array<{ dedupeKey: string }>) expect(keys, "each queued intent has its receipt").toContain(intent.dedupeKey);
@@ -258,7 +258,7 @@ describe("gateway/notifications delivery locks", () => {
     expect(sent[0]!.id, "distinct pushes go out under distinct request ids").not.toBe(sent[1]!.id);
     expect(relay.requests.every((request) => request.method === "POST"), "nothing is revoked").toBe(true);
     const document = await lock.document();
-    const sessionKey = (document.receipts[0] as { sessionKey: string }).sessionKey;
+    const sessionKey = document.receipts[0]!.sessionKey;
     const waiting = push({ sessionKey, requestId: sent[0]!.id, envelope: sent[0]!.envelope, result: "accepted_by_apns", title, kind: "waiting",
       message: "The agent is waiting on 1 background task.", sessionId });
     const finished = push({ sessionKey, requestId: sent[1]!.id, envelope: sent[1]!.envelope, result: "accepted_by_apns", title, kind: "agent_finished",
@@ -421,7 +421,7 @@ describe("gateway/notifications delivery locks", () => {
     expect(sent[0]!.id).not.toBe(sent[1]!.id);
     expect(sent[2]!.envelope, "and with the same envelope").toEqual(sent[0]!.envelope);
     expect(sent[3]!.envelope).toEqual(sent[1]!.envelope);
-    const sessionKey = (queued.receipts[0] as { sessionKey: string }).sessionKey;
+    const sessionKey = queued.receipts[0]!.sessionKey;
     const finished = (result: string) => push({ sessionKey, requestId: sent[0]!.id, envelope: sent[0]!.envelope, result, title, kind: "agent_finished", message: finishedMessage, sessionId });
     const stopped = (result: string) => push({ sessionKey, requestId: sent[1]!.id, envelope: sent[1]!.envelope, result, title, kind: "agent_finished", message: stoppedMessage, sessionId });
     expect(parsed(queued), "both pushes stay queued after one retryable attempt each").toEqual({
@@ -433,8 +433,8 @@ describe("gateway/notifications delivery locks", () => {
     expect(parsed(delivered), "the restarted owner delivers both").toEqual({
       receipts: [finished("accepted_by_apns").receipt, stopped("accepted_by_apns").receipt], pending: [], revocations: [],
       inbox: [finished("accepted_by_apns").inbox, stopped("accepted_by_apns").inbox] });
-    expect((delivered.receipts as Array<{ dedupeKey: string }>).map((receipt) => receipt.dedupeKey), "under the queued receipts")
-      .toEqual((queued.receipts as Array<{ dedupeKey: string }>).map((receipt) => receipt.dedupeKey));
+    expect(delivered.receipts.map((receipt) => receipt.dedupeKey), "under the queued receipts")
+      .toEqual(queued.receipts.map((receipt) => receipt.dedupeKey));
     const entry = (message: string) => ({ version: 1, id: expect.any(String), kind: "agent_finished", title, message, outcome: "accepted_by_apns",
       sessionId, isUnread: true, createdAt: ISO, updatedAt: ISO });
     expect(inbox, "the phone's inbox lists both, newest first, unread").toEqual({ notifications: [entry(stoppedMessage), entry(finishedMessage)], revision: expect.stringMatching(/^[0-9a-f]{32}$/u), unreadCount: 2 });
@@ -479,7 +479,7 @@ describe("gateway/notifications delivery locks", () => {
     expect(revocations[0]!.requestDigest).toEqual(DIGEST);
     expect(revocations[0]!.requestDigest).not.toBe(sent[0]!.id);
     expect(relay.requests.map((request) => request.method), "in this order").toEqual(["POST", "DELETE", "DELETE"]);
-    const sessionKey = (queued.receipts[0] as { sessionKey: string }).sessionKey;
+    const sessionKey = queued.receipts[0]!.sessionKey;
     const finished = (result: string) => push({ sessionKey, requestId: sent[0]!.id, envelope: sent[0]!.envelope, result, title, kind: "agent_finished", message, sessionId });
     expect(parsed(queued), "the push is queued after one retryable attempt").toEqual({
       receipts: [finished("queued").receipt], pending: [finished("queued").pending(1, "retryable")], revocations: [], inbox: [finished("queued").inbox] });
