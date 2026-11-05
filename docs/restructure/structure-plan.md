@@ -22,8 +22,8 @@ generated now (`scripts/tron ownership --ledger`), so it is not kept on main.
 ## Re-judged items
 
 **S3' instead of S3.** Why fold `tools/` into `scripts/`? So one job has one home. Why does that
-matter to an agent? A tool's tests sit elsewhere (`tools/verify` vs `scripts/test-tron-verify*.py`)
-and seven root manifests each own one tool plus its stray tests. Why are they split? Tests were
+matter to an agent? A tool's tests sat elsewhere (`tools/verify` vs its tests in `scripts/`)
+and seven root manifests each owned one tool plus its stray tests. Why were they split? Tests were
 put beside the dispatcher, not the tool. The harm is the split, not the directory name: moving
 whole tools across homes rewrites ~96 referencing files and verify's own selector for no further
 gain, since `scripts/tron` is already the one front door. S3': each tool keeps its directory and
