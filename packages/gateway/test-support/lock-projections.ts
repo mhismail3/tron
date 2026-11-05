@@ -1,12 +1,12 @@
 import { expect } from "vitest";
 
 /**
- * What a behavior lock asserts about a session (#2279): the parts of the transcript
- * projection, the canonical messages and the provider requests a client or the
- * model acts on, without the per-run identities, times and token counts. Each
- * function keeps every remaining field of its record, so a changed classification,
- * grouping, ordering or text fails the lock; the identities it drops are checked
- * by relation instead (`toolCallsResolve`).
+ * What a behavior lock asserts about a session (#2279): the transcript projection,
+ * the canonical entries and the provider requests a client or the model acts on.
+ * A per-run value (an identity, a time, a counter, token usage) keeps its key as
+ * `<present>` but not its value, as the former goldens' normalization did, so a
+ * record that loses one fails as it does a changed classification, grouping,
+ * ordering or text; identities are also checked by relation (`toolCallsResolve`).
  */
 
 /** Per-run values: identities, times, counters and host-derived numbers. */
@@ -22,13 +22,23 @@ const VOLATILE = new Set([
  */
 const HOST_DERIVED = new Set(["tokensBefore"]);
 
+/** A role label a lock gave a session (`<session:A>`) names which session it is, so it is kept as it is. */
+function isRoleLabel(value: unknown): boolean {
+  return typeof value === "string" && value.startsWith("<session:");
+}
+
+/** A per-run value's place in the record: that it is there, as the harness normalization pinned it (`<id>`, `<timestamp>`, …). */
+function presence(value: unknown): string | undefined {
+  return value === undefined ? undefined : isRoleLabel(value) ? value as string : "<present>";
+}
+
 /** A record without its per-run values, and each lock's faux provider named `<LOCK>`. */
 export function projected(value: unknown): unknown {
   const strip = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(strip);
     if (node === null || typeof node !== "object") return typeof node === "string" ? node.replace(/tron-lock-[a-z0-9-]+/gu, "<LOCK>") : node;
-    return Object.fromEntries(Object.entries(node).filter(([key]) => !VOLATILE.has(key))
-      .map(([key, child]) => [key, HOST_DERIVED.has(key) ? "<value>" : strip(child)]));
+    return Object.fromEntries(Object.entries(node)
+      .map(([key, child]) => [key, VOLATILE.has(key) ? presence(child) : HOST_DERIVED.has(key) ? "<value>" : strip(child)]));
   };
   return strip(value);
 }
@@ -64,17 +74,17 @@ export function projectedSnapshot(value: unknown): unknown {
   const strip = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(strip);
     if (node === null || typeof node !== "object") return node;
-    return Object.fromEntries(Object.entries(node).filter(([key]) => !SNAPSHOT_VOLATILE.has(key)).map(([key, child]) => [key, strip(child)]));
+    return Object.fromEntries(Object.entries(node).map(([key, child]) => [key, SNAPSHOT_VOLATILE.has(key) ? presence(child) : strip(child)]));
   };
   return strip(projected(value));
 }
 
 /** What a converted scenario lock expects of one session, generated from its former golden and reviewed as code. */
 export interface SessionLockExpectation {
-  /** Every client request (method, parameters) and its response, except `session.transcript` reads. */
+  /** Every client request (method, parameters) and its response; `session.transcript` reads only when `items` is absent. */
   readonly exchanges: unknown[];
-  /** The transcript items a client reads at the end. */
-  readonly items: unknown[];
+  /** The transcript items a client reads at the end, when the lock reads one session's transcript separately. */
+  readonly items?: unknown[];
   /** The canonical messages after the system entry. */
   readonly messages: unknown[];
   /** Each canonical entry's type (with custom type or message role), in file order. */
@@ -83,6 +93,10 @@ export interface SessionLockExpectation {
   readonly receipts: unknown[];
   /** The session header, model and thinking-level entries. */
   readonly sessionEntries: unknown[];
+  /** Every canonical entry's envelope (id, parent, time), by presence and type. */
+  readonly envelopes: unknown[];
+  /** The transcript read's window (start, end, total), when `items` is present. */
+  readonly window?: unknown;
   /** The conversation each provider request carried. */
   readonly providers: unknown[];
 }
@@ -111,17 +125,27 @@ export interface SessionLockActual {
   readonly canonical: readonly unknown[];
   /** The transcript items the client read at the end (raw). */
   readonly items: readonly unknown[];
+  /** The transcript read's window and identities, without its items (raw). */
+  readonly window?: unknown;
   /** Each provider request's messages, as the harness recorded them. */
   readonly providers: readonly unknown[];
 }
 
 /** Assert one converted scenario lock's session against its expectation, exactly. */
 export function expectSessionLock(label: string, actual: SessionLockActual, expected: SessionLockExpectation): void {
-  expect((actual.exchanges as Array<{ method: string; params: unknown; response: unknown }>).filter((exchange) => exchange.method !== "session.transcript")
+  expect((actual.exchanges as Array<{ method: string; params: unknown; response: unknown }>)
+    .filter((exchange) => expected.items === undefined || exchange.method !== "session.transcript")
     .map((exchange) => ({ method: exchange.method, params: projectedSnapshot(exchange.params), response: projectedSnapshot(exchange.response) })),
   `${label}: the client's requests and responses`).toEqual(expected.exchanges);
-  expect(projected(actual.items), `${label}: the transcript a client reads`).toEqual(expected.items);
-  expect(toolCallsResolve(actual.items), `${label}: each tool call has its result, in its group`).toBe(true);
+  if (expected.items !== undefined) {
+    expect(projected(actual.items), `${label}: the transcript a client reads`).toEqual(expected.items);
+    expect(toolCallsResolve(actual.items), `${label}: each tool call has its result, in its group`).toBe(true);
+    expect(projectedSnapshot(actual.window), `${label}: the transcript window`).toEqual(expected.window);
+  }
+  expect(actual.canonical.map((entry) => {
+    const { id, parentId, timestamp } = entry as { id?: unknown; parentId?: unknown; timestamp?: unknown };
+    return projectedSnapshot({ id, parentId, timestamp });
+  }), `${label}: each canonical entry's envelope`).toEqual(expected.envelopes);
   expect(canonicalMessages(actual.canonical), `${label}: the canonical messages`).toEqual(expected.messages);
   expect(actual.canonical.map(entryType), `${label}: the canonical entries, in order`).toEqual(expected.types);
   expect(invocationReceipts(actual.canonical), `${label}: the invocation receipts, in order`).toEqual(expected.receipts);
