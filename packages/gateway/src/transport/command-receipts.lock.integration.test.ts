@@ -30,6 +30,31 @@ const RECEIPT_FILE: Record<string, string> = {
   "bytes-0003|session.rename": "7WSZyHvcSn5MxhroEbJkfYAy-dYys67tLH7Fzp_NMZg",
   "bytes-0004|session.rename": "r-l6dBaHzgHxxD6pWcXRbVa70byqM0Glqgz-nMyXiP8",
   "lane-0001|session.rename": "Krnr4svwkFdQRTuAobmLudH-rwe0oPTVanuVljT4cq8",
+  // The forged receipts' names: each is the name the store reads for that command.
+  "empty-0001|session.rename": "oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg",
+  "broken-0001|session.rename": "rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY",
+  "extra-0001|session.rename": "N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0",
+  "other-0001|session.rename": "FzMuXrHOshC72HSNDwPfzZuclpKx1C3TfGSum4jbe-Q",
+  "noresult-0001|session.rename": "d_OEhst10eCcitNRCOGXjt_gJ91lksQhqQYGXnvek84",
+  "nobind-0001|session.rename": "hipKWazEWGktyOUKyGvipHr7dD7yGI0_TfM38jprlKg",
+  "null-0001|session.rename": "yO7HsypqXYErekt1izF4QUL5D60FEdHBnzqvdKoOjio",
+  "array-0001|session.rename": "21dPgue96qflS0fj5CY4xfPriaH2y6drccP0M8EB4HE",
+  "bound-0001|session.rename": "z_YFbjrlfvNZVkoBGVZI37tjXLnUsuat_uqVUFidLOo",
+  "bind-0001|session.rename": "3vnDVqslT-9qTzWbI7iALhwILOxUPhVxs9mh-44cP-E",
+  "bind-0002|session.rename": "z2OHXCXjH0-iZdL6BbFatz3VTytgdeiIP7BC-UVpVgg",
+  "bind-0003|session.rename": "7OCAqqs33_pORsrY-iJHTowtn58cuh2AbIv6kATjOW4",
+  "bind-0004|session.rename": "2pVdpfJNPODWuahosiJyRkkycIYe7LDEcDQ0Y0UbvTU",
+  "bind-0005|session.rename": "1nc5LVKwtdmoIRIBGc8uEOKEV8YfltClRlwmq7e23Gg",
+  "bind-0006|session.rename": "O5zKRLk22-8wYShBLScuMwdNVIXI28Gj64aSxQhgZnk",
+  "bind-0007|session.rename": "2yrBHS49IiDDgD1qhL5MI0VTy-z4_897LIsXV_LhMPo",
+  "bind-0008|session.rename": "wkMLJp0OZuABCFaUZ2F-l_0uZhceAn-LHibz_HufzTs",
+  "bind-0009|session.rename": "C-YlRaUr8yARZ9eD39wIinved0iFBzEr3MQM9UfV3Tc",
+  "bind-0010|session.rename": "KenIxRSdOIEZ0qr5lTt499gZ2uy4AOifP5nsGQkqlNk",
+  "bind-0011|session.rename": "7qht5M8f9xrkQBZkSFXu6GW-ZDdiRyADCmAIEz1Q6vM",
+  "hash-0001|session.rename": "OZzBxENO_s1n1DxpiPDA9L-gb3K31g06JOslrxeu_AY",
+  "status-0001|session.rename": "rtgXsW8bHM4R_cl9nKepEF2iXihZ8H19fW-6FZ1kGxc",
+  "result-0001|session.rename": "kQribBRAl3uDk89uXCBjO_Wq32NFDGq4ZigvmPzGjcw",
+  "time-0001|session.rename": "nRriCRHOiMWUTdC0TFfNzecdb-5Joe1UmNVcKotqHfY",
 };
 const fileOf = (key: string) => `${RECEIPT_FILE[key] ?? expect.unreachable(`no literal receipt name for ${key}`)}.json`;
 /** A receipt document exactly as the store writes it. */
@@ -165,12 +190,12 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   expect(() => new CommandReceiptStore(h.home, undefined, { maximumEntries: 0 }), "an invalid capacity is refused").toThrow(expect.objectContaining({ message: "Invalid command receipt capacity" }));
 
   const forged = async (label: string, method: string, commandId: string, content: string, expectedOutcome: unknown) => {
-    const key = createHash("sha256").update(PHONE_HASH).update("\0").update(method).update("\0").update(commandId).digest("base64url");
+    const name = fileOf(`${commandId}|${method}`);
     const written = content.replaceAll("<identity>", PHONE_HASH);
-    await writeFile(join(h.directory, `${key}.json`), written);
+    await writeFile(join(h.directory, name), written);
     let stored: unknown;
     try { stored = JSON.parse(written); } catch { stored = `<${Buffer.byteLength(written)} bytes>`; }
-    expected[`${key}.json`] = stored;
+    expected[name] = stored;
     expect(await outcome(() => store.status(phone, method, commandId)), label).toEqual(expectedOutcome);
     await holds(`${label} leaves the forged receipt in place`);
   };
@@ -258,6 +283,7 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   expected = { [fileOf("bytes-0004|session.rename")]: receiptDocument("bytes-0004", "session.rename", "pending", T(24 * 60 + 13 + 64)) };
   await holds("a failed completed write keeps the pending fence");
   expect(await store.status(phone, "session.rename", "bytes-0004"), "status after the failed completed write").toEqual({ status: "pending" });
+  await holds("status after the failed completed write");
   await store.dispose();
   await rm(h.directory, { recursive: true, force: true });
   store = new CommandReceiptStore(h.home, writer);
