@@ -50,8 +50,7 @@ row and the app-level `operation.gatewayConnect` row both record.
 The fixtures are small, sanitized records with the real shapes: phone rows are
 `AppLogRecord` JSON with details in the message, and Gateway rows are
 `gateway.jsonl` records with typed fields. The report of the full run is kept
-at `TRON_TRIAGE_TEST_REPORT` (default: a new file under the system temp
-directory) so a reviewer can read what the tool produced.
+in `test-results/triage-cli/` so a reviewer can read what the tool produced.
 """
 
 from __future__ import annotations
@@ -1255,9 +1254,8 @@ class LiveEvidenceTests(TriageFixture):
         self.assertEqual(causes, ["path", "path", "phone-background", "unknown", "phone-stall"],
                          report["episodes"])
         self.assertEqual(report["summary"]["byCause"]["path"], 2)
-        retained = Path(os.environ.get(
-            "TRON_TRIAGE_TEST_REPORT",
-            Path(tempfile.gettempdir()) / "tron-triage-report.json"))
+        retained = ROOT / "test-results" / "triage-cli" / "report.json"
+        retained.parent.mkdir(parents=True, exist_ok=True)
         retained.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         # The text table is what an operator reads first.
         table = self.run_tool(phone, json_output=False)
