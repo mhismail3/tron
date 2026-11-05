@@ -47,7 +47,8 @@ export function toolCallsResolve(items: readonly unknown[]): boolean {
     for (const block of item.content ?? []) if (block.type === "toolCall") calls.set(block.toolCallId!, block.groupId);
     if (item.role === "toolResult") results.push(item);
   }
-  return results.length === calls.size && results.every((result) => calls.has(result.toolCallId!) && calls.get(result.toolCallId!) === result.groupId);
+  return results.length === calls.size && [...calls.keys()].every((id) => typeof id === "string" && id.length > 0)
+    && results.every((result) => typeof result.toolCallId === "string" && calls.has(result.toolCallId) && calls.get(result.toolCallId) === result.groupId);
 }
 
 /** A session snapshot's per-run values beyond a record's: its subscription, sync and runtime identities and revisions. */
