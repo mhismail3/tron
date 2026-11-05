@@ -1,7 +1,8 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
+import { normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
+import { expectSessionLock, projectedSnapshot, type SessionLockExpectation } from "../../test-support/lock-projections.js";
 import { createAndOpen, DETACHED_RUN, drainBlockersScenario, openExisting, WAITING_COMMAND } from "../../test-support/lock-scenarios.js";
 
 /**
@@ -20,7 +21,6 @@ import { createAndOpen, DETACHED_RUN, drainBlockersScenario, openExisting, WAITI
  *   drain completes only after the answer and the run's terminal artifact.
  */
 
-const MODULE = "gateway/run";
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -115,20 +115,21 @@ describe("gateway/run heap and drain locks", () => {
         list: labelled(list.result, roles, gateway),
       },
     };
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, trace.lock), trace, update: lockUpdateRequested(MODULE),
-      validate: () => {
-        expect(liveFull).toEqual(["A", "B", "C"]);
-        expect(touchesDistinct).toBe(true);
-        expect(touchOrder).toEqual(["C", "A", "B"]);
-        expect(liveAfterD).toEqual(["B", "C", "D-draft"]);
-        expect(liveAfterE).toEqual(["C", "D-draft", "E-open"]);
-        expect(liveAfterF).toEqual(["D-draft", "E-open", "F-open"]);
-        expect(refused.error).toMatchObject({ code: "busy" });
-        const evictions = trace.observed.runtimeLifecycle.filter((entry) => JSON.stringify(entry).includes("runtime.evicted"));
-        expect(evictions).toEqual(["A", "B", "C"].map((role) => ({ event: "runtime.evicted", session: `<session:${role}>`, reason: "capacity" })));
-      },
-    });
+    expectSessionLock(trace.lock, { exchanges: (trace as { exchanges?: unknown[] }).exchanges ?? [],
+      canonical: (trace as { canonicalJsonl?: unknown[] }).canonicalJsonl ?? [], items: [],
+      providers: recorded.providerRequests.map((request) => request.messages) }, EXPECTED[trace.lock]!);
+    for (const [key, value] of Object.entries(EXPECTED[trace.lock]!.extra)) {
+      expect(projectedSnapshot((trace as unknown as Record<string, unknown>)[key]), `${trace.lock}: ${key}`).toEqual(value);
+    }
+    expect(liveFull).toEqual(["A", "B", "C"]);
+    expect(touchesDistinct).toBe(true);
+    expect(touchOrder).toEqual(["C", "A", "B"]);
+    expect(liveAfterD).toEqual(["B", "C", "D-draft"]);
+    expect(liveAfterE).toEqual(["C", "D-draft", "E-open"]);
+    expect(liveAfterF).toEqual(["D-draft", "E-open", "F-open"]);
+    expect(refused.error).toMatchObject({ code: "busy" });
+    const evictions = trace.observed.runtimeLifecycle.filter((entry) => JSON.stringify(entry).includes("runtime.evicted"));
+    expect(evictions).toEqual(["A", "B", "C"].map((role) => ({ event: "runtime.evicted", session: `<session:${role}>`, reason: "capacity" })));
   }, 60_000);
 
   it("run-drain-blockers: a waiting extension command and a detached extension run hold the drain until they settle", async () => {
@@ -155,22 +156,2748 @@ describe("gateway/run heap and drain locks", () => {
         activities: activities.map((activity) => labelled({ status: activity.status, mode: activity.mode ?? null, state: activity.lifecycle?.state ?? null }, roles, gateway)),
       },
     };
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, trace.lock), trace, update: lockUpdateRequested(MODULE),
-      validate: () => {
-        const categories = (status: { result?: { blockers: Array<{ category: string; sessionId?: string }> } }) =>
-          status.result!.blockers.map((blocker) => `${roles.get(blocker.sessionId ?? "") ?? "none"}:${blocker.category}`).sort();
-        // A command's handler runs inside Pi's admission, so its wait is still the
-        // prompt's preflight work, which owns its select.
-        expect(categories(statusWaiting)).toEqual(["command:prompt-preflight", "detached:detached-extension-run"]);
-        expect(categories(statusAfterAnswer)).toEqual(["detached:detached-extension-run"]);
-        expect(statusWaiting.result.phase).toBe("waiting");
-        expect(statusAfterAnswer.result.phase).toBe("waiting");
-        expect(commandResponse.ok, JSON.stringify(commandResponse)).toBe(true);
-        expect(completed).toBe(true);
-        expect(statusComplete.result).toMatchObject({ phase: "complete", blockerCount: 0 });
-        expect(trace.observed.activities).toEqual([{ status: "completed", mode: "asynchronous", state: "completed" }]);
-      },
-    });
+    expectSessionLock(trace.lock, { exchanges: (trace as { exchanges?: unknown[] }).exchanges ?? [],
+      canonical: (trace as { canonicalJsonl?: unknown[] }).canonicalJsonl ?? [], items: [],
+      providers: recorded.providerRequests.map((request) => request.messages) }, EXPECTED[trace.lock]!);
+    for (const [key, value] of Object.entries(EXPECTED[trace.lock]!.extra)) {
+      expect(projectedSnapshot((trace as unknown as Record<string, unknown>)[key]), `${trace.lock}: ${key}`).toEqual(value);
+    }
+    const categories = (status: { result?: { blockers: Array<{ category: string; sessionId?: string }> } }) =>
+      status.result!.blockers.map((blocker) => `${roles.get(blocker.sessionId ?? "") ?? "none"}:${blocker.category}`).sort();
+    // A command's handler runs inside Pi's admission, so its wait is still the
+    // prompt's preflight work, which owns its select.
+    expect(categories(statusWaiting)).toEqual(["command:prompt-preflight", "detached:detached-extension-run"]);
+    expect(categories(statusAfterAnswer)).toEqual(["detached:detached-extension-run"]);
+    expect(statusWaiting.result.phase).toBe("waiting");
+    expect(statusAfterAnswer.result.phase).toBe("waiting");
+    expect(commandResponse.ok, JSON.stringify(commandResponse)).toBe(true);
+    expect(completed).toBe(true);
+    expect(statusComplete.result).toMatchObject({ phase: "complete", blockerCount: 0 });
+    expect(trace.observed.activities).toEqual([{ status: "completed", mode: "asynchronous", state: "completed" }]);
   }, 60_000);
 });
+
+/** What each converted lock in this file expects (`test-support/lock-projections.ts`), with what it observed. */
+const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, unknown> }> = {
+  "run-eviction-choice": {
+    "exchanges": [
+      {
+        "method": "session.create",
+        "params": {
+          "commandId": "lock-command-0001",
+          "cwd": "<tmp>/workspace"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 0,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session",
+                "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 2
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.prompt",
+        "params": {
+          "commandId": "lock-command-0002",
+          "text": "session A turn"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.close",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "closed": true
+          }
+        }
+      },
+      {
+        "method": "session.create",
+        "params": {
+          "commandId": "lock-command-0003",
+          "cwd": "<tmp>/workspace"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 0,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session",
+                "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 2
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.prompt",
+        "params": {
+          "commandId": "lock-command-0004",
+          "text": "session B turn"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.close",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "closed": true
+          }
+        }
+      },
+      {
+        "method": "session.create",
+        "params": {
+          "commandId": "lock-command-0005",
+          "cwd": "<tmp>/workspace"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 0,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session",
+                "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 2
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.prompt",
+        "params": {
+          "commandId": "lock-command-0006",
+          "text": "session C turn"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.close",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "closed": true
+          }
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 1,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session"
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "latestCacheHitRate": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "content": [
+                    {
+                      "ordinal": 0,
+                      "text": "session C turn",
+                      "type": "text"
+                    }
+                  ],
+                  "kind": "message",
+                  "role": "user",
+                  "semantic": {
+                    "contextEffect": "modelInput",
+                    "delivery": "stored",
+                    "direction": "inboundContext",
+                    "kind": "resourcePrompt",
+                    "lifecycle": "completed",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "user"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "content": [
+                    {
+                      "ordinal": 0,
+                      "text": "Session C answered.",
+                      "type": "text"
+                    }
+                  ],
+                  "kind": "message",
+                  "modelId": "faux-1",
+                  "provider": "<LOCK>",
+                  "role": "assistant",
+                  "semantic": {
+                    "contextEffect": "modelInput",
+                    "delivery": "stored",
+                    "direction": "agentOutput",
+                    "kind": "prompt",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "assistant"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  },
+                  "stopReason": "stop",
+                  "thinkingLevel": "off"
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 4
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 1,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session"
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "latestCacheHitRate": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "content": [
+                    {
+                      "ordinal": 0,
+                      "text": "session A turn",
+                      "type": "text"
+                    }
+                  ],
+                  "kind": "message",
+                  "role": "user",
+                  "semantic": {
+                    "contextEffect": "modelInput",
+                    "delivery": "stored",
+                    "direction": "inboundContext",
+                    "kind": "resourcePrompt",
+                    "lifecycle": "completed",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "user"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "content": [
+                    {
+                      "ordinal": 0,
+                      "text": "Session A answered.",
+                      "type": "text"
+                    }
+                  ],
+                  "kind": "message",
+                  "modelId": "faux-1",
+                  "provider": "<LOCK>",
+                  "role": "assistant",
+                  "semantic": {
+                    "contextEffect": "modelInput",
+                    "delivery": "stored",
+                    "direction": "agentOutput",
+                    "kind": "prompt",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "assistant"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  },
+                  "stopReason": "stop",
+                  "thinkingLevel": "off"
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 4
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.close",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "closed": true
+          }
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 1,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session"
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "latestCacheHitRate": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "content": [
+                    {
+                      "ordinal": 0,
+                      "text": "session B turn",
+                      "type": "text"
+                    }
+                  ],
+                  "kind": "message",
+                  "role": "user",
+                  "semantic": {
+                    "contextEffect": "modelInput",
+                    "delivery": "stored",
+                    "direction": "inboundContext",
+                    "kind": "resourcePrompt",
+                    "lifecycle": "completed",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "user"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "content": [
+                    {
+                      "ordinal": 0,
+                      "text": "Session B answered.",
+                      "type": "text"
+                    }
+                  ],
+                  "kind": "message",
+                  "modelId": "faux-1",
+                  "provider": "<LOCK>",
+                  "role": "assistant",
+                  "semantic": {
+                    "contextEffect": "modelInput",
+                    "delivery": "stored",
+                    "direction": "agentOutput",
+                    "kind": "prompt",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "assistant"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  },
+                  "stopReason": "stop",
+                  "thinkingLevel": "off"
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 4
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.close",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "closed": true
+          }
+        }
+      },
+      {
+        "method": "session.create",
+        "params": {
+          "commandId": "lock-command-0007",
+          "cwd": "<tmp>/workspace"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 0,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session",
+                "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 2
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.close",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "closed": true
+          }
+        }
+      },
+      {
+        "method": "session.create",
+        "params": {
+          "commandId": "lock-command-0008",
+          "cwd": "<tmp>/workspace"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 0,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session",
+                "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 2
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.create",
+        "params": {
+          "commandId": "lock-command-0009",
+          "cwd": "<tmp>/workspace"
+        },
+        "response": {
+          "error": {
+            "code": "busy",
+            "message": "Gateway live runtime capacity is full; close or wait for an idle session",
+            "retryable": true
+          },
+          "ok": false,
+          "result": null
+        }
+      },
+      {
+        "method": "session.close",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "closed": true
+          }
+        }
+      },
+      {
+        "method": "session.create",
+        "params": {
+          "commandId": "lock-command-0010",
+          "cwd": "<tmp>/workspace"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {}
+        }
+      },
+      {
+        "method": "session.open",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "completionRevision": 0,
+            "session": {
+              "acceptsQueuedPrompts": false,
+              "automaticCompactionEnabled": false,
+              "availableThinkingLevels": [
+                "off"
+              ],
+              "compactionPolicy": {
+                "currentBudgets": {
+                  "enabled": false,
+                  "keepRecentTokens": 120,
+                  "reserveTokens": 2048
+                },
+                "extensionMayOverride": false,
+                "next": {
+                  "effectiveThinkingLevel": "off",
+                  "enabled": false,
+                  "instructions": "",
+                  "keepRecentTokens": 120,
+                  "model": {
+                    "provider": "<LOCK>"
+                  },
+                  "requestedThinkingLevel": "off",
+                  "reserveTokens": 2048,
+                  "source": {
+                    "enabled": "global",
+                    "instructions": "global",
+                    "keepRecentTokens": "global",
+                    "reserveTokens": "global",
+                    "thinkingLevel": "global"
+                  },
+                  "thinkingLevel": "inherit"
+                }
+              },
+              "compactionQueued": false,
+              "configurationBlocker": null,
+              "contextUsage": {
+                "contextWindow": "<value>",
+                "percent": "<value>",
+                "tokens": "<value>"
+              },
+              "contextWindowPolicy": {
+                "default": 128000,
+                "effective": 128000,
+                "maximum": 128000,
+                "minimum": 3192,
+                "model": {
+                  "provider": "<LOCK>"
+                },
+                "override": 128000,
+                "source": "session",
+                "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+              },
+              "cwd": "<tmp>/workspace",
+              "diagnostics": [],
+              "extensionPresentation": {
+                "capabilities": [
+                  "semantic.dialogs",
+                  "tron.form.v1",
+                  "semantic.notifications",
+                  "semantic.status",
+                  "semantic.working",
+                  "semantic.hidden-thinking-label",
+                  "semantic.string-widgets",
+                  "semantic.title",
+                  "semantic.revisioned-editor",
+                  "semantic.tools-expanded",
+                  "surfaces.full-frame"
+                ],
+                "diagnostics": [
+                  {
+                    "code": "remote-components.enabled",
+                    "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                  },
+                  {
+                    "code": "remote-components.overlay-deferred",
+                    "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                  },
+                  {
+                    "code": "theme.baseline-only",
+                    "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                  }
+                ],
+                "pendingInteractions": [],
+                "semanticState": {
+                  "editorRevision": 0,
+                  "editorText": "",
+                  "statusOwners": {},
+                  "statuses": {},
+                  "toolsExpanded": false,
+                  "widgets": [],
+                  "working": {
+                    "indicator": {
+                      "frames": [],
+                      "kind": "default"
+                    },
+                    "visible": true
+                  }
+                },
+                "surfaces": [],
+                "version": 3
+              },
+              "liveActivityRevision": 0,
+              "model": {
+                "provider": "<LOCK>"
+              },
+              "phase": "idle",
+              "processOverview": {
+                "activeCount": 0,
+                "problemCount": 0,
+                "recentCount": 0,
+                "version": 1,
+                "visibility": "hidden"
+              },
+              "queueRevision": 0,
+              "queuedItems": [],
+              "stats": {
+                "assistantMessages": "<value>",
+                "cost": "<value>",
+                "tokens": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "toolCalls": "<value>",
+                "toolResults": "<value>",
+                "totalMessages": "<value>",
+                "userMessages": "<value>"
+              },
+              "thinkingLevel": "off",
+              "toolExecutions": [],
+              "transcript": [
+                {
+                  "kind": "modelChange",
+                  "modelRef": {
+                    "provider": "<LOCK>"
+                  },
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                },
+                {
+                  "kind": "thinkingChange",
+                  "level": "off",
+                  "semantic": {
+                    "contextEffect": "none",
+                    "delivery": "stored",
+                    "direction": "ambientStatus",
+                    "kind": "status",
+                    "origin": {
+                      "confidence": "boundary",
+                      "kind": "gateway"
+                    },
+                    "version": 1,
+                    "visibility": "visible"
+                  }
+                }
+              ],
+              "transcriptStart": 0,
+              "transcriptTotal": 2
+            }
+          }
+        }
+      },
+      {
+        "method": "session.sync",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "synchronized": true
+          }
+        }
+      },
+      {
+        "method": "session.list",
+        "params": {},
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "archivedCount": 0,
+            "listRevision": 6,
+            "projectionToken": "<id>",
+            "sessions": [
+              {
+                "attentionRevision": 0,
+                "completionRevision": 0,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "isUnread": false,
+                "kind": "user",
+                "messageCount": 0,
+                "phase": "idle",
+                "summaryRevision": 1,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              },
+              {
+                "attentionRevision": 0,
+                "completionRevision": 0,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "isUnread": false,
+                "kind": "user",
+                "messageCount": 0,
+                "phase": "idle",
+                "summaryRevision": 1,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              },
+              {
+                "attentionRevision": 0,
+                "completionRevision": 0,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "isUnread": false,
+                "kind": "user",
+                "messageCount": 0,
+                "phase": "idle",
+                "summaryRevision": 1,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              },
+              {
+                "attentionRevision": 1,
+                "completionRevision": 1,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "session C turn",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "isUnread": true,
+                "kind": "user",
+                "messageCount": 2,
+                "phase": "idle",
+                "summaryRevision": 7,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              },
+              {
+                "attentionRevision": 1,
+                "completionRevision": 1,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "session B turn",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "isUnread": true,
+                "kind": "user",
+                "messageCount": 2,
+                "phase": "idle",
+                "summaryRevision": 7,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              },
+              {
+                "attentionRevision": 1,
+                "completionRevision": 1,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "session A turn",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "isUnread": true,
+                "kind": "user",
+                "messageCount": 2,
+                "phase": "idle",
+                "summaryRevision": 7,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "messages": [],
+    "types": [],
+    "receipts": [],
+    "sessionEntries": [],
+    "providers": [
+      [
+        {
+          "role": "user",
+          "text": "session A turn"
+        }
+      ],
+      [
+        {
+          "role": "user",
+          "text": "session B turn"
+        }
+      ],
+      [
+        {
+          "role": "user",
+          "text": "session C turn"
+        }
+      ]
+    ],
+    "extra": {
+      "observed": {
+        "runtimeLifecycle": [
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:A>"
+          },
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:B>"
+          },
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:C>"
+          },
+          {
+            "event": "runtime.evicted",
+            "reason": "capacity",
+            "session": "<session:A>"
+          },
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:D-draft>"
+          },
+          {
+            "event": "runtime.evicted",
+            "reason": "capacity",
+            "session": "<session:B>"
+          },
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:E-open>"
+          },
+          {
+            "event": "runtime.evicted",
+            "reason": "capacity",
+            "session": "<session:C>"
+          },
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:F-open>"
+          }
+        ],
+        "live": {
+          "full": [
+            "A",
+            "B",
+            "C"
+          ],
+          "afterD": [
+            "B",
+            "C",
+            "D-draft"
+          ],
+          "afterE": [
+            "C",
+            "D-draft",
+            "E-open"
+          ],
+          "afterF": [
+            "D-draft",
+            "E-open",
+            "F-open"
+          ]
+        },
+        "refused": {
+          "code": "busy",
+          "message": "Gateway live runtime capacity is full; close or wait for an idle session",
+          "retryable": true
+        },
+        "list": {
+          "archivedCount": 0,
+          "listRevision": 6,
+          "projectionToken": "<id>",
+          "sessions": [
+            {
+              "attentionRevision": 0,
+              "completionRevision": 0,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:F-open>",
+              "isUnread": false,
+              "kind": "user",
+              "messageCount": 0,
+              "phase": "idle",
+              "summaryRevision": 1,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            },
+            {
+              "attentionRevision": 0,
+              "completionRevision": 0,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:E-open>",
+              "isUnread": false,
+              "kind": "user",
+              "messageCount": 0,
+              "phase": "idle",
+              "summaryRevision": 1,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            },
+            {
+              "attentionRevision": 0,
+              "completionRevision": 0,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:D-draft>",
+              "isUnread": false,
+              "kind": "user",
+              "messageCount": 0,
+              "phase": "idle",
+              "summaryRevision": 1,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            },
+            {
+              "attentionRevision": 1,
+              "completionRevision": 1,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "session C turn",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:C>",
+              "isUnread": true,
+              "kind": "user",
+              "messageCount": 2,
+              "phase": "idle",
+              "summaryRevision": 7,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            },
+            {
+              "attentionRevision": 1,
+              "completionRevision": 1,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "session B turn",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:B>",
+              "isUnread": true,
+              "kind": "user",
+              "messageCount": 2,
+              "phase": "idle",
+              "summaryRevision": 7,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            },
+            {
+              "attentionRevision": 1,
+              "completionRevision": 1,
+              "createdAt": "<timestamp>",
+              "cwd": "<tmp>/workspace",
+              "firstMessage": "session A turn",
+              "foregroundPhase": "idle",
+              "hasActiveSubagents": false,
+              "id": "<session:A>",
+              "isUnread": true,
+              "kind": "user",
+              "messageCount": 2,
+              "phase": "idle",
+              "summaryRevision": 7,
+              "updatedAt": "<timestamp>",
+              "waitingForUser": false
+            }
+          ]
+        }
+      }
+    }
+  },
+  "run-drain-blockers": {
+    "exchanges": [],
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "start the background run",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "arguments": {},
+            "name": "lock_background",
+            "type": "toolCall"
+          }
+        ],
+        "model": "faux-1",
+        "provider": "<LOCK>",
+        "role": "assistant",
+        "stopReason": "toolUse",
+        "thinkingLevel": "off"
+      },
+      {
+        "content": [
+          {
+            "text": "Background run started.",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "asyncDir": "<tmp>/workspace/.pi/subagents/async-subagent-runs/lock-background-run",
+          "runId": "<id>",
+          "state": "running"
+        },
+        "isError": false,
+        "role": "toolResult",
+        "toolName": "lock_background"
+      },
+      {
+        "content": [
+          {
+            "text": "The background run is under way.",
+            "type": "text"
+          }
+        ],
+        "model": "faux-1",
+        "provider": "<LOCK>",
+        "role": "assistant",
+        "stopReason": "stop",
+        "thinkingLevel": "off"
+      }
+    ],
+    "types": [
+      "session",
+      "model_change",
+      "thinking_level_change",
+      "custom:tron.context-window.v1",
+      "custom:tron.settings.v1",
+      "custom:tron.settings.v1",
+      "custom:tron.chat-invocation.v1",
+      "custom:tron.chat-invocation.v1",
+      "message:system",
+      "message:user",
+      "custom:tron.chat-invocation.v1",
+      "message:assistant",
+      "message:toolResult",
+      "message:assistant",
+      "custom:tron.chat-invocation.v1",
+      "custom:tron.extension-activity.v1"
+    ],
+    "receipts": [
+      {
+        "receiptKind": "start",
+        "lifecycle": "staged",
+        "source": "plain"
+      },
+      {
+        "receiptKind": "transition",
+        "lifecycle": "accepted",
+        "source": "plain"
+      },
+      {
+        "receiptKind": "binding",
+        "source": "plain"
+      },
+      {
+        "receiptKind": "terminal",
+        "lifecycle": "completed",
+        "source": "plain"
+      }
+    ],
+    "sessionEntries": [
+      {
+        "cwd": "<tmp>/workspace",
+        "type": "session",
+        "version": 3
+      },
+      {
+        "modelId": "faux-1",
+        "provider": "<LOCK>",
+        "type": "model_change"
+      },
+      {
+        "thinkingLevel": "off",
+        "type": "thinking_level_change"
+      }
+    ],
+    "providers": [
+      [
+        {
+          "role": "user",
+          "text": "start the background run"
+        }
+      ],
+      [
+        {
+          "role": "user",
+          "text": "start the background run"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_background"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "Background run started.",
+          "toolName": "lock_background"
+        }
+      ]
+    ],
+    "extra": {
+      "observed": {
+        "commandResponse": {},
+        "drain": {
+          "before": {
+            "blockerCount": 2,
+            "blockerCounts": {
+              "detached-extension-run": 1,
+              "prompt-preflight": 1
+            },
+            "blockers": [
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "detached-extension-run",
+                "sessionId": "<session:detached>",
+                "state": "active"
+              },
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "prompt-preflight",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:command>",
+                "state": "active"
+              }
+            ],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "idle",
+            "suspectProjectionCount": 0
+          },
+          "waiting": {
+            "blockerCount": 2,
+            "blockerCounts": {
+              "detached-extension-run": 1,
+              "prompt-preflight": 1
+            },
+            "blockers": [
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "detached-extension-run",
+                "sessionId": "<session:detached>",
+                "state": "active"
+              },
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "prompt-preflight",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:command>",
+                "state": "active"
+              }
+            ],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "waiting",
+            "suspectProjectionCount": 0
+          },
+          "afterAnswer": {
+            "blockerCount": 1,
+            "blockerCounts": {
+              "detached-extension-run": 1
+            },
+            "blockers": [
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "detached-extension-run",
+                "sessionId": "<session:detached>",
+                "state": "active"
+              }
+            ],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "waiting",
+            "suspectProjectionCount": 0
+          },
+          "completed": true,
+          "complete": {
+            "blockerCount": 0,
+            "blockerCounts": {},
+            "blockers": [],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "complete",
+            "suspectProjectionCount": 0
+          }
+        },
+        "activities": [
+          {
+            "mode": "asynchronous",
+            "state": "completed",
+            "status": "completed"
+          }
+        ]
+      },
+      "commandTranscript": {
+        "end": 3,
+        "items": [
+          {
+            "kind": "modelChange",
+            "modelRef": {
+              "provider": "<LOCK>"
+            },
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "version": 1,
+              "visibility": "visible"
+            }
+          },
+          {
+            "kind": "thinkingChange",
+            "level": "off",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "version": 1,
+              "visibility": "visible"
+            }
+          },
+          {
+            "customType": "tron.chat-invocation.v1",
+            "kind": "customEntry",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "command",
+              "lifecycle": "completed",
+              "origin": {
+                "confidence": "adapter",
+                "kind": "extension",
+                "ownerId": "extension:<digest>",
+                "title": "Lock Ask"
+              },
+              "resourceInvocations": [
+                {
+                  "arguments": "",
+                  "name": "lockask",
+                  "source": "extension"
+                }
+              ],
+              "version": 1,
+              "visibility": "visible"
+            }
+          }
+        ],
+        "start": 0,
+        "total": 3
+      }
+    }
+  },
+};
