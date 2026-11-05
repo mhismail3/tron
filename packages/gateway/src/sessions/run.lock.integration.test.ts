@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { type LockGateway, type LockGatewayOptions } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { compactionScenario, openLockSession, promptStreamScenario, type LockSession } from "../../test-support/lock-scenarios.js";
+import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, openLockSession, promptStreamScenario, type LockSession } from "../../test-support/lock-scenarios.js";
 
 /**
  * Kernel run locks (restructure plan §6.4, V3) for the `gateway/run` module:
@@ -159,41 +159,8 @@ describe("gateway/run kernel locks", () => {
   });
 
   it("extension UI: an extension tool's select waits for the client's answer and resumes the turn with it", async () => {
-    const session = await openSession("run-extension-ui", { extensions: [{ name: "lock-select.ts", source: `
-      export default function (pi) {
-        pi.registerTool({
-          name: "lock_select", label: "Lock select", description: "Ask the user which lock path to take",
-          parameters: { type: "object", properties: {} },
-          execute: async (_id, _params, _signal, _update, ctx) => {
-            const answer = await ctx.ui.select("Choose a lock path", ["Keep", "Change"]);
-            return { content: [{ type: "text", text: "chosen: " + (answer ?? "cancelled") }], details: { answer: answer ?? null } };
-          },
-        });
-      }
-    ` }] });
-    session.gateway.script([
-      async () => {
-        await session.gateway.observeLiveOperation(session.client, session.sessionId);
-        return fauxAssistantMessage([fauxToolCall("lock_select", {}, { id: "lock-select" })], { stopReason: "toolUse" });
-      },
-      () => fauxAssistantMessage("Keeping the lock path."),
-    ]);
-    const running = session.prompt("ask me which path");
-    // The client answers what it was shown: the interaction arrives on an event.
-    const pending = await waitFor(() => {
-      for (const event of session.client.events) {
-        const shown = (event.payload as { extensionPresentation?: { pendingInteractions?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> } })
-          ?.extensionPresentation?.pendingInteractions?.[0];
-        if (shown) return shown;
-      }
-      return undefined;
-    }, "the pending select to reach the client");
-    const answered = await session.client.request("extension.respond", {
-      commandId: session.gateway.commandId(), sessionId: session.sessionId, interactionId: pending.id,
-      hostEpoch: pending.hostEpoch, presentationRevision: pending.presentationRevision, value: "Keep",
-    });
-    expect(answered.ok, JSON.stringify(answered)).toBe(true);
-    expect((await running).ok).toBe(true);
+    const session = await openSession("run-extension-ui", EXTENSION_UI_OPTIONS);
+    const { pending } = await extensionUiScenario(session);
     await finish(session, "run-extension-ui", (trace) => {
       const result = trace.canonicalJsonl.find((entry) => (entry as { message?: { role?: string } }).message?.role === "toolResult");
       expect(JSON.stringify(result)).toContain("chosen: Keep");
