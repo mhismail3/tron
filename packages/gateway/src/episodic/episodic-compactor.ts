@@ -24,9 +24,9 @@ Preserve, in priority order:
   proposals or tool output to the maintainer.
 - Durable actions, outcomes and commitments; exact issue numbers, IDs,
   SHAs, paths and names needed to locate or resume the work.
-- Findings, errors, blockers, pending work and what is still unproven.
-  Distinguish requested, proposed, attempted, verified and completed work.
-  A tool call proves an attempt, not success. Keep future work in the future.
+- Findings, errors, blockers and pending work. Distinguish requested,
+  proposed, attempted, verified and completed work. Keep future work in the
+  future.
 - Minor items as brief searchable anchors. Compress intermediate tool
   chatter, repeated status and raw payloads before sacrificing facts.
 
@@ -40,8 +40,8 @@ When merging, retain both stretches' distinct facts and unresolved items;
 deduplicate repeated facts, not different outcomes. Keep exact identifiers,
 decisions, useful reasons and uncertainty as lines grow older. Do not turn
 a plan into a result or erase an earlier blocker without evidence it ended.
-Use the available bytes for concrete detail, not a generic recap. Keep each
-item at least findable by a specific anchor; non-ASCII costs 2–4 bytes.`;
+Keep each item at least findable by a specific anchor; non-ASCII costs 2–4
+bytes.`;
 
 /** A compactor reply is one line, but a reasoning model spends output tokens
  * thinking before it writes it: a 2,048-token ceiling let DeepSeek on OpenCode
@@ -66,20 +66,30 @@ export function emptyReplyDetail(message: AssistantMessage): string {
     : "the compactor returned no line";
 }
 
+/** Models count words, not bytes. Memory lines run about 7.5 UTF-8 bytes per
+ * word, so a word budget at 8.5 bytes a word keeps the first reply near the limit. */
+function wordBudget(nodeBytes: number): number {
+  return Math.floor(nodeBytes / 8.5);
+}
+
+function words(line: string): number {
+  return line.split(" ").filter(Boolean).length;
+}
+
 /** The step for a level-0 node (gist §4.2): the message whole, newlines kept. */
 export function leafStep(kind: string, text: string, nodeBytes: number): string {
-  return `Compress this message into one line of content only, in at most ${nodeBytes} bytes. Do not add a role label; Tron attaches the canonical kind:\n<stretch>\n${kind}: ${text}\n</stretch>\nKeep exact identifiers and pending vs completed status; a request or tool call is not a result. Use the available bytes for detail. Content only, no role label.`;
+  return `Compress this message into one line of content only, in at most ${nodeBytes} bytes (about ${wordBudget(nodeBytes)} words). Do not add a role label; Tron attaches the canonical kind:\n<stretch>\n${kind}: ${text}\n</stretch>\nContent only, no role label.`;
 }
 
 /** The step for a merge: the two lines written out again, newlines flattened. */
 export function mergeStep(childA: string, childB: string, nodeBytes: number): string {
   const flatten = (text: string) => text.replace(/\s*\n\s*/gu, " ");
-  return `Merge these two lines into one, in at most ${nodeBytes} bytes:\n<stretch>\n${flatten(childA)}\n${flatten(childB)}\n</stretch>\nKeep both lines' distinct items, exact identifiers and pending vs completed status. Use the available bytes for detail. Content only, no role labels.`;
+  return `Merge these two lines into one, in at most ${nodeBytes} bytes (about ${wordBudget(nodeBytes)} words):\n<stretch>\n${flatten(childA)}\n${flatten(childB)}\n</stretch>\nContent only, no role labels.`;
 }
 
 /** The size loop's feedback, in the same conversation (gist §4.3). */
 export function sizeFeedback(line: string, nodeBytes: number): string {
-  return `That line is ${Buffer.byteLength(line, "utf8")} bytes; the limit is ${nodeBytes}. Rewrite the whole line more concisely, aiming below ${Math.floor(nodeBytes * 0.9)} bytes. Keep exact identifiers, decisions and unresolved outcomes; compress tool chatter first. Finish complete words. Output only the revised line, not this feedback.`;
+  return `That line is ${Buffer.byteLength(line, "utf8")} bytes (${words(line)} words); the limit is ${nodeBytes} bytes (about ${wordBudget(nodeBytes)} words). Rewrite the whole line more concisely, aiming below ${Math.floor(nodeBytes * 0.9)} bytes. Keep exact identifiers, decisions and outcomes; compress tool chatter first. Finish complete words. Output only the revised line, not this feedback.`;
 }
 
 const ZERO_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };

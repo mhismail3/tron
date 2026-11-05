@@ -67,7 +67,8 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
 - **Tree and view** (gist §3–5). Node `(l, i)` covers `[i·2^l, (i+1)·2^l)`,
   addressed `start+n`. Free nodes (fit in `NODE` bytes) need no model. The compactor
   makes one call per node with the step alone (the message, or the two child lines,
-  in `<stretch>`), then up to `TRIES` size repairs. No view line reaches the
+  in `<stretch>`), then up to `TRIES` size repairs; the step and each repair
+  state the byte limit with a word budget (`NODE` / 8.5). No view line reaches the
   model: a line restates only its own stretch, so status from elsewhere in the
   chat cannot enter it. Replies are flattened across Unicode whitespace;
   the shortest reply is retained. If it still exceeds `NODE`, whole whitespace-

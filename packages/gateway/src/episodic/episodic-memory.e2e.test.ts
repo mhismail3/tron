@@ -332,8 +332,8 @@ function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixtu
     compactor.feedbackTurns += 1;
     return fauxAssistantMessage(pad("short", nodeBytes - 40));
   }
-  const leaf = /Compress this message into one line of content only, in at most \d+ bytes\. Do not add a role label; Tron attaches the canonical kind:\n<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(text);
-  const merge = /Merge these two lines into one, in at most \d+ bytes:\n<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(text);
+  const leaf = /Compress this message into one line of content only, in at most \d+ bytes \(about \d+ words\)\. Do not add a role label; Tron attaches the canonical kind:\n<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(text);
+  const merge = /Merge these two lines into one, in at most \d+ bytes \(about \d+ words\):\n<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(text);
   const body = (leaf?.[1] ?? merge?.[1] ?? text).replace(/\s+/gu, " ").trim();
   if (leaf) compactor.levelZeroBodies.push(body);
   const overshoot = body.length % 5 === 0;
