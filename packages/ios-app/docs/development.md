@@ -145,6 +145,11 @@ PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test sta
   capped at 64 KiB, with up to four samples capped at 256,000 bytes each.
 - A pass needs one executed, passing test and writes `coverage.json`; partial evidence is kept.
 - A hosted launch without a fixture argument renders the production `ProductionSceneRoot`.
+  This arm also mounts `HostedNativeViewportProbe`, a read-only public UIKit window-geometry
+  boundary for retained-UI assertions. It rejects unavailable, nonfinite, out-of-window or
+  non-bottom-spanning keyboard guides; the UI test rejects changing window/safe-area space or
+  inset transitions within a frame capture. There is no AX-key-region geometry fallback.
+  Static fixture arms and the shipping app do not mount this probe.
 
 ## Gateway fixture work
 
@@ -173,7 +178,10 @@ removed native vendor-setup selectors refuse before any build, fixture or lease.
 `results/<utc>-ui.*`. The invitation journey requires the full accepted prompt
 label before and after foreground, independent of AX role: overflowing prompts
 are reader buttons. Generated navigation-title snippets are not transcript
-retention evidence and cannot satisfy the full-label query. `status`, `logs`, `stop` and `clean` act only on this worktree's fixture; run
+retention evidence and cannot satisfy the full-label query. Reader retention uses an
+additional canonical UI turn so history exceeds the full native viewport: the prompt's
+visible preview is capped, regardless of its full accessibility label. `status`,
+`logs`, `stop` and `clean` act only on this worktree's fixture; run
 `clean` before deleting a worktree. DTO changes need Gateway tests and Swift decoding.
 The fixture's canonical lifecycle root is its isolated `HOME/Workspace` (exact spelling).
 `testProjectLifecycleApproveMovesAndArchives`, `testProjectLifecycleDenialRetainsUntrustedRepository`

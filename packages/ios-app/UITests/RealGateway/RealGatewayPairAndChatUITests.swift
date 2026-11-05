@@ -128,9 +128,35 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         keepScreenshot(app, name: "424-real-ui-pair-prompt-streamed-reply")
 
+        // One capped prompt fits the full native viewport without a keyboard.
+        // Add actual canonical history, not longer text hidden by that preview.
+        let stop = app.buttons["Stop Tron"]
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: stop
+        )], timeout: 60), .completed, "the initial completed reply must settle before reader setup")
+        let readerContextPrompt = "HOME-AUTOMATION-JOURNEY: Reader continuity context."
+        composer.tap()
+        composer.typeText(readerContextPrompt)
+        XCTAssertEqual(composer.value as? String, readerContextPrompt)
+        XCTAssertTrue(waitForEnabled(send, timeout: 60))
+        send.tap()
+        let readerContextSent = app.scrollViews.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@", readerContextPrompt)
+        ).firstMatch
+        XCTAssertTrue(readerContextSent.waitForExistence(timeout: 60), "the additional reader turn was not rendered")
+        // The existing text-only fixture branch adds canonical rows without
+        // coupling reader setup to unrelated interactive tool-consent sheets.
+        let readerContextCompletion = "Home automation fixture ready."
+        let sameRouteReply = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", readerContextCompletion)
+        ).firstMatch
+        XCTAssertTrue(sameRouteReply.waitForExistence(timeout: 180), "the canonical reader-history turn did not complete")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: stop
+        )], timeout: 60), .completed, "the unique reader-history reply must settle before retention")
+
         // Keep this route mounted: unlike navigating back to the dashboard,
         // retiring its transport must not retire the last installed transcript.
-        let sameRouteReply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
         composer.tap()
         var unsentDraft = "Unsent recovery draft: keep every word and the keyboard."
         composer.typeText(unsentDraft)
@@ -138,8 +164,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                        "the retained route must expose the complete unsent draft")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
                       "the composer keyboard must be present before transport retirement")
+        let viewportBeforeLoss = try nativeViewport(app, stage: "before-loss-before-frames")
+        _ = try XCTUnwrap(viewportBeforeLoss.keyboardInset > 0 ? viewportBeforeLoss : nil,
+                          "the initial composer must have actual native software-keyboard occlusion")
         let replyFrameBeforeLoss = sameRouteReply.frame
         let composerFrameBeforeLoss = composer.frame
+        let viewportAfterInitialFrames = try nativeViewport(app, stage: "before-loss-after-frames")
+        try requireSameNativeSpace(viewportBeforeLoss, viewportAfterInitialFrames)
+        _ = try XCTUnwrap(viewportBeforeLoss.keyboardInset == viewportAfterInitialFrames.keyboardInset
+                          ? viewportAfterInitialFrames : nil, "native inset changed during initial frame capture")
         try setProxyMode(fixture, mode: "blackhole")
         defer { try? setProxyMode(fixture, mode: "pass") }
         XCTAssertTrue(app.staticTexts["Gateway connection unavailable"].waitForExistence(timeout: 60),
@@ -149,6 +182,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                        "transport retirement must preserve the entire unsent draft")
         XCTAssertTrue(app.keyboards.firstMatch.exists,
                       "transport retirement must not dismiss the active composer keyboard")
+        let viewportAtRetirement = try nativeViewport(app, stage: "transport-retired")
+        try requireSameNativeSpace(viewportBeforeLoss, viewportAtRetirement)
+        XCTAssertEqual(viewportAtRetirement.keyboardInset, viewportBeforeLoss.keyboardInset, accuracy: 3,
+                       "transport retirement dismissed the native software keyboard")
         keepScreenshot(app, name: "393-simulator-same-route-transport-retired")
         let transientNotice = app.descendants(matching: .any).matching(identifier: "in-app-notice-card").firstMatch
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
@@ -160,6 +197,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the mounted chat must keep its visible lifecycle reason after the transient notice expires")
         assertRecoveryInChrome(app, status: waitingStatus)
         XCTAssertTrue(sameRouteReply.isHittable, "recovery must not cover the retained reply")
+        let viewportBeforeHome = try nativeViewport(app, stage: "retired-before-home")
+        try requireSameNativeSpace(viewportBeforeLoss, viewportBeforeHome)
+        XCTAssertEqual(viewportBeforeHome.keyboardInset, viewportBeforeLoss.keyboardInset, accuracy: 3,
+                       "the transport-only recovery must preserve native keyboard occlusion")
         try setProxyMode(fixture, mode: "pass")
         try setProxyMode(fixture, mode: "hold-open")
         // Foreground admission owns an immediate attempt; the response barrier
@@ -174,14 +215,25 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "subscription replacement discarded the same-session transcript")
         XCTAssertFalse(app.otherElements["Opening conversation"].exists,
                        "a retained conversation must not be hidden by the full opening surface")
-        XCTAssertEqual(sameRouteReply.frame.minY, replyFrameBeforeLoss.minY, accuracy: 3,
-                       "the pinned transcript moved while its replacement open was held")
+        let viewportWhileHeld = try nativeViewport(app, stage: "held-before-frames")
+        let replyFrameWhileHeld = sameRouteReply.frame
+        let composerFrameWhileHeld = composer.frame
+        let viewportAfterHeldFrames = try nativeViewport(app, stage: "held-after-frames")
+        try requireSameNativeSpace(viewportBeforeHome, viewportWhileHeld)
+        try requireSameNativeSpace(viewportWhileHeld, viewportAfterHeldFrames)
+        _ = try XCTUnwrap(viewportWhileHeld.keyboardInset == viewportAfterHeldFrames.keyboardInset
+                          ? viewportAfterHeldFrames : nil, "native inset changed during held frame capture")
+        // Only deliberate Home/activate may change UIKit's native inset. The
+        // transport-only samples above independently preserve keyboard occlusion.
+        let nativeViewportShift = CGFloat(viewportBeforeHome.keyboardInset - viewportWhileHeld.keyboardInset)
+        XCTAssertEqual(replyFrameWhileHeld.minY, replyFrameBeforeLoss.minY + nativeViewportShift, accuracy: 3,
+                       "the pinned transcript moved within its native viewport while replacement open was held")
         XCTAssertEqual(composer.value as? String, unsentDraft,
                        "the replacement open must preserve the full draft")
         XCTAssertTrue(app.keyboards.firstMatch.exists,
-                      "the held replacement open must preserve the active composer keyboard")
-        XCTAssertEqual(composer.frame.minY, composerFrameBeforeLoss.minY, accuracy: 3)
-        XCTAssertEqual(composer.frame.height, composerFrameBeforeLoss.height, accuracy: 3)
+                      "the held replacement open must retain the keyboard accessibility element")
+        XCTAssertEqual(composerFrameWhileHeld.minY, composerFrameBeforeLoss.minY + nativeViewportShift, accuracy: 3)
+        XCTAssertEqual(composerFrameWhileHeld.height, composerFrameBeforeLoss.height, accuracy: 3)
         // Type without refocusing: a visible keyboard alone does not prove the
         // same draft still owns its responder/caret after replacement.
         app.typeText(" Still editing.")
@@ -213,7 +265,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(sameRouteReply.isHittable)
         XCTAssertEqual(composer.value as? String, unsentDraft)
         XCTAssertTrue(app.keyboards.firstMatch.exists,
-                      "an ordinary foreground must preserve the active composer keyboard")
+                      "an ordinary foreground must retain the keyboard accessibility element")
 
         // A foreground reconnect whose handshake is still in flight stays quiet
         // through the app's recovery grace, then names the delay honestly in
@@ -295,26 +347,28 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
         // A real reader detaches from the tail; this is not a short transcript
         // that happens to fit in the viewport. Scrolling intentionally dismisses
-        // the keyboard, separately from the pinned keyboard-preservation checks.
+        // any software keyboard, separately from the pinned input-retention checks.
         let transcriptScroll = app.scrollViews.containing(
             NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")
         ).firstMatch
         XCTAssertTrue(transcriptScroll.exists)
         // The separate status-bar scroll owner is a 1-point UIScrollView; target
         // the actual conversation and keep the gesture above the keyboard.
+        _ = try nativeViewport(app, stage: "reader-before-drag")
+        XCTContext.runActivity(named: "reader-precondition prompt=\(sent.frame) scroll=\(transcriptScroll.frame)") { _ in }
         let readerStart = transcriptScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
         let readerEnd = transcriptScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
         readerStart.press(forDuration: 0.1, thenDragTo: readerEnd)
         readerStart.press(forDuration: 0.1, thenDragTo: readerEnd)
         keepScreenshot(app, name: "393-simulator-reader-detaches")
+        _ = try nativeViewport(app, stage: "reader-after-drag")
         XCTAssertTrue(app.buttons["Catch up"].waitForExistence(timeout: 10),
                       "the reader did not leave the pinned tail: \(app.debugDescription)")
         XCTAssertTrue(sent.isHittable)
         let anchorFrame = sent.frame
-        // The prompt is one accessibility element taller than the viewport;
-        // XCUI clips its frame to the visible region beneath the bar, and that
-        // clipped edge follows the title view while recovery replaces it. The
-        // rendered rows are the reader's position, so qualify their pixels too.
+        // XCUI can clip a prompt's accessibility frame beneath the bar; that
+        // clipped edge alone can follow chrome rather than readable content.
+        // The rendered rows are the reader's position, so qualify their pixels too.
         let rowsBeforeLoss = transcriptRows(app)
         try setProxyMode(fixture, mode: "blackhole")
         XCTAssertTrue(waitingStatus.waitForExistence(timeout: 60))
@@ -2191,6 +2245,31 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     @MainActor
     private func recoveryStatus(_ app: XCUIApplication, _ label: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
+    private struct NativeViewportSnapshot: Decodable {
+        let capturedAt: Double
+        let window: [Double]
+        let guide: [Double]
+        let safeBottom: Double
+        let keyboardInset: Double
+    }
+
+    @MainActor
+    private func nativeViewport(_ app: XCUIApplication, stage: String) throws -> NativeViewportSnapshot {
+        let raw = try XCTUnwrap(app.otherElements["hosted-native-viewport"].value as? String,
+                               "the passive native viewport probe is unavailable")
+        XCTContext.runActivity(named: "native-viewport-\(stage) \(raw)") { _ in }
+        let packet = try JSONDecoder().decode(NativeViewportSnapshot.self, from: Data(raw.utf8))
+        let values = packet.window + packet.guide + [packet.safeBottom, packet.keyboardInset, packet.capturedAt]
+        return try XCTUnwrap(packet.window.count == 4 && packet.guide.count == 4
+                             && values.allSatisfy({ $0.isFinite }) && packet.keyboardInset >= 0
+                             ? packet : nil, "invalid native viewport packet: \(raw)")
+    }
+
+    private func requireSameNativeSpace(_ first: NativeViewportSnapshot, _ second: NativeViewportSnapshot) throws {
+        _ = try XCTUnwrap(first.window == second.window && first.safeBottom == second.safeBottom
+                          ? second : nil, "native window bounds/safe bottom changed between viewport samples")
     }
 
     /// Recovery belongs to the route's navigation chrome and is itself the

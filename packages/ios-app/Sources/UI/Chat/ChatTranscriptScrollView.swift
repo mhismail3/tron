@@ -711,6 +711,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     orientation: orientation
                   ) else { return }
             publishGeometry(change, phase: observation.presentationPhase)
+            #if HOSTED_TEST
+            let evidence = "eventAt=\(Date().timeIntervalSince1970) content=\(observation.geometry.contentSize) container=\(observation.geometry.containerSize) insets=\(observation.geometry.contentInsets) visible=\(observation.geometry.visibleRect) offset=\(observation.geometry.contentOffset) ready=\(isReady) positionedByUser=\(scrollPosition.isPositionedByUser) catchup=\(scrollCoordinator.shouldShowCatchUpButton) phase=\(observation.presentationPhase)"
+            Task { await AppLog.shared.recordCausal(name: "r13.reader.geometry", details: evidence) }
+            #endif
         }
         .onChange(of: orientation.layoutClearance(for: safeAreaInsets).top, initial: true) { _, obstruction in
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
@@ -730,6 +734,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 to: newPhase,
                 finalGeometry: orientation.coordinatorGeometry(context.geometry, obstruction: orientation.layoutClearance(for: safeAreaInsets).top)
             )
+            #if HOSTED_TEST
+            let evidence = "eventAt=\(Date().timeIntervalSince1970) from=\(oldPhase) to=\(newPhase) content=\(context.geometry.contentSize) container=\(context.geometry.containerSize) insets=\(context.geometry.contentInsets) visible=\(context.geometry.visibleRect) offset=\(context.geometry.contentOffset) ready=\(isReady) positionedByUser=\(scrollPosition.isPositionedByUser) catchup=\(scrollCoordinator.shouldShowCatchUpButton)"
+            Task { await AppLog.shared.recordCausal(name: "r13.reader.phase", details: evidence) }
+            #endif
         }
         .modifier(ChatTranscriptCoordinatorObservationModifier(
             coordinator: scrollCoordinator,

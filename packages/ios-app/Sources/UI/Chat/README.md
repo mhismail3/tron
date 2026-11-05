@@ -57,8 +57,15 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   `ChatScrollCoordinator` owns the bounded commands: catch-up, semantic restore (within one point,
   one-second deadline) and prepend (eight-second deadline); every `ChatLayoutTransaction` ends
   settled or abandoned. A detached reader keeps one frozen installed commit until it returns.
+  Reader boundary fixtures need actual canonical history overflowing the full native viewport;
+  longer prompt text alone does not enlarge its capped visible preview.
   UIKit owns keyboard motion and the composer's single first responder; the composer is the
-  ScrollView's sole bottom safe-area inset. Exactly one scroll owns the status-bar gesture.
+  ScrollView's sole bottom safe-area inset. UIKit may change software-keyboard occlusion across
+  scene transitions while retaining the native responder; pinned rows and composer retain their
+  coordinates within that native viewport, not a fixed screen Y. Transport-only recovery must
+  preserve keyboard occlusion. UI boundary checks keep strict position bounds using independently
+  measured native inset changes only across deliberate background/foreground. Exactly one scroll
+  owns the status-bar gesture.
 - **Spatial roles.** User prompts right-anchored (≤ 364 points, emerald glass), agent prose and
   tools left, system events centered. Entrances follow the role once per semantic identity;
   existing rows never animate stack-wide. An outgoing prompt installs at full natural size and

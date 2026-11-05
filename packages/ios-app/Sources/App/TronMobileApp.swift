@@ -18,6 +18,11 @@ struct TronMobileApp: App {
 
         var body: some View {
             ProductionSceneRoot(owner: owner, pushDelegate: nil)
+                .background {
+                    HostedNativeViewportProbe()
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                }
         }
     }
 
