@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { it } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { GatewayError } from "../errors.js";
 import { storePathLock } from "../../test-support/store-path-lock.js";
 import { durableAtomicWriteJson } from "../foundation/durable-json.js";
@@ -150,36 +151,77 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   await log.finish();
 });
 
+const EPOCH = Date.parse("2026-01-01T00:00:00.000Z");
+const PHONE = "device:lock-phone";
+const RECEIPT_BYTES = 1_048_576 + 4 * 1_024;
+
+/**
+ * A disposable home under a fixed clock (receipts carry `createdAt`, so expiry
+ * follows `advance`). `receipts()` reads every persisted receipt back by command
+ * id; the on-disk layout itself is pinned by `command-receipt-paths` and the
+ * `store-command-receipts` corpus.
+ */
+async function receiptHome() {
+  const home = await mkdtemp(join(tmpdir(), "tron-command-receipts-"));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(EPOCH);
+  onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
+  const directory = join(home, "gateway", "command-receipts");
+  let calls = 0;
+  return {
+    home, directory,
+    advance: (ms: number) => { vi.setSystemTime(Date.now() + ms); },
+    run: (result: unknown) => async () => { calls += 1; return result as never; },
+    fail: (error: Error) => async () => { calls += 1; throw error; },
+    /** The operations run (`ran`) while `work` was outstanding. */
+    async counted(work: () => Promise<unknown>) { const before = calls; const result = await work(); return { result, ran: calls - before }; },
+    async receipts(): Promise<Record<string, { method: string; status: string; createdAt: string; result?: unknown }>> {
+      const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
+      const receipts: Record<string, { method: string; status: string; createdAt: string; result?: unknown }> = {};
+      for (const name of names) {
+        expect(name, "only receipt files remain").toMatch(/^[A-Za-z0-9_-]{43}\.json$/u);
+        const { commandId, method, status, createdAt, result } = JSON.parse(await readFile(join(directory, name), "utf8"));
+        receipts[commandId] = { method, status, createdAt, ...(result === undefined ? {} : { result }) };
+      }
+      return receipts;
+    },
+  };
+}
+
+/** What `work` was told: its result, or its refusal's message, code, retryability and details. */
+async function outcome(work: () => Promise<unknown>) {
+  try { return { result: await work() }; } catch (error) {
+    const { code, retryable, details } = error as GatewayError;
+    return { refused: (error as Error).message, code: code ?? null, retryable: retryable ?? null, details: details ?? null };
+  }
+}
+
+const CAPACITY_FULL = { refused: "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation",
+  code: "busy", retryable: true, details: null };
+const IDENTITY_MISMATCH = { refused: "Idempotency receipt identity mismatch; refresh authoritative state instead of replaying",
+  code: "conflict", retryable: false, details: { outcomeUnknown: true } };
+const rename = (createdAt: string, result?: unknown) => ({ method: "session.rename", status: "completed", createdAt, ...(result === undefined ? {} : { result }) });
+
 /**
  * The receipt store's accounting under concurrency: capacity bounds, an inventory
  * rebuild that lands inside another command's pending or completed write window, and
- * an early prompt response whose lane must
- * outlive the response. Each window is opened from inside the receipt writer,
- * and its outcome is visible only through admission, so the steps pin what each
- * command was told and whether its operation ran.
+ * an early prompt response whose lane must outlive the response. Each window is
+ * opened from inside the receipt writer, and its outcome is visible only through
+ * admission, so each check names what each command was told and whether its
+ * operation ran.
  */
 it("command-receipt-concurrency: bounds, rebuild windows and lane lifetimes", async () => {
-  const log = await storePathLock({ module: "gateway/transport", name: "command-receipt-concurrency", testFileUrl: import.meta.url, owned: "gateway/command-receipts" });
-  const phone = "device:lock-phone";
-  const receiptBytes = 1_048_576 + 4 * 1_024;
-  const directory = join(log.home, "gateway", "command-receipts");
-  let calls = 0;
-  const run = (result: unknown) => async () => { calls += 1; return result as never; };
-  const counted = async (work: () => Promise<unknown>) => { const before = calls; const result = await work(); return { result, ran: calls - before }; };
-  const outcome = async (work: () => Promise<unknown>) => {
-    try { return { result: await work() }; } catch (error) { return { refused: (error as Error).message, code: (error as GatewayError).code ?? null }; }
-  };
+  const h = await receiptHome();
 
-  for (const [label, capacity, expected] of [
-    ["an aggregate below one receipt is refused", { maximumAggregateBytes: receiptBytes - 1 }, "refused"],
-    ["an aggregate of exactly one receipt is accepted", { maximumAggregateBytes: receiptBytes }, "result"],
-    ["a fractional aggregate is refused", { maximumAggregateBytes: receiptBytes + 0.5 }, "refused"],
-    ["a negative age is refused", { maximumAgeMs: -1 }, "refused"],
-    ["a zero age is accepted", { maximumAgeMs: 0 }, "result"],
-    ["a fractional age is refused", { maximumAgeMs: 0.5 }, "refused"],
-    ["a fractional entry count is refused", { maximumEntries: 1.5 }, "refused"],
-  ] as const) await log.step(label, () => { new CommandReceiptStore(log.home, undefined, capacity); return capacity; }, expected);
-  await log.step("prune before any receipt exists", () => new CommandReceiptStore(log.home).prune(), "result");
+  for (const capacity of [{ maximumAggregateBytes: RECEIPT_BYTES - 1 }, { maximumAggregateBytes: RECEIPT_BYTES + 0.5 },
+    { maximumAgeMs: -1 }, { maximumAgeMs: 0.5 }, { maximumEntries: 1.5 }]) {
+    expect(() => new CommandReceiptStore(h.home, undefined, capacity), JSON.stringify(capacity)).toThrow("Invalid command receipt capacity");
+  }
+  for (const capacity of [{ maximumAggregateBytes: RECEIPT_BYTES }, { maximumAgeMs: 0 }]) {
+    expect(() => new CommandReceiptStore(h.home, undefined, capacity), JSON.stringify(capacity)).not.toThrow();
+  }
+  await expect(new CommandReceiptStore(h.home).prune(), "prune before any receipt exists").resolves.toBeUndefined();
+  expect(await h.receipts()).toEqual({});
 
   // The writer runs `during` once, right after the named receipt reached the disk.
   let during: { status: string; run: () => Promise<void> } | undefined;
@@ -191,62 +233,73 @@ it("command-receipt-concurrency: bounds, rebuild windows and lane lifetimes", as
 
   // Pending window: room for one in-flight receipt plus 100 bytes, so a rebuild that
   // counted the published but unaccounted pending receipt would refuse the next command.
-  let store = new CommandReceiptStore(log.home, writer, { maximumAggregateBytes: 2 * receiptBytes + 100, maximumAgeMs: 60_000 });
-  await log.step("a receipt that will expire", () => counted(() => store.execute(phone, "session.rename", "window-0001", run({ first: true }))));
-  log.advance(2 * 60_000);
+  let store = new CommandReceiptStore(h.home, writer, { maximumAggregateBytes: 2 * RECEIPT_BYTES + 100, maximumAgeMs: 60_000 });
+  expect(await h.counted(() => store.execute(PHONE, "session.rename", "window-0001", h.run({ first: true })))).toEqual({ result: { first: true }, ran: 1 });
+  h.advance(2 * 60_000);
   let inside: unknown;
-  during = { status: "pending", run: async () => { inside = await outcome(() => counted(() => store.execute(phone, "session.rename", "window-0003", run({ inside: true })))); } };
-  await log.step("a rebuild inside another command's pending write admits the next command", async () =>
-    ({ outer: await counted(() => store.execute(phone, "session.rename", "window-0002", run({ outer: true }))), inside }));
+  during = { status: "pending", run: async () => { inside = await outcome(() => h.counted(() => store.execute(PHONE, "session.rename", "window-0003", h.run({ inside: true })))); } };
+  expect(await h.counted(() => store.execute(PHONE, "session.rename", "window-0002", h.run({ outer: true }))), "the outer command").toEqual({ result: { outer: true }, ran: 2 });
+  expect(inside, "a rebuild inside another command's pending write admits the next command").toEqual({ result: { result: { inside: true }, ran: 1 } });
+  expect(await h.receipts(), "the expired receipt is pruned").toEqual({
+    "window-0002": rename("2026-01-01T00:02:00.000Z", { outer: true }), "window-0003": rename("2026-01-01T00:02:00.000Z", { inside: true }) });
   await store.dispose();
 
   // Completed window: the rebuild credits the pending size, not the larger completed
   // file, and the completion's accounting then counts both receipts exactly once.
-  await rm(directory, { recursive: true, force: true });
-  store = new CommandReceiptStore(log.home, writer, { maximumEntries: 2, maximumAggregateBytes: 2 * receiptBytes + 600, maximumAgeMs: 60_000 });
-  await log.step("a large receipt that will expire", () => counted(() => store.execute(phone, "session.rename", "window-0101", run({ text: "x".repeat(600) }))));
-  log.advance(2 * 60_000);
-  during = { status: "completed", run: async () => { inside = await outcome(() => counted(() => store.execute(phone, "session.rename", "window-0103", run({ inside: true })))); } };
-  await log.step("a rebuild inside another command's completed write admits the next command", async () =>
-    ({ outer: await counted(() => store.execute(phone, "session.rename", "window-0102", run({ text: "y".repeat(1_000) }))), inside }));
-  await log.step("both receipts are then counted, so a third command waits for capacity", () => store.execute(phone, "session.rename", "window-0104", run({})), "refused");
+  await rm(h.directory, { recursive: true, force: true });
+  store = new CommandReceiptStore(h.home, writer, { maximumEntries: 2, maximumAggregateBytes: 2 * RECEIPT_BYTES + 600, maximumAgeMs: 60_000 });
+  const large = { text: "x".repeat(600) };
+  expect(await h.counted(() => store.execute(PHONE, "session.rename", "window-0101", h.run(large)))).toEqual({ result: large, ran: 1 });
+  h.advance(2 * 60_000);
+  during = { status: "completed", run: async () => { inside = await outcome(() => h.counted(() => store.execute(PHONE, "session.rename", "window-0103", h.run({ inside: true })))); } };
+  const larger = { text: "y".repeat(1_000) };
+  expect(await h.counted(() => store.execute(PHONE, "session.rename", "window-0102", h.run(larger))), "the outer command").toEqual({ result: larger, ran: 2 });
+  expect(inside, "a rebuild inside another command's completed write admits the next command").toEqual({ result: { result: { inside: true }, ran: 1 } });
+  expect(await outcome(() => store.execute(PHONE, "session.rename", "window-0104", h.run({}))), "both receipts are counted, so a third command waits").toEqual(CAPACITY_FULL);
+  expect(await h.receipts()).toEqual({
+    "window-0102": rename("2026-01-01T00:04:00.000Z", larger), "window-0103": rename("2026-01-01T00:04:00.000Z", { inside: true }) });
   await store.dispose();
 
   // An early prompt response: the lane outlives the response until the completed
   // receipt is durable, so a duplicate waits for it and replays.
-  await rm(directory, { recursive: true, force: true });
+  await rm(h.directory, { recursive: true, force: true });
   let open!: () => void;
   const gate = new Promise<void>((resolve) => { open = resolve; });
-  store = new CommandReceiptStore(log.home, async (path, value, mode) => {
+  store = new CommandReceiptStore(h.home, async (path, value, mode) => {
     if ((value as { status?: unknown }).status === "completed") await gate;
     await durableAtomicWriteJson(path, value, mode);
   });
-  await log.step("a duplicate prompt sent before the first one's completion is durable replays it", async () => {
-    const before = calls;
-    const first = await store.execute(phone, "session.prompt", "prompt-0101", run({ accepted: 1 }), { respondBeforeCompletion: true });
-    const duplicate = outcome(() => store.execute(phone, "session.prompt", "prompt-0101", run({ accepted: 2 }), { respondBeforeCompletion: true }));
+  const prompt = await h.counted(async () => {
+    const first = await store.execute(PHONE, "session.prompt", "prompt-0101", h.run({ accepted: 1 }), { respondBeforeCompletion: true });
+    const duplicate = outcome(() => store.execute(PHONE, "session.prompt", "prompt-0101", h.run({ accepted: 2 }), { respondBeforeCompletion: true }));
     open();
-    return { first, duplicate: await duplicate, ran: calls - before };
+    return { first, duplicate: await duplicate };
   });
-  // A receipt stored under this command's name but naming another command is never replayed or overwritten.
-  const identityHash = createHash("sha256").update(phone).digest("base64url");
-  const key = createHash("sha256").update(identityHash).update("\0").update("session.rename").update("\0").update("mismatch-0001").digest("base64url");
-  await writeFile(join(directory, `${key}.json`), JSON.stringify({ version: 1, identityHash, commandId: "mismatch-0002",
-    method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }));
-  await log.step("execute over a receipt for another command is refused without running", () =>
-    counted(() => store.execute(phone, "session.rename", "mismatch-0001", run({}))), "refused");
-  // The same under a receipt that names another method or identity: each field alone is checked,
-  // by the status read and by execution.
+  expect(prompt, "a duplicate prompt sent before the first one's completion is durable replays it")
+    .toEqual({ result: { first: { accepted: 1 }, duplicate: { result: { accepted: 1 } } }, ran: 1 });
+  const prompted = { "prompt-0101": { method: "session.prompt", status: "completed", createdAt: "2026-01-01T00:04:00.000Z", result: { accepted: 1 } } };
+  expect(await h.receipts()).toEqual(prompted);
+
+  // A receipt stored under this command's name but naming another command, method or
+  // identity is never replayed or overwritten, by the status read or by execution.
+  const identityHash = createHash("sha256").update(PHONE).digest("base64url");
+  const forge = async (commandId: string, receipt: Record<string, unknown>) => {
+    const key = createHash("sha256").update(identityHash).update("\0").update("session.rename").update("\0").update(commandId).digest("base64url");
+    await writeFile(join(h.directory, `${key}.json`), JSON.stringify({ version: 1, identityHash, commandId,
+      method: "session.rename", createdAt: "2026-01-01T00:00:00.000Z", ...receipt }));
+  };
+  await forge("mismatch-0001", { commandId: "mismatch-0002", status: "pending" });
+  expect(await outcome(() => h.counted(() => store.execute(PHONE, "session.rename", "mismatch-0001", h.run({})))), "another command id").toEqual(IDENTITY_MISMATCH);
   for (const [commandId, forged] of [["mismatch-0003", { method: "session.archive" }], ["mismatch-0004", { identityHash: "B".repeat(43) }]] as const) {
-    const name = createHash("sha256").update(identityHash).update("\0").update("session.rename").update("\0").update(commandId).digest("base64url");
-    await writeFile(join(directory, `${name}.json`), JSON.stringify({ version: 1, identityHash, commandId,
-      method: "session.rename", status: "completed", createdAt: "2026-01-01T00:00:00.000Z", result: { replayed: true }, ...forged }));
-    await log.step(`status of a receipt naming another ${Object.keys(forged)[0]} is refused`, () => store.status(phone, "session.rename", commandId), "refused");
-    await log.step(`execute over a receipt naming another ${Object.keys(forged)[0]} is refused without running`, () =>
-      counted(() => store.execute(phone, "session.rename", commandId, run({}))), "refused");
+    await forge(commandId, { status: "completed", result: { replayed: true }, ...forged });
+    expect(await outcome(() => store.status(PHONE, "session.rename", commandId)), `status of a receipt naming another ${Object.keys(forged)[0]}`).toEqual(IDENTITY_MISMATCH);
+    expect(await outcome(() => h.counted(() => store.execute(PHONE, "session.rename", commandId, h.run({})))), `execute over a receipt naming another ${Object.keys(forged)[0]}`).toEqual(IDENTITY_MISMATCH);
   }
+  expect(await h.receipts(), "forged receipts are left untouched").toEqual({ ...prompted,
+    "mismatch-0002": { method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" },
+    "mismatch-0003": { method: "session.archive", status: "completed", createdAt: "2026-01-01T00:00:00.000Z", result: { replayed: true } },
+    "mismatch-0004": rename("2026-01-01T00:00:00.000Z", { replayed: true }) });
   await store.dispose();
-  await log.finish();
 });
 
 /**
@@ -258,76 +311,65 @@ it("command-receipt-concurrency: bounds, rebuild windows and lane lifetimes", as
  * reaches the same outcome every run.
  */
 it("command-receipt-races: lane lifetime, prune and rebuild inside a duplicate's lane", async () => {
-  const log = await storePathLock({ module: "gateway/transport", name: "command-receipt-races", testFileUrl: import.meta.url, owned: "gateway/command-receipts" });
-  const phone = "device:lock-phone";
-  const directory = join(log.home, "gateway", "command-receipts");
-  let calls = 0;
-  const run = (result: unknown) => async () => { calls += 1; return result as never; };
-  const counted = async (work: () => Promise<unknown>) => { const before = calls; const result = await work(); return { result, ran: calls - before }; };
-  const outcome = async (work: () => Promise<unknown>) => {
-    try { return { result: await work() }; } catch (error) { return { refused: (error as Error).message, code: (error as GatewayError).code ?? null }; }
-  };
+  const h = await receiptHome();
 
   // A lane stays registered while any duplicate holds it. The first command fails
   // definitively while a duplicate waits on its lane; the duplicate then runs, and a
   // third copy sent during its operation must queue behind it and replay, never open
   // a second lane that reads the duplicate's pending receipt as an uncertain fence.
-  let store = new CommandReceiptStore(log.home);
-  await log.step("a copy sent while the lane's second holder runs waits for it and replays", async () => {
-    let third: Promise<unknown> | undefined;
-    let thirdSettledDuringOperation: boolean | undefined;
-    const first = outcome(() => store.execute(phone, "session.rename", "race-0001", async () => {
-      calls += 1;
-      throw new GatewayError("not_found", "no such session");
-    }));
-    const second = counted(() => store.execute(phone, "session.rename", "race-0001", async () => {
-      calls += 1;
-      third = outcome(() => counted(() => store.execute(phone, "session.rename", "race-0001", run({ third: true }))));
-      // Correct code cannot settle the third copy before this operation returns.
-      thirdSettledDuringOperation = await Promise.race([third.then(() => true),
-        new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), 300); })]);
-      return { second: true };
-    }));
-    return { first: await first, second: await second, thirdSettledDuringOperation, third: await third };
-  });
+  let store = new CommandReceiptStore(h.home);
+  let third: Promise<unknown> | undefined;
+  let thirdSettledDuringOperation: boolean | undefined;
+  const first = outcome(() => store.execute(PHONE, "session.rename", "race-0001", h.fail(new GatewayError("not_found", "no such session"))));
+  const second = h.counted(() => store.execute(PHONE, "session.rename", "race-0001", async () => {
+    await h.run(undefined)();
+    third = outcome(() => h.counted(() => store.execute(PHONE, "session.rename", "race-0001", h.run({ third: true }))));
+    // Correct code cannot settle the third copy before this operation returns.
+    thirdSettledDuringOperation = await Promise.race([third.then(() => true),
+      new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), 300); })]);
+    return { second: true };
+  }));
+  expect(await first).toEqual({ refused: "no such session", code: "not_found", retryable: false, details: null });
+  expect(await second, "the duplicate runs once the definitive failure frees the lane").toEqual({ result: { second: true }, ran: 2 });
+  expect(thirdSettledDuringOperation, "a copy sent while the lane's second holder runs waits for it").toBe(false);
+  expect(await third, "and replays it").toEqual({ result: { result: { second: true }, ran: 0 } });
+  expect(await h.receipts()).toEqual({ "race-0001": rename("2026-01-01T00:00:00.000Z", { second: true }) });
   await store.dispose();
 
   // A lane that never wrote does not preserve the receipt it replays: a prune that
   // holds the inventory when the duplicate arrives still expires that receipt, so the
   // duplicate runs again instead of replaying it.
-  await rm(directory, { recursive: true, force: true });
-  store = new CommandReceiptStore(log.home);
-  await log.step("a receipt to expire", () => counted(() => store.execute(phone, "session.rename", "race-0101", run({ first: true }))), "result");
-  log.advance(1_000);
-  await log.step("a prune holding the inventory when a duplicate arrives expires its receipt", async () => {
-    const prune = store.prune(0);
-    const duplicate = counted(() => store.execute(phone, "session.rename", "race-0101", run({ again: true })));
-    await prune;
-    return duplicate;
-  });
+  await rm(h.directory, { recursive: true, force: true });
+  store = new CommandReceiptStore(h.home);
+  expect(await h.counted(() => store.execute(PHONE, "session.rename", "race-0101", h.run({ first: true })))).toEqual({ result: { first: true }, ran: 1 });
+  h.advance(1_000);
+  const prune = store.prune(0);
+  const duplicate = h.counted(() => store.execute(PHONE, "session.rename", "race-0101", h.run({ again: true })));
+  await prune;
+  expect(await duplicate, "a prune holding the inventory when a duplicate arrives expires its receipt").toEqual({ result: { again: true }, ran: 1 });
+  expect(await h.receipts()).toEqual({ "race-0101": rename("2026-01-01T00:00:01.000Z", { again: true }) });
   await store.dispose();
 
   // A rebuild counts a receipt whose lane has not written: a replaying duplicate's
   // lane, registered while another command's admission rebuilds the inventory, must
   // not hide the receipt it replays. One entry fits, and the kept receipt fills it.
-  await rm(directory, { recursive: true, force: true });
-  store = new CommandReceiptStore(log.home);
-  await log.step("a receipt to replay", () => counted(() => store.execute(phone, "session.rename", "race-0201", run({ kept: true }))), "result");
+  await rm(h.directory, { recursive: true, force: true });
+  store = new CommandReceiptStore(h.home);
+  expect(await h.counted(() => store.execute(PHONE, "session.rename", "race-0201", h.run({ kept: true })))).toEqual({ result: { kept: true }, ran: 1 });
   await store.dispose();
-  store = new CommandReceiptStore(log.home, undefined, { maximumEntries: 1 });
-  let duplicate: Promise<unknown> | undefined;
-  await log.step("a rebuild while a replaying duplicate holds its lane counts its receipt, so the store is full", () =>
-    store.execute(phone, "session.rename", "race-0202", run({ admitted: true }), {
-      resolveBinding: () => {
-        // Registered after this command's rebuild is queued, before that rebuild reads the directory.
-        duplicate = (async () => {
-          for (let hop = 0; hop < 20; hop += 1) await Promise.resolve();
-          return counted(() => store.execute(phone, "session.rename", "race-0201", run({ replayed: false })));
-        })();
-        return { homeId: "home-1", bindingRevision: 1, physicalSessionId: "chapter-1" };
-      },
-    }), "refused");
-  await log.step("the duplicate replays the kept receipt", () => duplicate, "result");
+  store = new CommandReceiptStore(h.home, undefined, { maximumEntries: 1 });
+  let replay: Promise<unknown> | undefined;
+  expect(await outcome(() => store.execute(PHONE, "session.rename", "race-0202", h.run({ admitted: true }), {
+    resolveBinding: () => {
+      // Registered after this command's rebuild is queued, before that rebuild reads the directory.
+      replay = (async () => {
+        for (let hop = 0; hop < 20; hop += 1) await Promise.resolve();
+        return h.counted(() => store.execute(PHONE, "session.rename", "race-0201", h.run({ replayed: false })));
+      })();
+      return { homeId: "home-1", bindingRevision: 1, physicalSessionId: "chapter-1" };
+    },
+  })), "a rebuild while a replaying duplicate holds its lane counts its receipt, so the store is full").toEqual(CAPACITY_FULL);
+  expect(await replay, "the duplicate replays the kept receipt").toEqual({ result: { kept: true }, ran: 0 });
+  expect(await h.receipts()).toEqual({ "race-0201": rename("2026-01-01T00:00:01.000Z", { kept: true }) });
   await store.dispose();
-  await log.finish();
 });
