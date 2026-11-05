@@ -2,7 +2,6 @@
   "layer": "L5",
   "purpose": "Root files, shared configuration and the repository layout (AGENTS.md \"Where things go\")",
   "owns": [
-    ".codex/**",
     ".gitattributes",
     ".github/dependabot.yml",
     ".gitignore",
@@ -17,7 +16,6 @@
   "layout": {
     "root": [
       ".agents",
-      ".codex",
       ".gitattributes",
       ".github",
       ".gitignore",

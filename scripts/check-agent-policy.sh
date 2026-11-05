@@ -63,8 +63,8 @@ grep -Fq 'XcodeBuildMCP' "$ROOT/AGENTS.md" \
   && grep -Fq 'xcrun mcpbridge' "$ROOT/.agents/skills/tron-ios/SKILL.md" \
   || fail "simulator lease rule lacks the agent (MCP/AXe) simulator paths"
 # Scan tracked and not-yet-tracked source so the check is trustworthy before
-# commit as well as in CI. Only the untouched external caller and bounded
-# compatibility implementation and policy tests may spell retired names.
+# commit as well as in CI. Only the device helper's refusal and policy tests may
+# spell retired names.
 python3 - "$ROOT" <<'PY' || fail "stale iOS build guidance outside bounded compatibility"
 from pathlib import Path
 import re
@@ -73,8 +73,6 @@ import sys
 
 root = Path(sys.argv[1])
 allowed = {
-    ".codex/environments/environment.toml",
-    "scripts/tron-ios-device",
     "scripts/test-ios-test-infrastructure.py",
     "scripts/check-agent-policy.sh",
     "packages/ios-app/scripts/test-build-matrix-policy.sh",
