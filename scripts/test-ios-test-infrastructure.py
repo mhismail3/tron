@@ -2138,6 +2138,9 @@ with open(state / 'events', 'a', encoding='utf-8') as events:
         job_pid = int((self.state / "running" / running[0]).read_text())
         holder.kill()
         holder.wait(timeout=10)
+        # The waiter's rescans emit nothing observable (it reports only every
+        # HOST_SLOT_REPORT_SECONDS), so a fixed window spanning several rescans
+        # is what lets a wrongly freed slot be taken before this check.
         time.sleep(1)
         self.assertEqual(len(self.started()), self.cap, "a killed holder's live job lost its slot")
 

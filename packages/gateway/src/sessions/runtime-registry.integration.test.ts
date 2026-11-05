@@ -2390,6 +2390,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(quarantineLock.directory).toBe(await realpath(dirname(fixture.sessionFile)));
     expect(outcome).toMatchObject({ code: "conflict", retryable: false,
       message: "Tron session deletion failed and its file could not be restored; it remains beside the original as a .tron-delete file" });
+    // Both failures stay diagnosable: the refused removal and the refused restore.
+    expect(((outcome as Error).cause as AggregateError).errors.map(error => (error as NodeJS.ErrnoException).code)).toEqual(["EACCES", "EACCES"]);
     // The transcript bytes are kept, never removed by the failed deletion.
     expect(existsSync(fixture.sessionFile)).toBe(false);
     expect((await readdir(dirname(fixture.sessionFile))).filter(name => name.startsWith(`${basename(fixture.sessionFile)}.tron-delete-`))).toHaveLength(1);

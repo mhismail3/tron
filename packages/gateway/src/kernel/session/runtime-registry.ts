@@ -3510,6 +3510,7 @@ export class RuntimeRegistry implements SessionOperations {
       throw new GatewayError("busy", "Tron session changed while deletion was committing", true);
     });
     let committed = false;
+    let deletionFailure: unknown;
     try {
       const moved = await lstat(quarantine);
       if (!moved.isFile() || moved.isSymbolicLink()
@@ -3523,15 +3524,18 @@ export class RuntimeRegistry implements SessionOperations {
       }
       await rm(quarantine);
       committed = true;
+    } catch (error) {
+      deletionFailure = error;
+      throw error;
     } finally {
       if (!committed) {
         const originalExists = await lstat(path).then(() => true).catch(() => false);
         // A refused restore strands the transcript beside its path: that is the
-        // outcome to report, replacing the retryable failure that preceded it.
+        // outcome to report. Both the deletion and the restore failure stay its cause.
         if (!originalExists) await rename(quarantine, path).catch((error: unknown) => {
           const failure = new GatewayError("conflict",
             "Tron session deletion failed and its file could not be restored; it remains beside the original as a .tron-delete file");
-          failure.cause = error;
+          failure.cause = new AggregateError([deletionFailure, error], "Session deletion and its restore both failed");
           throw failure;
         });
       }

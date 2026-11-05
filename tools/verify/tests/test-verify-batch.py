@@ -1736,8 +1736,12 @@ class FullGatewayLockTests(unittest.TestCase):
                 run = self.start(stderr=sink)
                 # The run announces its wait only after its own non-blocking try on the held lock has failed.
                 wait_until(lambda: 'waiting for ' in errors.read_text(), 'the run to announce that it waits')
-                self.assertIsNone(run.poll(), 'the run waits while another holder has the lock')
-                self.assertFalse(self.ran.exists(), 'Vitest does not start before the lock is free')
+                # It then keeps waiting for as long as the lock is held, not just at the announcement.
+                held_until = time.monotonic() + 2
+                while time.monotonic() < held_until:
+                    self.assertIsNone(run.poll(), 'the run waits while another holder has the lock')
+                    self.assertFalse(self.ran.exists(), 'Vitest does not start before the lock is free')
+                    time.sleep(0.05)
         out, _ = run.communicate(timeout=30)
         err = errors.read_text()
         self.assertEqual(run.returncode, 0, out + err)
