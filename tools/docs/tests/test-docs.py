@@ -81,16 +81,24 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(int(output.split(" ", 1)[0]), len(listed))
 
     def test_settings_list_holds_the_key_the_settings_lock_edited(self) -> None:
-        # The admin settings lock (packages/gateway/src/admin/admin.lock.integration.test.ts,
-        # EXPECTED["admin-settings-change"]) resolves and edits this key at the global layer
-        # through a real Gateway; the generated list must describe it the same way.
-        key, group, edited_layer = "run.retry.maxRetries", "run", "global"
-        lock = (ROOT / "packages/gateway/src/admin/admin.lock.integration.test.ts").read_text()
-        self.assertIn(f'"key": "{key}"', lock)
-        self.assertIn(f'"group": "{group}"', lock)
-        row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{key}` |"))
-        self.assertIn(edited_layer, row.split(" | ")[3].split(", "))
-        self.assertEqual(row.split(" | ")[2], group)
+        # The admin settings lock asserts its real-Gateway trace against this inline JSON literal.
+        source = (ROOT / "packages/gateway/src/admin/admin.lock.integration.test.ts").read_text()
+        marker = '"admin-settings-change": '
+        self.assertEqual(source.count(marker), 1, "the admin lock's inline expectation moved")
+        lock, _ = json.JSONDecoder().raw_decode(source, source.index(marker) + len(marker))
+        resolved = next(e for e in lock["exchanges"] if e["method"] == "settings.resolve")["response"]["result"]["keys"][0]
+        row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{resolved['key']}` |"))
+        layers = row.split(" | ")[3].split(", ")
+        edited_layers = {
+            change["layer"]
+            for exchange in lock["exchanges"]
+            if exchange["method"] == "settings.change" and exchange["response"]["ok"]
+            for change in exchange["response"]["result"]["changes"]
+            if change["key"] == resolved["key"] and change["status"] == "applied"
+        }
+        self.assertTrue(edited_layers)
+        self.assertLessEqual(edited_layers, set(layers))
+        self.assertEqual(row.split(" | ")[2], resolved["group"])
 
     def test_signals_print_and_committed_blocks_are_current(self) -> None:
         # Today no module README has a Signals section and no doc embeds a block; consumers (#1501, #1497,
