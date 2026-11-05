@@ -13,8 +13,9 @@ its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock`
 scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`,
 `run-extension-ui`), `run-queue-control`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers`, `run-lifecycle-rpcs`, `project-root-trust`, `project-root-resources`, `admin-settings-change`, `automation-owned-run`, `transport-reconnect-snapshot` and the store mutation-path tests in the paragraph after the table
-assert inline only. The other scenario locks in
-the table below compare whole-scenario goldens.
+assert inline only. `delegation-subagent` and `home-contention-restart` assert inline
+and keep a narrowed golden of the entries no other lock covers. The other scenario
+locks in the table below compare whole-scenario goldens.
 
 ## Framework
 
@@ -81,8 +82,8 @@ the `computer` module registers only on darwin.
 | `gateway/notifications` | `notifications-queued-cancel` | inline checks: removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged. Inline checks (`expectScenario`): every request and response, both sessions' canonical JSONL, provider conversations, the automation records, command receipts and run markers (none left) |
 | `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
-| `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result |
-| `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
+| `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result. Inline checks (`expectScenario`): the callers, both Gateways' exchanges and Home requests, the publication and ledger, the task records and Home's other entries. Narrowed golden: Home's system entry, the recovered task result and its settings, chat-invocation and context-delivery entries |
+| `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child. Inline checks (`expectScenario`): the parent's provider requests, both sessions' other entries and the subagent's process activity. Narrowed golden: both sessions' system entries and the task session's settings, context-window and extension-activity entries |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 | `gateway/pi-sdk` | `session-shapes` | what the model receives for each kind of session (plain chat, extension tool, notifications, automations, Home task worker and its reminder, trusted and revoked project subdirectory, compaction): tool names, prompt sections and hash, canonical system entries (section text and tool schemas), and the product-written messages. Golden in `test-fixtures/pi-sdk/` |
 | `gateway/pi-sdk` | `session-entries` | every distinct Tron custom session entry (`tron.chat-invocation.v1`, `tron.settings.v1`, `tron.context-window.v1`, `tron.extension-activity.v1`) the shared scenarios persist, with its values; each lock's faux provider name becomes `<lock>`. Golden in `test-fixtures/pi-sdk/` |
