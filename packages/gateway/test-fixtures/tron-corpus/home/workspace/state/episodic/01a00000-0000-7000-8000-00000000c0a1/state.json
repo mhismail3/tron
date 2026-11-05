@@ -4,7 +4,7 @@
   "cursor": {
     "completeBytes": 8538,
     "leafEntryId": "0000000c",
-    "completePrefixDigest": "830dd8a5ab2df59773fbc3917bb97829c79be91de3dfc6d50b2b99cd48960023",
+    "completePrefixDigest": "3a2de3fcb6a5126e319d115f4a26ed9c2accbf3f2385c17517b8ac57489d6c56",
     "home": {
       "version": 2,
       "ledgerRevision": 1,
@@ -13,14 +13,14 @@
           "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
           "sealed": false,
           "dev": 16777232,
-          "ino": 559161562,
+          "ino": 721724697,
           "size": 8538,
           "completeBytes": 8538,
           "leafEntryId": "0000000c",
           "leafLineDigest": "5e4eab33929693c3b5562a6d6c54008e12e463247f5a193b7c423ee412b060ed",
           "completePrefixDigest": "1f3c051f613192b7bfabf2de1a7bc515b4a1f44e510c682e30e920cd408d02f6",
-          "mtimeMs": 1792530167658.0962,
-          "ctimeMs": 1792530167658.0962
+          "mtimeMs": 1793842563213.1763,
+          "ctimeMs": 1793842563213.1763
         }
       ]
     }

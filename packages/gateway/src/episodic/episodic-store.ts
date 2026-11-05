@@ -579,10 +579,11 @@ function isNodeLogRecord(value: Record<string, unknown>): boolean {
     && isContextRuns(value.contextRuns) && typeof value.textDigest === "string" && typeof value.sourceDigest === "string"
     && (childRevisions === undefined || (Array.isArray(childRevisions) && childRevisions.length === 2 && childRevisions.every(isRevision)));
   if (!shape) return false;
-  // A free node made no call and holds no context; a summary's runs must cover
-  // exactly the messages before its end, or the dependents it implies are wrong.
+  // Nodes the owner writes hold no runs. A stored summary that holds runs must
+  // cover exactly the messages before its end, or the dependents it implies are wrong.
   const runs = value.contextRuns as EpisodicContextRun[];
-  if (value.kind === "free") return runs.length === 0;
+  if (runs.length === 0) return true;
+  if (value.kind === "free") return false;
   const end = (value.level as number) === 0 ? value.index as number : ((value.index as number) + 1) * 2 ** (value.level as number);
   return runs.reduce((total, run) => total + run[1] * 2 ** run[0], 0) === end;
 }
