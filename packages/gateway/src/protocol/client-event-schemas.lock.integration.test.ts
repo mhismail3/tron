@@ -25,13 +25,10 @@ import { sessionSettingChange } from "../../test-support/session-settings-change
  */
 
 const MODULE = "gateway/protocol";
-const gateways: LockGateway[] = [];
+/** Every release in creation order; each Gateway restores the agent-dir environment it found, so they run newest first. */
 const owned: Array<() => Promise<void>> = [];
-afterEach(async () => {
-  for (const release of owned.splice(0).reverse()) await release();
-  // Sequentially, newest first: each Gateway restores the agent-dir environment it found.
-  for (const gateway of gateways.splice(0).reverse()) await gateway.dispose();
-});
+const own = (gateway: LockGateway) => { owned.push(() => gateway.dispose()); };
+afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
 
 type EventTrace = { topic: string; paths: string[] };
 
@@ -46,26 +43,26 @@ describe("gateway/protocol client event schemas", () => {
     for (const [name, scenario] of [["run-compaction", compactionScenario], ["run-prompt-stream", promptStreamScenario],
       ["run-queue-control", queueControlScenario]] as const) {
       const session = await openLockSession(`client-events-${name}`);
-      gateways.push(session.gateway);
+      own(session.gateway);
       await scenario(session);
       await session.gateway.settled(session.sessionId);
       record(session.gateway);
     }
     {
       const gateway = await startLockGateway("client-events-project-root-trust");
-      gateways.push(gateway);
+      own(gateway);
       await projectRootTrustScenario(gateway);
       record(gateway, ["session.toolProgress"]);
     }
     {
       const gateway = await startLockGateway("client-events-automation-owned-run", { automations: true });
-      gateways.push(gateway);
+      own(gateway);
       await automationOwnedRunScenario(gateway);
       record(gateway);
     }
     {
       const session = await openLockSession("client-events-session-settings");
-      gateways.push(session.gateway);
+      own(session.gateway);
       const changed = await session.client.request("settings.change", sessionSettingChange("tools", {
         commandId: session.gateway.commandId(), sessionId: session.sessionId, tools: ["read"] }));
       expect(changed.ok, JSON.stringify(changed)).toBe(true);
