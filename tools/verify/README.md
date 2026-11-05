@@ -247,7 +247,8 @@ would break if a unit (file, directory or module) were removed, or moved without
 callers. It checks out HEAD in a private worktree (reusing installed Gateway dependencies
 read-only), runs the unit's guardians unchanged, applies the change with the manifests kept
 true to the tree, commits it and runs them again. Guardians are the tests `verify` selects for
-the unit plus the tests of every module whose files name it ([purpose cards](../ownership/README.md#purpose-cards)).
+the unit, every test that names it, and the tests that name a file of their own module that names
+it (one hop through a consumer; references as in [purpose cards](../ownership/README.md#purpose-cards)).
 Xcode runners are listed, not run. A guardian already red at HEAD stops the probe (exit 1).
 
 | Verdict | Meaning | What to do |

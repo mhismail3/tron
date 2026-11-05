@@ -8,7 +8,8 @@ helper verify imports into a disposable Git repository and probes one unit as a 
 2. cascade: deleting a data file the tool reads quietly turns several tests red without naming it.
 3. silent: deleting a file no test reaches turns nothing red.
 4. A move that leaves its callers behind turns the callers' tests red and the card check names
-   every file still using the old path; the caller's test is chosen because it names the tool.
+   every file still using the old path; the caller's test is chosen because it names the caller,
+   which names the tool.
 5. A guardian already red at HEAD stops the probe with exit 1 before any change.
 
 Every run leaves no scratch worktree behind. The last run's output is kept in `test-results/probe-cli/`.
@@ -136,7 +137,8 @@ class ProbeTests(unittest.TestCase):
         result, report = r.probe("tools/tool/tool.sh", "--move", "tools/tool/bin/tool.sh")
         self.assertEqual(report["verdict"], "precise", result.stdout)
         self.assertIn("tools/caller/tests/test-caller.sh", report["failing"])
-        self.assertIn("owned by repo/caller", report["guardians"]["tools/caller/tests/test-caller.sh"]["why"])
+        self.assertEqual(report["guardians"]["tools/caller/tests/test-caller.sh"]["why"],
+                         "names tools/caller/caller.sh, which names the unit")
         self.assertTrue(any("card interface 'tools/tool/tool.sh' is not a tracked path or directory; still named by "
                             "tools/caller/caller.sh:" in line for line in report["static"]),
                         report["static"])

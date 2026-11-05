@@ -67,20 +67,23 @@ def names_of(unit: str, files: list[str]) -> set[str]:
 
 
 def guardians(unit: str, files: list[str], modules: dict, tracked: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Tests verify would select for the change, plus the tests of every module whose files name the unit."""
+    """Tests verify would select for the change, plus every test that names the unit, or names a file of its
+    own module that names the unit (one hop: a consumer's source and the tests that exercise it)."""
     selection = verify.select("changed", None, "HEAD", modules, tracked, paths=files)
     chosen = {path: "selected by verify" for path in selection["tests"] + selection["deferredTests"]}
     owner = {path: key for key, module in modules.items() for path in module["owned"]}
     paths, read = verify.ownership.inventory(None)
     refs = cards.references(paths, read, owner)
     gone = set(files)
-    for source, targets in refs.items():
-        if source in gone or not any(cards.covers(target, path) for target in targets for path in gone):
+    naming = {source for source, targets in refs.items() if source not in gone
+              and any(cards.covers(target, path) for target in targets for path in gone)}
+    for source in sorted(naming):
+        if verify.is_test(source):
+            chosen.setdefault(source, f"names the unit")
             continue
-        consumer = owner.get(source)
-        for test in modules.get(consumer, {"owned": []})["owned"]:
-            if verify.is_test(test) and test not in gone:
-                chosen.setdefault(test, f"owned by {consumer}, which names the unit in {source}")
+        for test, targets in refs.items():
+            if verify.is_test(test) and test not in gone and source in targets and owner.get(test) == owner.get(source):
+                chosen.setdefault(test, f"names {source}, which names the unit")
     return sorted(test for test in chosen if test not in gone), chosen
 
 
