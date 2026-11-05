@@ -7,10 +7,12 @@ The consolidated golden locks each own one thing another party reads verbatim:
 persisted formats (the `store-*` locks, the corpus, `session-entries`), the wire
 contract (`protocol-wire`, `client-event-schemas`) and model-visible text (the SDK
 behavior trace, `session-shapes`). A converted lock asserts its behavior (accepted
-effects, refusals, ordering, identity, persistence and recovery) inline, and keeps a
-narrowed golden only for what no consolidated lock pins (`notifications-push`,
-`notifications-waiting`). The other scenario locks in the table below still compare
-whole-scenario goldens until they are converted (#2279).
+effects, refusals, ordering, identity, persistence and recovery) inline. Two keep a
+narrowed golden: `notifications-waiting` its provider requests, and `notifications-push`
+its provider requests and event shapes (the latter also pinned by
+`client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`
+and the store mutation-path tests below assert inline only. The other scenario locks in
+the table below compare whole-scenario goldens.
 
 ## Framework
 
@@ -41,7 +43,9 @@ whole-scenario goldens until they are converted (#2279).
   with scripted requests.
 
 A lock's golden lives beside its test in `locks/<name>.golden.json`, owned by
-the test's module. `test-support/lock-scenarios.ts` holds the scenarios that a
+the test's module; `session-shapes` and `session-entries`, like the SDK behavior trace,
+keep theirs in `test-fixtures/pi-sdk/` and write their actual traces to
+`test-results/session-*.actual.json`. `test-support/lock-scenarios.ts` holds the scenarios that a
 scenario lock and the consolidated locks (`client-event-schemas`, `session-entries`)
 both run; `client-event-schemas` adds one Session-scope `settings.change` of its own. Goldens are darwin-specific, as for the SDK boundary trace:
 the `computer` module registers only on darwin.
@@ -79,8 +83,9 @@ the `computer` module registers only on darwin.
 | `gateway/protocol` | `client-event-schemas` | every client event topic with the union of its payload paths, across the shared scenarios that together reach every shape (`test-support/lock-scenarios.ts`) |
 
 Store mutation-path tests assert inline, each driving one store's writes on a fresh
-home under a fixed clock and asserting each step's result or refusal and the exact
-persisted documents after it: `session-archive.lock`, `blob-store.lock`,
+home (under a fixed clock where the store records times; `catalog-metadata-index.lock`
+sets file times explicitly and `tron-workspace.lock` records none) and asserting each
+step's result or refusal and the exact persisted documents after it: `session-archive.lock`, `blob-store.lock`,
 `catalog-metadata-index.lock` (`gateway/session-catalog`), `session-attention.lock`
 (`gateway/projection`), `run-markers.lock` (`gateway/run`), `tron-workspace.lock`
 (`gateway/workspace`) and `command-receipts.lock` (`gateway/transport`; its paths test
