@@ -12,7 +12,7 @@ narrowed golden: `notifications-waiting` its provider requests, and `notificatio
 its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock`
 scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`,
-`run-extension-ui`), `run-queue-control`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers`, `run-lifecycle-rpcs`, `project-root-trust`, `project-root-resources`, `admin-settings-change`, `run-lifecycle-rpcs`, `project-root-trust`, `project-root-resources`, `admin-settings-change`, `automation-owned-run` and the store mutation-path tests in the paragraph after the table
+`run-extension-ui`), `run-queue-control`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers`, `run-lifecycle-rpcs`, `project-root-trust`, `project-root-resources`, `admin-settings-change`, `automation-owned-run` and the store mutation-path tests in the paragraph after the table
 assert inline only. The other scenario locks in
 the table below compare whole-scenario goldens.
 
