@@ -192,8 +192,12 @@ def main(argv: list[str]) -> int:
     scratch = Path(tempfile.mkdtemp(prefix="tron-probe-")) / "tree"
     git(verify.ROOT, "worktree", "add", "--detach", "-q", str(scratch), sha)
     try:
-        modules_dir = verify.ROOT / verify.GATEWAY / "node_modules"
-        if modules_dir.is_dir():
+        # Installed Gateway dependencies are reused read-only: this checkout's, else the primary checkout's.
+        common = Path(git(verify.ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+        modules_dir = next((candidate for candidate in (verify.ROOT / verify.GATEWAY / "node_modules",
+                                                         common.parent / verify.GATEWAY / "node_modules")
+                            if candidate.is_dir()), None)
+        if modules_dir:
             (scratch / verify.GATEWAY / "node_modules").symlink_to(modules_dir)
         baseline = run_tests(scratch, tests, out / "baseline", args.jobs, args.timeout)
         red = sorted(test for test, outcome in baseline.items() if outcome["outcome"] == "fail")
