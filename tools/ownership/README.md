@@ -110,7 +110,7 @@ modules it names (`foundDependencies`), whether or not a card declares them yet.
 - **`interfaces`** entries are `{name, kind, consumers?, external?}`. `name` is an owned
   file or single-owner directory, or a contract name (subcommand, RPC, env var) that occurs
   in an owned file. `kind` is `exec`, `import`, `read`, `cli`, `env`, `wire`, `fs` or
-  `launchd`. `consumers` are module ids; `external` says who outside the repository uses it.
+  `launchd` (`exec`, `import` and `read` name a tracked path; `wire` covers protocols, events and data formats). `consumers` are module ids; `external` says who outside the repository uses it.
   Each entry needs one of the two.
 - **References are found, not trusted.** Each tracked source file (not Markdown, not a
   manifest) is scanned for names of tracked files and single-owner directories, resolved

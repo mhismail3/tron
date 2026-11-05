@@ -1,4 +1,23 @@
 {
   "layer": "L5",
-  "owns": ["**"]
+  "purpose": "Reports documentation and file-size budgets for a commit; verify runs it as a static step.",
+  "owns": [
+    "**"
+  ],
+  "interfaces": [
+    {
+      "name": "tools/budgets",
+      "kind": "exec",
+      "consumers": [
+        "repo/verify"
+      ]
+    },
+    {
+      "name": "tools/budgets/budgets.py",
+      "kind": "exec",
+      "consumers": [
+        "repo/cli"
+      ]
+    }
+  ]
 }

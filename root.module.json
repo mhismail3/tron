@@ -216,24 +216,8 @@
       "protocol-fixtures/protocol-fixtures",
       "push-relay/push-relay",
       "repo/agents",
-      "repo/budgets",
-      "repo/cli",
-      "repo/dev",
       "repo/docs",
-      "repo/docs-index",
-      "repo/ios",
-      "repo/layers",
-      "repo/mac",
-      "repo/metrics",
-      "repo/ownership",
-      "repo/policy",
-      "repo/profile",
-      "repo/protocol-contract",
-      "repo/root",
-      "repo/triage",
-      "repo/verify",
-      "repo/web",
-      "repo/work"
+      "repo/root"
     ]
   }
 }

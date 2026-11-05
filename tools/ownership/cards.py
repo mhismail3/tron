@@ -16,6 +16,7 @@ import re
 from pathlib import PurePosixPath
 
 KINDS = {"exec", "import", "read", "cli", "env", "wire", "fs", "launchd"}
+PATH_KINDS = {"exec", "import", "read"}  # named by a tracked path; the others name a contract (`wire` includes data formats)
 INTERFACE_FIELDS = {"name", "kind", "consumers", "external"}
 USE_FIELDS = {"name", "kind", "why"}
 TEST_NAME = re.compile(r"(^test[-_].+\.(py|sh|js|mjs)$)|(\.test\.(ts|mjs|js)$)|(Tests?\.swift$)")
@@ -222,7 +223,7 @@ def problems(modules: dict[str, dict], paths: list[str], read, uncarded: list[st
             if not consumers and not external:
                 out.append(f"{label}: list its \"consumers\" (module ids) or say who uses it in \"external\"")
             is_path = name in owner or name in folders
-            if "/" in name and not is_path:
+            if "/" in name and not is_path and kind in PATH_KINDS:
                 pattern = re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(name) + r"(?![A-Za-z0-9_-])")
                 users = [path for path in paths if is_source(path) and path not in owned and pattern.search(text(path))]
                 out.append(f"{label} is not a tracked path or directory" +

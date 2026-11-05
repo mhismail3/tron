@@ -1,4 +1,32 @@
 {
   "layer": "L5",
-  "owns": ["**"]
+  "purpose": "Deterministic repository metrics of one commit's Git objects: size, large files, hotspots and structure.",
+  "owns": [
+    "**"
+  ],
+  "interfaces": [
+    {
+      "name": "tools/metrics",
+      "kind": "exec",
+      "consumers": [
+        "repo/budgets",
+        "repo/verify"
+      ]
+    },
+    {
+      "name": "tools/metrics/metrics.py",
+      "kind": "exec",
+      "consumers": [
+        "repo/budgets",
+        "repo/cli"
+      ]
+    },
+    {
+      "name": "tron-metrics/1",
+      "kind": "wire",
+      "consumers": [
+        "repo/verify"
+      ]
+    }
+  ]
 }

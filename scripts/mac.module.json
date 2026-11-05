@@ -1,5 +1,6 @@
 {
   "layer": "L5",
+  "purpose": "Maintainer-run Mac replacement, offline reinstall, install verification and checkpoint tooling for the installed Tron app and Stable Gateway.",
   "owns": [
     "mac.module.json",
     "mac.md",
@@ -16,5 +17,63 @@
     "tron_rebuild_lock.py",
     "validate-native-host.py",
     "verify-mac-install.sh"
+  ],
+  "interfaces": [
+    {
+      "name": "scripts/tron_checkpoint.py",
+      "kind": "exec",
+      "consumers": [
+        "repo/cli"
+      ]
+    },
+    {
+      "name": "scripts/tron_mac_reinstall.py",
+      "kind": "exec",
+      "consumers": [
+        "repo/cli"
+      ]
+    },
+    {
+      "name": "scripts/tron_mac_replace.py",
+      "kind": "exec",
+      "consumers": [
+        "gateway/admin",
+        "gateway/home",
+        "repo/cli"
+      ],
+      "external": "frozen: the installed Gateway and older checkouts run this path"
+    },
+    {
+      "name": "scripts/tron_rebuild_lock.py",
+      "kind": "exec",
+      "consumers": [
+        "repo/ios"
+      ]
+    },
+    {
+      "name": "scripts/validate-native-host.py",
+      "kind": "exec",
+      "consumers": [
+        "mac-app/package"
+      ]
+    },
+    {
+      "name": "scripts/verify-mac-install.sh",
+      "kind": "exec",
+      "consumers": [
+        "mac-app/server",
+        "repo/cli"
+      ]
+    }
+  ],
+  "uses": [
+    {
+      "name": ".tron-maintenance",
+      "kind": "fs"
+    },
+    {
+      "name": "com.tron.server",
+      "kind": "launchd"
+    }
   ]
 }

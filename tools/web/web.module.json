@@ -1,6 +1,47 @@
 {
   "layer": "L5",
+  "purpose": "Web and SwiftUI app sources the iOS share host and swift-app previews serve: the Builds app, its design previews and the shared stylesheet.",
   "owns": [
     "**"
+  ],
+  "interfaces": [
+    {
+      "name": "tools/web",
+      "kind": "read",
+      "consumers": [
+        "ios-app/swift-app-ui-tests"
+      ]
+    },
+    {
+      "name": "tools/web/apps/builds-preview",
+      "kind": "read",
+      "consumers": [
+        "ios-app/package"
+      ]
+    },
+    {
+      "name": "tools/web/apps/builds-preview/BuildsPreview.swift",
+      "kind": "read",
+      "consumers": [
+        "ios-app/swift-app-engine"
+      ]
+    },
+    {
+      "name": "tools/web/apps/builds/Builds.swift",
+      "kind": "read",
+      "consumers": [
+        "repo/ios"
+      ]
+    },
+    {
+      "name": "tools/web/tron.css",
+      "kind": "read",
+      "consumers": [
+        "repo/ios"
+      ]
+    }
+  ],
+  "verify": [
+    "scripts/tron test ios run --only-testing TronSwiftAppUITests/TronSwiftAppUITests --only-testing TronMobileUITests/TronAppsInstallDesignUITests"
   ]
 }

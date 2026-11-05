@@ -1,5 +1,6 @@
 {
   "layer": "L5",
+  "purpose": "Repository policy checks verify runs: agent-guidance and documentation policies, the personal-information guard and the pre-commit hook that runs it.",
   "owns": [
     "check-agent-policy.sh",
     "check-documentation-policy.py",
@@ -7,5 +8,39 @@
     "personal-info-guard.sh",
     "policy.module.json",
     "test-personal-info-guard.py"
+  ],
+  "interfaces": [
+    {
+      "name": "scripts/check-agent-policy.sh",
+      "kind": "exec",
+      "consumers": [
+        "repo/verify"
+      ]
+    },
+    {
+      "name": "scripts/check-documentation-policy.py",
+      "kind": "exec",
+      "consumers": [
+        "repo/budgets",
+        "repo/verify"
+      ]
+    },
+    {
+      "name": "scripts/install-hooks.sh",
+      "kind": "exec",
+      "consumers": [
+        "repo/ownership"
+      ],
+      "external": "once per clone (docs/development.md)"
+    },
+    {
+      "name": "scripts/personal-info-guard.sh",
+      "kind": "exec",
+      "consumers": [
+        "repo/verify",
+        "repo/work"
+      ],
+      "external": "the pre-commit hook install-hooks.sh writes"
+    }
   ]
 }

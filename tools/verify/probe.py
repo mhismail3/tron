@@ -13,8 +13,9 @@ name it (tools/ownership/cards.py), and the static `scripts/tron ownership` chec
   fails before and passes after). The static check is reported separately.
 
 It measures and never gates; exit 0 after any verdict, 1 for a baseline that is not green, 2 for
-usage or Git errors. Logs and a JSON report go to test-results/probe/<sha>/<unit>/; the scratch
-worktree is always removed.
+usage or Git errors. Logs and a JSON report go to test-results/probe/<sha>/<unit>/; baselines are
+shared by the probes of one commit (test-results/probe/<sha>/baseline.json); the scratch worktree
+is always removed.
 """
 from __future__ import annotations
 
@@ -213,7 +214,14 @@ def main(argv: list[str]) -> int:
                             if candidate.is_dir()), None)
         if modules_dir:
             (scratch / verify.GATEWAY / "node_modules").symlink_to(modules_dir)
-        baseline = run_tests(scratch, tests, out / "baseline", args.jobs, args.timeout)
+        # A guardian's baseline depends only on the commit, so probes of one commit share it.
+        cache = out.parent / "baseline.json"
+        known = json.loads(cache.read_text()) if cache.exists() else {}
+        fresh = run_tests(scratch, [test for test in tests if test not in known], out.parent / "baseline", args.jobs, args.timeout)
+        if fresh:
+            known = {**(json.loads(cache.read_text()) if cache.exists() else {}), **fresh}
+            cache.write_text(json.dumps(known, indent=2, sort_keys=True) + "\n")
+        baseline = {test: known[test] for test in tests}
         red = sorted(test for test, outcome in baseline.items() if outcome["outcome"] == "fail")
         if red:
             print(f"probe: {len(red)} guardian(s) already fail at HEAD; fix them first: {', '.join(red)}", file=sys.stderr)
