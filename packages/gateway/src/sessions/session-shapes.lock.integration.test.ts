@@ -19,8 +19,9 @@ import { awaitsWithin } from "../../test-support/wait-for.js";
  * text the product writes itself (the compaction summary prompts and the task
  * worker's report reminder), the messages too. Each chat shape, the task
  * worker and the project chat also record their canonical system entries: the
- * prompt sections' text and the tool schemas (names, descriptions, parameters)
- * added, as the session JSONL persists them.
+ * prompt sections' text and the tools added, as the session JSONL persists them
+ * (shared tools' descriptions and parameters are stripped at comparison, as in
+ * every scenario lock; `home-activation-wake` pins those).
  *
  * Shapes: a plain chat; a chat with an extension tool; a chat with push
  * notifications (the `notify` tool) with and without an extension; a chat with
@@ -163,7 +164,8 @@ describe("gateway/pi-sdk session shapes", () => {
     }
 
     // A chat in the subdirectory of a trusted Git project: the root's Project layer
-    // (skill, extension, instructions) reaches the prompt; after revoking trust it does not.
+    // (skill, extension, instructions) reaches the prompt; after revoking trust the skill and
+    // extension drop while the AGENTS.md instructions stay.
     {
       const gateway = await startLockGateway("session-shape-project");
       gateways.push(gateway);
