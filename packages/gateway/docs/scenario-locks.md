@@ -4,14 +4,14 @@ A scenario lock drives one deterministic scenario through the real Gateway and t
 pinned Pi SDK. A golden lock compares a normalized trace byte for byte with its
 committed golden: a golden diff means the change altered what that trace records.
 The consolidated golden locks each own one thing another party reads verbatim:
-persisted formats (the `store-*` locks, the corpus, `session-entries`), the wire
+persisted formats (the `store-*` locks, `session-entries`), the wire
 contract (`protocol-wire`, `client-event-schemas`) and model-visible text (the SDK
 behavior trace, `session-shapes`). A converted lock asserts its behavior (accepted
 effects, refusals, ordering, identity, persistence and recovery) inline. Two keep a
 narrowed golden: `notifications-waiting` its provider requests, and `notifications-push`
 its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`
-and the store mutation-path tests below assert inline only. The other scenario locks in
+and the store mutation-path tests in the paragraph after the table assert inline only. The other scenario locks in
 the table below compare whole-scenario goldens.
 
 ## Framework
