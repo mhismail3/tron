@@ -21,8 +21,8 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
-// Recipe §8 caching, proved on the wire (#491, #2228): Home
-// turns and the episodic summarizer's calls go through pi-ai's real Anthropic
+// Home's cached view and the summarizer's stretch-only calls, proved on the
+// wire (#491, #2228): Home turns and the episodic summarizer's calls go through pi-ai's real Anthropic
 // request builder to a local Anthropic-compatible endpoint that records every
 // request body and header. Nothing here calls a real provider.
 
@@ -353,7 +353,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     report.cases.push({ case: "openai-responses", requests: requests.map((request) => request.body), summarizerCalls: summaries.length });
   }, 60_000);
 
-  it("lays out Home turns and summarizer calls as the recipe's cached prefix", async () => {
+  it("lays out Home turns as the recipe's cached prefix and sends summarizer steps alone", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "cache-designate", model: MODEL });
     await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "cache-memory", model: MODEL }));

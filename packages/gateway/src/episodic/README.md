@@ -87,8 +87,11 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   chapter-filtered or zoomed children are not falsely marked as view lines. These
   facts share the browser revision and never reconstruct a past activation.
 - **Departures.** No `<chat>` context: the recipe's context imported stale status
-  and identifiers into new lines, so the step is sent alone. New nodes store empty
-  `contextRuns`; older nodes keep theirs and invalidation still honours them. The
+  and identifiers into new lines, so the step is sent alone. The owner writes empty
+  `contextRuns`; stored summaries that hold runs stay readable and invalidation
+  still honours them. A Gateway whose reader requires runs on every summary refuses
+  a store holding run-less summaries (`invalid-store`): rolling back across this
+  needs a restored pre-change backup of `state/episodic/`. The
   view refolds from message 0 only at load (yielding every 2,000 messages); revoked
   merged parts expand to leaves; invalidation carries ancestors and is written
   ancestor-first in chunks of ≤ 2,048 nodes (`open` repairs crashed chunks); blocked

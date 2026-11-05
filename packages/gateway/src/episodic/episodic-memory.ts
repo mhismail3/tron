@@ -986,7 +986,8 @@ export class EpisodicMemory {
   }
 
   /** Rule 3 of gist §4.1: a node builds only once every view part before its
-   * end is built (`end <= first(view)`), so leaves are summarized in order. */
+   * end is built (`end <= first(view)`), so the view's built prefix grows
+   * contiguously for `whenReady` and its cached head stays stable (#491). */
   private nextStartable(): { level: number; index: number } | undefined {
     const count = this.messages.size;
     const first = this.firstUnbuilt();

@@ -164,9 +164,9 @@ export interface EpisodicNodeRecord {
   text: string;
   /** Revisions of the two children a merge was built from. */
   childRevisions?: readonly [number, number];
-  /** The context runs a node's compactor call was given. Empty for a free node
-   * and for every summary built from its stretch alone; only older summaries,
-   * built with the view's context, hold runs. */
+  /** View lines a summary depends on, as level runs from message 0. The
+   * owner writes none; a store may still hold summaries with runs, which stay
+   * readable and make the summary a dependent of those lines. */
   contextRuns: readonly EpisodicContextRun[];
   textDigest: string;
   /** sha256 of the child texts (merge) or the source message text (leaf). */
@@ -268,7 +268,7 @@ export interface EpisodicUsage { input: number; output: number; cacheRead: numbe
  * but not listed. A production view holds ~250 parts, so this is headroom. */
 export const EPISODIC_STATUS_PARTS = 1_024;
 
-/** One compactor conversation (gist §4.2, §4.3). The step is the last turn. */
+/** One compactor conversation (gist §4.2, §4.3). The step is the first turn. */
 export interface EpisodicCompactorRequest {
   /** The COMPACT prompt (gist §4.4), constant for every call. */
   system: string;
