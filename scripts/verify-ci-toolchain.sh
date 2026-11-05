@@ -32,6 +32,22 @@ for tool in "$@"; do
       [[ -f "$presets/base.yml" && -f "$presets/Platforms/iOS.yml" && -f "$presets/Platforms/macOS.yml" ]] \
         || { echo "xcodegen setting presets are incomplete" >&2; exit 1; }
       ;;
+    release)
+      # The maintainer's manual iOS release (packages/ios-app/docs/development.md) archives with this exact Xcode.
+      [[ "$TRON_RELEASE_IOS_DEVELOPER_DIR" != *[Bb]eta* ]] \
+        || { echo "release Xcode must not be a beta bundle: $TRON_RELEASE_IOS_DEVELOPER_DIR" >&2; exit 1; }
+      [[ -d "$TRON_RELEASE_IOS_DEVELOPER_DIR" ]] \
+        || { echo "release Xcode is not installed: $TRON_RELEASE_IOS_DEVELOPER_DIR" >&2; exit 1; }
+      release_xcode="$(DEVELOPER_DIR="$TRON_RELEASE_IOS_DEVELOPER_DIR" xcodebuild -version)"
+      [[ "$(sed -n '1s/^Xcode //p' <<< "$release_xcode")" == "$TRON_RELEASE_IOS_XCODE_VERSION" \
+         && "$(sed -n '2s/^Build version //p' <<< "$release_xcode")" == "$TRON_RELEASE_IOS_XCODE_BUILD" ]] \
+        || { echo "release Xcode must be $TRON_RELEASE_IOS_XCODE_VERSION ($TRON_RELEASE_IOS_XCODE_BUILD); found: ${release_xcode//$'\n'/ }" >&2; exit 1; }
+      release_sdk="$(DEVELOPER_DIR="$TRON_RELEASE_IOS_DEVELOPER_DIR" xcrun --sdk iphoneos --show-sdk-version)"
+      [[ "$release_sdk" == "$TRON_RELEASE_IOS_SDK_VERSION" ]] \
+        || { echo "release iPhoneOS SDK must be $TRON_RELEASE_IOS_SDK_VERSION; found: $release_sdk" >&2; exit 1; }
+      DEVELOPER_DIR="$TRON_RELEASE_IOS_DEVELOPER_DIR" xcodebuild -checkFirstLaunchStatus >/dev/null \
+        || { echo "release Xcode first-launch tasks or license acceptance are incomplete" >&2; exit 1; }
+      ;;
     *) echo "unsupported tool verification: $tool" >&2; exit 64 ;;
   esac
 done

@@ -127,8 +127,10 @@
       "kind": "exec",
       "consumers": [
         "repo/ios",
-        "repo/profile"
-      ]
+        "repo/profile",
+        "repo/root"
+      ],
+      "external": "maintainer before an iOS release (`release`, packages/ios-app/docs/development.md)"
     }
   ],
   "uses": [

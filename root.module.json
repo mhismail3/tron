@@ -49,7 +49,6 @@
       "scripts/ios-gateway-e2e-test",
       "scripts/ios-gateway-fault-proxy.mjs",
       "scripts/ios-mac-terminal-journey",
-      "scripts/ios-release-toolchain-doctor.sh",
       "scripts/ios-share-publish.py",
       "scripts/ios-share-server.py",
       "scripts/ios-test-build-identity.py",

@@ -6,7 +6,6 @@
     "ios-gateway-e2e-fixture.sh",
     "ios-gateway-fault-proxy.mjs",
     "ios-mac-terminal-journey",
-    "ios-release-toolchain-doctor.sh",
     "ios-share-publish.py",
     "ios-share-server.py",
     "ios-test-build-identity.py",
@@ -52,11 +51,6 @@
         "ios-app/ui-tests",
         "repo/verify"
       ]
-    },
-    {
-      "name": "scripts/ios-release-toolchain-doctor.sh",
-      "kind": "exec",
-      "external": "maintainer before an iOS release (packages/ios-app/docs/development.md)"
     },
     {
       "name": "scripts/ios-share-publish.py",
