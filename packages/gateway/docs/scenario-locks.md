@@ -12,7 +12,7 @@ narrowed golden: `notifications-waiting` its provider requests, and `notificatio
 its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock`
 scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`,
-`run-extension-ui`), `run-queue-control`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers`, `automation-owned-run` and the store mutation-path tests in the paragraph after the table
+`run-extension-ui`), `run-queue-control`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers`, `admin-settings-change`, `automation-owned-run` and the store mutation-path tests in the paragraph after the table
 assert inline only. The other scenario locks in
 the table below compare whole-scenario goldens.
 
@@ -70,7 +70,7 @@ the `computer` module registers only on darwin.
 | `gateway/transport` | `transport-reconnect-snapshot` | a client drops mid-run and reopens to the live run, then the settled one; the prompt runs once |
 | `gateway/session-catalog` | `project-root-trust` | a chat in a subdirectory of an untrusted Git project: trust resolves to the root and refuses creation, a client's decision is saved for the root, and the chat keeps its cwd while the root's settings, compaction budgets, skill and extension (not the subdirectory's) load; revoking the decision reloads it without them |
 | `gateway/session-catalog` | `project-root-resources` | `packages.list` and `hooks.list` for a subdirectory of a Git project (harness option `administrativeResources`: the production package and hook owners) list the root's package and extension, never the subdirectory's, once the project is trusted |
-| `gateway/admin` | `admin-settings-change` | `settings.change` at the Global scope: resolution, a live chat, history, files, notifications |
+| `gateway/admin` | `admin-settings-change` | `settings.change` at the Global scope: resolution, a live chat, history, files, notifications. Inline checks (`expectScenario`): every request and response, the settings files and the notifications (none enqueued) |
 | `gateway/notifications` | `notifications-push` | inline checks: a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat (exact relay envelopes, receipts, inbox); a presented chat's are suppressed; a Home task worker's end pushes nothing. Golden: its client event schemas and provider requests |
 | `gateway/notifications` | `notifications-waiting` | inline checks: a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished`. Golden: its provider requests |
 | `gateway/notifications` | `notifications-queued-restart` | inline checks: with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
