@@ -158,7 +158,7 @@ class ProbeTests(unittest.TestCase):
 
     def test_sigterm_stops_running_tests_and_removes_the_worktree(self) -> None:
         r = self.repo
-        marker = "61.25"  # a sleep this probe alone starts
+        marker = f"61.{os.getpid() % 100000:05d}"  # a sleep only this run starts
         r.write("tools/caller/tests/test-caller.sh", f"#!/usr/bin/env bash\n# Slow guardian.\nsleep {marker}\n")
         r.commit("slow")
         process = subprocess.Popen([str(r.path / "scripts/tron"), "probe", "tools/caller/caller.sh"], cwd=r.path, env=r.env,
