@@ -23,7 +23,6 @@
     "sessions/locks/project-root-resources.golden.json",
     "sessions/session-archive-store.ts",
     "sessions/session-archive.lock.integration.test.ts",
-    "sessions/locks/session-archive-paths.golden.json",
     "sessions/session-branch.ts",
     "session-catalog.module.json",
     "sessions/session-catalog.store.lock.integration.test.ts",
