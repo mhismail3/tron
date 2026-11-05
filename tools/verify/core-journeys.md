@@ -38,8 +38,8 @@ All rows below were executed on `7964f6dd9` (clean worktree). Raw logs, xcresult
 | `TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground` | Native | Pair by invitation, type unique prompt, Send → sent row present; streamed reply reaches its completion marker | Then reconnect phases (row 6) | N pass |
 | `TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools` | Process | Prompt with commandId, accepted response dropped → `command.status` completed with operationId; reconnect snapshot idle with reply; prompt appears exactly once | Lost response; detached completion after client retirement | E fail then pass |
 
-**GAP #2230:** the assistant reply is counted once only inside the lock's golden-gated
-`validate`; the Process/Native rows assert presence, not exactly-once or canonical persistence.
+**GAP #2230:** the assistant reply is counted exactly once only by the lock's inline
+canonical-message check; the Process/Native rows assert presence, not exactly-once or canonical persistence.
 
 ## 2. Delegate / result — real child result returns; owned cancellation and settlement
 
