@@ -194,10 +194,9 @@ The Home tasks mutation-path lock (`home-task-store-paths`, `gateway/home`) stil
 uses `test-support/store-path-lock.ts`: it drives the store's writes on a fresh home
 under a fixed clock and pins each step's result or refusal and the exact files after
 it in its golden.
-Generated ids come from the same counted `randomUUID` as corpus recording. A value
-the host file system assigns (the index's device and inode identity) is named by a
-stable alias, and the index lock sets each transcript's modification time itself. The
-run-marker lock holds a queued write in the store's own file-system option to pin
+The catalog metadata index test reads each file's device and inode identity from
+the file system it asserts against, and sets each transcript's modification time
+itself. The run-marker lock holds a queued write in the store's own file-system option to pin
 that a later write waits for it.
 Command receipts also have `command-receipt-concurrency`: capacity bounds, an
 inventory rebuild opened from inside the receipt writer during another command's
