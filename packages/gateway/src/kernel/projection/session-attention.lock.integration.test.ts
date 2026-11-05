@@ -32,7 +32,7 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
   const stored = (sessions: Record<string, unknown>, reconciledThrough = T0) => ({ version: 1, reconciledThrough, sessions });
   const none = { ...projection(0, 0, false), unacknowledged: false };
 
-  await expect(store.complete("a", "a-1"), "mutation before initialize").rejects.toThrow("Session attention store is not initialized");
+  await expect(store.complete("a", "a-1"), "mutation before initialize").rejects.toThrow(expect.objectContaining({ message: "Session attention store is not initialized" }));
   expect(await committed()).toBeUndefined();
   await mkdir(join(home, "gateway"), { recursive: true });
   await store.initialize();
@@ -83,8 +83,8 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
   expect(await committed()).toEqual(stored({ b: bAcknowledged, c: aRead }));
   expect(await store.rekey("a", "c"), "rekey the absent a again").toBe(false);
   expect(await store.rekey("c", "c"), "rekey c to itself").toBe(false);
-  await expect(store.rekey("c", "b"), "rekey c onto b").rejects.toThrow("Replacement session already has attention state");
-  await expect(store.assertAbsent("b")).rejects.toThrow("New session identity already has attention state");
+  await expect(store.rekey("c", "b"), "rekey c onto b").rejects.toThrow(expect.objectContaining({ message: "Replacement session already has attention state" }));
+  await expect(store.assertAbsent("b")).rejects.toThrow(expect.objectContaining({ message: "New session identity already has attention state" }));
   await expect(store.assertAbsent("d")).resolves.toBeUndefined();
   expect(await committed(), "refusals commit nothing").toEqual(stored({ b: bAcknowledged, c: aRead }));
 
@@ -136,7 +136,7 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
     [document({ x: [] }), "Invalid session attention record"],
     [document({ x: "unread" }), "Invalid session attention record"],
   ] as const) {
-    await expect(reopen(refused), JSON.stringify(refused).slice(0, 120)).rejects.toThrow(message);
+    await expect(reopen(refused), JSON.stringify(refused).slice(0, 120)).rejects.toThrow(expect.objectContaining({ message: message }));
     expect(await committed(), "a refused document is kept as written").toEqual(refused);
   }
 });

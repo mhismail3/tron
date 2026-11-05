@@ -52,7 +52,7 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   for (const candidate of [{ ...limits, maximumItemBytes: -1 }, { ...limits, maximumItems: 0 }, { ...limits, maximumTotalBytes: 63 },
     { ...limits, maximumReaders: 0 }, { ...limits, maximumReaders: 1.5 }, { ...limits, maximumFileProductions: 0 },
     { ...limits, maximumFileProductions: 1.5 }, { ...limits, minimumFreeBytes: -1 }, { ...limits, minimumFreeBytes: 0.5 }]) {
-    expect(() => new BlobStore(candidate, Date.now, directory), JSON.stringify(candidate)).toThrow("Invalid blob store limits");
+    expect(() => new BlobStore(candidate, Date.now, directory), JSON.stringify(candidate)).toThrow(expect.objectContaining({ message: "Invalid blob store limits" }));
   }
   for (const candidate of [{ ...limits, maximumItems: 1 }, { ...limits, maximumTotalBytes: 64 }]) {
     expect(() => new BlobStore(candidate, Date.now, directory), JSON.stringify(candidate)).not.toThrow();
