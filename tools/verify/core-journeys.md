@@ -116,7 +116,7 @@ only when the whole trace equals its golden, so these goldens gate the assertion
 | Home wake | `modules/home/locks/home-activation-wake.golden.json` | prompt hashes + full tool schemas | #2189 |
 | Home restart | `modules/home/locks/home-contention-restart.golden.json` | full tool descriptions/schemas | #2236 |
 | Settings | `admin/locks/admin-settings-change.golden.json` | whole exchange/file trace | #2236 |
-| Reconnect | `transport/locks/transport-reconnect-snapshot.golden.json`, `sessions/locks/run-lifecycle-rpcs.golden.json`, `run-cold-load-eviction.golden.json` | prompt hash | #2189 |
+| Reconnect | `transport/locks/transport-reconnect-snapshot.golden.json`, `sessions/locks/run-lifecycle-rpcs.golden.json`; the cold-load prompt hash is in `test-fixtures/pi-sdk/session-shapes.golden.json` | prompt hash | #2189 |
 | Wire | `protocol/locks/protocol-wire.golden.json` | method shapes, prompt section headings | #2236 |
 
 Native pixel/geometry oracles in the reconnect journey

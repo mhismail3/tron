@@ -71,10 +71,10 @@ export function projectedSnapshot(value: unknown): unknown {
 
 /** What a converted scenario lock expects of one session, generated from its former golden and reviewed as code. */
 export interface SessionLockExpectation {
-  /** Every client request (method, parameters) and its response, except `session.transcript` reads. */
+  /** Every client request (method, parameters) and its response; `session.transcript` reads only when `items` is absent. */
   readonly exchanges: unknown[];
-  /** The transcript items a client reads at the end. */
-  readonly items: unknown[];
+  /** The transcript items a client reads at the end, when the lock reads one session's transcript separately. */
+  readonly items?: unknown[];
   /** The canonical messages after the system entry. */
   readonly messages: unknown[];
   /** Each canonical entry's type (with custom type or message role), in file order. */
@@ -117,11 +117,14 @@ export interface SessionLockActual {
 
 /** Assert one converted scenario lock's session against its expectation, exactly. */
 export function expectSessionLock(label: string, actual: SessionLockActual, expected: SessionLockExpectation): void {
-  expect((actual.exchanges as Array<{ method: string; params: unknown; response: unknown }>).filter((exchange) => exchange.method !== "session.transcript")
+  expect((actual.exchanges as Array<{ method: string; params: unknown; response: unknown }>)
+    .filter((exchange) => expected.items === undefined || exchange.method !== "session.transcript")
     .map((exchange) => ({ method: exchange.method, params: projectedSnapshot(exchange.params), response: projectedSnapshot(exchange.response) })),
   `${label}: the client's requests and responses`).toEqual(expected.exchanges);
-  expect(projected(actual.items), `${label}: the transcript a client reads`).toEqual(expected.items);
-  expect(toolCallsResolve(actual.items), `${label}: each tool call has its result, in its group`).toBe(true);
+  if (expected.items !== undefined) {
+    expect(projected(actual.items), `${label}: the transcript a client reads`).toEqual(expected.items);
+    expect(toolCallsResolve(actual.items), `${label}: each tool call has its result, in its group`).toBe(true);
+  }
   expect(canonicalMessages(actual.canonical), `${label}: the canonical messages`).toEqual(expected.messages);
   expect(actual.canonical.map(entryType), `${label}: the canonical entries, in order`).toEqual(expected.types);
   expect(invocationReceipts(actual.canonical), `${label}: the invocation receipts, in order`).toEqual(expected.receipts);
