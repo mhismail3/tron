@@ -1,10 +1,18 @@
 # Scenario locks
 
-A scenario lock records what one deterministic scenario makes the real Gateway
-and the pinned Pi SDK emit, persist and send, normalizes it, and compares it
-byte for byte with a committed golden.
-Restructure slices must leave every golden unchanged; a golden diff means the
-slice changed behavior.
+A scenario lock drives one deterministic scenario through the real Gateway and the
+pinned Pi SDK. A golden lock compares a normalized trace byte for byte with its
+committed golden: a golden diff means the change altered what that trace records.
+The consolidated golden locks each own one thing another party reads verbatim:
+persisted formats (the `store-*` locks, `session-entries`), the wire
+contract (`protocol-wire`, `client-event-schemas`) and model-visible text (the SDK
+behavior trace, `session-shapes`). A converted lock asserts its behavior (accepted
+effects, refusals, ordering, identity, persistence and recovery) inline. Two keep a
+narrowed golden: `notifications-waiting` its provider requests, and `notifications-push`
+its provider requests and event shapes (the latter also pinned by
+`client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`
+and the store mutation-path tests in the paragraph after the table assert inline only. The other scenario locks in
+the table below compare whole-scenario goldens.
 
 ## Framework
 
@@ -35,7 +43,11 @@ slice changed behavior.
   with scripted requests.
 
 A lock's golden lives beside its test in `locks/<name>.golden.json`, owned by
-the test's module. Goldens are darwin-specific, as for the SDK boundary trace:
+the test's module; `session-shapes` and `session-entries`, like the SDK behavior trace,
+keep theirs in `test-fixtures/pi-sdk/` and write their actual traces to
+`test-results/session-*.actual.json`. `test-support/lock-scenarios.ts` holds the scenarios that a
+scenario lock and the consolidated locks (`client-event-schemas`, `session-entries`)
+both run; `client-event-schemas` adds one Session-scope `settings.change` of its own. Goldens are darwin-specific, as for the SDK boundary trace:
 the `computer` module registers only on darwin.
 
 ## Locks
@@ -57,21 +69,34 @@ the `computer` module registers only on darwin.
 | `gateway/session-catalog` | `project-root-trust` | a chat in a subdirectory of an untrusted Git project: trust resolves to the root and refuses creation, a client's decision is saved for the root, and the chat keeps its cwd while the root's settings, compaction budgets, skill and extension (not the subdirectory's) load; revoking the decision reloads it without them |
 | `gateway/session-catalog` | `project-root-resources` | `packages.list` and `hooks.list` for a subdirectory of a Git project (harness option `administrativeResources`: the production package and hook owners) list the root's package and extension, never the subdirectory's, once the project is trusted |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Global scope: resolution, a live chat, history, files, notifications |
-| `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
-| `gateway/notifications` | `notifications-waiting` | a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished` |
-| `gateway/notifications` | `notifications-queued-restart` | with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
-| `gateway/notifications` | `notifications-queued-cancel` | removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
+| `gateway/notifications` | `notifications-push` | inline checks: a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat (exact relay envelopes, receipts, inbox); a presented chat's are suppressed; a Home task worker's end pushes nothing. Golden: its client event schemas and provider requests |
+| `gateway/notifications` | `notifications-waiting` | inline checks: a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished`. Golden: its provider requests |
+| `gateway/notifications` | `notifications-queued-restart` | inline checks: with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
+| `gateway/notifications` | `notifications-queued-cancel` | inline checks: removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
 | `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
 | `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
+| `gateway/pi-sdk` | `session-shapes` | what the model receives for each kind of session (plain chat, extension tool, notifications, automations, Home task worker and its reminder, trusted and revoked project subdirectory, compaction): tool names, prompt sections and hash, canonical system entries (section text and tool schemas), and the product-written messages. Golden in `test-fixtures/pi-sdk/` |
+| `gateway/pi-sdk` | `session-entries` | every distinct Tron custom session entry (`tron.chat-invocation.v1`, `tron.settings.v1`, `tron.context-window.v1`, `tron.extension-activity.v1`) the shared scenarios persist, with its values; each lock's faux provider name becomes `<lock>`. Golden in `test-fixtures/pi-sdk/` |
+| `gateway/protocol` | `client-event-schemas` | every client event topic with the union of its payload paths, across the shared scenarios that together reach every shape (`test-support/lock-scenarios.ts`) |
+
+Store mutation-path tests assert inline, each driving one store's writes on a fresh
+home (under a fixed clock where the store records times; `catalog-metadata-index.lock`
+sets file times explicitly and `tron-workspace.lock` records none) and asserting each
+step's result or refusal and the exact persisted documents after it: `session-archive.lock`, `blob-store.lock`,
+`catalog-metadata-index.lock` (`gateway/session-catalog`), `session-attention.lock`
+(`gateway/projection`), `run-markers.lock` (`gateway/run`), `tron-workspace.lock`
+(`gateway/workspace`) and `command-receipts.lock` (`gateway/transport`; its paths test
+pins the receipt file names and documents the store writes).
 
 The delivery locks (`notifications-queue.lock`) script the relay's availability and run
 the owner on a clock they freeze and advance, so no retry comes due by host timing; their
 restart is a new `NotificationService` over the same Tron home, the push store being the
 persistence authority, not a whole-process restart. Dedupe keys and relay request ids are
-digests of per-run session ids, relabelled by first appearance. The waiting lock prompts
+digests of per-run session ids, checked by shape and identity: a retry reuses its request
+id, and a push's receipt, queued intent and inbox entry share one dedupe key. The waiting lock prompts
 again only once the previous turn's terminal work has left the drain's blockers (#1567).
 `home-contention-restart` restarts by disposing the first Gateway (its registry aborts
 the worker's turn, as a `restartNow` shutdown does; not a crash) and starting another
@@ -165,18 +190,13 @@ Knowledge lock.
 | `gateway/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |
 | Pi session JSONL, `agent/` auth, MCP and settings | Pi SDK | Pi persisted-state corpus (`gateway/pi-sdk`) |
 
-Mutation-path locks (`test-support/store-path-lock.ts`) drive one store's
-writes on a fresh home under a fixed clock and pin each step's result or refusal
-and the exact files after it: session attention (`gateway/projection`), session
-archive, the blob store behind `gateway/blobs/` and `gateway/exports/`, and the
-cold-catalog metadata index `gateway/catalog-metadata-v3/` and its v2 migration
-(`gateway/session-catalog`), command receipts (`gateway/transport`), run
-markers (`gateway/run`), Home tasks and their
-authority (`gateway/home`), and the workspace-state markers (`gateway/workspace`).
-Generated ids come from the same counted `randomUUID` as corpus recording. A value
-the host file system assigns (the index's device and inode identity) is named by a
-stable alias, and the index lock sets each transcript's modification time itself. The
-run-marker lock holds a queued write in the store's own file-system option to pin
+The Home tasks mutation-path lock (`home-task-store-paths`, `gateway/home`) still
+uses `test-support/store-path-lock.ts`: it drives the store's writes on a fresh home
+under a fixed clock and pins each step's result or refusal and the exact files after
+it in its golden.
+The catalog metadata index test reads each file's device and inode identity from
+the file system it asserts against, and sets each transcript's modification time
+itself. The run-marker lock holds a queued write in the store's own file-system option to pin
 that a later write waits for it.
 Command receipts also have `command-receipt-concurrency`: capacity bounds, an
 inventory rebuild opened from inside the receipt writer during another command's
