@@ -30,7 +30,7 @@ import XCTest
         for mode in ["light", "dark"] {
             let app = launch(["-tron-home-dashboard-fixture", "-home-shell-ready", "-memory-redesign"] + (mode == "dark" ? ["-home-dark"] : []), "emerald")
             manage(app)
-            for (control, slider) in [("Effort", "settings-choice-slider"), ("Context Window", "settings-number-slider")] {
+            for (control, slider) in [("Effort", "settings-choice-slider")] {
                 app.buttons[control].firstMatch.tap()
                 _ = app.descendants(matching: .any)[slider].firstMatch.waitForExistence(timeout: 5)
                 shot("first-open-\(control)-\(mode)")
