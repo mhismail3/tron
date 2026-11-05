@@ -134,9 +134,9 @@ class VerifyCase(unittest.TestCase):
 
 
 class ExternalVerificationTests(VerifyCase):
-    def external(self, name: str, body: str | None = None) -> str:
+    def external(self, name: str, body: str | None = None, path: str | None = None) -> str:
         r = self.repo
-        path = f"scripts/test-{name}.py"
+        path = path or f"scripts/test-{name}.py"
         r.write(path, body if body is not None else
                 f"from pathlib import Path\np=Path('test-results/{name}')\np.parent.mkdir(exist_ok=True)\n"
                 "with p.open('a') as stream: stream.write('executed\\n')\n")
@@ -186,6 +186,23 @@ class ExternalVerificationTests(VerifyCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse((r.path / "test-results/direct").exists())
             self.assertFalse((r.path / "test-results/dependent").exists())
+
+    def test_a_tool_suite_beside_its_tool_is_a_declarable_consumer(self) -> None:
+        r = self.repo
+        declared = self.external("tool", path="tools/fixture/tests/test-tool.py")
+        self.declare("alpha", [declared])
+        r.commit("tool-owned consumer")
+        planned = r.verify("--all", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        selection = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
+        self.assertIn("tools/fixture/tests/test-tool.py", selection)
+        # Only a tool's own tests/ directory is admitted, not any Python file under tools/.
+        self.declare("alpha", ["scripts/tron test tooling tools/fixture/helper.py"])
+        r.write("tools/fixture/helper.py", "VALUE = 1\n")
+        r.commit("undeclarable helper")
+        refused = r.verify("--all", "--plan")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("unsupported verify declaration", refused.stdout + refused.stderr)
 
     def test_gateway_declarations_keep_existing_runner_classification(self) -> None:
         r = self.repo
