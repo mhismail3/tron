@@ -13,7 +13,8 @@ helper verify imports into a disposable Git repository and probes one unit as a 
 5. A guardian already red at HEAD is left out and reported; with no green guardian left the probe
    stops with exit 1 before any change.
 6. SIGTERM stops every running test's process group and removes the scratch worktree.
-7. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
+7. A guardian that seals a tree read-only leaves no scratch behind.
+8. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
    checkout's (bundle-gateway.sh runs `npm ci`).
 
 Every run leaves no scratch worktree behind. The last run's output is kept in `test-results/probe-cli/`.
@@ -185,6 +186,17 @@ class ProbeTests(unittest.TestCase):
         self.assertNotEqual(process.returncode, 0, output)
         self.assertEqual(subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode, 1,
                          "a guardian's process outlived the probe")
+
+    def test_a_guardian_that_seals_a_tree_read_only_leaves_no_scratch_behind(self) -> None:
+        r = self.repo
+        r.write("tools/caller/tests/test-caller.sh", CALLER_TEST.replace(
+            "out=$(", "mkdir -p \"$TMPDIR/sealed/a\" sealed/b && touch \"$TMPDIR/sealed/a/f\" sealed/b/f && "
+                      "chmod -R a-w \"$TMPDIR/sealed\" sealed\nout=$("))
+        r.commit("a guardian that seals its output")
+        result, report = r.probe("tools/caller/caller.sh")
+        self.assertEqual(report["verdict"], "precise", result.stdout + result.stderr)
+        left = sorted(path.name for path in Path(self.temp.name).iterdir() if path.name.startswith(("probe-test-", "tron-probe-")))
+        self.assertEqual(left, [], result.stderr)
 
     def test_a_guardian_that_reinstalls_dependencies_leaves_the_checkouts_copy_alone(self) -> None:
         r = self.repo

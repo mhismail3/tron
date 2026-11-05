@@ -107,6 +107,21 @@ RUNNING: set = set()  # test process groups this probe started; stopped on inter
 STOPPING = threading.Event()
 
 
+def remove_tree(path: Path) -> None:
+    """Delete a scratch tree a guardian may have sealed read-only (bundle-gateway.sh seals payloads); say so if it stays."""
+    if not path.exists():
+        return
+    for folder, directories, _ in os.walk(path):
+        for name in [folder, *(os.path.join(folder, d) for d in directories)]:
+            try:
+                os.chmod(name, os.stat(name, follow_symlinks=False).st_mode | 0o700, follow_symlinks=False)
+            except (OSError, NotImplementedError):
+                pass
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():
+        print(f"probe: could not remove {path}; remove it by hand", file=sys.stderr)
+
+
 def stop_running() -> None:
     STOPPING.set()
     for process in list(RUNNING):
@@ -145,7 +160,7 @@ def run_tests(scratch: Path, tests: list[str], logs: Path, jobs: int, timeout: f
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            shutil.rmtree(private, ignore_errors=True)
+            remove_tree(private)
         log = logs / (test.replace("/", "__") + ".log")
         log.write_text(output)
         return test, {"outcome": "pass" if code == 0 else "fail", "exit": code, "seconds": round(time.time() - started, 1),
@@ -286,7 +301,7 @@ def main(argv: list[str]) -> int:
         after = run_tests(scratch, tests, out / "after", args.jobs, args.timeout)
     finally:
         git(verify.ROOT, "worktree", "remove", "--force", str(scratch), check=False)
-        shutil.rmtree(scratch.parent, ignore_errors=True)
+        remove_tree(scratch.parent)
         git(verify.ROOT, "worktree", "prune", check=False)
     names = names_of(unit, files)
     failing = {test: (verify.ROOT / outcome["log"]).read_text() for test, outcome in after.items()
