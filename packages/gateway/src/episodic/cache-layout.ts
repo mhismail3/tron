@@ -1,18 +1,12 @@
 /**
- * Prompt-caching layout for requests that carry a memory view.
+ * Prompt-caching layout for Home requests, which carry the memory view.
  *
- * The episodic summarizer's context uses the recipe's cuts (OptChat gist §8): the
- * context is cut into pieces at the last line end before each mark, so two calls
- * whose contexts share their start share the pieces before the first cut that
- * differs. Home's activations send the view in fixed groups of lines instead
- * (`viewPieces`, #2228). Anthropic caches only where a request places
+ * Home's activations send the view in fixed groups of lines (`viewPieces`,
+ * #2228). Anthropic caches only where a request places
  * `cache_control`, at most four times per request, and keys each entry by every
  * block before it; OpenAI and DeepSeek cache shared prefixes on their own, so for
  * them the order of the request is the whole layout.
  */
-
-/** Where the view is cut, in characters (gist §8; picked there by replaying real sessions). */
-const CACHE_MARKS = [50_000, 80_000, 100_000] as const;
 
 /**
  * View lines per block of a Home request. Four lines keep the uncached partial
@@ -22,25 +16,6 @@ export const VIEW_BLOCK_LINES = 4;
 
 /** Anthropic refuses a request with more `cache_control` blocks than this. */
 export const ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4;
-
-/**
- * `text` cut at the last line end at or before each mark; a mark past the end
- * of the text, or with no new line end before it, adds no cut. The pieces
- * rejoin to exactly `text`, and every piece but the last ends with a line end.
- */
-export function cachePieces(text: string): string[] {
-  const pieces: string[] = [];
-  let start = 0;
-  for (const mark of CACHE_MARKS) {
-    if (mark >= text.length) break;
-    const lineEnd = text.lastIndexOf("\n", mark - 1);
-    if (lineEnd < start) continue;
-    pieces.push(text.slice(start, lineEnd + 1));
-    start = lineEnd + 1;
-  }
-  if (start < text.length || pieces.length === 0) pieces.push(text.slice(start));
-  return pieces;
-}
 
 type Json = Record<string, unknown>;
 

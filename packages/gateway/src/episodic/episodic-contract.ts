@@ -164,8 +164,9 @@ export interface EpisodicNodeRecord {
   text: string;
   /** Revisions of the two children a merge was built from. */
   childRevisions?: readonly [number, number];
-  /** The context runs of this node's compactor call. Empty for a free node,
-   * which made no call. */
+  /** View lines a summary depends on, as level runs from message 0. The
+   * owner writes none; a store may still hold summaries with runs, which stay
+   * readable and make the summary a dependent of those lines. */
   contextRuns: readonly EpisodicContextRun[];
   textDigest: string;
   /** sha256 of the child texts (merge) or the source message text (leaf). */
@@ -267,16 +268,13 @@ export interface EpisodicUsage { input: number; output: number; cacheRead: numbe
  * but not listed. A production view holds ~250 parts, so this is headroom. */
 export const EPISODIC_STATUS_PARTS = 1_024;
 
-/** One compactor conversation (gist §4.2, §4.3). The step is the last turn. */
+/** One compactor conversation (gist §4.2, §4.3). The step is the first turn. */
 export interface EpisodicCompactorRequest {
   /** The COMPACT prompt (gist §4.4), constant for every call. */
   system: string;
   /** Alternating turns: the step, the reply, the size feedback, the reply. */
   turns: Array<{ role: "user" | "assistant"; text: string }>;
   signal: AbortSignal;
-  /** The start of the first turn that consecutive calls share: the context
-   * block (gist §8, "the compactor calls share their <chat> prefix"). */
-  cachePrefix: string;
   /** Stable for one memory, so a provider routes its calls to one cache. */
   cacheKey: string;
 }

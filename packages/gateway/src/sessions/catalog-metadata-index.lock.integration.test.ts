@@ -1,25 +1,25 @@
-import { appendFile, chmod, lstat, mkdir, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { it } from "vitest";
-import { storePathLock } from "../../test-support/store-path-lock.js";
+import { expect, it, onTestFinished } from "vitest";
 import { CatalogMetadataIndex, catalogActivityTimestamp, type CatalogMetadataIndexRow, type CatalogMetadataIndexSummary } from "./catalog-metadata-index.js";
 
 /**
- * `gateway/session-catalog` mutation-path lock for the cold-catalog metadata index
- * `gateway/catalog-metadata-v3/` and the superseded `gateway/catalog-metadata-v2.json` it
- * migrates (plan §6.5 V4, §6.6; test-support/store-path-lock.ts): rows stamped from a
+ * `gateway/session-catalog` cold-catalog metadata index `gateway/catalog-metadata-v3/`
+ * and the superseded `gateway/catalog-metadata-v2.json` it migrates: rows stamped from a
  * summary, sharded saves and their bounds, appends, reconcile with its stop and
- * unproven candidates, legacy document and row admission, and disposal. File times
- * are set explicitly and device/inode identities are aliased, so the golden is the
- * index's own arithmetic over real files. Shard digests hash bytes that carry the
- * temporary root, so they are aliased too.
+ * unproven candidates, legacy document and row admission, and disposal. File times are
+ * set explicitly, so sizes, times and tail hashes are the index's own arithmetic over
+ * real files. Each persisted manifest and shard is asserted as the exact document, except
+ * shard digests: those hash bytes that carry the temporary root, so they are checked by
+ * shape and by equality across steps whose shard bytes are unchanged.
  */
 it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admission and dispose", async () => {
-  const log = await storePathLock({ module: "gateway/session-catalog", name: "catalog-metadata-index-paths", testFileUrl: import.meta.url,
-    owned: "gateway", aliases: ["fileIdentity"], digests: ["digest"] });
+  const home = join(await realpath(await mkdtemp(join(tmpdir(), "tron-catalog-metadata-"))), "home");
+  onTestFinished(() => rm(join(home, ".."), { recursive: true, force: true }));
   const failures: string[] = [];
-  const gateway = join(log.home, "gateway");
-  const root = join(log.home, "sessions");
+  const gateway = join(home, "gateway");
+  const root = join(home, "sessions");
   await mkdir(root, { recursive: true });
   const index = new CatalogMetadataIndex(gateway, (stage) => { failures.push(stage); });
   const time = "2026-01-01T00:00:00.000Z";
@@ -36,50 +36,92 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     return { path, id, cwd, fileIdentity: `${info.dev}:${info.ino}`, size: info.size, mtimeMs: info.mtimeMs };
   };
   const reported = async <T>(run: () => Promise<T>) => { failures.length = 0; const value = await run(); return { value: value ?? null, failures: [...failures] }; };
+  /**
+   * The row the index must hold for `path` as the file is now: its identity, size and
+   * time come from the file itself; the counts, text and tail hash from the scenario.
+   */
+  const fileRow = async (id: string, path: string, rest: { tailBoundaryHash: string } & Partial<CatalogMetadataIndexRow>): Promise<CatalogMetadataIndexRow> => {
+    const info = await lstat(path);
+    return { id, path, cwd: "/work", firstMessage: "hello", createdAt: time, updatedAt: time, messageCount: 1,
+      fileIdentity: `${info.dev}:${info.ino}`, size: info.size, mtimeMs: info.mtimeMs, eofOffset: info.size, ...rest };
+  };
+  /** Every file the index owns under `gateway/`, parsed: the manifest, each shard and the legacy document. */
+  const persisted = async (): Promise<Record<string, unknown>> => {
+    const files: Record<string, unknown> = {};
+    for (const name of (await readdir(gateway).catch(() => [])).sort()) {
+      const path = join(gateway, name);
+      if ((await lstat(path)).isDirectory()) {
+        for (const inner of (await readdir(path)).sort()) files[`${name}/${inner}`] = JSON.parse(await readFile(join(path, inner), "utf8"));
+      } else files[name] = JSON.parse(await readFile(path, "utf8"));
+    }
+    return files;
+  };
+  const digest = expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u);
+  const shardDocument = (shard: string, rows: CatalogMetadataIndexRow[]) => ({ version: 3, root, shard, rows });
+  const manifestDigests = async () => ((await persisted())["catalog-metadata-v3/manifest.json"] as { shards: Array<{ shard: string; digest: string }> }).shards;
 
-  await log.step("load before a document exists", () => index.load(root));
-  await log.step("reconcile before a document exists", () => index.reconcile(root, [], async () => undefined));
+  expect(await index.load(root), "load before a document exists").toBeUndefined();
+  expect(await index.reconcile(root, [], async () => undefined), "reconcile before a document exists").toBeUndefined();
+  expect(await persisted()).toEqual({});
   const one = await session("one", header("s1") + message("user", "hello", 1));
-  let row!: CatalogMetadataIndexRow;
-  await log.step("stamp a row from a summary", async () => { row = (await index.entryFromSummary(summary("s1", one)))!; return row; }, "result");
-  await log.step("a long name and first message are bounded", () => index.entryFromSummary(summary("s1", one, { name: "n".repeat(2_000), firstMessage: "f".repeat(2_000) })));
-  const refusedSummaries: Array<[string, () => Promise<CatalogMetadataIndexSummary>]> = [
-    ["a missing file", async () => summary("s1", join(root, "missing.jsonl"))],
-    ["a directory", async () => { await mkdir(join(root, "folder.jsonl")); return summary("s1", join(root, "folder.jsonl")); }],
-    ["a symbolic link", async () => { await symlink(one, join(root, "link.jsonl")); return summary("s1", join(root, "link.jsonl")); }],
-    ["another session id", async () => summary("s9", one)],
-    ["another working directory", async () => ({ ...summary("s1", one), cwd: "/elsewhere" })],
-    ["an empty file", async () => summary("s1", await session("empty", ""))],
-    ["a header that is not JSON", async () => summary("s1", await session("garbled", "{not json\n"))],
-    ["a header of another type", async () => summary("s1", await session("typed", `${JSON.stringify({ type: "message", id: "s1", cwd: "/work" })}\n`))],
-    ["a file without a final newline", async () => summary("s1", await session("open", header("s1") + message("user", "hello", 1).trimEnd()))],
-    ["a parse of an earlier size", async () => summary("s1", one, { parsedSize: 10 })],
+  const oneTail = "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE";
+  let row = (await index.entryFromSummary(summary("s1", one)))!;
+  expect(row, "stamp a row from a summary").toEqual(await fileRow("s1", one, { tailBoundaryHash: oneTail }));
+  expect(await index.entryFromSummary(summary("s1", one, { name: "n".repeat(2_000), firstMessage: "f".repeat(2_000) })), "a long name and first message are bounded")
+    .toEqual(await fileRow("s1", one, { tailBoundaryHash: oneTail, name: `${"n".repeat(1_021)}…`, firstMessage: `${"f".repeat(1_021)}…` }));
+  const refusedSummaries: Array<[string, () => Promise<CatalogMetadataIndexSummary>, string[]]> = [
+    ["a missing file", async () => summary("s1", join(root, "missing.jsonl")), ["rebuild"]],
+    ["a directory", async () => { await mkdir(join(root, "folder.jsonl")); return summary("s1", join(root, "folder.jsonl")); }, []],
+    ["a symbolic link", async () => { await symlink(one, join(root, "link.jsonl")); return summary("s1", join(root, "link.jsonl")); }, []],
+    ["another session id", async () => summary("s9", one), []],
+    ["another working directory", async () => ({ ...summary("s1", one), cwd: "/elsewhere" }), []],
+    ["an empty file", async () => summary("s1", await session("empty", "")), []],
+    ["a header that is not JSON", async () => summary("s1", await session("garbled", "{not json\n")), []],
+    ["a header of another type", async () => summary("s1", await session("typed", `${JSON.stringify({ type: "message", id: "s1", cwd: "/work" })}\n`)), []],
+    ["a file without a final newline", async () => summary("s1", await session("open", header("s1") + message("user", "hello", 1).trimEnd())), []],
+    ["a parse of an earlier size", async () => summary("s1", one, { parsedSize: 10 }), []],
   ];
-  for (const [label, prepare] of refusedSummaries) {
-    await log.step(`no row is stamped for ${label}`, async () => { const input = await prepare(); return reported(() => index.entryFromSummary(input)); });
+  for (const [label, prepare, stages] of refusedSummaries) {
+    const input = await prepare();
+    expect(await reported(() => index.entryFromSummary(input)), `no row is stamped for ${label}`).toEqual({ value: null, failures: stages });
   }
-  await log.step("a parse of the current size is stamped", async () => reported(async () => index.entryFromSummary(summary("s1", one, { parsedSize: (await lstat(one)).size }))));
+  const parsedSize = (await lstat(one)).size;
+  expect(await reported(async () => index.entryFromSummary(summary("s1", one, { parsedSize }))), "a parse of the current size is stamped")
+    .toEqual({ value: await fileRow("s1", one, { tailBoundaryHash: oneTail, parsedSize }), failures: [] });
 
-  await log.step("save one row", () => index.save(root, [row]), "result");
-  await log.step("load the saved rows", () => index.load(root), "result");
-  await log.step("load for another catalog root", () => index.load(join(log.home, "elsewhere")));
-  await log.step("a save over the entry bound is not written", () => reported(() => index.save(root, Array.from({ length: 25_001 }, () => row))));
+  expect(await index.save(root, [row]), "save one row").toBe(true);
+  const saved = { "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest }], refused: [] },
+    "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]) };
+  expect(await persisted(), "a save publishes a manifest and the row's shard").toEqual(saved);
+  const savedDigests = await manifestDigests();
+  expect(await index.load(root), "load the saved rows").toEqual([row]);
+  expect(await index.load(join(home, "elsewhere")), "load for another catalog root").toBeUndefined();
+  expect(await reported(() => index.save(root, Array.from({ length: 25_001 }, () => row))), "a save over the entry bound").toEqual({ value: false, failures: ["save"] });
+  expect(await persisted(), "is not written").toEqual(saved);
   // Every copy of one row lands in one shard, so this is one shard over its byte ceiling.
-  await log.step("a shard over its byte bound is not written and the manifest records the refusal", () => reported(() => index.save(root,
-    Array.from({ length: 2_100 }, () => ({ ...row, cwd: "c".repeat(4_096) })))));
-  await log.step("the next accepted save publishes a complete cut again", () => index.save(root, [row]), "result");
-  await log.step("a save into a state directory that is a file is refused", async () => {
-    await writeFile(join(log.home, "blocked"), "");
-    return new CatalogMetadataIndex(join(log.home, "blocked", "gateway")).save(root, [row]);
-  }, "refused");
-  await log.step("an unchanged row appends nothing", () => index.append(row));
+  expect(await reported(() => index.save(root, Array.from({ length: 2_100 }, () => ({ ...row, cwd: "c".repeat(4_096) })))), "a shard over its byte bound")
+    .toEqual({ value: false, failures: ["save"] });
+  expect(await persisted(), "is not written, and the manifest records the refusal").toEqual({
+    "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [], refused: ["13"] }, "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]) });
+  expect(await index.save(root, [row]), "the next accepted save").toBe(true);
+  expect(await persisted(), "publishes a complete cut again").toEqual(saved);
+  expect(await manifestDigests(), "over the same shard bytes").toEqual(savedDigests);
+  await writeFile(join(home, "blocked"), "");
+  await expect(new CatalogMetadataIndex(join(home, "blocked", "gateway")).save(root, [row]), "a save into a state directory that is a file")
+    .rejects.toThrow(`ENOTDIR: not a directory, mkdir '${join(home, "blocked", "gateway", "catalog-metadata-v3")}'`);
+  expect(await persisted(), "the refused save leaves this store unchanged").toEqual(saved);
+  expect(await index.append(row), "an unchanged row appends nothing").toEqual(row);
 
   await appendFile(one, message("assistant", "hi there", 2) + `${JSON.stringify({ type: "session_info", name: "Named" })}\n` + message("user", "again", 3));
   await stamp(one);
-  let grown!: CatalogMetadataIndexRow;
-  await log.step("append counts the new lines", async () => { grown = (await index.append(row))!; return grown; }, "result");
+  const grown = (await index.append(row))!;
+  expect(grown, "append counts the new lines").toEqual(await fileRow("s1", one, { tailBoundaryHash: "eStg-E-tSXUMOtMQKG50o0Q6c30sE5TVMJnyInohmBo",
+    updatedAt: "2026-01-01T00:03:00.000Z", messageCount: 3, name: "Named" }));
+  expect(grown.size, "the row covers the whole file").toBe(408);
   const appends: Array<[string, () => Promise<CatalogMetadataIndexRow>]> = [
     ["a row whose offset is not its size", async () => ({ ...grown, eofOffset: grown.size - 1 })],
+    // An earlier genuine offset and its tail hash still match the file's bytes; only the size disagrees.
+    ["a row whose genuine earlier offset is not its size", async () => ({ ...grown, eofOffset: row.eofOffset, tailBoundaryHash: row.tailBoundaryHash })],
     ["a row of another file", async () => ({ ...grown, fileIdentity: "0:0" })],
     ["a row longer than the file", async () => ({ ...grown, size: grown.size + 10, eofOffset: grown.size + 10 })],
     ["a row whose tail no longer matches", async () => ({ ...grown, tailBoundaryHash: "changed" })],
@@ -87,7 +129,10 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     ["an unchanged size at another time", async () => ({ ...grown, mtimeMs: grown.mtimeMs - 1 })],
     ["an append without a final newline", async () => { await appendFile(one, "{\"type\":\"message\""); await stamp(one); return grown; }],
   ];
-  for (const [label, prepare] of appends) await log.step(`no append for ${label}`, async () => { const input = await prepare(); return reported(() => index.append(input)); });
+  for (const [label, prepare] of appends) {
+    const input = await prepare();
+    expect(await reported(() => index.append(input)), `no append for ${label}`).toEqual({ value: null, failures: [] });
+  }
   const lines = async (name: string, appended: string) => {
     const path = await session(name, header(name) + message("user", "start", 1));
     const base = (await index.entryFromSummary(summary(name, path)))!;
@@ -95,13 +140,14 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     await stamp(path);
     return base;
   };
-  await log.step("no append past a line that is not JSON", async () => { const base = await lines("bad-line", "{oops\n"); return reported(() => index.append(base)); });
-  await log.step("no append past a line that is not an object", async () => { const base = await lines("list-line", "[1]\n"); return reported(() => index.append(base)); });
-  await log.step("an append skips blank lines and system messages", async () => {
-    const base = await lines("system-line", `\n${JSON.stringify({ type: "message", message: { role: "system", content: "context" } })}\n`);
-    return reported(() => index.append(base));
-  });
-  await log.step("an append accumulates counts, first message, name and activity time from each entry kind", async () => {
+  for (const [name, appended] of [["bad-line", "{oops\n"], ["list-line", "[1]\n"]]) {
+    const base = await lines(name!, appended!);
+    expect(await reported(() => index.append(base)), `no append past ${JSON.stringify(appended)}`).toEqual({ value: null, failures: [] });
+  }
+  const systemLine = await lines("system-line", `\n${JSON.stringify({ type: "message", message: { role: "system", content: "context" } })}\n`);
+  expect(await reported(() => index.append(systemLine)), "an append skips blank lines and system messages").toEqual({ value: await fileRow("system-line",
+    join(root, "system-line.jsonl"), { tailBoundaryHash: "Lz0qIpFhTpVA_2DNAl63qQj8mWdi0QN8VxOdajd77Dc" }), failures: [] });
+  {
     const path = await session("metadata", header("metadata"));
     const base = (await index.entryFromSummary({ ...summary("metadata", path), firstMessage: "(no messages)", messageCount: 0 }))!;
     const at = (minute: number) => Date.parse(time) + minute * 60_000;
@@ -120,13 +166,17 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     await appendFile(path, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
     await stamp(path);
     const named = (await index.append(base))!;
+    const accumulated = { firstMessage: "first part", updatedAt: "2026-01-01T00:20:00.000Z", messageCount: 8 };
+    expect(named, "an append accumulates counts, first message, name and activity time from each entry kind")
+      .toEqual(await fileRow("metadata", path, { ...accumulated, name: "Titled", tailBoundaryHash: "EZE8sF8Ml8D7dnqLF2IcigyHcLBhKUHOLyqKP_B6Tnk" }));
     await appendFile(path, `${JSON.stringify({ type: "session_info", name: null })}\n`);
     await stamp(path);
-    return { named, cleared: (await index.append(named))! };
-  }, "result");
-  await log.step("activity time of each entry shape", () => {
+    expect(await index.append(named), "a null name clears it")
+      .toEqual(await fileRow("metadata", path, { ...accumulated, tailBoundaryHash: "3DViKZrSlxvYqld-rwNyWUQ2mXikj6eQGL_-jHANxL8" }));
+  }
+  {
     const at = Date.parse(time) + 60_000;
-    return [
+    expect([
       { type: "message", message: { role: "user", content: "x", timestamp: at } },
       { type: "message", timestamp: at, message: { role: "assistant", content: "x" } },
       { type: "message", timestamp: new Date(at).toISOString(), message: { role: "user", content: "x" } },
@@ -136,9 +186,10 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
       { type: "message", message: { role: "user", timestamp: at } },
       { type: "message", message: { role: "user", content: "x", timestamp: -1 } },
       { type: "message", timestamp: "not a time", message: { role: "user", content: "x" } },
-    ].map((entry) => catalogActivityTimestamp(entry) ?? null);
-  });
-  await log.step("an append of a missing file reports its failure", () => reported(() => index.append({ ...grown, path: join(root, "missing.jsonl") })));
+    ].map((entry) => catalogActivityTimestamp(entry) ?? null), "activity time of each entry shape").toEqual([at, at, at, null, null, null, null, null, null]);
+  }
+  expect(await reported(() => index.append({ ...grown, path: join(root, "missing.jsonl") })), "an append of a missing file reports its failure")
+    .toEqual({ value: null, failures: ["append"] });
 
   const two = await session("two", header("s2") + message("user", "second", 1));
   const three = await session("three", header("s3") + message("user", "third", 1));
@@ -146,62 +197,84 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   await writeFile(one, header("s1") + message("user", "hello", 1));
   await stamp(one);
   row = (await index.entryFromSummary(summary("s1", one)))!;
-  await index.save(root, [row, { ...(await index.entryFromSummary(summary("s2", two)))!, messageCount: 7 }]);
-  // Candidates of one batch are proven in parallel, so the rebuilds are recorded as a set.
+  const twoRow = { ...(await index.entryFromSummary(summary("s2", two)))!, messageCount: 7 };
+  await index.save(root, [row, twoRow]);
+  // Candidates of one batch are proven in parallel, so the rebuilds are compared as a set.
   const rebuilt: string[] = [];
   const rebuild = async (input: { id: string; path: string }) => { rebuilt.push(input.id); return input.id === "s3" ? undefined : summary(input.id, input.path); };
-  await log.step("reconcile keeps unchanged rows, rebuilds a new one and reports those it cannot prove", async () => {
-    rebuilt.length = 0;
-    const result = await index.reconcile(root, [await candidate("s1", one), await candidate("s2", two, "/moved"), await candidate("s3", three),
-      await candidate("s4", two), await candidate("s5", five)], rebuild);
-    return { result, rebuilt: [...rebuilt].sort() };
-  }, "result");
+  rebuilt.length = 0;
+  expect(await index.reconcile(root, [await candidate("s1", one), await candidate("s2", two, "/moved"), await candidate("s3", three),
+    await candidate("s4", two), await candidate("s5", five)], rebuild), "reconcile keeps unchanged rows, rebuilds a new one and reports those it cannot prove")
+    .toEqual({ rows: [row, await fileRow("s5", five, { tailBoundaryHash: "55ZojGed4cr608aWDF5W6LfuGKmNYe_lqHtDLLPYV4E" })], unproven: [two, three, two] });
+  expect(rebuilt.sort(), "every changed or new candidate is rebuilt").toEqual(["s2", "s3", "s4", "s5"]);
+  expect(await persisted(), "reconcile leaves the saved cut").toEqual({
+    "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest }, { shard: "26", digest }], refused: [] },
+    "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]), "catalog-metadata-v3/shard-26.json": shardDocument("26", [twoRow]) });
+  const reconcileCut = await persisted();
+  const shard13Digest = (await manifestDigests()).find(({ shard }) => shard === "13")!.digest;
   await appendFile(two, message("assistant", "reply", 2));
   await stamp(two);
-  await log.step("reconcile appends a grown row", async () => {
-    rebuilt.length = 0;
-    return { result: await index.reconcile(root, [await candidate("s2", two)], rebuild), rebuilt: [...rebuilt].sort() };
-  });
-  await log.step("reconcile rebuilds a row whose file was replaced", async () => {
-    await writeFile(two, header("s2") + message("user", "replaced", 1));
-    await stamp(two);
-    rebuilt.length = 0;
-    return { result: await index.reconcile(root, [await candidate("s2", two)], rebuild), rebuilt: [...rebuilt].sort() };
-  });
-  await log.step("reconcile reports a candidate it can no longer read unproven", async () => {
+  rebuilt.length = 0;
+  expect(await index.reconcile(root, [await candidate("s2", two)], rebuild), "reconcile appends a grown row").toEqual({ rows: [await fileRow("s2", two,
+    { tailBoundaryHash: "tsQ05_K6612aZrprQNotjfv5vlmml67zxir82zWJ8N0", updatedAt: "2026-01-01T00:02:00.000Z", messageCount: 8 })], unproven: [] });
+  expect(rebuilt, "without a rebuild").toEqual([]);
+  expect(await persisted(), "reconciling a grown row writes nothing").toEqual(reconcileCut);
+  await writeFile(two, header("s2") + message("user", "replaced", 1));
+  await stamp(two);
+  rebuilt.length = 0;
+  expect(await index.reconcile(root, [await candidate("s2", two)], rebuild), "reconcile rebuilds a row whose file was replaced")
+    .toEqual({ rows: [await fileRow("s2", two, { tailBoundaryHash: "r44hzeWEZKxuC4JuseTRFgLzBGRJvQZoFzHqZ-VnT1Q" })], unproven: [] });
+  expect(rebuilt).toEqual(["s2"]);
+  expect(await persisted(), "reconciling a replaced row writes nothing").toEqual(reconcileCut);
+  {
     const locked = await session("locked", header("s6") + message("user", "locked", 1));
-    await index.save(root, [row, (await index.entryFromSummary(summary("s6", locked)))!]);
+    const lockedRow = (await index.entryFromSummary(summary("s6", locked)))!;
+    expect(lockedRow).toEqual(await fileRow("s6", locked, { tailBoundaryHash: "wwghYw0JCHl8FzHrCgysA92kV1Pv_Czk7l0d9msWJg8" }));
+    await index.save(root, [row, lockedRow]);
     const listed = await candidate("s6", locked);
-    // Mode 000 is unreadable only to an unprivileged user; root would read it, so refuse loudly instead of pinning another trace.
+    // Mode 000 is unreadable only to an unprivileged user; root would read it, so refuse loudly instead of asserting another outcome.
     if (process.getuid?.() === 0) throw new Error("This lock runs as an unprivileged user");
     await chmod(locked, 0o000);
     rebuilt.length = 0;
-    try { return await reported(async () => ({ result: await index.reconcile(root, [listed], rebuild), rebuilt: [...rebuilt].sort() })); }
-    finally { await chmod(locked, 0o600); }
-  });
-  await log.step("a stopped reconcile reports every candidate unproven", async () => {
+    try {
+      expect(await reported(async () => ({ result: await index.reconcile(root, [listed], rebuild), rebuilt: [...rebuilt].sort() })),
+        "reconcile reports a candidate it can no longer read unproven").toEqual({ value: { result: { rows: [], unproven: [locked] }, rebuilt: ["s6"] }, failures: ["append", "rebuild"] });
+    } finally { await chmod(locked, 0o600); }
+    expect(await persisted(), "a save replaces the shards it no longer holds").toEqual({
+      "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest }, { shard: "32", digest }], refused: [] },
+      "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]), "catalog-metadata-v3/shard-32.json": shardDocument("32", [lockedRow]) });
+    expect((await manifestDigests())[0], "the unchanged shard keeps its digest").toEqual({ shard: "13", digest: shard13Digest });
+  }
+  const lockedCut = await persisted();
+  {
     const progress: unknown[] = [];
-    const result = await index.reconcile(root, [await candidate("s1", one)], rebuild, (state) => { progress.push(state); return true; });
-    return { result, progress };
-  });
-  await log.step("a reconcile stopped before a rebuild reports it unproven", async () => {
+    expect(await index.reconcile(root, [await candidate("s1", one)], rebuild, (state) => { progress.push(state); return true; }),
+      "a stopped reconcile reports every candidate unproven").toEqual({ rows: [], unproven: [one] });
+    expect(progress).toEqual([{ proven: 0, unproven: 0 }]);
+    expect(await persisted(), "a stopped reconcile writes nothing").toEqual(lockedCut);
+  }
+  {
     let asked = 0;
-    const result = await index.reconcile(root, [await candidate("s3", three)], rebuild, () => { asked += 1; return asked > 1; });
-    return { result, asked };
-  });
-  await log.step("reconcile proves seventeen candidates in two batches", async () => {
+    expect(await index.reconcile(root, [await candidate("s3", three)], rebuild, () => { asked += 1; return asked > 1; }),
+      "a reconcile stopped before a rebuild reports it unproven").toEqual({ rows: [], unproven: [three] });
+    expect(asked).toBe(2);
+    expect(await persisted(), "a reconcile stopped before a rebuild writes nothing").toEqual(lockedCut);
+  }
+  {
     const progress: unknown[] = [];
     const many = await Promise.all(Array.from({ length: 17 }, () => candidate("s1", one)));
     const result = await index.reconcile(root, many, rebuild, (state) => { progress.push(state); return false; });
-    return { rows: result?.rows.length, unproven: result?.unproven, progress };
-  });
+    expect({ rows: result?.rows.length, unproven: result?.unproven, progress }, "reconcile proves seventeen candidates in two batches")
+      .toEqual({ rows: 17, unproven: [], progress: [{ proven: 0, unproven: 0 }, { proven: 16, unproven: 0 }] });
+    expect(await persisted(), "proving seventeen candidates writes nothing").toEqual(lockedCut);
+  }
 
-  // The index binds a document to the catalog root's canonical path (the temporary root may be a symbolic link).
+  // The index binds a document to the catalog root's canonical path.
   const canonical = await realpath(root);
   const document = (rows: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ version: 3, root: canonical, rows, ...extra });
-  // A hand-written legacy document is the migration input. Its store is removed
-  // again after its load, so the golden pins each verdict (an admitted document
-  // is migrated and removed; an ignored one stays), not the input bytes.
+  // A hand-written legacy document is the migration input. Its store is removed again
+  // after its load, so each check pins the verdict: an admitted document is migrated
+  // and removed; an ignored one stays.
   const loadWritten = async (content: string) => {
     await rm(index.directory, { recursive: true, force: true });
     await writeFile(index.legacyPath, content);
@@ -213,19 +286,24 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
       await rm(index.directory, { recursive: true, force: true });
     }
   };
-  const forged = async (label: string, content: string, expected: "admitted" | "ignored") =>
-    log.step(`${expected === "admitted" ? "admit" : "ignore"} ${label}`, () => loadWritten(content));
+  const admitted = { loaded: 1, legacyKept: false };
+  const ignored = { loaded: "ignored", legacyKept: true };
   const valid = { ...row };
-  await forged("a hand-written document", document([valid]), "admitted");
-  await forged("a document of another version", document([valid], { version: 2 }), "ignored");
-  await forged("a document for another root", document([valid], { root: "/elsewhere" }), "ignored");
-  await forged("a document with an overlong root", document([valid], { root: "r".repeat(4_097) }), "ignored");
-  await forged("a document whose rows are not a list", document([], { rows: { length: 0 } }), "ignored");
-  await forged("a document that is a list", "[]", "ignored");
-  await forged("a document that is null", "null", "ignored");
-  await forged("a document that is not JSON", "{", "ignored");
-  await forged("a row automation origin", document([{ ...valid, creationOrigin: { kind: "automation", automationId: "01234567-89ab-4def-8123-456789abcdef" } }]), "admitted");
-  await forged("a row with a parent and a name", document([{ ...valid, parentSessionPath: "/parent.jsonl", name: "Named" }]), "admitted");
+  const automation = { kind: "automation", automationId: "01234567-89ab-4def-8123-456789abcdef" };
+  for (const [label, content, verdict] of [
+    ["a hand-written document", document([valid]), admitted],
+    ["a document of another version", document([valid], { version: 2 }), ignored],
+    ["a document for another root", document([valid], { root: "/elsewhere" }), ignored],
+    ["a document with an overlong root", document([valid], { root: "r".repeat(4_097) }), ignored],
+    ["a document whose rows are not a list", document([], { rows: { length: 0 } }), ignored],
+    ["a document that is a list", "[]", ignored],
+    ["a document that is null", "null", ignored],
+    ["a document that is not JSON", "{", ignored],
+    ["a row automation origin", document([{ ...valid, creationOrigin: automation }]), admitted],
+    ["a row with a parent and a name", document([{ ...valid, parentSessionPath: "/parent.jsonl", name: "Named" }]), admitted],
+    ["a zero-length row at the bounds", document([{ ...valid, messageCount: 0, size: 0, eofOffset: 0, name: "n".repeat(1_024), firstMessage: "😀".repeat(256) }]), admitted],
+    ["a document over the byte bound", document([valid], { padding: "p".repeat(8 * 1_024 * 1_024) }), ignored],
+  ] as const) expect(await loadWritten(content), label).toEqual(verdict);
   for (const [label, bad] of [
     ["a null row", null], ["a list row", []],
     ["a row with an overlong id", { ...valid, id: "i".repeat(257) }],
@@ -235,8 +313,8 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     ["a row that is not a transcript", { ...valid, path: join(canonical, "one.json") }],
     ["a row with an overlong working directory", { ...valid, cwd: "c".repeat(4_097) }],
     ["a row with an overlong parent", { ...valid, parentSessionPath: "p".repeat(4_097) }],
-    ["a row with a parent and an automation origin", { ...valid, parentSessionPath: "/parent.jsonl", creationOrigin: { kind: "automation", automationId: "01234567-89ab-4def-8123-456789abcdef" } }],
-    ["a row with another origin kind", { ...valid, creationOrigin: { kind: "user", automationId: "01234567-89ab-4def-8123-456789abcdef" } }],
+    ["a row with a parent and an automation origin", { ...valid, parentSessionPath: "/parent.jsonl", creationOrigin: automation }],
+    ["a row with another origin kind", { ...valid, creationOrigin: { ...automation, kind: "user" } }],
     ["a row with a malformed automation id", { ...valid, creationOrigin: { kind: "automation", automationId: "automation-1" } }],
     ["a row with a list origin", { ...valid, creationOrigin: [] }],
     ["a row with an overlong name", { ...valid, name: "n".repeat(10_000) }],
@@ -255,21 +333,19 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     ["a row with an infinite modification time", { ...valid, mtimeMs: null }],
     ["a row whose offset is not its size", { ...valid, eofOffset: valid.size - 1 }],
     ["a row with an overlong tail hash", { ...valid, tailBoundaryHash: "h".repeat(129) }],
-  ] as const) await forged(label, document([bad]), "ignored");
-  await forged("a zero-length row at the bounds", document([{ ...valid, messageCount: 0, size: 0, eofOffset: 0, name: "n".repeat(1_024), firstMessage: "😀".repeat(256) }]), "admitted");
-  await forged("a document over the byte bound", document([valid], { padding: "p".repeat(8 * 1_024 * 1_024) }), "ignored");
-  await log.step("ignore a document that is a symbolic link", async () => {
-    await writeFile(join(log.home, "linked.json"), document([valid]));
-    await symlink(join(log.home, "linked.json"), index.legacyPath);
-    try { return { loaded: (await index.load(root)) === undefined ? "ignored" : "loaded" }; }
-    finally { await rm(index.legacyPath); }
-  });
+  ] as const) expect(await loadWritten(document([bad])), `ignore ${label}`).toEqual(ignored);
+  expect(await persisted(), "every admission check leaves no store behind").toEqual({});
+  await writeFile(join(home, "linked.json"), document([valid]));
+  await symlink(join(home, "linked.json"), index.legacyPath);
+  try { expect(await index.load(root), "ignore a document that is a symbolic link").toBeUndefined(); }
+  finally { await rm(index.legacyPath); }
 
-  await log.step("dispose", () => index.dispose(), "result");
-  await log.step("a disposed index writes nothing", () => index.save(root, [row]));
-  await log.step("a disposed index proves no candidate", async () => {
-    await new CatalogMetadataIndex(gateway).save(root, [row]);
-    return index.reconcile(root, [await candidate("s1", one)], rebuild);
-  });
-  await log.finish();
+  await expect(index.dispose(), "dispose").resolves.toBeUndefined();
+  expect(await index.save(root, [row]), "a disposed index writes nothing").toBe(false);
+  expect(await persisted()).toEqual({});
+  await new CatalogMetadataIndex(gateway).save(root, [row]);
+  expect(await index.reconcile(root, [await candidate("s1", one)], rebuild), "a disposed index proves no candidate").toEqual({ rows: [], unproven: [one] });
+  expect(await persisted(), "and leaves another owner's save alone").toEqual({
+    "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest: shard13Digest }], refused: [] },
+    "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]) });
 });

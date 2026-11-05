@@ -11,7 +11,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import type { GatewayConfig } from "../config.js";
-import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, VIEW_BLOCK_LINES, cachePieces } from "../episodic/cache-layout.js";
+import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, VIEW_BLOCK_LINES } from "../episodic/cache-layout.js";
 import { EPISODIC_COMPACT_PROMPT } from "../episodic/episodic-compactor.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
@@ -21,8 +21,8 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
-// Recipe §8 caching, proved on the wire (#491, #2228): Home
-// turns and the episodic summarizer's calls go through pi-ai's real Anthropic
+// Home's cached view and the summarizer's stretch-only calls, proved on the
+// wire (#491, #2228): Home turns and the episodic summarizer's calls go through pi-ai's real Anthropic
 // request builder to a local Anthropic-compatible endpoint that records every
 // request body and header. Nothing here calls a real provider.
 
@@ -353,7 +353,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     report.cases.push({ case: "openai-responses", requests: requests.map((request) => request.body), summarizerCalls: summaries.length });
   }, 60_000);
 
-  it("lays out Home turns and summarizer calls as the recipe's cached prefix", async () => {
+  it("lays out Home turns as the recipe's cached prefix and sends summarizer steps alone", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "cache-designate", model: MODEL });
     await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "cache-memory", model: MODEL }));
@@ -424,17 +424,17 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(viewMarks(toolStep!)).toEqual(viewMarks(last!));
     expect(cacheMarks(toolStep!)).toContain(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
 
-    // The summarizer's context comes first, cut at the same marks, under the
-    // budget, and every call carries the memory's stable cache key.
-    const longContext = summarizer.filter((request) => blocks(messagesOf(request)[0]!).length >= 3);
-    expect(longContext.length).toBeGreaterThan(0);
-    const sample = longContext.at(-1)!;
-    const contextBlocks = blocks(messagesOf(sample)[0]!);
-    const contextText = contextBlocks.slice(0, -1).map((block) => block.text ?? "").join("");
-    expect(contextText.startsWith("<chat>\n")).toBe(true);
-    expect(contextBlocks.slice(0, -1).map((block) => block.text)).toEqual(cachePieces(contextText));
+    // A summarizer call sends its step alone, never the view, and every call
+    // carries the memory's stable cache key.
+    expect(summarizer.length).toBeGreaterThan(0);
+    for (const request of summarizer) {
+      const first = blocks(messagesOf(request)[0]!);
+      expect(first).toHaveLength(1);
+      expect(first[0]!.text).toMatch(/^(?:Compress this message|Merge these two lines) into one/u);
+      expect(JSON.stringify(request.body)).not.toContain(HOME_MEMORY_VIEW_MARKER);
+    }
+    const sample = summarizer.at(-1)!;
     const sampleMarks = cacheMarks(sample);
-    for (let index = 0; index < contextBlocks.length - 2; index += 1) expect(sampleMarks).toContain(`.messages[0].content[${index}]`);
     expect(sampleMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     // The summarizer's calls ask for long retention too.
     expect(markTtls(sample)).toEqual(new Set(["1h"]));
@@ -468,7 +468,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     report.cases.push({
       case: "wire-layout", homeTurns: homeRequests.length, summarizerCalls: summarizer.length,
       viewChars: view.length, viewPieces: viewPieces.map((piece) => piece.length), lastTurnMarks: lastMarks,
-      summarizerContextPieces: contextBlocks.slice(0, -1).map((block) => (block.text ?? "").length), summarizerMarks: sampleMarks,
+      summarizerMarks: sampleMarks,
       ordinaryMarks: plainMarks,
     });
   }, 300_000);
