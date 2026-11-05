@@ -1,10 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { automationOwnedRunScenario } from "../../test-support/lock-scenarios.js";
 
 /**
  * Automation owned-run lock (restructure E0c, `docs/restructure/k0-kernel.md` §7)
@@ -59,76 +58,13 @@ async function assistantEntryIds(gateway: LockGateway, sessionId: string): Promi
   });
 }
 
-interface RunRecord { runId?: string; state?: string; executionSessionId?: string; assistantCompletionId?: string }
-interface AutomationFile { currentRun?: RunRecord | null; lastRun?: RunRecord | null }
 
 describe("gateway/automations owned-run lock", () => {
   it("automation-owned-run: a session prompt and a workspace prompt run now through the owned-session boundary", async () => {
     const gateway = await startLockGateway("automation-owned-run", { automations: true });
     gateways.push(gateway);
-    const phone = await gateway.connect("phone");
-    const created = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
-    expect(created.ok, JSON.stringify(created)).toBe(true);
-    const sessionId = created.result.sessionId as string;
-    const opened = await phone.request("session.open", { sessionId });
-    expect(opened.ok, JSON.stringify(opened)).toBe(true);
-    expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
-
+    const { sessionId, existing, workspace } = await automationOwnedRunScenario(gateway);
     const automationFile = (automationId: string) => join(gateway.tronHome, "gateway", "automations", `${automationId}.json`);
-    const raw = async (automationId: string) => {
-      return JSON.parse(await readFile(automationFile(automationId), "utf8")) as AutomationFile;
-    };
-    const runNow = async (definition: Record<string, unknown>, label: string) => {
-      const automation = await phone.request("automation.create", { commandId: gateway.commandId(), definition });
-      expect(automation.ok, JSON.stringify(automation)).toBe(true);
-      const automationId = automation.result.id as string;
-      const run = await phone.request("automation.runNow", {
-        commandId: gateway.commandId(), automationId, expectedRevision: automation.result.revision,
-      });
-      expect(run.ok, JSON.stringify(run)).toBe(true);
-      const runId = run.result.runId as string;
-      // Settled: the terminal run is the record's last run and no run is current.
-      const settled = await waitFor(async () => {
-        const record = await raw(automationId);
-        return record.lastRun?.runId === runId && !record.currentRun ? record.lastRun : undefined;
-      }, `the ${label} run's durable terminal`);
-      await gateway.settled(settled.executionSessionId!);
-      return { automationId, runId, executionSessionId: settled.executionSessionId!, state: settled.state, assistantCompletionId: settled.assistantCompletionId };
-    };
-    const definition = (target: Record<string, unknown>, text: string, name: string) => ({
-      name, activation: "draft", target,
-      trigger: { kind: "once", at: "2099-01-01T09:00:00.000Z" },
-      action: { kind: "sessionPrompt", text },
-    });
-
-    gateway.script([
-      async () => {
-        await gateway.observeLiveOperation(phone, sessionId);
-        return fauxAssistantMessage("Ready for scheduled checks.");
-      },
-      () => fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-automation-read" })], { stopReason: "toolUse" }),
-      () => fauxAssistantMessage("The scheduled check found: lock notes."),
-      () => fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-workspace-read" })], { stopReason: "toolUse" }),
-      () => fauxAssistantMessage("The workspace check found: lock notes."),
-    ]);
-    // A chat exists for the catalog once its first turn is persisted; only then can it be a target.
-    expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "get ready for scheduled checks" })).ok).toBe(true);
-    await gateway.settled(sessionId);
-    const existing = await runNow(definition({ kind: "existingSession", sessionId }, "run the scheduled notes check", "Lock session check"), "session prompt");
-    const workspace = await runNow(definition({ kind: "workspace", cwd: gateway.cwd, sessionPolicy: "newPerRun" },
-      "run the workspace notes check", "Lock workspace check"), "workspace prompt");
-
-    const reads: Array<[string, Record<string, unknown>]> = [
-      ["automation.get", { automationId: existing.automationId }],
-      ["automation.run.get", { automationId: existing.automationId, runId: existing.runId }],
-      ["automation.get", { automationId: workspace.automationId }],
-      ["automation.run.get", { automationId: workspace.automationId, runId: workspace.runId }],
-      ["session.transcript", { sessionId }],
-    ];
-    for (const [method, params] of reads) {
-      const read = await phone.request(method, params);
-      expect(read.ok, `${method} ${JSON.stringify(read)}`).toBe(true);
-    }
     const recorded = gateway.record();
     const receipts = join(gateway.tronHome, "gateway", "command-receipts");
     const completions = [(await assistantEntryIds(gateway, sessionId)).at(-1), (await assistantEntryIds(gateway, workspace.executionSessionId)).at(-1)];

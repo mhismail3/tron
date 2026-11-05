@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway, type LockGatewayOptions } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { compactionScenario, openLockSession, promptStreamScenario, type LockSession } from "../../test-support/lock-scenarios.js";
 
 /**
  * Kernel run locks (restructure plan §6.4, V3) for the `gateway/run` module:
@@ -33,27 +34,12 @@ interface RunLockTrace {
   readonly observed?: TraceValue;
 }
 
-interface Session {
-  readonly gateway: LockGateway;
-  readonly client: LockClient;
-  readonly sessionId: string;
-  prompt(text: string, extra?: Record<string, unknown>): Promise<{ ok: boolean; result?: any; error?: any }>;
-}
+type Session = LockSession;
 
 async function openSession(name: string, options?: LockGatewayOptions): Promise<Session> {
-  const gateway = await startLockGateway(name, options);
-  gateways.push(gateway);
-  const client = await gateway.connect("phone");
-  const created = await client.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
-  expect(created.ok, JSON.stringify(created)).toBe(true);
-  const sessionId = created.result.sessionId as string;
-  const opened = await client.request("session.open", { sessionId });
-  expect(opened.ok, JSON.stringify(opened)).toBe(true);
-  expect((await client.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
-  return {
-    gateway, client, sessionId,
-    prompt: (text, extra = {}) => client.send("session.prompt", { commandId: gateway.commandId(), sessionId, text, ...extra }),
-  };
+  const session = await openLockSession(name, options);
+  gateways.push(session.gateway);
+  return session;
 }
 
 async function finish(session: Session, lock: string, validate: (trace: RunLockTrace) => void, observed?: TraceValue): Promise<void> {
@@ -97,19 +83,7 @@ function gate(): { opened: Promise<void>; open(): void; reached: Promise<void>; 
 describe("gateway/run kernel locks", () => {
   it("prompt/stream: one prompt streams thinking, text and a tool round trip", async () => {
     const session = await openSession("run-prompt-stream");
-    session.gateway.script([
-      async () => {
-        await session.gateway.observeLiveOperation(session.client, session.sessionId);
-        return fauxAssistantMessage([
-          fauxThinking("Reading the lock notes."),
-          { type: "text", text: "Reading notes." },
-          fauxToolCall("read", { path: "notes.txt" }, { id: "lock-read" }),
-        ], { stopReason: "toolUse" });
-      },
-      () => fauxAssistantMessage("The notes say: lock notes."),
-    ]);
-    const admitted = await session.prompt("read the notes");
-    expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+    await promptStreamScenario(session);
     await finish(session, "run-prompt-stream", (trace) => {
       expect(canonicalRoles(trace)).toEqual(["user", "assistant", "toolResult", "assistant"]);
       expect(trace.providerRequests).toHaveLength(2);
@@ -174,24 +148,7 @@ describe("gateway/run kernel locks", () => {
 
   it("compaction: a manual compaction summarizes earlier turns and keeps the recent tail", async () => {
     const session = await openSession("run-compaction");
-    const long = "lock context ".repeat(80);
-    session.gateway.script([
-      async () => {
-        await session.gateway.observeLiveOperation(session.client, session.sessionId);
-        return fauxAssistantMessage(`First answer. ${long}`);
-      },
-      () => fauxAssistantMessage(`Second answer. ${long}`),
-      // A manual compaction asks for the summary of the cut history, then for the
-      // prefix of the split turn the recent tail keeps.
-      () => fauxAssistantMessage("Summary: two answered turns about the lock context."),
-      () => fauxAssistantMessage("Turn prefix: the second question."),
-    ]);
-    expect((await session.prompt("first question")).ok).toBe(true);
-    await session.gateway.settled(session.sessionId);
-    expect((await session.prompt("second question")).ok).toBe(true);
-    await session.gateway.settled(session.sessionId);
-    const compacted = await session.client.request("session.compact", { commandId: session.gateway.commandId(), sessionId: session.sessionId });
-    expect(compacted.ok, JSON.stringify(compacted)).toBe(true);
+    await compactionScenario(session);
     await finish(session, "run-compaction", (trace) => {
       expect(canonicalTypes(trace)).toContain("compaction");
       const compaction = trace.canonicalJsonl.find((entry) => (entry as { type?: unknown }).type === "compaction") as { summary?: string };
