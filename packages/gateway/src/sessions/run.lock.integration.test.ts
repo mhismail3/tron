@@ -2,7 +2,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { type LockGateway, type LockGatewayOptions } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin } from "../../test-support/wait-for.js";
 import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, openLockSession, promptStreamScenario, type LockSession } from "../../test-support/lock-scenarios.js";
 
 /**

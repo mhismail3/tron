@@ -10,7 +10,7 @@ import { compareWithGolden, lockUpdateRequested, type TraceValue } from "../../t
 /**
  * Tron's persisted session entries (#2279): every distinct Tron custom entry
  * (`tron.chat-invocation.v1`, `tron.settings.v1`, `tron.context-window.v1`,
- * `tron.extension-activity.v1`, `tron.context-delivery.v4`) the shared lock
+ * `tron.extension-activity.v1`) the shared lock
  * scenarios write into canonical session JSONL, with its values, normalized as
  * `gateway.canonical` normalizes them. Each lock's faux provider is named after
  * the lock, so that name becomes `<lock>`. The behavior locks assert what a
