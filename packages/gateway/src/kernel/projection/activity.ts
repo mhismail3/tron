@@ -1,13 +1,17 @@
-import type { ExtensionRunActivity, SessionProcessActivity, SessionProcessOverview, ToolExecutionState } from "../../protocol/types.js";
-import type { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
+import type { ExtensionRunActivity, ExtensionRunVisibility, SessionProcessActivity, SessionProcessOverview, ToolExecutionState } from "../../protocol/types.js";
 import type { ProcessActivityRecency } from "./process-activity-recency.js";
 import { boundProcessActivities, processOverview } from "./process-activity.js";
+
+/** Extension recency is owned by sessions/extension-activity; this port is the only read the projection makes of it. */
+export interface ExtensionActivityVisibilityReader {
+  visibility(activity: ExtensionRunActivity): { visibility: ExtensionRunVisibility; remainingMs?: number };
+}
 
 /** Activity producers/expiry remain run-owned; these reads only bound wire views. */
 export interface ActivitySource {
   processActivities: ReadonlyMap<string, SessionProcessActivity>;
   extensionActivities: ReadonlyMap<string, ExtensionRunActivity>;
-  dependencies: { processActivityRecency: ProcessActivityRecency; extensionActivityRecency: ExtensionActivityRecency };
+  dependencies: { processActivityRecency: ProcessActivityRecency; extensionActivityRecency: ExtensionActivityVisibilityReader };
   processRevision: number;
   processAsOf: string;
   liveActivityRevision: number;
