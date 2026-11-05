@@ -1,0 +1,2210 @@
+{
+  "original_refs": [
+    {
+      "oid": "3cec727e19505aa4c58a18bcc4e54560c6829cce",
+      "ref": "refs/codex/snapshots/01e42fae317b34e65520243ac7c606ef153c31ee"
+    },
+    {
+      "oid": "d70486e8a8dbac3723ae0efca3fef816af12a612",
+      "ref": "refs/codex/snapshots/0292021a10a04026539349c9998e8f7f8cff6fda"
+    },
+    {
+      "oid": "98a80373a53fa2375df976b39a6a85cfee046ad6",
+      "ref": "refs/codex/snapshots/03829c2794c0bf465129dceb4e1cf2c6240c3aef"
+    },
+    {
+      "oid": "9a29c8edc41b3d78fda9aa574ff72d3a3beca713",
+      "ref": "refs/codex/snapshots/03c2c4c30c2eb6bcab3bf0494c6a28894ea22ee0"
+    },
+    {
+      "oid": "605038d984459673c9873e20236b4ef4d6a47955",
+      "ref": "refs/codex/snapshots/043a05b8eda2dd1a14a442fbb8c5046fe4aa499f"
+    },
+    {
+      "oid": "1ce3dae26001042cddb1de985a95d12b675ef69e",
+      "ref": "refs/codex/snapshots/04cd8e09d500544cbfea349f45ff85dc121b5ac0"
+    },
+    {
+      "oid": "ab1b2f5fa60b4e4fbd6cabfdb03e862bda764d4e",
+      "ref": "refs/codex/snapshots/0532289752b690b6573f0842734ec3fa5e0b8d74"
+    },
+    {
+      "oid": "c7deea13d1bcb37b0348406329d503c043933ae6",
+      "ref": "refs/codex/snapshots/0682248acbee779946330b386867992e2f4a597d"
+    },
+    {
+      "oid": "1fa3e0009176a5c8df9a659e81e4f1329c4c2b96",
+      "ref": "refs/codex/snapshots/06a4ce3e5d58e3a528c72a3ab876c9d6e1b2a94c"
+    },
+    {
+      "oid": "90784394899a88e9b7877c027905d6f6f0cd2d31",
+      "ref": "refs/codex/snapshots/0922d99f6ae60db4dd72c1e81193987a30b23936"
+    },
+    {
+      "oid": "d2cb7cd32976f1de460defe5fc0cb094669b0140",
+      "ref": "refs/codex/snapshots/09521bce80557a3ae2ae71e53f96d935d915337a"
+    },
+    {
+      "oid": "3680ea2715951708c00f3cd22ec7727962fc6517",
+      "ref": "refs/codex/snapshots/09ccbd7605d03a09a39438d6a9e5fb02f1a2fded"
+    },
+    {
+      "oid": "199ff2290ee611f91bd64fb15e98426a75b608a6",
+      "ref": "refs/codex/snapshots/09d74f7718f3dcd39adb4fec6e5bcd93a1ebe86c"
+    },
+    {
+      "oid": "515d76d9c8c42f3af59cbe655d400d15f4baac51",
+      "ref": "refs/codex/snapshots/0a5cd31c03344d59f71ee456ebbe716dbf0f1e34"
+    },
+    {
+      "oid": "c9583b1f4647bae7e5c09bf8460f2e40a340ac77",
+      "ref": "refs/codex/snapshots/0b63dd4e8248c4011b54b525baa2723be1b67a1d"
+    },
+    {
+      "oid": "8ed8db55500f3a05aef55a1e2ec39acba30a8c07",
+      "ref": "refs/codex/snapshots/0bf47c89a1864d9aa01ba8be5e310c1a783e9aa5"
+    },
+    {
+      "oid": "2bd51fcf38d68720ee4ed25937b393b8450ecbe0",
+      "ref": "refs/codex/snapshots/0c7dd25cf792518ef9ff839ddf0863ceadf3ebcc"
+    },
+    {
+      "oid": "2bd51fcf38d68720ee4ed25937b393b8450ecbe0",
+      "ref": "refs/codex/snapshots/0e546cf8d7a7182c613b4bedb7951cad4bca3817"
+    },
+    {
+      "oid": "58c94586da6a01f1f7e3f23624ee523bd832ec86",
+      "ref": "refs/codex/snapshots/0f1f3f62da7564b111cbc5fae7bb9a2940624aa9"
+    },
+    {
+      "oid": "788b105980b59d73b5e0c05eb682c81b669827ad",
+      "ref": "refs/codex/snapshots/0fab1e424949d110b1767cc88abe46cb6b89ab70"
+    },
+    {
+      "oid": "ce56ff609948d0d31dbd76e74a30a87a027738d3",
+      "ref": "refs/codex/snapshots/0fcc03e74824e7bb908d6b3b4a828528f7521e11"
+    },
+    {
+      "oid": "9008894583d05fbc7848c290d2c0a75eea3e6109",
+      "ref": "refs/codex/snapshots/107593fc08feb5373021f112040a5798a4e7e566"
+    },
+    {
+      "oid": "d57aaf83e94693e2eaefde16108202ea4e254e5e",
+      "ref": "refs/codex/snapshots/108e8b2aa58ce390652cbe535a88579bfbe84405"
+    },
+    {
+      "oid": "49b76afa3805eeed7b4f5847779cfb2eb69a8edf",
+      "ref": "refs/codex/snapshots/10daf88048ddb23b4da03d5b2bba4d35a823c69a"
+    },
+    {
+      "oid": "16025248d4b9f470786e61888d5f74b7fc9f3572",
+      "ref": "refs/codex/snapshots/11e0126bc92826a0dfbba79319c4b0d107101496"
+    },
+    {
+      "oid": "fef27cb991dc9944de6132ffb51f927581493951",
+      "ref": "refs/codex/snapshots/12c9499d3e163817f9f009c532ad1c6f5806bc71"
+    },
+    {
+      "oid": "85579a78da54113321cb32de9eb90dd8cd330aef",
+      "ref": "refs/codex/snapshots/13321d6f1a14bf1769972f3ccb919ee431532871"
+    },
+    {
+      "oid": "cd97c2f87afa3e961258eedf37a227926e496720",
+      "ref": "refs/codex/snapshots/148a77ae2c383363034dc19536fd31ac6ce39977"
+    },
+    {
+      "oid": "8a298bd63ddaf492057ead1233bf3bf18b4dd5d3",
+      "ref": "refs/codex/snapshots/15a0ebbd2188e0240ed9c961c2584bee89c46d10"
+    },
+    {
+      "oid": "9a74084d9ce8b241d8fdf4a7865a683bd04e652c",
+      "ref": "refs/codex/snapshots/162b08063e8e012fdd5707cd0b1c6c43042f6437"
+    },
+    {
+      "oid": "49a47cc1902a958eb775bcb5a3a28913d0d3aefb",
+      "ref": "refs/codex/snapshots/168f8841b4b6f93e9a6292c7fab7904c865f11d3"
+    },
+    {
+      "oid": "99045be98eac653eaeedcbb772992f1954464edd",
+      "ref": "refs/codex/snapshots/16df71ef39ba2338fe593b7393f1c49f3dbccda7"
+    },
+    {
+      "oid": "e62804694fa6578758d4f7e7c6cf12f334a13853",
+      "ref": "refs/codex/snapshots/17289536eb10f73c823e6b48ecb39e69be4e54a3"
+    },
+    {
+      "oid": "9329dd1f92440500afd861293a9d4b6e981930ef",
+      "ref": "refs/codex/snapshots/1a373afb99f009924be39a22278e675ffc8dddb0"
+    },
+    {
+      "oid": "7c794417c1b5b6490324fa6e1062580b73f339a8",
+      "ref": "refs/codex/snapshots/1bcd3ef00e0e626f839f4fddef49a1efd2193e8b"
+    },
+    {
+      "oid": "9a29c8edc41b3d78fda9aa574ff72d3a3beca713",
+      "ref": "refs/codex/snapshots/1c3cb7615f89bef88eaa9dfc997cf43b67815b17"
+    },
+    {
+      "oid": "8fcb3051dc0359e558ffac9dfe77f525709f1c92",
+      "ref": "refs/codex/snapshots/1c911972de5d1d344e037490025cd5b983ed3398"
+    },
+    {
+      "oid": "9e9393acde1284b0c684a5c15d9bf331133c9928",
+      "ref": "refs/codex/snapshots/1cfe7d49cbbe37f6a1fa0eaade217b64970667c8"
+    },
+    {
+      "oid": "f2fb7c3303da51cb91893ff87b9d41af240702aa",
+      "ref": "refs/codex/snapshots/1da72c895756635ea3c57379beaa4a733cfba153"
+    },
+    {
+      "oid": "470e73897b885264aec0a6c9692e54eb2a186ef1",
+      "ref": "refs/codex/snapshots/1e1f088ef19443f07278acfa3004a17b6cc1fbbc"
+    },
+    {
+      "oid": "be6b5a8781fc687c9e9e6b402007085a80250842",
+      "ref": "refs/codex/snapshots/1f73706f5ac1906ab452f659d7982709b0e4f989"
+    },
+    {
+      "oid": "2650dd0b9769c403de9734bdec957c42afaf782c",
+      "ref": "refs/codex/snapshots/1fe29c4b0e2f15fc38b9f18342165c49e7a562a2"
+    },
+    {
+      "oid": "69553012f38a993e2a9f122bec1d64eff037b6fe",
+      "ref": "refs/codex/snapshots/1ff6ad0c990467e8a0e9c523bee4608d71bc9908"
+    },
+    {
+      "oid": "a7ed577ece4e8a1bb26dc655e818a3c256fa4933",
+      "ref": "refs/codex/snapshots/2071ca0094a98a5bba7a08b3a8d624618818ce2c"
+    },
+    {
+      "oid": "719ebb5fc6d0db082a2577e44aa60982abbed253",
+      "ref": "refs/codex/snapshots/20ea919c8a1b22d8e4a816e59b5388b7e2b94e8f"
+    },
+    {
+      "oid": "4fb134c64596c980f94f97cdb61c5d0859dc681a",
+      "ref": "refs/codex/snapshots/2268816b0b4465fb6451c58d7c218544df095914"
+    },
+    {
+      "oid": "0176379ba04190639fcccddddaf0a6d2db184b25",
+      "ref": "refs/codex/snapshots/24be3e402c4d09c217c00c163c1ea9458b3824a2"
+    },
+    {
+      "oid": "7f72e9407bf1dfc39b9a41dd091fc7fd7565d432",
+      "ref": "refs/codex/snapshots/251d1e6da625ba6b622b73a4f37a27f013881d7d"
+    },
+    {
+      "oid": "d57aaf83e94693e2eaefde16108202ea4e254e5e",
+      "ref": "refs/codex/snapshots/2544ca20182278f362405fa04347539ca6f4f40e"
+    },
+    {
+      "oid": "49a47cc1902a958eb775bcb5a3a28913d0d3aefb",
+      "ref": "refs/codex/snapshots/25b317ee53bcb1f17b42c12fc58f8ef047d00de4"
+    },
+    {
+      "oid": "b114493199703a045636c1b3b46250f1af2f6a11",
+      "ref": "refs/codex/snapshots/25e5215b8e5afc43b92ee16e97515c85c58c54df"
+    },
+    {
+      "oid": "fbd475bede9627c11dba2c8273fa7b47995fd4b3",
+      "ref": "refs/codex/snapshots/26d6c23384c462ff188a7eaa3a3d8e8b3465d030"
+    },
+    {
+      "oid": "72a5b9c7c21a9ea053402b8feae6dde5d8f10913",
+      "ref": "refs/codex/snapshots/28141e688bb7fa97988381e8d43fbd77788ee903"
+    },
+    {
+      "oid": "bc469ba3458ecce8301eb84abbd82070cfd0362a",
+      "ref": "refs/codex/snapshots/295cb809b12033510f677d85c1330bdb895d74ed"
+    },
+    {
+      "oid": "99045be98eac653eaeedcbb772992f1954464edd",
+      "ref": "refs/codex/snapshots/299c26f40a87abee001e73ca638b05448bdd4676"
+    },
+    {
+      "oid": "c473be51dd35d8083ca736f30e81cbfa83e81d78",
+      "ref": "refs/codex/snapshots/2a78f6855d96b46b4fcdcea6fdf5f9a1bda72e35"
+    },
+    {
+      "oid": "16025248d4b9f470786e61888d5f74b7fc9f3572",
+      "ref": "refs/codex/snapshots/2b9994603370905472661ee70cff540c4c65c883"
+    },
+    {
+      "oid": "69553012f38a993e2a9f122bec1d64eff037b6fe",
+      "ref": "refs/codex/snapshots/2d33a21cac940dd337e4608ac2cf1e074f7bb63b"
+    },
+    {
+      "oid": "f787947059e419f5aa8d64d5e2741e6bd06ad487",
+      "ref": "refs/codex/snapshots/2d9302c25d7080415265b6da5dd2bc757eace6e3"
+    },
+    {
+      "oid": "c52205d3dc049c5fe8cc312588bec45c303cc90a",
+      "ref": "refs/codex/snapshots/2dce1ea814492726e3a1fd4172d1bdfb127b5078"
+    },
+    {
+      "oid": "9008894583d05fbc7848c290d2c0a75eea3e6109",
+      "ref": "refs/codex/snapshots/2e0f3cf1f04272b4001fa7d9dad9de18426b51b4"
+    },
+    {
+      "oid": "705253e16644b1b8f4c05f6a57533f320703df49",
+      "ref": "refs/codex/snapshots/2eb89b675a6071b89871f4474c008a23f8f5a69a"
+    },
+    {
+      "oid": "b679dfe19761123ba72daccbf8eb6af73d8e6ead",
+      "ref": "refs/codex/snapshots/304d7a1db8180d6f08257d37e26d8b5d6e1ae9e6"
+    },
+    {
+      "oid": "495881c1e4f30604640cf91761515ac9f3a97279",
+      "ref": "refs/codex/snapshots/3168ae878bc7322dad8e09853b96df47271e6aed"
+    },
+    {
+      "oid": "2b546ee9316ae758193b96b594a2002733e2afc9",
+      "ref": "refs/codex/snapshots/329f2040ff207a27ca627eb796a66c856d0ec2c7"
+    },
+    {
+      "oid": "4ecb612612abd7f000c059aafcd2c5e135361fa3",
+      "ref": "refs/codex/snapshots/329f5a2791960026ba5946201fc5b8862df3c994"
+    },
+    {
+      "oid": "b44a096295f76a2a2a4b00add2d040982b8a73ec",
+      "ref": "refs/codex/snapshots/32e39237c40d7ed61ce19cc33a42b1050881bc71"
+    },
+    {
+      "oid": "93ad5383dd2b4d21cffe05117bdde736d01a0c99",
+      "ref": "refs/codex/snapshots/3358807a1827c88a8d3cdc79412a4d46cbf42834"
+    },
+    {
+      "oid": "d70486e8a8dbac3723ae0efca3fef816af12a612",
+      "ref": "refs/codex/snapshots/342c6c1b22a38a4a84ed51ae76f2e332a534bf63"
+    },
+    {
+      "oid": "634fb74696cfbd324cb96cf6509072cc6bd4f3b7",
+      "ref": "refs/codex/snapshots/35e3c3121ae19396c2cb131748ba6561cf5057f0"
+    },
+    {
+      "oid": "b96494d899d587ce0178165f439baf7df7280a49",
+      "ref": "refs/codex/snapshots/3845e568c22debacfe9164d6b2257f1d33120561"
+    },
+    {
+      "oid": "07c571b6b405a9cc97588fbb3adf113ea40578bf",
+      "ref": "refs/codex/snapshots/392280e9b3fbb9374ac5a87d2ddb7472aadca20f"
+    },
+    {
+      "oid": "cfdc3c29962a1407a580721acf84a888968a7ee9",
+      "ref": "refs/codex/snapshots/39ee1888f35906fde97a41118c20f5de5cf28c85"
+    },
+    {
+      "oid": "cd7b5f6cde3e6521470e256d49aa9bfe65c94102",
+      "ref": "refs/codex/snapshots/3bafc10e2ac961a5f8b86149f5b58eaeb0f5eafb"
+    },
+    {
+      "oid": "c52205d3dc049c5fe8cc312588bec45c303cc90a",
+      "ref": "refs/codex/snapshots/3bc3c342a249fe32b96f53cb691acef404b9c951"
+    },
+    {
+      "oid": "f931c3126a2ee62940f42512278715c9c65c2079",
+      "ref": "refs/codex/snapshots/3d2469ecafe950df9be8f44680db5a34e3a5b941"
+    },
+    {
+      "oid": "be1300934fb36ec9bac650eedfee933c9daf0d9d",
+      "ref": "refs/codex/snapshots/3e5038f0678c0b6a70374c13c13136e569d7362e"
+    },
+    {
+      "oid": "7411664c41f4eba5b1147c9c91891c04e84100e5",
+      "ref": "refs/codex/snapshots/3eaccb0e82045e095b83507114f501d64d0a844a"
+    },
+    {
+      "oid": "2241def83033d3bb49836b0d6b1ecf3c36fc8c39",
+      "ref": "refs/codex/snapshots/3ebb218d7892649968bdf7dd44ea9eb278ff8294"
+    },
+    {
+      "oid": "8ad68584b546b17db06ca256a12e7a9d905e3320",
+      "ref": "refs/codex/snapshots/3ef6357cbf0c0e768e72f062ae180cab29803492"
+    },
+    {
+      "oid": "a5129ba3a536b23d08a743c64b044135505584d6",
+      "ref": "refs/codex/snapshots/3f6e83a062cd83aaaaa22fcfbdd92ac39eb0aefd"
+    },
+    {
+      "oid": "40e55f6ceec9c0f9f750bb1648bf34701df1a4b1",
+      "ref": "refs/codex/snapshots/4037994c48c1d0fbabeff1d2fdfdee42bce24975"
+    },
+    {
+      "oid": "bdc0dafcdeaa1eda5472a03467f10e99de99c941",
+      "ref": "refs/codex/snapshots/41fef8547181919427b8a5fc1df71168e2811c0e"
+    },
+    {
+      "oid": "737411eefa30aa5a9b7ebd040583e62c995ba48f",
+      "ref": "refs/codex/snapshots/4437a32ff811b08a7efe111b14a08468979ed569"
+    },
+    {
+      "oid": "ee49469bd4cf1b0c506bfe3bc90f3547476d992c",
+      "ref": "refs/codex/snapshots/44a103f5bd681685be2c5c10a7c2daf98d96bd6d"
+    },
+    {
+      "oid": "c70b6d20ad31bddb76e7475578b14fd7b1296862",
+      "ref": "refs/codex/snapshots/44e105f8273a71414f79d388ac91001a5e6bad2c"
+    },
+    {
+      "oid": "ce2fa09167223afc57a50277d2a006086384722c",
+      "ref": "refs/codex/snapshots/451f968e113fc8c5b94fa637af5b9509ed2b4b9a"
+    },
+    {
+      "oid": "2bd51fcf38d68720ee4ed25937b393b8450ecbe0",
+      "ref": "refs/codex/snapshots/4689aa54ea2a406e5a84e8b3ba8087c4ddb3654f"
+    },
+    {
+      "oid": "8e0f8842d4ab02960687b24e1bf8d95f43738272",
+      "ref": "refs/codex/snapshots/46c82590c14ca6e5613ae1f363639cfb157685ad"
+    },
+    {
+      "oid": "77f0620545b4d277c0288cc9503e2d90cdf7e0b8",
+      "ref": "refs/codex/snapshots/46e4ef949f5a4b7e9cdea82b31c0b52619fd6657"
+    },
+    {
+      "oid": "34b860b56ab20f6ff69f7ee177ce8906ceeead87",
+      "ref": "refs/codex/snapshots/46fa08b44ff46dc2f69b222d0460d5c08e4412de"
+    },
+    {
+      "oid": "4ecb612612abd7f000c059aafcd2c5e135361fa3",
+      "ref": "refs/codex/snapshots/47a0434fac6e544a7038d53c2b5528d809c9d46e"
+    },
+    {
+      "oid": "ce2fa09167223afc57a50277d2a006086384722c",
+      "ref": "refs/codex/snapshots/47cc3d6deb13f083a13c3608dc156f0e02fc2ad6"
+    },
+    {
+      "oid": "8ad68584b546b17db06ca256a12e7a9d905e3320",
+      "ref": "refs/codex/snapshots/48523280abf4c5b9c7caee43ab7d8b0ddec40125"
+    },
+    {
+      "oid": "05e5afd0a2af05e83eeff95a1388d8dfae1e7770",
+      "ref": "refs/codex/snapshots/48877389d8a09ad24fa3a003de9c5085456ade69"
+    },
+    {
+      "oid": "cb30347b29d7e11d8e0e4210068ee67e6cabd9f0",
+      "ref": "refs/codex/snapshots/48fe5183feeda6f9618541855c148b85711a6726"
+    },
+    {
+      "oid": "49b76afa3805eeed7b4f5847779cfb2eb69a8edf",
+      "ref": "refs/codex/snapshots/49c04cd265330e6805fecab9b1a85296c6c69b3c"
+    },
+    {
+      "oid": "6b3512a4280e0f1c43b3e7bfad813fe86f0ce8c4",
+      "ref": "refs/codex/snapshots/49e0c63bb9624863101f68662653637ccf36d1b7"
+    },
+    {
+      "oid": "0d76be40df3ec6ddf96574546ec220fb992c6478",
+      "ref": "refs/codex/snapshots/4a3bee4b99ab523a6261a439c7a95bc9a96faf11"
+    },
+    {
+      "oid": "e73ae67d3ba1c88fc96018d95a7234928675b26f",
+      "ref": "refs/codex/snapshots/4b22141ed3b6582dbf99b9785a1fe681b5c3ac91"
+    },
+    {
+      "oid": "85579a78da54113321cb32de9eb90dd8cd330aef",
+      "ref": "refs/codex/snapshots/4c97f844ca659a416dfd85b6d7cc00cc51203546"
+    },
+    {
+      "oid": "4e66af3022508b13a6229020d529ee248e49c5a5",
+      "ref": "refs/codex/snapshots/4cee832673e70d50905006bb2fb067b0abf21846"
+    },
+    {
+      "oid": "d69afc6a16d7d89e05a1eca54167a94065a48449",
+      "ref": "refs/codex/snapshots/4da42e87cf56ae6ae2453f23e046af22d16f463d"
+    },
+    {
+      "oid": "ea4a4d04ceb37a10899871c3fe4f394ae10fbfa5",
+      "ref": "refs/codex/snapshots/4e0627a2dfe288fe4f0e12f154e3962243d21d34"
+    },
+    {
+      "oid": "3a076c28abc55b3455c818e6ba0f9560262ca708",
+      "ref": "refs/codex/snapshots/4e8393d947958edda798e8ee27ef1985b27496ae"
+    },
+    {
+      "oid": "8ad68584b546b17db06ca256a12e7a9d905e3320",
+      "ref": "refs/codex/snapshots/4e9d60f1dad2d2c46f04568600f1e5b06b5ca6b2"
+    },
+    {
+      "oid": "821bfd90c3460f56e87aa5c707f6cf712531291a",
+      "ref": "refs/codex/snapshots/4ea1f1b5b1b9c61425246680c8d9d06262812c2d"
+    },
+    {
+      "oid": "db05cd467ff028530df043dc754dfd252c2211ac",
+      "ref": "refs/codex/snapshots/51430c110166149dfeeed61f7170adf07ec3877d"
+    },
+    {
+      "oid": "86cc58a3f19a2097fda7136d85b8d854d30cc4d8",
+      "ref": "refs/codex/snapshots/51c6ae92984603049a9f33d1217052fc6437d0d1"
+    },
+    {
+      "oid": "0689cbd5d58efcd764fbd6124e618bf0546e051b",
+      "ref": "refs/codex/snapshots/51ce0eb44ad351cf76cf73b2dea5fe57e78296af"
+    },
+    {
+      "oid": "470e73897b885264aec0a6c9692e54eb2a186ef1",
+      "ref": "refs/codex/snapshots/53f8e8b5cace8672e47fcef2f981734a1e63bea9"
+    },
+    {
+      "oid": "fef27cb991dc9944de6132ffb51f927581493951",
+      "ref": "refs/codex/snapshots/5401f1242b43e67b42fc5f7b978373a958483de4"
+    },
+    {
+      "oid": "ce56ff609948d0d31dbd76e74a30a87a027738d3",
+      "ref": "refs/codex/snapshots/55b0765f24a18428efab0b2955e1913284b81d9f"
+    },
+    {
+      "oid": "be1300934fb36ec9bac650eedfee933c9daf0d9d",
+      "ref": "refs/codex/snapshots/561b7152386d29b760141cb6d1f87adb944b2303"
+    },
+    {
+      "oid": "705253e16644b1b8f4c05f6a57533f320703df49",
+      "ref": "refs/codex/snapshots/56523a12423ef3d16da3b4676d61e2737a5a9b55"
+    },
+    {
+      "oid": "9a74084d9ce8b241d8fdf4a7865a683bd04e652c",
+      "ref": "refs/codex/snapshots/584fedce2ad1fab27f24e7ac2c6eaabf2e9e55a4"
+    },
+    {
+      "oid": "ca74c9f06838949a2074dcf6c5aef99a641c3d18",
+      "ref": "refs/codex/snapshots/595ac546173a5b004ca82dc63fff1d06333ba3e9"
+    },
+    {
+      "oid": "a3d6ddcb0b088165af25cd798cddef65667dc74e",
+      "ref": "refs/codex/snapshots/59be1c01571f22b46de54096485ed3c01c71522a"
+    },
+    {
+      "oid": "b679dfe19761123ba72daccbf8eb6af73d8e6ead",
+      "ref": "refs/codex/snapshots/5a4936045dba25172411b3833ee548c31648c539"
+    },
+    {
+      "oid": "9ef779cf56c7a498921dec0782dea41cfbe17104",
+      "ref": "refs/codex/snapshots/5d641d582ec232e5da416285d88e9863f7152d30"
+    },
+    {
+      "oid": "485819810382db7f763196b8305426e1f3f8a839",
+      "ref": "refs/codex/snapshots/5d672b4b0884f8e8d697b77dd99859b52742adb2"
+    },
+    {
+      "oid": "d701655306bc0ac42ce12a8142ad2a62b6ea0d1b",
+      "ref": "refs/codex/snapshots/5df419a789311c84e344310049bcb13f243ffeac"
+    },
+    {
+      "oid": "6aa395fddf8ad8cca8f485c6a96fa0e78862e653",
+      "ref": "refs/codex/snapshots/5fc57e06a1eae91e738094e35d892e5ef3ae97ba"
+    },
+    {
+      "oid": "687dc1e1f4b51701452f2ba25c92f34bc018a950",
+      "ref": "refs/codex/snapshots/6061d39f89ba37e47f47513eb1426c814ee72617"
+    },
+    {
+      "oid": "21ac91a24c91b60746ecacb62cac3b7760f8696d",
+      "ref": "refs/codex/snapshots/6153ec6135fc36fe763e24bfbaab62581a950828"
+    },
+    {
+      "oid": "3a9d4f35674b166528d7e15aea0e17802d634cea",
+      "ref": "refs/codex/snapshots/6176a30e812cde5cf7c6c35daf29ea3b73e06cba"
+    },
+    {
+      "oid": "90784394899a88e9b7877c027905d6f6f0cd2d31",
+      "ref": "refs/codex/snapshots/621003b2d7849eb85a985d9c57ecd24f46eb5c11"
+    },
+    {
+      "oid": "2ef4e7381114e6edfe2e5be90100e090f719c42c",
+      "ref": "refs/codex/snapshots/6225f0d00009509097c17ee39e9753d57f4e294b"
+    },
+    {
+      "oid": "fb4de368d49a9479f77be0382df25cf1e8595b51",
+      "ref": "refs/codex/snapshots/646fc273320218c439da3fea1990587aada965e1"
+    },
+    {
+      "oid": "9e9393acde1284b0c684a5c15d9bf331133c9928",
+      "ref": "refs/codex/snapshots/6692462ef069a66f0fdb909a320e7daa649179df"
+    },
+    {
+      "oid": "ca74c9f06838949a2074dcf6c5aef99a641c3d18",
+      "ref": "refs/codex/snapshots/6695b8993ac3a80079b85c8534672672fe25962e"
+    },
+    {
+      "oid": "e7e6dec0a61b5ce89ba2b982763b466567ff06d0",
+      "ref": "refs/codex/snapshots/67b90e1963a7e44bad63b633eb64419c533fff38"
+    },
+    {
+      "oid": "980867c3534612cd8d30867473a5b3eb36ad1f03",
+      "ref": "refs/codex/snapshots/68f94fca0a7ebd3d89460ddd0b4942241b65a24e"
+    },
+    {
+      "oid": "fce107fa282dcfaf4f406e0b459e81dee67f3c46",
+      "ref": "refs/codex/snapshots/695e07b528bf35b0931d5c74df04f72e0c46a5eb"
+    },
+    {
+      "oid": "58edb6f41d474f1ee61cb58cf2aead3bfe7d4eab",
+      "ref": "refs/codex/snapshots/69a73d4fd807dc6735e02b68fdfe1f85f6766b87"
+    },
+    {
+      "oid": "9e9393acde1284b0c684a5c15d9bf331133c9928",
+      "ref": "refs/codex/snapshots/69c47511484edd809a63be88447c290710157d24"
+    },
+    {
+      "oid": "2d3cf28eb130bcf6ba22b59b55556ba22abea650",
+      "ref": "refs/codex/snapshots/6a3bd163a040ddef51ec35db6b61ee22d4ebb159"
+    },
+    {
+      "oid": "c70b6d20ad31bddb76e7475578b14fd7b1296862",
+      "ref": "refs/codex/snapshots/6a68900c2ec1464c29346f2f476dcdf4c08d5459"
+    },
+    {
+      "oid": "6f9de689326fba57d40aa619c08bc03b325c6509",
+      "ref": "refs/codex/snapshots/6ab5bca2b0b1b36ba3cfb0ce0954360e4acda02f"
+    },
+    {
+      "oid": "07c571b6b405a9cc97588fbb3adf113ea40578bf",
+      "ref": "refs/codex/snapshots/6b03c00bf41f095d71cf161f7e0c5d599ac22f9c"
+    },
+    {
+      "oid": "4a51156b78fd6c01108cecccc82af34864b943bb",
+      "ref": "refs/codex/snapshots/6b8ca2b3a24ba973a4cb17e4f9c99adb59e9a6c0"
+    },
+    {
+      "oid": "5d8216085006973c02349ecef3604124a87bf3e3",
+      "ref": "refs/codex/snapshots/6d2adddd2c43ad42b4117e648b4adcf0b26d1e0d"
+    },
+    {
+      "oid": "c01924ba634b64ec0bdb6033bd53dc304b5a94fc",
+      "ref": "refs/codex/snapshots/6eea6c804546e5b3ab71cbfe5cc2e2897ce8b0f0"
+    },
+    {
+      "oid": "f7ca654e47b449792fccf0efa5498c27461bd45a",
+      "ref": "refs/codex/snapshots/70273357ec2d5a58951b9a7958fc5c46cfef5571"
+    },
+    {
+      "oid": "980867c3534612cd8d30867473a5b3eb36ad1f03",
+      "ref": "refs/codex/snapshots/70e459b7a3f100db81386bb4e325244f9b70de3a"
+    },
+    {
+      "oid": "a4288114a22fb1a3f4ef31577a058a3304332145",
+      "ref": "refs/codex/snapshots/7120d95f6c92d0a242a2839c57ac3b2facd4441e"
+    },
+    {
+      "oid": "cb30347b29d7e11d8e0e4210068ee67e6cabd9f0",
+      "ref": "refs/codex/snapshots/712d95604ab921009b2d2de6b27df50a903f13c1"
+    },
+    {
+      "oid": "21ac91a24c91b60746ecacb62cac3b7760f8696d",
+      "ref": "refs/codex/snapshots/730679917c9795e61fbff2acb8c03531b8a1ee0f"
+    },
+    {
+      "oid": "4ecb612612abd7f000c059aafcd2c5e135361fa3",
+      "ref": "refs/codex/snapshots/7458253113cde30a99609c5577b9f3c7bc5858eb"
+    },
+    {
+      "oid": "21d3d24a7f757b43d3f51599fe35a14e7f0f3633",
+      "ref": "refs/codex/snapshots/752ee7bbc0c7e2cd222f83f2e672a3edbd94cf99"
+    },
+    {
+      "oid": "962164520b32bcc25ca24db41daf8bd27baad85f",
+      "ref": "refs/codex/snapshots/754ee1654c1492cbb2072f714dc38bad242d28f2"
+    },
+    {
+      "oid": "78f44fe4482df664569c1df0382f590f0476a003",
+      "ref": "refs/codex/snapshots/75950753e251f8821d55e1ef2410a8dee489f903"
+    },
+    {
+      "oid": "605038d984459673c9873e20236b4ef4d6a47955",
+      "ref": "refs/codex/snapshots/767a58df37d25d19812cab7e6f8b748faec56b3b"
+    },
+    {
+      "oid": "98b9a7eeb62afb9a844ffd7dd6cd8f591aab6de6",
+      "ref": "refs/codex/snapshots/77286772b3fda0b845b3faafc6b589a9f7513e09"
+    },
+    {
+      "oid": "084efb4d807eb39c8f3a36508c12541a477c58ce",
+      "ref": "refs/codex/snapshots/776d7bd2cc10d722120eb51b398a338071bdadff"
+    },
+    {
+      "oid": "982e753d4a5a697c291307fbc9da466089e03b87",
+      "ref": "refs/codex/snapshots/785f97caff7eadb9e7233713bec6b494d2bede42"
+    },
+    {
+      "oid": "414cb54119453afbdaf496c7063fcea7dd8e694f",
+      "ref": "refs/codex/snapshots/7b34f748bff854a02d4c99219a75b482e334842a"
+    },
+    {
+      "oid": "e9fb48c3b9469d4b8122ab76c299eba3832df8c0",
+      "ref": "refs/codex/snapshots/7d1bf79e2e4a166ebe4dd3876d2283baadf886c8"
+    },
+    {
+      "oid": "a3d6ddcb0b088165af25cd798cddef65667dc74e",
+      "ref": "refs/codex/snapshots/7f40486be4bc7eafffa8fa475e06925fda009b1d"
+    },
+    {
+      "oid": "cd7b5f6cde3e6521470e256d49aa9bfe65c94102",
+      "ref": "refs/codex/snapshots/7fc232d55a3953d7a9001f0e3000496d247aae2f"
+    },
+    {
+      "oid": "b0352fbb79f30b267d8725deaf3fc2e234ec5998",
+      "ref": "refs/codex/snapshots/80456cb33e2e701c3d5284f3e0a4838cec819120"
+    },
+    {
+      "oid": "8ed8db55500f3a05aef55a1e2ec39acba30a8c07",
+      "ref": "refs/codex/snapshots/82d500fd86be0161ce309ea05fba07078e3e3a96"
+    },
+    {
+      "oid": "5826fb787def627d597d043d51a077920b2dcc9f",
+      "ref": "refs/codex/snapshots/83abab47f81ad38eef653c4a00988ef7d1c90d87"
+    },
+    {
+      "oid": "4b530e0142caa72ca3f508f266bcd66bb29cdb83",
+      "ref": "refs/codex/snapshots/84f707903f5d732d4ed09d6c3d854160270dc825"
+    },
+    {
+      "oid": "1ce3dae26001042cddb1de985a95d12b675ef69e",
+      "ref": "refs/codex/snapshots/86984e25ba41fb4849e6b14a3eb260fd1cbdf353"
+    },
+    {
+      "oid": "7c794417c1b5b6490324fa6e1062580b73f339a8",
+      "ref": "refs/codex/snapshots/86d57b4c2e5edce0b62325a5a361dce39307ece9"
+    },
+    {
+      "oid": "77f0620545b4d277c0288cc9503e2d90cdf7e0b8",
+      "ref": "refs/codex/snapshots/87b8a7544c7fb12590c680738e786bb882b3343e"
+    },
+    {
+      "oid": "83030ba226a436cd72406fae1d5a53aa01dbed59",
+      "ref": "refs/codex/snapshots/8826281ddbb795b42ff6de9be69cec238bf5261f"
+    },
+    {
+      "oid": "83030ba226a436cd72406fae1d5a53aa01dbed59",
+      "ref": "refs/codex/snapshots/8847ff0a69281c462c0113819ceb964adac11497"
+    },
+    {
+      "oid": "b373a367887d5fb114ed66fdc1023401bcd0aaa5",
+      "ref": "refs/codex/snapshots/89ada81a15c048d7e1bb043ef9b3bfd8470ee0c4"
+    },
+    {
+      "oid": "980867c3534612cd8d30867473a5b3eb36ad1f03",
+      "ref": "refs/codex/snapshots/8c457d5c3edd8b683eeab8a4d819f348bb826296"
+    },
+    {
+      "oid": "86cc58a3f19a2097fda7136d85b8d854d30cc4d8",
+      "ref": "refs/codex/snapshots/8ca47de32075dbd24253318d81616fc5f51e5eb3"
+    },
+    {
+      "oid": "6505d30ca56abc0d5f9f3700242f862fe078e571",
+      "ref": "refs/codex/snapshots/8d17b47badcfdbfa2c3a11a09e7abe4c2603144b"
+    },
+    {
+      "oid": "f5b0bb0895f9f829541bfa426453b59cf0a401cd",
+      "ref": "refs/codex/snapshots/8e9fc08690df3aff4bd46e66d0feb818530b3932"
+    },
+    {
+      "oid": "199ff2290ee611f91bd64fb15e98426a75b608a6",
+      "ref": "refs/codex/snapshots/8eba58031c271d274695cc444884853335a5c26b"
+    },
+    {
+      "oid": "f603ea566de9b021ec14cdc123f3cf71b43f1bad",
+      "ref": "refs/codex/snapshots/8f0f18b78d5bdbe9d6eec053e1dce995dd59fd25"
+    },
+    {
+      "oid": "470e73897b885264aec0a6c9692e54eb2a186ef1",
+      "ref": "refs/codex/snapshots/8fd641a0a0b0b317481f440bfd24ffc431b4d2d3"
+    },
+    {
+      "oid": "8e0f8842d4ab02960687b24e1bf8d95f43738272",
+      "ref": "refs/codex/snapshots/9039d287fdcf9adce73226002572662ccc1a09c4"
+    },
+    {
+      "oid": "d2cb7cd32976f1de460defe5fc0cb094669b0140",
+      "ref": "refs/codex/snapshots/905c9bc9f4a53d26217601c46247cff69481af52"
+    },
+    {
+      "oid": "5826fb787def627d597d043d51a077920b2dcc9f",
+      "ref": "refs/codex/snapshots/94df3daef9d2832ac04a0a78e36e71b06c718118"
+    },
+    {
+      "oid": "85579a78da54113321cb32de9eb90dd8cd330aef",
+      "ref": "refs/codex/snapshots/958595cb014a5c8ddf7165e0cfb8089923e3f6d5"
+    },
+    {
+      "oid": "64d28711a91b4bf1115581dda2b5210b1b120075",
+      "ref": "refs/codex/snapshots/96c9f85109b8453e57d55740a9e285ca53119466"
+    },
+    {
+      "oid": "fce107fa282dcfaf4f406e0b459e81dee67f3c46",
+      "ref": "refs/codex/snapshots/99a41a27c80ad365a26eb18de09700fc50f0fb74"
+    },
+    {
+      "oid": "5c99501b5e00305f3be95ae3fce4d2f855c6aed8",
+      "ref": "refs/codex/snapshots/9a2ddb5256796ae204c06a71ae24747b8daf164f"
+    },
+    {
+      "oid": "5e881e8681229545fe8260a1dc2be8f47cd07a3a",
+      "ref": "refs/codex/snapshots/9a5648df7d548481a3e26db3e16a617af8fc22d2"
+    },
+    {
+      "oid": "30dbf4b6bfd45edbee00ed7e55be2fb1ed964b19",
+      "ref": "refs/codex/snapshots/9ed7fcca6989999a5c28a63157e9b48bca7466ca"
+    },
+    {
+      "oid": "a2d9ce6321e19e3c46fd8a6c8c4a4b0184687b85",
+      "ref": "refs/codex/snapshots/9f66a074ebd186345b656084545e158d148a1e7b"
+    },
+    {
+      "oid": "f9146e3a0f7736af561f8fba348d7f8b9fbbb7ad",
+      "ref": "refs/codex/snapshots/9fdb37a38bba1384bb392c769eb524fb982de1cb"
+    },
+    {
+      "oid": "05d0a5872d6426afa1bda076706a362835410748",
+      "ref": "refs/codex/snapshots/a00345d565c92dfa5559c56254d3dd9b3702d209"
+    },
+    {
+      "oid": "87c72c69e62222ed24db447297c2ce18df318c6c",
+      "ref": "refs/codex/snapshots/a0064aa36a3192f3a341c439d51d28d464102b6b"
+    },
+    {
+      "oid": "8a6995ca80843a54363998bd08962e7693e8f523",
+      "ref": "refs/codex/snapshots/a0bfdf55af56c0a0d6d8d3c441153b760740087a"
+    },
+    {
+      "oid": "9a74084d9ce8b241d8fdf4a7865a683bd04e652c",
+      "ref": "refs/codex/snapshots/a2186d078cd4447e295b249806042bc28a8ac553"
+    },
+    {
+      "oid": "0edb811fd4597263bdb71c82174d9685e3ae3252",
+      "ref": "refs/codex/snapshots/a21a7f372fad24002d28daca8ea297256b712a8b"
+    },
+    {
+      "oid": "e4a76da649a95875c54e7f182bebab313c077e47",
+      "ref": "refs/codex/snapshots/a24c51cbe9336b33f0eff4590748fedcf56fc7bf"
+    },
+    {
+      "oid": "8702a7e8cb6346d29ac5247ee87344f34b766143",
+      "ref": "refs/codex/snapshots/a302484674b3df77ea9019aa1abd06a4d48cb334"
+    },
+    {
+      "oid": "e3fe06cab3e70d988230a4a9e3aeb2bc9fcfc355",
+      "ref": "refs/codex/snapshots/a33cf23f194bf61327c988b9c49978beebc4662f"
+    },
+    {
+      "oid": "982e753d4a5a697c291307fbc9da466089e03b87",
+      "ref": "refs/codex/snapshots/a3d260a23cc155ba7130790d069a523adc998e2f"
+    },
+    {
+      "oid": "1fa3e0009176a5c8df9a659e81e4f1329c4c2b96",
+      "ref": "refs/codex/snapshots/a45a0695ef705310b2e6afc0de2fbfe6679640f7"
+    },
+    {
+      "oid": "419433985790f35f5ef514e9f508b4f8906d37a1",
+      "ref": "refs/codex/snapshots/a56c3f89ca2c2adda358ea347b26a23b268db145"
+    },
+    {
+      "oid": "87f53a0ca8ed28e804e674a1e9688725f9236609",
+      "ref": "refs/codex/snapshots/a6d8593fb984d6732033839d1b72bf4e96304a21"
+    },
+    {
+      "oid": "ca336f6aed4f9582bd4e7d6738ebc2410728f80f",
+      "ref": "refs/codex/snapshots/a7bec7ed8550891258642c73881809ccba9923d1"
+    },
+    {
+      "oid": "ea2e01ec7e33a69136915b3c1a04c009b1dccfdc",
+      "ref": "refs/codex/snapshots/a7fa85012bffaa692de35a845338d5835f076fda"
+    },
+    {
+      "oid": "0d76be40df3ec6ddf96574546ec220fb992c6478",
+      "ref": "refs/codex/snapshots/a8b89e413d426c4a2da7635c2d0630041a783111"
+    },
+    {
+      "oid": "8a6995ca80843a54363998bd08962e7693e8f523",
+      "ref": "refs/codex/snapshots/a8c985a502aafaec3c744c3aa74ddb2604fb8dc9"
+    },
+    {
+      "oid": "501cc8de8d4d7f9a1bd8654ed8f9b6f49137f0b6",
+      "ref": "refs/codex/snapshots/a8f21d3c310e2bc3ad183098ad5b578fd3ce7b36"
+    },
+    {
+      "oid": "fccdbbd54161e82bc4c837d68b7c4d0ca62be0cf",
+      "ref": "refs/codex/snapshots/aaec748f32b3982456d70522ee85dae48dfc632e"
+    },
+    {
+      "oid": "c01924ba634b64ec0bdb6033bd53dc304b5a94fc",
+      "ref": "refs/codex/snapshots/ad1d37e4e91378a68c058849a2f36c666765a9be"
+    },
+    {
+      "oid": "962164520b32bcc25ca24db41daf8bd27baad85f",
+      "ref": "refs/codex/snapshots/ad42dad49a486ec2e8ea6a2ee1d20502c3b34e67"
+    },
+    {
+      "oid": "501cc8de8d4d7f9a1bd8654ed8f9b6f49137f0b6",
+      "ref": "refs/codex/snapshots/ade1c9073b776bba5753a843d3f059a05051b3bf"
+    },
+    {
+      "oid": "78f44fe4482df664569c1df0382f590f0476a003",
+      "ref": "refs/codex/snapshots/adf6e7c19d380345e1337bb975c8abff63aaf121"
+    },
+    {
+      "oid": "2ef4e7381114e6edfe2e5be90100e090f719c42c",
+      "ref": "refs/codex/snapshots/af5cb5f4bc19f7e2d4a03975b7e6c6ddab059682"
+    },
+    {
+      "oid": "419433985790f35f5ef514e9f508b4f8906d37a1",
+      "ref": "refs/codex/snapshots/afea146617886abaf69388e3bcdc9df204f4cdff"
+    },
+    {
+      "oid": "b114493199703a045636c1b3b46250f1af2f6a11",
+      "ref": "refs/codex/snapshots/b2ab6728ec81eff785b0e082a7cface1d9100af9"
+    },
+    {
+      "oid": "c1d266e224f87fb57f18f85846f2c8931e038ec8",
+      "ref": "refs/codex/snapshots/b380391521874d7850082ec2013412d4958af050"
+    },
+    {
+      "oid": "2aa981c34f26b334acf5bd4e523b5fb6e502a227",
+      "ref": "refs/codex/snapshots/b4e26cdabeb2124fee4f4f60eb48a9e22cd2718a"
+    },
+    {
+      "oid": "af3b79b16576f52b13ae96053ae12cfef715d857",
+      "ref": "refs/codex/snapshots/b5346f51ea3d093ada3c58e5b96ca48000bcee86"
+    },
+    {
+      "oid": "c473be51dd35d8083ca736f30e81cbfa83e81d78",
+      "ref": "refs/codex/snapshots/b5f075ad6a784a847e3fdc6a92357d97409695c2"
+    },
+    {
+      "oid": "788b105980b59d73b5e0c05eb682c81b669827ad",
+      "ref": "refs/codex/snapshots/b7a1d58e0717f74f9911f3a8f703b475bba50752"
+    },
+    {
+      "oid": "8a298bd63ddaf492057ead1233bf3bf18b4dd5d3",
+      "ref": "refs/codex/snapshots/b813bf1e60d545fe60cf4d1650c77181251b2003"
+    },
+    {
+      "oid": "8ec67c5aad9391377a317f407d0d0fab0db10418",
+      "ref": "refs/codex/snapshots/b8389443989b9150382657cad7606fca53297365"
+    },
+    {
+      "oid": "e73ae67d3ba1c88fc96018d95a7234928675b26f",
+      "ref": "refs/codex/snapshots/b8c2503bd82859d91cac7863a6f6829f6a90be51"
+    },
+    {
+      "oid": "43379c475bd76caeca97bbbd15d479b7b85afcca",
+      "ref": "refs/codex/snapshots/b8db8a52bf088d03101e23f362fdd5ecde01f0c2"
+    },
+    {
+      "oid": "899910502ec894e1ba8b0c6a5bb0795549383d88",
+      "ref": "refs/codex/snapshots/b917a7c024d2cfb1a8660fdd92c3a01b9c4400dd"
+    },
+    {
+      "oid": "634fb74696cfbd324cb96cf6509072cc6bd4f3b7",
+      "ref": "refs/codex/snapshots/b95cbaaf845105d6d2e5634eca0c1b80b6b4d144"
+    },
+    {
+      "oid": "0176379ba04190639fcccddddaf0a6d2db184b25",
+      "ref": "refs/codex/snapshots/b9a19df044ae37c5d4759631fb3415922e3ea228"
+    },
+    {
+      "oid": "2da96a8488a46760b25524c5d8d782529fc92b68",
+      "ref": "refs/codex/snapshots/bb5ccff0920680d0bd677eaddaf8fd5c62b9fde1"
+    },
+    {
+      "oid": "81242bf36e4484c619747235e88bbe90df708d75",
+      "ref": "refs/codex/snapshots/bb78300f0c76bf9417ec3c36bbcae92140fd09e8"
+    },
+    {
+      "oid": "b432de9bd85610124cf5cea651d90ae76023f5a5",
+      "ref": "refs/codex/snapshots/bb9f51ea0d823d566e121947acdcc6a1ae437126"
+    },
+    {
+      "oid": "743b783976b0515372e5525c0c1671f5dbec37bd",
+      "ref": "refs/codex/snapshots/bba79497a97f2c276a35ea0b8d0c70ce36ad153b"
+    },
+    {
+      "oid": "6915bcfcd0a76518af5e007233de1c29a43c1556",
+      "ref": "refs/codex/snapshots/bcb98c995cf3c73944cdc0165e24675b515f08fb"
+    },
+    {
+      "oid": "93ad5383dd2b4d21cffe05117bdde736d01a0c99",
+      "ref": "refs/codex/snapshots/bcbe403ec47d798a3063503c278a7bc74a11ef32"
+    },
+    {
+      "oid": "0689cbd5d58efcd764fbd6124e618bf0546e051b",
+      "ref": "refs/codex/snapshots/bcda1f444a6486f9a07b25dae98285ead9d28156"
+    },
+    {
+      "oid": "125d58efd7baafb86b2a339d64a6f145b10cc1e2",
+      "ref": "refs/codex/snapshots/bd406a6b3eba491870c3113050c3a0facbd79d0f"
+    },
+    {
+      "oid": "9a74084d9ce8b241d8fdf4a7865a683bd04e652c",
+      "ref": "refs/codex/snapshots/bdfb2229790bc169f2893a7dd28515d293f70421"
+    },
+    {
+      "oid": "f9146e3a0f7736af561f8fba348d7f8b9fbbb7ad",
+      "ref": "refs/codex/snapshots/bf53b01835b12d63426c2dd13b356d44c4f59754"
+    },
+    {
+      "oid": "d2cb7cd32976f1de460defe5fc0cb094669b0140",
+      "ref": "refs/codex/snapshots/c034aa5d2e5f6e59e41328e11890d1a4d34fc090"
+    },
+    {
+      "oid": "264bcefb61a81d78c823cb3eb86195d8a59d74e6",
+      "ref": "refs/codex/snapshots/c12e5eed05164f3a5b58181ad71a1b123c4b71d0"
+    },
+    {
+      "oid": "67da0bbf4336d1bed455a294cf26318a0128f30e",
+      "ref": "refs/codex/snapshots/c16f753dc2f043a8ae3190577d43a3cd698ad491"
+    },
+    {
+      "oid": "0ff5d2b28de52dda2beb64245c1d6524ed835969",
+      "ref": "refs/codex/snapshots/c17c600b9cee67e5458556344a8c79099b299aa1"
+    },
+    {
+      "oid": "90bccdc940b5f4070367733e2376413723650736",
+      "ref": "refs/codex/snapshots/c1ded2d360816f6bd374d52833305d642cbc7c49"
+    },
+    {
+      "oid": "5c99501b5e00305f3be95ae3fce4d2f855c6aed8",
+      "ref": "refs/codex/snapshots/c6e8020ab87e89dd660bcb6e9e0d0d4234700b9e"
+    },
+    {
+      "oid": "de8bac83d7508c0dc99a929e095a3c2240d89910",
+      "ref": "refs/codex/snapshots/c71549ca4ff967e57de6e4a99c14466c03b1db58"
+    },
+    {
+      "oid": "ce147b9ff9958c101fa7b9d40d26b0470eafbf60",
+      "ref": "refs/codex/snapshots/c716130f9bede820b8bda8edcd700ed04cd4450d"
+    },
+    {
+      "oid": "c99a5439d9538dfc88de2883bf6b4383c8e1c037",
+      "ref": "refs/codex/snapshots/c7c95417933d258a918f67249524c198535cb5ff"
+    },
+    {
+      "oid": "8fcb3051dc0359e558ffac9dfe77f525709f1c92",
+      "ref": "refs/codex/snapshots/c9f0ff2a9cede798bf6e8fa79b2b1ef8bc28cc57"
+    },
+    {
+      "oid": "4bd45c343d92326719f0f5ea48a10f8acafd8372",
+      "ref": "refs/codex/snapshots/ca098b570a5c12258100e125663f7ca4a3a1092a"
+    },
+    {
+      "oid": "515d76d9c8c42f3af59cbe655d400d15f4baac51",
+      "ref": "refs/codex/snapshots/cc9f5184476ddf6c86fdb7150d5de6e21e0993de"
+    },
+    {
+      "oid": "6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f",
+      "ref": "refs/codex/snapshots/cd43a5e78fb45e38587fd25214403c11bf3ced1a"
+    },
+    {
+      "oid": "414cb54119453afbdaf496c7063fcea7dd8e694f",
+      "ref": "refs/codex/snapshots/cd71efddf020a4b917e936c260ab0c31b73e9806"
+    },
+    {
+      "oid": "d701655306bc0ac42ce12a8142ad2a62b6ea0d1b",
+      "ref": "refs/codex/snapshots/ce21b5fa30ad7ac5fbbbe3e0927cb084e967babb"
+    },
+    {
+      "oid": "737411eefa30aa5a9b7ebd040583e62c995ba48f",
+      "ref": "refs/codex/snapshots/cea429e8b71b51009484c4fe6d855b313e809af2"
+    },
+    {
+      "oid": "34b860b56ab20f6ff69f7ee177ce8906ceeead87",
+      "ref": "refs/codex/snapshots/cf2a2b626ad3bf3229f8016c6366d1ecafd8eeeb"
+    },
+    {
+      "oid": "6f9de689326fba57d40aa619c08bc03b325c6509",
+      "ref": "refs/codex/snapshots/d0651084733b080e436abb8e76c0df638f400de5"
+    },
+    {
+      "oid": "f2fb7c3303da51cb91893ff87b9d41af240702aa",
+      "ref": "refs/codex/snapshots/d2a49082c9f5c1860022981e26a891a02f4e1531"
+    },
+    {
+      "oid": "2c472ed7ded121e1e2210156d89526b70e28ad65",
+      "ref": "refs/codex/snapshots/d2b36f97045c8b502f425273d5da592b6feb9d6b"
+    },
+    {
+      "oid": "404290d066e88d5f07eb448439839c0d762abaae",
+      "ref": "refs/codex/snapshots/d347ac5bf2db25705dd3f3651e98b60ab35042ad"
+    },
+    {
+      "oid": "be6b5a8781fc687c9e9e6b402007085a80250842",
+      "ref": "refs/codex/snapshots/d413b6170a65ebdc479b45205c0d7896a82d69aa"
+    },
+    {
+      "oid": "ee49469bd4cf1b0c506bfe3bc90f3547476d992c",
+      "ref": "refs/codex/snapshots/d53996e5a2837fd7d845fcb4409ff722fa999210"
+    },
+    {
+      "oid": "9a74084d9ce8b241d8fdf4a7865a683bd04e652c",
+      "ref": "refs/codex/snapshots/d5ba9c42a0bd884f8f1a5aca86669b1d1a4e6d64"
+    },
+    {
+      "oid": "f7ca654e47b449792fccf0efa5498c27461bd45a",
+      "ref": "refs/codex/snapshots/d6ce69ddb298afcaa77599faa6a8de3e2a1e0145"
+    },
+    {
+      "oid": "6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f",
+      "ref": "refs/codex/snapshots/d73415e5fb8d9f03089dd7442cf6597254afb8da"
+    },
+    {
+      "oid": "de8bac83d7508c0dc99a929e095a3c2240d89910",
+      "ref": "refs/codex/snapshots/d775c399ba5076d3327a2c3433cf6632c8154f67"
+    },
+    {
+      "oid": "37e835d7b575ef3b4063a5c0da0b050fd6f8b192",
+      "ref": "refs/codex/snapshots/d8282a59fefc75684e3f9f76f77d97b77220dd47"
+    },
+    {
+      "oid": "81421e7209f1b4316e3dd8a5f29415660b94f755",
+      "ref": "refs/codex/snapshots/d8354875180c952fe62dbde31a6650ed9da27235"
+    },
+    {
+      "oid": "07ba69b4f3c3f5c7e68d609d798bfbadb79040ea",
+      "ref": "refs/codex/snapshots/d855764be59fd099585636dd2ae4eed7875aeec7"
+    },
+    {
+      "oid": "2b546ee9316ae758193b96b594a2002733e2afc9",
+      "ref": "refs/codex/snapshots/d9a52eee6fe6960df73471df93667a08278cd69a"
+    },
+    {
+      "oid": "2d8d804ce00358800746d46788e03ab584cc12ec",
+      "ref": "refs/codex/snapshots/d9b37761952503c300dae7435ef16454efbc5fc1"
+    },
+    {
+      "oid": "ea2e01ec7e33a69136915b3c1a04c009b1dccfdc",
+      "ref": "refs/codex/snapshots/da864b85ac1ca1f562ba34a1b1f2128ceaf9d26b"
+    },
+    {
+      "oid": "cfff8bc5f732243724dc97c964a613070ef9736c",
+      "ref": "refs/codex/snapshots/da8a143ea9ce103ec82c3aa7dc35ee860b11fd6b"
+    },
+    {
+      "oid": "a7ed577ece4e8a1bb26dc655e818a3c256fa4933",
+      "ref": "refs/codex/snapshots/dad9653f34af23d85320771d894ac2f458d58ca8"
+    },
+    {
+      "oid": "81421e7209f1b4316e3dd8a5f29415660b94f755",
+      "ref": "refs/codex/snapshots/dba613d84e3dce4c4897fb93348a05a0de41797c"
+    },
+    {
+      "oid": "cfff8bc5f732243724dc97c964a613070ef9736c",
+      "ref": "refs/codex/snapshots/dc488b41eba95d87e33a0a902f2be92c8e757b7c"
+    },
+    {
+      "oid": "6b3512a4280e0f1c43b3e7bfad813fe86f0ce8c4",
+      "ref": "refs/codex/snapshots/dd50d5149c2cec7df4feaf7a9e768e7474b8a5d9"
+    },
+    {
+      "oid": "b432de9bd85610124cf5cea651d90ae76023f5a5",
+      "ref": "refs/codex/snapshots/dd9e26741d13bb91428afcd9bb8d5d3214999fc3"
+    },
+    {
+      "oid": "0d76be40df3ec6ddf96574546ec220fb992c6478",
+      "ref": "refs/codex/snapshots/de707dc33d5d576fdc031419c06f6ea7e54629f5"
+    },
+    {
+      "oid": "bdc0dafcdeaa1eda5472a03467f10e99de99c941",
+      "ref": "refs/codex/snapshots/deba8a3f8bd735e1c4afb9edc37650adb8a66885"
+    },
+    {
+      "oid": "4a9454e5347c6686e34b8be3efae0e828cd2ae49",
+      "ref": "refs/codex/snapshots/dee0d5191aa854c039a7a807b8cd6ea0b1cc09d7"
+    },
+    {
+      "oid": "9e8ccb1cf129ba8ef1dc14d9050e84da5ee7e3b3",
+      "ref": "refs/codex/snapshots/e1be939dce0a9fd593a0f2c09879793de2a0af6a"
+    },
+    {
+      "oid": "621e1bf2b3e95af4ed44a133f789bdbd908c1d41",
+      "ref": "refs/codex/snapshots/e27d827bb059a93dfbd59f6bfc7c9bcfdb535e31"
+    },
+    {
+      "oid": "347eb565d815a253ea03a7d24e0418d25d2a698a",
+      "ref": "refs/codex/snapshots/e29f1a3dd75ddd117f01332d733166c7af132879"
+    },
+    {
+      "oid": "72a5b9c7c21a9ea053402b8feae6dde5d8f10913",
+      "ref": "refs/codex/snapshots/e3fb7e5f0546272c7f72f92924e5e83ef9f6175c"
+    },
+    {
+      "oid": "90bccdc940b5f4070367733e2376413723650736",
+      "ref": "refs/codex/snapshots/e62c392eafc245aa63c1904718139fd4dd54b210"
+    },
+    {
+      "oid": "de8bac83d7508c0dc99a929e095a3c2240d89910",
+      "ref": "refs/codex/snapshots/e7ebc6e2baa8c7aab96891922ed5bf5bfa881a17"
+    },
+    {
+      "oid": "6c53f3ee9761efce0539363e2c54dd1b80b4f735",
+      "ref": "refs/codex/snapshots/e812a9eb0f2eefebac32c867aa77b018bf1c3307"
+    },
+    {
+      "oid": "cfdc3c29962a1407a580721acf84a888968a7ee9",
+      "ref": "refs/codex/snapshots/e842e8f25656746a245a0caa9256e2877ee003d5"
+    },
+    {
+      "oid": "69553012f38a993e2a9f122bec1d64eff037b6fe",
+      "ref": "refs/codex/snapshots/e87cf3b26b11d1a3cad6e592bb4640aa06153fbd"
+    },
+    {
+      "oid": "821bfd90c3460f56e87aa5c707f6cf712531291a",
+      "ref": "refs/codex/snapshots/e98797d60d5bbf57b6a9bc2054ab543bb7905bb8"
+    },
+    {
+      "oid": "ce147b9ff9958c101fa7b9d40d26b0470eafbf60",
+      "ref": "refs/codex/snapshots/eadde93abb12e106ef61c4c09b3b83d6b8a295f6"
+    },
+    {
+      "oid": "2c472ed7ded121e1e2210156d89526b70e28ad65",
+      "ref": "refs/codex/snapshots/ec61a3008f9e910b9f7312dbc6bf603ab75b5e0b"
+    },
+    {
+      "oid": "e9fb48c3b9469d4b8122ab76c299eba3832df8c0",
+      "ref": "refs/codex/snapshots/ee38532095f3673f6c3efd12cf0dc33e25db1094"
+    },
+    {
+      "oid": "0ff5d2b28de52dda2beb64245c1d6524ed835969",
+      "ref": "refs/codex/snapshots/eeaefe612aa2fc2cbe3d92d3c4b04ad419062c61"
+    },
+    {
+      "oid": "21ac91a24c91b60746ecacb62cac3b7760f8696d",
+      "ref": "refs/codex/snapshots/eec56797cdef900085c6cfb4da069cf0c31fbece"
+    },
+    {
+      "oid": "58edb6f41d474f1ee61cb58cf2aead3bfe7d4eab",
+      "ref": "refs/codex/snapshots/ef2e93eedbceb4fdfdd5035fe97ffff1d70b6e80"
+    },
+    {
+      "oid": "2d8d804ce00358800746d46788e03ab584cc12ec",
+      "ref": "refs/codex/snapshots/f0364bf1a1964638440176cd5b0123b3c0a7452a"
+    },
+    {
+      "oid": "f787947059e419f5aa8d64d5e2741e6bd06ad487",
+      "ref": "refs/codex/snapshots/f0606346f6722bc7798530b59eb976ae21759ed0"
+    },
+    {
+      "oid": "0edb811fd4597263bdb71c82174d9685e3ae3252",
+      "ref": "refs/codex/snapshots/f0db644810f0c27e564c30af44d430b4fb9777ce"
+    },
+    {
+      "oid": "af3b79b16576f52b13ae96053ae12cfef715d857",
+      "ref": "refs/codex/snapshots/f14bb69da9adceebfe351fad381ca9e32f72b377"
+    },
+    {
+      "oid": "8ed8db55500f3a05aef55a1e2ec39acba30a8c07",
+      "ref": "refs/codex/snapshots/f2d8f2c3d4f727a38862d0dde219fdc76f74f24e"
+    },
+    {
+      "oid": "0ed28e7fb309ff7db355e4c8cc2ad0062e3c699a",
+      "ref": "refs/codex/snapshots/f2dd909e7aab2a10317cd77443cf234ad28e3bb5"
+    },
+    {
+      "oid": "719ebb5fc6d0db082a2577e44aa60982abbed253",
+      "ref": "refs/codex/snapshots/f3df198eae79ea9449bf31ea542f465fc311e2a0"
+    },
+    {
+      "oid": "8033e22932f55388a94f9d18ce6b11a91f9f1545",
+      "ref": "refs/codex/snapshots/f416872ef7d5f784b1cb70ce4a75310b02a5e63f"
+    },
+    {
+      "oid": "ace41ac98c0003124e2395003ddce12c4bac7b30",
+      "ref": "refs/codex/snapshots/f4bd0cb894aa5f357297061894070b39e7c90bd5"
+    },
+    {
+      "oid": "6505d30ca56abc0d5f9f3700242f862fe078e571",
+      "ref": "refs/codex/snapshots/f5a0633e532802a60af70e063ae0edf691962958"
+    },
+    {
+      "oid": "5c99501b5e00305f3be95ae3fce4d2f855c6aed8",
+      "ref": "refs/codex/snapshots/f6a255dd3bab918597c4e4617a1d43e19058123f"
+    },
+    {
+      "oid": "b373a367887d5fb114ed66fdc1023401bcd0aaa5",
+      "ref": "refs/codex/snapshots/f7ad5bff3d20845f275676816993a6d751772ae6"
+    },
+    {
+      "oid": "8702a7e8cb6346d29ac5247ee87344f34b766143",
+      "ref": "refs/codex/snapshots/f7ad96b3238a4d3b5aee954499f2299f8f1c19d8"
+    },
+    {
+      "oid": "64d28711a91b4bf1115581dda2b5210b1b120075",
+      "ref": "refs/codex/snapshots/f7e3ab21feaf066ad63792dbb43b408ab7bc6325"
+    },
+    {
+      "oid": "6c53f3ee9761efce0539363e2c54dd1b80b4f735",
+      "ref": "refs/codex/snapshots/f825efe9c4f5e0ae49f03379f976a66f52dd6c0f"
+    },
+    {
+      "oid": "c91b77ad409a6525d6e174e68c348ccfaf363786",
+      "ref": "refs/codex/snapshots/f8c8ccad80a2a5437b703cfe076201abb502fb48"
+    },
+    {
+      "oid": "301f61bc3af24e69decbe0281d829b9a9f7ada8e",
+      "ref": "refs/codex/snapshots/f9d0c179175488a84f6ed68d31133ccab4bb19eb"
+    },
+    {
+      "oid": "34b860b56ab20f6ff69f7ee177ce8906ceeead87",
+      "ref": "refs/codex/snapshots/fc4f22b0b2a8958e5d70ce2f4a7420a730a6e1ba"
+    },
+    {
+      "oid": "4bd45c343d92326719f0f5ea48a10f8acafd8372",
+      "ref": "refs/codex/snapshots/fc5130b03d78869985bb782352bf4278c39df39b"
+    },
+    {
+      "oid": "92b9357edaa3a64e7c2dfee3e41e95f391239637",
+      "ref": "refs/codex/snapshots/fc892bc2619c71a9e62c1cfa3fded1ee90bcde65"
+    },
+    {
+      "oid": "9329dd1f92440500afd861293a9d4b6e981930ef",
+      "ref": "refs/codex/snapshots/fd23fa4f9a430f5f7c1bd6a9e89f20f3d64d8f1b"
+    },
+    {
+      "oid": "7329eee43187cd5ddf7ac2493f674add47d9a64b",
+      "ref": "refs/codex/snapshots/fd3ff4364625e5034ad143064f32d205c2d8ffd5"
+    },
+    {
+      "oid": "be6b5a8781fc687c9e9e6b402007085a80250842",
+      "ref": "refs/codex/snapshots/fdcdf98380df99ab2e706d4bf8697a3965e98f85"
+    },
+    {
+      "oid": "f603ea566de9b021ec14cdc123f3cf71b43f1bad",
+      "ref": "refs/codex/snapshots/fe249e3150c45ed7e04ea09dac845ee0dd7171f1"
+    },
+    {
+      "oid": "92b9357edaa3a64e7c2dfee3e41e95f391239637",
+      "ref": "refs/codex/snapshots/ffa39a11dac5a1729a19a03010c6526b6d5bbaae"
+    },
+    {
+      "oid": "8fd4a06d6a3b3ffe577d0c7b2dcc4d18e08f2cfa",
+      "ref": "refs/codex/turn-diffs/captures/1785739155707/bac8253a-7d77-481e-9f02-81cdfe753f1e/base"
+    },
+    {
+      "oid": "2db6bb28de68d8c6eb70d007841e561869e8ac0e",
+      "ref": "refs/codex/turn-diffs/checkpoints/9296cde3efea71c739a1fa28843a4ff27c858d6efa6a27806190c4c0fc1a523b/abc7c46083f778ab8671ac0af665beda54da772f23ce54415949bb4f716a964a/1785254402933/755db17c-0874-4325-a818-5db7e11470f7"
+    },
+    {
+      "oid": "8fd4a06d6a3b3ffe577d0c7b2dcc4d18e08f2cfa",
+      "ref": "refs/codex/turn-diffs/checkpoints/d2ce93e2ac8532bac65e48b46e1992868d69379dc5c32b5d36cbc881aa028e23/413be6ab7d3477295c3e7a3600c6c3049d57e55b8b52aa74efc9c5dbb98c218e/1785739099079/c4e387d0-c302-42a6-b591-97556f33840e"
+    },
+    {
+      "oid": "6410592b54c64ee7d9bbba8fb18e0db5e3194eff",
+      "ref": "refs/heads/codex/agent-briefing-autonomy-cockpit"
+    },
+    {
+      "oid": "b679dfe19761123ba72daccbf8eb6af73d8e6ead",
+      "ref": "refs/heads/codex/audit-compaction-modularity"
+    },
+    {
+      "oid": "b432de9bd85610124cf5cea651d90ae76023f5a5",
+      "ref": "refs/heads/codex/autoload-earlier-chat-pages"
+    },
+    {
+      "oid": "03a3a99e823845083401ef0b10b2e8e89081a38e",
+      "ref": "refs/heads/codex/canonical-contract-corrections"
+    },
+    {
+      "oid": "9a29c8edc41b3d78fda9aa574ff72d3a3beca713",
+      "ref": "refs/heads/codex/capability-adapter-seam-hardening"
+    },
+    {
+      "oid": "af3b79b16576f52b13ae96053ae12cfef715d857",
+      "ref": "refs/heads/codex/capability-binding-policy"
+    },
+    {
+      "oid": "86cc58a3f19a2097fda7136d85b8d854d30cc4d8",
+      "ref": "refs/heads/codex/capability-binding-policy-fix-1"
+    },
+    {
+      "oid": "70b7c97801e14cc11e7b78ab8d83bae1dd6b4c33",
+      "ref": "refs/heads/codex/capability-cockpit-projection-truth"
+    },
+    {
+      "oid": "7329eee43187cd5ddf7ac2493f674add47d9a64b",
+      "ref": "refs/heads/codex/capability-cockpit-visibility"
+    },
+    {
+      "oid": "de7bda4b706dc3da5bca5b7fc0ac4ed4ea558325",
+      "ref": "refs/heads/codex/capability-cockpit-visibility-fix-1"
+    },
+    {
+      "oid": "90bccdc940b5f4070367733e2376413723650736",
+      "ref": "refs/heads/codex/capability-shadow-replacement-trial"
+    },
+    {
+      "oid": "6b997d481974dac1683bd67372df947f05337931",
+      "ref": "refs/heads/codex/catalog-contract-review-fixes"
+    },
+    {
+      "oid": "7ad5242b9b177efeaa9cdc7808a02831b81e26e8",
+      "ref": "refs/heads/codex/chat-media-delivery-cockpit-hardening"
+    },
+    {
+      "oid": "c3cc264c9ec3c8e1b37f895f654093836db4cc61",
+      "ref": "refs/heads/codex/cockpit-ui-hygiene-polish"
+    },
+    {
+      "oid": "9906807e255ce045682f743c1da1e4b0349f0e28",
+      "ref": "refs/heads/codex/cockpit-ui-hygiene-progressive-disclosure"
+    },
+    {
+      "oid": "ab1b2f5fa60b4e4fbd6cabfdb03e862bda764d4e",
+      "ref": "refs/heads/codex/configuration-profile-environment-discipline"
+    },
+    {
+      "oid": "58c94586da6a01f1f7e3f23624ee523bd832ec86",
+      "ref": "refs/heads/codex/configuration-profile-environment-discipline-recovery"
+    },
+    {
+      "oid": "fbd475bede9627c11dba2c8273fa7b47995fd4b3",
+      "ref": "refs/heads/codex/data-integrity-storage-migration-discipline"
+    },
+    {
+      "oid": "e4a76da649a95875c54e7f182bebab313c077e47",
+      "ref": "refs/heads/codex/data-integrity-storage-migration-discipline-recovery"
+    },
+    {
+      "oid": "9ef779cf56c7a498921dec0782dea41cfbe17104",
+      "ref": "refs/heads/codex/developer-experience-repo-hygiene-automation"
+    },
+    {
+      "oid": "f931c3126a2ee62940f42512278715c9c65c2079",
+      "ref": "refs/heads/codex/documentation-evidence-scorecard-integrity"
+    },
+    {
+      "oid": "67d2d8783c1ace034efe5b736f826870691d21cb",
+      "ref": "refs/heads/codex/dynamic-replacement-runtime-closure"
+    },
+    {
+      "oid": "f0276c69c1f24f37769aff33bf422341cdcb7bf2",
+      "ref": "refs/heads/codex/dynamic-replacement-runtime-closure-local"
+    },
+    {
+      "oid": "be6b5a8781fc687c9e9e6b402007085a80250842",
+      "ref": "refs/heads/codex/fix-autoload-layered-pagination-terminal-state"
+    },
+    {
+      "oid": "b679dfe19761123ba72daccbf8eb6af73d8e6ead",
+      "ref": "refs/heads/codex/fix-autoload-layered-pagination-terminal-state-review"
+    },
+    {
+      "oid": "21ac91a24c91b60746ecacb62cac3b7760f8696d",
+      "ref": "refs/heads/codex/fix-autoload-server-cursor"
+    },
+    {
+      "oid": "16025248d4b9f470786e61888d5f74b7fc9f3572",
+      "ref": "refs/heads/codex/fix-branch-inventory-truncated-metadata"
+    },
+    {
+      "oid": "aceb4cc33dba5cb0750a2dc23ee60448f2ec83f5",
+      "ref": "refs/heads/codex/fix-dashboard-pagination-rereview"
+    },
+    {
+      "oid": "b659cde6b5a594568ef2f1701219d042d7afa290",
+      "ref": "refs/heads/codex/fix-dashboard-pagination-review"
+    },
+    {
+      "oid": "8a298bd63ddaf492057ead1233bf3bf18b4dd5d3",
+      "ref": "refs/heads/codex/fix-deeplink-autoload-pruned-progress"
+    },
+    {
+      "oid": "1ce3dae26001042cddb1de985a95d12b675ef69e",
+      "ref": "refs/heads/codex/fix-execution-chip-lifecycle"
+    },
+    {
+      "oid": "3c7fffa60c9a364c94c3a933756976b1d69c9a3b",
+      "ref": "refs/heads/codex/fix-ios-hit-target-containers"
+    },
+    {
+      "oid": "605038d984459673c9873e20236b4ef4d6a47955",
+      "ref": "refs/heads/codex/fix-thinking-streaming-order"
+    },
+    {
+      "oid": "eaeb9e94c546bc188aac092a37e72dabd3cf4833",
+      "ref": "refs/heads/codex/ios-dashboard-session-pagination"
+    },
+    {
+      "oid": "3cec727e19505aa4c58a18bcc4e54560c6829cce",
+      "ref": "refs/heads/codex/ios-thin-client-generic-runtime-shell"
+    },
+    {
+      "oid": "8e0f8842d4ab02960687b24e1bf8d95f43738272",
+      "ref": "refs/heads/codex/kernel-boundary-lockdown"
+    },
+    {
+      "oid": "8a4ce675ea1203803e0944e2a6f3aa2415a581d3",
+      "ref": "refs/heads/codex/latest-session-primitive-hardening"
+    },
+    {
+      "oid": "fd0b4bd9692efab832a31870de5fe6a6cf8a1846",
+      "ref": "refs/heads/codex/legacy-main-before-hardened-baseline"
+    },
+    {
+      "oid": "ad1199110bd213444b57370b496207de57ebfdc9",
+      "ref": "refs/heads/codex/level-2-kernel"
+    },
+    {
+      "oid": "ac2cfdc7652e2b792d8fc5d22eb2f9217bc099b9",
+      "ref": "refs/heads/codex/native-generative-ui"
+    },
+    {
+      "oid": "7411664c41f4eba5b1147c9c91891c04e84100e5",
+      "ref": "refs/heads/codex/off-plan-successor-teardown-cleanup"
+    },
+    {
+      "oid": "f8a59f84c51688845ab34a935192f9883e9904b8",
+      "ref": "refs/heads/codex/p3msa-inv-011-subagent-delegation-module-pack"
+    },
+    {
+      "oid": "b114493199703a045636c1b3b46250f1af2f6a11",
+      "ref": "refs/heads/codex/performance-resource-governance"
+    },
+    {
+      "oid": "43379c475bd76caeca97bbbd15d479b7b85afcca",
+      "ref": "refs/heads/codex/performance-resource-governance-recovery"
+    },
+    {
+      "oid": "5d8216085006973c02349ecef3604124a87bf3e3",
+      "ref": "refs/heads/codex/phase-2-slice-10a-subagent-task-lifecycle-foundation"
+    },
+    {
+      "oid": "a7ed577ece4e8a1bb26dc655e818a3c256fa4933",
+      "ref": "refs/heads/codex/phase-2-slice-10a-subagent-task-lifecycle-foundation-fix1"
+    },
+    {
+      "oid": "93ad5383dd2b4d21cffe05117bdde736d01a0c99",
+      "ref": "refs/heads/codex/phase-2-slice-10a-subagent-task-lifecycle-foundation-fix2"
+    },
+    {
+      "oid": "81421e7209f1b4316e3dd8a5f29415660b94f755",
+      "ref": "refs/heads/codex/phase-2-slice-10b-subagent-worker-launch-foundation"
+    },
+    {
+      "oid": "cd7b5f6cde3e6521470e256d49aa9bfe65c94102",
+      "ref": "refs/heads/codex/phase-2-slice-10b-subagent-worker-launch-foundation-fix1"
+    },
+    {
+      "oid": "621e1bf2b3e95af4ed44a133f789bdbd908c1d41",
+      "ref": "refs/heads/codex/phase-2-slice-11a-procedural-state-provenance-foundation"
+    },
+    {
+      "oid": "4e56ef5b62dd873bacb21ba5b625df559bd71844",
+      "ref": "refs/heads/codex/phase-2-slice-11a-procedural-state-provenance-foundation-fix1"
+    },
+    {
+      "oid": "2ae31c48e0ba8246e61bf6b2b63ed67cd7de88ee",
+      "ref": "refs/heads/codex/phase-2-slice-12-scheduling-reminders-automations-background-work"
+    },
+    {
+      "oid": "7e5a3a85d21eecef7ea3fa1b73bbdcae0c111c88",
+      "ref": "refs/heads/codex/phase-2-slice-12-scheduling-reminders-automations-background-work-fix1"
+    },
+    {
+      "oid": "0b4896da73e8c026e6efbbd8ffd2cc25d444dc5e",
+      "ref": "refs/heads/codex/phase-2-slice-13-notifications-apns-device-broker-inbox"
+    },
+    {
+      "oid": "e5eedd8058c0ccd14842520b8e314c3c0433bf7a",
+      "ref": "refs/heads/codex/phase-2-slice-13-notifications-apns-device-broker-inbox-fix1"
+    },
+    {
+      "oid": "47ff7c214b3dcc058eeaf7be5d2c2c7fbeeeb102",
+      "ref": "refs/heads/codex/phase-2-slice-13-notifications-apns-device-broker-inbox-fix2"
+    },
+    {
+      "oid": "e84723a86880bc461e5238ac54ddd3c69d491e5e",
+      "ref": "refs/heads/codex/phase-2-slice-13-notifications-apns-device-broker-inbox-fix3"
+    },
+    {
+      "oid": "7197d05732ab27e878b589609cedd9cd731b998e",
+      "ref": "refs/heads/codex/phase-2-slice-13-notifications-apns-device-broker-inbox-fix4"
+    },
+    {
+      "oid": "1c09fa2f0a4ed849cd13dfc9e1d8694af0ecad44",
+      "ref": "refs/heads/codex/phase-2-slice-13-notifications-apns-device-broker-inbox-fix5"
+    },
+    {
+      "oid": "aae9d8d0910338989da0914d9030b6da106411b6",
+      "ref": "refs/heads/codex/phase-2-slice-14a-media-artifact-voice-note-foundation"
+    },
+    {
+      "oid": "0792a9ef35352f1a51ea65adb8605cceffa5bce3",
+      "ref": "refs/heads/codex/phase-2-slice-14a-media-artifact-voice-note-foundation-fix1"
+    },
+    {
+      "oid": "e34fb0a9747ff2cfd176fa75499e61b48138cfe6",
+      "ref": "refs/heads/codex/phase-2-slice-14b-import-session-resource-graph-foundation"
+    },
+    {
+      "oid": "c3f434686b1eeed6a60e262c46c1498d8c4fd42c",
+      "ref": "refs/heads/codex/phase-2-slice-14c-update-diagnostics-resource-foundation"
+    },
+    {
+      "oid": "80e95921943fd6a26bc9186210b0a27d24aa415c",
+      "ref": "refs/heads/codex/phase-2-slice-14d-repository-tree-snapshot-foundation"
+    },
+    {
+      "oid": "ee49469bd4cf1b0c506bfe3bc90f3547476d992c",
+      "ref": "refs/heads/codex/phase-2-slice-14e-import-preview-resource-foundation"
+    },
+    {
+      "oid": "99045be98eac653eaeedcbb772992f1954464edd",
+      "ref": "refs/heads/codex/phase-2-slice-15a-program-execution-resource-foundation"
+    },
+    {
+      "oid": "f787947059e419f5aa8d64d5e2741e6bd06ad487",
+      "ref": "refs/heads/codex/phase-2-slice-16a-prompt-artifact-resource-foundation"
+    },
+    {
+      "oid": "0ad3d222546d496ba471dc293dc80c0df488d1c1",
+      "ref": "refs/heads/codex/phase-2-slice-17a-model-provider-reasoning-status-evidence"
+    },
+    {
+      "oid": "44b1895d629661a6d784799a2e8c89caeda331de",
+      "ref": "refs/heads/codex/phase-2-slice-18a-memory-query-decision-evidence"
+    },
+    {
+      "oid": "58df927f8d0381ccb1a9d3f98ca8dc2d2631f227",
+      "ref": "refs/heads/codex/phase-2-slice-19a-event-protocol-catalog-parity"
+    },
+    {
+      "oid": "4d4f7f0b3a260632591152b06d725788197cd8c8",
+      "ref": "refs/heads/codex/phase-2-slice-20a-database-schema-catalog-parity"
+    },
+    {
+      "oid": "2892f3ea42b2cb263f69cbcf29cce98e2c153120",
+      "ref": "refs/heads/codex/phase-2-slice-21a-settings-profile-catalog-parity"
+    },
+    {
+      "oid": "f86b47f22be3c816d1c1503680f5bdd4d25f9134",
+      "ref": "refs/heads/codex/phase-2-slice-22a-dependency-restoration-review"
+    },
+    {
+      "oid": "4a51156b78fd6c01108cecccc82af34864b943bb",
+      "ref": "refs/heads/codex/phase-2-slice-6-next-discovery"
+    },
+    {
+      "oid": "4a51156b78fd6c01108cecccc82af34864b943bb",
+      "ref": "refs/heads/codex/phase-2-slice-6a-final-summary"
+    },
+    {
+      "oid": "69553012f38a993e2a9f122bec1d64eff037b6fe",
+      "ref": "refs/heads/codex/phase-2-slice-6a-readonly-git-worktree"
+    },
+    {
+      "oid": "470e73897b885264aec0a6c9692e54eb2a186ef1",
+      "ref": "refs/heads/codex/phase-2-slice-6a-readonly-git-worktree-v2"
+    },
+    {
+      "oid": "6f9de689326fba57d40aa619c08bc03b325c6509",
+      "ref": "refs/heads/codex/phase-2-slice-6a-review-fixes"
+    },
+    {
+      "oid": "81242bf36e4484c619747235e88bbe90df708d75",
+      "ref": "refs/heads/codex/phase-2-slice-6a-review-fixes-2"
+    },
+    {
+      "oid": "743b783976b0515372e5525c0c1671f5dbec37bd",
+      "ref": "refs/heads/codex/phase-2-slice-6b-discovery"
+    },
+    {
+      "oid": "d70486e8a8dbac3723ae0efca3fef816af12a612",
+      "ref": "refs/heads/codex/phase-2-slice-6b-final-summary"
+    },
+    {
+      "oid": "d70486e8a8dbac3723ae0efca3fef816af12a612",
+      "ref": "refs/heads/codex/phase-2-slice-6b-final-summary-2"
+    },
+    {
+      "oid": "0689cbd5d58efcd764fbd6124e618bf0546e051b",
+      "ref": "refs/heads/codex/phase-2-slice-6b-git-index-mutation"
+    },
+    {
+      "oid": "982e753d4a5a697c291307fbc9da466089e03b87",
+      "ref": "refs/heads/codex/phase-2-slice-6b-review-fixes"
+    },
+    {
+      "oid": "c473be51dd35d8083ca736f30e81cbfa83e81d78",
+      "ref": "refs/heads/codex/phase-2-slice-6b-review-fixes-2"
+    },
+    {
+      "oid": "34b860b56ab20f6ff69f7ee177ce8906ceeead87",
+      "ref": "refs/heads/codex/phase-2-slice-6b-review-fixes-3"
+    },
+    {
+      "oid": "c9583b1f4647bae7e5c09bf8460f2e40a340ac77",
+      "ref": "refs/heads/codex/phase-2-slice-6b-review-fixes-4"
+    },
+    {
+      "oid": "bc469ba3458ecce8301eb84abbd82070cfd0362a",
+      "ref": "refs/heads/codex/phase-2-slice-6c-discovery"
+    },
+    {
+      "oid": "6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f",
+      "ref": "refs/heads/codex/phase-2-slice-6c-git-commit-evidence"
+    },
+    {
+      "oid": "cfff8bc5f732243724dc97c964a613070ef9736c",
+      "ref": "refs/heads/codex/phase-2-slice-6d-branch-start"
+    },
+    {
+      "oid": "4d7221bf436acce3406d50ab0b1f2a06415616be",
+      "ref": "refs/heads/codex/phase-2-slice-6d-discovery"
+    },
+    {
+      "oid": "05e5afd0a2af05e83eeff95a1388d8dfae1e7770",
+      "ref": "refs/heads/codex/phase-2-slice-6e-branch-inventory"
+    },
+    {
+      "oid": "16025248d4b9f470786e61888d5f74b7fc9f3572",
+      "ref": "refs/heads/codex/phase-2-slice-6e-branch-inventory-v2"
+    },
+    {
+      "oid": "2241def83033d3bb49836b0d6b1ecf3c36fc8c39",
+      "ref": "refs/heads/codex/phase-2-slice-6e-discovery"
+    },
+    {
+      "oid": "8ec67c5aad9391377a317f407d0d0fab0db10418",
+      "ref": "refs/heads/codex/phase-2-slice-7a-answer-lease-fix"
+    },
+    {
+      "oid": "264bcefb61a81d78c823cb3eb86195d8a59d74e6",
+      "ref": "refs/heads/codex/phase-2-slice-7a-discovery"
+    },
+    {
+      "oid": "9950ea484299901e09af9077f33466021118ca33",
+      "ref": "refs/heads/codex/phase-2-slice-7a-goal-question-foundation"
+    },
+    {
+      "oid": "9950ea484299901e09af9077f33466021118ca33",
+      "ref": "refs/heads/codex/phase-2-slice-7a-goal-question-foundation-direct"
+    },
+    {
+      "oid": "4ecb612612abd7f000c059aafcd2c5e135361fa3",
+      "ref": "refs/heads/codex/phase-2-slice-7a-goal-question-foundation-v2"
+    },
+    {
+      "oid": "e7e6dec0a61b5ce89ba2b982763b466567ff06d0",
+      "ref": "refs/heads/codex/phase-2-slice-7a-goal-question-foundation-v3"
+    },
+    {
+      "oid": "77f0620545b4d277c0288cc9503e2d90cdf7e0b8",
+      "ref": "refs/heads/codex/phase-2-slice-8a-web-fetch-source-provenance"
+    },
+    {
+      "oid": "8033e22932f55388a94f9d18ce6b11a91f9f1545",
+      "ref": "refs/heads/codex/phase-2-slice-8b-web-source-citation-inspection"
+    },
+    {
+      "oid": "ea4a4d04ceb37a10899871c3fe4f394ae10fbfa5",
+      "ref": "refs/heads/codex/phase-2-slice-8c-web-html-text-extraction"
+    },
+    {
+      "oid": "5e881e8681229545fe8260a1dc2be8f47cd07a3a",
+      "ref": "refs/heads/codex/phase-2-slice-8c-web-html-text-extraction-fix1"
+    },
+    {
+      "oid": "3a9d4f35674b166528d7e15aea0e17802d634cea",
+      "ref": "refs/heads/codex/phase-2-slice-8d-web-source-retention-cache-policy"
+    },
+    {
+      "oid": "ca336f6aed4f9582bd4e7d6738ebc2410728f80f",
+      "ref": "refs/heads/codex/phase-2-slice-8e-web-robots-policy"
+    },
+    {
+      "oid": "b0352fbb79f30b267d8725deaf3fc2e234ec5998",
+      "ref": "refs/heads/codex/phase-2-slice-8e-web-robots-policy-fix1"
+    },
+    {
+      "oid": "21d3d24a7f757b43d3f51599fe35a14e7f0f3633",
+      "ref": "refs/heads/codex/phase-2-slice-8e-web-robots-policy-fix2"
+    },
+    {
+      "oid": "c01924ba634b64ec0bdb6033bd53dc304b5a94fc",
+      "ref": "refs/heads/codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage"
+    },
+    {
+      "oid": "cb30347b29d7e11d8e0e4210068ee67e6cabd9f0",
+      "ref": "refs/heads/codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage-fix1"
+    },
+    {
+      "oid": "2bd51fcf38d68720ee4ed25937b393b8450ecbe0",
+      "ref": "refs/heads/codex/phase-2-slice-9a-tool-source-provenance"
+    },
+    {
+      "oid": "2bd51fcf38d68720ee4ed25937b393b8450ecbe0",
+      "ref": "refs/heads/codex/phase-2-slice-9a-tool-source-provenance-fix1"
+    },
+    {
+      "oid": "788b105980b59d73b5e0c05eb682c81b669827ad",
+      "ref": "refs/heads/codex/phase-2-slice-9a-tool-source-provenance-fix2"
+    },
+    {
+      "oid": "8fcb3051dc0359e558ffac9dfe77f525709f1c92",
+      "ref": "refs/heads/codex/phase-2-slice-9a-tool-source-provenance-fix3"
+    },
+    {
+      "oid": "2c472ed7ded121e1e2210156d89526b70e28ad65",
+      "ref": "refs/heads/codex/phase-2-slice-9a-tool-source-provenance-fix4"
+    },
+    {
+      "oid": "ce56ff609948d0d31dbd76e74a30a87a027738d3",
+      "ref": "refs/heads/codex/phase-2-slice-9b-worker-package-lifecycle-inspection"
+    },
+    {
+      "oid": "7c794417c1b5b6490324fa6e1062580b73f339a8",
+      "ref": "refs/heads/codex/phase-2-slice-9b-worker-package-lifecycle-inspection-fix1"
+    },
+    {
+      "oid": "cd97c2f87afa3e961258eedf37a227926e496720",
+      "ref": "refs/heads/codex/phase-2-slice-9b-worker-package-lifecycle-inspection-fix2"
+    },
+    {
+      "oid": "7cdb2df72360c77281ebf43626148ad784a52ad4",
+      "ref": "refs/heads/codex/phase-3-post-completion-docs-cleanup"
+    },
+    {
+      "oid": "6e1d3176cbe99acbef827b634e51b0076c8153be",
+      "ref": "refs/heads/codex/phase-3-slice-23a-module-manifest-registry"
+    },
+    {
+      "oid": "b19fbfdb0f148335156bcf1eb3f7ee4bb7908554",
+      "ref": "refs/heads/codex/phase-3-slice-23b-module-authoring-workspace"
+    },
+    {
+      "oid": "a661175984dce70cdb8c974ddc691794c9df0d90",
+      "ref": "refs/heads/codex/phase-3-slice-23c-module-contract-test-harness"
+    },
+    {
+      "oid": "96a5c1dd9e6b60e6545873c8789bf3858a440618",
+      "ref": "refs/heads/codex/phase-3-slice-23d-module-review-approval-install-gate"
+    },
+    {
+      "oid": "7493385ba62f200686d28b8d1d93cffbb043908a",
+      "ref": "refs/heads/codex/phase-3-slice-23e-module-lifecycle"
+    },
+    {
+      "oid": "f3480f632bc0d5f64f0f50ad4d1fe2cd35eee42a",
+      "ref": "refs/heads/codex/phase-3-slice-23f-module-runtime-supervisor"
+    },
+    {
+      "oid": "897392c4a95ee27c7cf31168ef1d764b2c5a787f",
+      "ref": "refs/heads/codex/phase-3-slice-23g-module-dependency-policy"
+    },
+    {
+      "oid": "4027e08b9759288e7a4e3f368d8f8a1b3935cf6a",
+      "ref": "refs/heads/codex/phase-3-slice-23h-generic-autonomous-work-cockpit"
+    },
+    {
+      "oid": "7c97170118d843dae6ed199ce0dde84a8b542688",
+      "ref": "refs/heads/codex/phase-3-slice-24a-file-git-module-pack"
+    },
+    {
+      "oid": "51f084690a42b255c49affc4d70c5ac3557dc07e",
+      "ref": "refs/heads/codex/phase-3-slice-24b-jobs-program-execution-module-pack"
+    },
+    {
+      "oid": "783cb48c5042736843ff6266518f747bd2b1e767",
+      "ref": "refs/heads/codex/phase-3-slice-24d-memory-module-pack"
+    },
+    {
+      "oid": "7de27a0265bbd48575b377ab106f2171e9e9f3f3",
+      "ref": "refs/heads/codex/phase-3-slice-24e-procedural-module-pack"
+    },
+    {
+      "oid": "55fc1b0a5ed2124dfebee0077296c82b71ac109b",
+      "ref": "refs/heads/codex/phase-3-slice-24f-web-research-module-pack"
+    },
+    {
+      "oid": "060659f0933b0c8429c290adaf67e9612dc922e6",
+      "ref": "refs/heads/codex/phase-3-slice-24g-notification-delivery-module-pack"
+    },
+    {
+      "oid": "cd856d951e2103db56e0bf20339d9ce844a9916c",
+      "ref": "refs/heads/codex/phase-3-slice-24h-import-update-module-pack"
+    },
+    {
+      "oid": "37e9092087f19969b59f3a2254e23431d08574ff",
+      "ref": "refs/heads/codex/phase-3-slice-24i-fixed-old-ios-product-panels"
+    },
+    {
+      "oid": "1ad2b80122f64938573b65925bdfd09c8be2cebe",
+      "ref": "refs/heads/codex/phase-3-slice-24j-broad-product-dto-containment"
+    },
+    {
+      "oid": "af652bf9f9b68a08ce5b05bb01ad6c68c16217d2",
+      "ref": "refs/heads/codex/phase-3-slice-24k-speculative-dependency-restoration"
+    },
+    {
+      "oid": "ce8fe2a46d7f7393ae1066888cea1c1e6cd23af3",
+      "ref": "refs/heads/codex/phase-3-slice-24l-no-managed-skills-bootstrap"
+    },
+    {
+      "oid": "b114493199703a045636c1b3b46250f1af2f6a11",
+      "ref": "refs/heads/codex/provider-model-boundary-discipline"
+    },
+    {
+      "oid": "07ba69b4f3c3f5c7e68d609d798bfbadb79040ea",
+      "ref": "refs/heads/codex/public-protocol-api-contract-discipline"
+    },
+    {
+      "oid": "b44a096295f76a2a2a4b00add2d040982b8a73ec",
+      "ref": "refs/heads/codex/release-install-upgrade-rollback-discipline"
+    },
+    {
+      "oid": "470e73897b885264aec0a6c9692e54eb2a186ef1",
+      "ref": "refs/heads/codex/restoration-slice-discovery-20260624"
+    },
+    {
+      "oid": "b432de9bd85610124cf5cea651d90ae76023f5a5",
+      "ref": "refs/heads/codex/review-autoload-earlier-chat-pages"
+    },
+    {
+      "oid": "c91b77ad409a6525d6e174e68c348ccfaf363786",
+      "ref": "refs/heads/codex/review-autoload-layered-pagination-terminal-state"
+    },
+    {
+      "oid": "21ac91a24c91b60746ecacb62cac3b7760f8696d",
+      "ref": "refs/heads/codex/review-autoload-server-cursor-fix1"
+    },
+    {
+      "oid": "8a298bd63ddaf492057ead1233bf3bf18b4dd5d3",
+      "ref": "refs/heads/codex/review-deeplink-autoload-pruned-progress"
+    },
+    {
+      "oid": "6f9de689326fba57d40aa619c08bc03b325c6509",
+      "ref": "refs/heads/codex/review-phase-2-slice-6a-after-fixes"
+    },
+    {
+      "oid": "81242bf36e4484c619747235e88bbe90df708d75",
+      "ref": "refs/heads/codex/review-phase-2-slice-6a-final"
+    },
+    {
+      "oid": "69553012f38a993e2a9f122bec1d64eff037b6fe",
+      "ref": "refs/heads/codex/review-phase-2-slice-6a-readonly-git-worktree"
+    },
+    {
+      "oid": "0689cbd5d58efcd764fbd6124e618bf0546e051b",
+      "ref": "refs/heads/codex/review-phase-2-slice-6b"
+    },
+    {
+      "oid": "c473be51dd35d8083ca736f30e81cbfa83e81d78",
+      "ref": "refs/heads/codex/review-phase-2-slice-6b-final"
+    },
+    {
+      "oid": "c9583b1f4647bae7e5c09bf8460f2e40a340ac77",
+      "ref": "refs/heads/codex/review-phase-2-slice-6b-final-2"
+    },
+    {
+      "oid": "c9583b1f4647bae7e5c09bf8460f2e40a340ac77",
+      "ref": "refs/heads/codex/review-phase-2-slice-6b-final-3"
+    },
+    {
+      "oid": "982e753d4a5a697c291307fbc9da466089e03b87",
+      "ref": "refs/heads/codex/review-phase-2-slice-6b-fixed"
+    },
+    {
+      "oid": "605038d984459673c9873e20236b4ef4d6a47955",
+      "ref": "refs/heads/codex/review-thinking-streaming-order-fix1"
+    },
+    {
+      "oid": "e3fe06cab3e70d988230a4a9e3aeb2bc9fcfc355",
+      "ref": "refs/heads/codex/rust-dead-code-warning-cleanup-current"
+    },
+    {
+      "oid": "4b530e0142caa72ca3f508f266bcd66bb29cdb83",
+      "ref": "refs/heads/codex/self-adapting-agent-promotion-governance"
+    },
+    {
+      "oid": "2da96a8488a46760b25524c5d8d782529fc92b68",
+      "ref": "refs/heads/codex/self-adapting-agent-successor-teardown-cleanup"
+    },
+    {
+      "oid": "125d58efd7baafb86b2a339d64a6f145b10cc1e2",
+      "ref": "refs/heads/codex/self-adapting-agent-worker-activation"
+    },
+    {
+      "oid": "899910502ec894e1ba8b0c6a5bb0795549383d88",
+      "ref": "refs/heads/codex/self-adapting-agent-worker-bundle-handoff"
+    },
+    {
+      "oid": "2d3cf28eb130bcf6ba22b59b55556ba22abea650",
+      "ref": "refs/heads/codex/self-adapting-agent-worker-orchestration"
+    },
+    {
+      "oid": "9e8ccb1cf129ba8ef1dc14d9050e84da5ee7e3b3",
+      "ref": "refs/heads/codex/self-adapting-agent-worker-schedule-capacity"
+    },
+    {
+      "oid": "9e9393acde1284b0c684a5c15d9bf331133c9928",
+      "ref": "refs/heads/codex/self-adapting-agent-worker-schedule-dispatch"
+    },
+    {
+      "oid": "d701655306bc0ac42ce12a8142ad2a62b6ea0d1b",
+      "ref": "refs/heads/codex/self-adapting-agent-worker-trigger-launch"
+    },
+    {
+      "oid": "e62804694fa6578758d4f7e7c6cf12f334a13853",
+      "ref": "refs/heads/codex/self-sufficient-agent-runtime-readiness"
+    },
+    {
+      "oid": "40e55f6ceec9c0f9f750bb1648bf34701df1a4b1",
+      "ref": "refs/heads/codex/settings-ui-detent-provider-fix"
+    },
+    {
+      "oid": "8cd8a94bdc492e10af73f67c2c68a8da9d172ca7",
+      "ref": "refs/heads/codex/worker-first-autonomy-poc"
+    },
+    {
+      "oid": "5c759c08f361cf7402f13e361a327d48fc6f31e4",
+      "ref": "refs/heads/main"
+    },
+    {
+      "oid": "5c759c08f361cf7402f13e361a327d48fc6f31e4",
+      "ref": "refs/remotes/origin/HEAD"
+    },
+    {
+      "oid": "6410592b54c64ee7d9bbba8fb18e0db5e3194eff",
+      "ref": "refs/remotes/origin/codex/agent-briefing-autonomy-cockpit"
+    },
+    {
+      "oid": "f3761b95b39a28ffb4a6d2b007ee7ac3097d691c",
+      "ref": "refs/remotes/origin/codex/worker-first-autonomy-poc"
+    },
+    {
+      "oid": "3c3cf71509dcf3c05873702dc31d31eeb661b141",
+      "ref": "refs/remotes/origin/dependabot/cargo/packages/agent/runtime-minor-4eda291c96"
+    },
+    {
+      "oid": "75350245a63fc3180bad1bb8c6cbec7271efe421",
+      "ref": "refs/remotes/origin/dependabot/github_actions/actions/checkout-7"
+    },
+    {
+      "oid": "90649b99bc4a156d9eac22b9e4e77c5bb4c602de",
+      "ref": "refs/remotes/origin/dependabot/github_actions/actions/upload-artifact-7"
+    },
+    {
+      "oid": "9b4640c7cc39f733c4f64b77c319801cdd604a08",
+      "ref": "refs/remotes/origin/dependabot/github_actions/dorny/paths-filter-4"
+    },
+    {
+      "oid": "24b7c77410356311e964b35ca8fa63ad0698da3e",
+      "ref": "refs/remotes/origin/feature/three-tier-architecture"
+    },
+    {
+      "oid": "0825574a2a2a2a1ef5f9470bd96c0aee8ebe1077",
+      "ref": "refs/remotes/origin/fix/audiorecorder-avengine-rewrite"
+    },
+    {
+      "oid": "5c759c08f361cf7402f13e361a327d48fc6f31e4",
+      "ref": "refs/remotes/origin/main"
+    },
+    {
+      "oid": "ad5e484722c6f7abbe764126409494026216ad92",
+      "ref": "refs/remotes/origin/next/modular-capability-engine"
+    },
+    {
+      "oid": "da1f4465cf2b31f6afe738ea6c933cb72836d039",
+      "ref": "refs/remotes/origin/refactor/render-ui-backend-agnostic"
+    },
+    {
+      "oid": "bc1bd6022c773601adccba6b19111bba242c2f25",
+      "ref": "refs/remotes/origin/session/sess_019e84f6-3d34-70a3-b083-812988035042"
+    },
+    {
+      "oid": "76adaf13781c0c58f574c05b10506ae4683eeb97",
+      "ref": "refs/remotes/origin/session/sess_019e8cd0-02fc-7c00-bd53-c95a2c96184f"
+    },
+    {
+      "oid": "136fc6032bd319213516443fa39a831e53acb699",
+      "ref": "refs/remotes/origin/stable/legacy-mobile-agent"
+    },
+    {
+      "oid": "a84a9045043bd76699b55ebf592a49d6493a61c5",
+      "ref": "refs/remotes/origin/tron-rs/exploration"
+    },
+    {
+      "oid": "7ddb9e0f5fcea33fad07fa0311edfa2b58a9916c",
+      "ref": "refs/remotes/origin/ts-server/snapshot"
+    },
+    {
+      "oid": "2df0d24f32e67a03deca19c1828d37360856c3cc",
+      "ref": "refs/stash"
+    },
+    {
+      "oid": "df7d66d1cde1724418cd4f290c097ff9e9168f2f",
+      "ref": "refs/tags/mac-v0.1.0-beta.1"
+    },
+    {
+      "oid": "2d7e7bd56c2d5582287787f95008ea1de091a9a2",
+      "ref": "refs/tags/pre-phase-0"
+    },
+    {
+      "oid": "70522f765fc60890307c841e7ffc6c13fcb8263c",
+      "ref": "refs/tags/pre-phase-1"
+    },
+    {
+      "oid": "134915ca462369ee1197391fa2b9bafcb1af3d40",
+      "ref": "refs/tags/pre-phase-2"
+    },
+    {
+      "oid": "e9ca5176947c6a7df0fccb747fc54586372d45fe",
+      "ref": "refs/tags/pre-phase-3"
+    },
+    {
+      "oid": "20c3994ceff09a8bfb02d1e881d316de79a944d2",
+      "ref": "refs/tags/pre-phase-4"
+    },
+    {
+      "oid": "1489cb0dae8532e00a2843095452362754da5d56",
+      "ref": "refs/tags/pre-phase-5"
+    },
+    {
+      "oid": "3f3ae8c224542758c650966be2e11a8b80a3ee35",
+      "ref": "refs/tags/pre-phase-5.5"
+    },
+    {
+      "oid": "4e787940b184798c0805f789d87d4bfee20dc243",
+      "ref": "refs/tags/pre-phase-6"
+    },
+    {
+      "oid": "f912b6df798ca6170fc9107da8709f761bddf259",
+      "ref": "refs/tags/pre-phase-7"
+    },
+    {
+      "oid": "d19a6674f7ecb52c72f33f401c3c4b10700ae866",
+      "ref": "refs/tags/pre-phase-8"
+    },
+    {
+      "oid": "d3afc3772f5bc3b2b61b8e4d6b41f07ac6f5ab86",
+      "ref": "refs/tags/pre-phase-9"
+    },
+    {
+      "oid": "d932f6596f41db7e4db9b8b056b6876e3462111e",
+      "ref": "refs/tags/pre-restoration-baseline-2026-06-14"
+    },
+    {
+      "oid": "f61eea5207029570f90efe8098d6edf0732e3d0e",
+      "ref": "refs/tags/primitive-baseline-2026-06-13"
+    },
+    {
+      "oid": "6315001d4cbac9b9ad7ebdc167cd9674325c277d",
+      "ref": "refs/tags/server-v0.1.0-beta.2"
+    },
+    {
+      "oid": "d30e9772d3e41e94bf0eb64eeb90ecb1e16d22aa",
+      "ref": "refs/tags/server-v0.1.0-beta.3"
+    },
+    {
+      "oid": "73eb5b4f5ad5ef343e541a39b63690c81d36aee7",
+      "ref": "refs/tags/server-v0.1.0-beta.4"
+    },
+    {
+      "oid": "9db8fa356449104e5173ef57c220a540ea02df55",
+      "ref": "refs/tags/server-v0.1.0-beta.5"
+    },
+    {
+      "oid": "2ef158e518b7690e23bbf70eb8b96cadf6b09324",
+      "ref": "refs/tags/server-v0.1.0-beta.6"
+    },
+    {
+      "oid": "5d9dae8f8f6db3ca4a193a6253d5e432bb73f797",
+      "ref": "refs/tags/server-v0.1.0-beta.7"
+    },
+    {
+      "oid": "8cd8a94bdc492e10af73f67c2c68a8da9d172ca7",
+      "ref": "HEAD"
+    },
+    {
+      "oid": "7ad5242b9b177efeaa9cdc7808a02831b81e26e8",
+      "ref": "worktrees/clients/HEAD"
+    },
+    {
+      "oid": "67d2d8783c1ace034efe5b736f826870691d21cb",
+      "ref": "worktrees/tron14/HEAD"
+    },
+    {
+      "oid": "c3cc264c9ec3c8e1b37f895f654093836db4cc61",
+      "ref": "worktrees/tron13/HEAD"
+    },
+    {
+      "oid": "136b9ffc5c799ee3257897025cf5cb805667074b",
+      "ref": "worktrees/tron12/HEAD"
+    },
+    {
+      "oid": "67d2d8783c1ace034efe5b736f826870691d21cb",
+      "ref": "worktrees/tron15/HEAD"
+    },
+    {
+      "oid": "70b7c97801e14cc11e7b78ab8d83bae1dd6b4c33",
+      "ref": "worktrees/tron4/HEAD"
+    },
+    {
+      "oid": "7329eee43187cd5ddf7ac2493f674add47d9a64b",
+      "ref": "worktrees/tron3/HEAD"
+    },
+    {
+      "oid": "70b7c97801e14cc11e7b78ab8d83bae1dd6b4c33",
+      "ref": "worktrees/tron2/HEAD"
+    },
+    {
+      "oid": "3c7fffa60c9a364c94c3a933756976b1d69c9a3b",
+      "ref": "worktrees/tron5/HEAD"
+    },
+    {
+      "oid": "b659cde6b5a594568ef2f1701219d042d7afa290",
+      "ref": "worktrees/tron/HEAD"
+    },
+    {
+      "oid": "eaeb9e94c546bc188aac092a37e72dabd3cf4833",
+      "ref": "worktrees/tron10/HEAD"
+    },
+    {
+      "oid": "bc74a52b4ba3945f3f7ce61b934afddfc5a332e2",
+      "ref": "worktrees/tron17/HEAD"
+    },
+    {
+      "oid": "de7bda4b706dc3da5bca5b7fc0ac4ed4ea558325",
+      "ref": "worktrees/tron11/HEAD"
+    },
+    {
+      "oid": "b72f836a8be349692b1c6caf698cd6e1393e997e",
+      "ref": "worktrees/tron7/HEAD"
+    },
+    {
+      "oid": "3e80bdf9382b2b9c63e72a7636f0d32b4414bb6b",
+      "ref": "worktrees/tron9/HEAD"
+    },
+    {
+      "oid": "7ad5242b9b177efeaa9cdc7808a02831b81e26e8",
+      "ref": "worktrees/rust-core-domains/HEAD"
+    },
+    {
+      "oid": "7ad5242b9b177efeaa9cdc7808a02831b81e26e8",
+      "ref": "worktrees/tooling-docs-artifacts/HEAD"
+    },
+    {
+      "oid": "f8f471b2e54289d7b509b2c47c8c657efd40a383",
+      "ref": "worktrees/tron8/HEAD"
+    },
+    {
+      "oid": "9906807e255ce045682f743c1da1e4b0349f0e28",
+      "ref": "worktrees/tron6/HEAD"
+    },
+    {
+      "oid": "de7bda4b706dc3da5bca5b7fc0ac4ed4ea558325",
+      "ref": "worktrees/tron1/HEAD"
+    }
+  ],
+  "canonical_main_prerequisite": "339819f0bff641a694a540aa722a6ee1184fb8d1",
+  "compact": "unique-source.bundle",
+  "compact_sha256": "f828b49541756426704782f1a79ac5d76d1dc07e3a31c049c3732b00fbd89c7c",
+  "initial_missing_objects": [
+    "3c3cf71509dcf3c05873702dc31d31eeb661b141",
+    "75350245a63fc3180bad1bb8c6cbec7271efe421",
+    "ac2cfdc7652e2b792d8fc5d22eb2f9217bc099b9",
+    "aceb4cc33dba5cb0750a2dc23ee60448f2ec83f5",
+    "ad1199110bd213444b57370b496207de57ebfdc9",
+    "b659cde6b5a594568ef2f1701219d042d7afa290",
+    "eaeb9e94c546bc188aac092a37e72dabd3cf4833"
+  ],
+  "verified_all_original_tips": true,
+  "restore": "In a clone containing the recorded canonical main, run git bundle verify <unique-source.bundle>, then git fetch <unique-source.bundle> +refs/archive/*:refs/archive/* . The dirty patch remains unchanged alongside this archive."
+}

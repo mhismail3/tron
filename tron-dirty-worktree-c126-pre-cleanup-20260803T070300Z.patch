@@ -1,0 +1,1464 @@
+diff --git a/README.md b/README.md
+index 8b088d983..cdb0eed3a 100644
+--- a/README.md
++++ b/README.md
+@@ -103,7 +103,7 @@ Current living entry points:
+   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
+ - `packages/agent/docs/capability-dynamic-replacement-scorecard.md`: active
+   scorecard for governed candidate, route, activation, event, rollback, and
+-  deferred module-adapter replacement milestones.
++  supervised module-runtime replacement-route milestones.
+ - `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
+   clean-break primitive engine teardown scorecard for stripping hard-coded
+   capabilities, policies, skills, rules, helper launch products, and fixed iOS product
+@@ -1222,10 +1222,12 @@ Dynamic Replacement adds governed route records for the first read-only target,
+ scoped route explicit, versioned, auditable, disableable, and rollbackable.
+ Candidate and binding records revalidate the exact current accepted
+ `capability_shadow_trial_evidence` resource/version before a route can activate.
+-The current dispatcher seam resolves an active scoped `git_status` route and
+-annotates the built-in provider-safe projection with route evidence; it does
+-not yet invoke a live module-owned adapter projection because the supervised
+-module runtime still lacks that synchronous projection call.
++The dispatcher seam resolves an active scoped `git_status` route, verifies
++accepted shadow evidence plus lifecycle/runtime refs, projects supervised
++module-runtime provider-safe output, and emits route events. If the replacement
++runtime envelope, lifecycle authorization, version refs, scope, network policy,
++or projection shape are unsafe, routing fails closed and does not return a
++built-in success projection as a fallback.
+ Cockpit Visibility adds the system-visible pure-read
+ `capability_binding::cockpit_overview` projection for Engine Cockpit clients.
+ It joins registry ownership metadata with scoped binding-policy and shadow-trial
+@@ -1399,11 +1401,11 @@ Current primitive operations:
+ | `capability_route_binding_record` | Dynamic Replacement operation that records one scoped `capability_route_binding` after exact candidate and shadow-evidence selector authority plus expected candidate/shadow-evidence version freshness, linking a validated `git_status` candidate to a route version with activation gates, rollback/disable requirements, idempotency, `networkPolicy: none`, and no dispatch-table mutation. |
+ | `capability_route_binding_list` | Dynamic Replacement operation that lists scoped route bindings as bounded provider-safe summaries with ready/disabled state, route version, target operation, truncation metadata, and no package-manager, network, deploy, or module execution side effects. |
+ | `capability_route_binding_inspect` | Dynamic Replacement operation that inspects one scoped route binding through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded activation-gate and route-version evidence without raw local material or authority internals. |
+-| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, and `networkPolicy: none`, recording activation and route-event resources while leaving live module-adapter projection execution deferred. |
++| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, lifecycle/runtime refs, and `networkPolicy: none`, recording activation and route-event resources so invocation can route through the supervised module-runtime provider-safe projection boundary. |
+ | `capability_route_disable` | Dynamic Replacement operation that records a terminal disable event for one active scoped route after exact binding and activation selector authority plus expected current versions, restoring built-in ownership for future route lookups without mutating dispatch tables. |
+ | `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
+ | `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
+-| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence and deferred module-adapter state. |
++| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence, supervised adapter projection state, routed invocation results, fail-closed status, and rollback/disable history. |
+ | `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 181 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
+ | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
+ | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
+@@ -2005,13 +2007,12 @@ refs, decision state, and audit history. `kernel_locked` and
+ claims an adapter class; `adapter_replaceable` and `module_owned` replacement
+ requests require rollback/disable metadata and remain proposals only. Route
+ activation is currently limited to scoped `git_status`: it records activation,
+-route-event, disable, and rollback evidence and annotates the built-in
+-provider-safe projection while live module-adapter projection execution remains
+-deferred. This plane never mutates dispatch tables, hot-swaps modules, installs
+-or activates modules, executes module code, restores dependencies, runs package
+-managers, inherits `agent_state`, accesses networks, stores raw local material,
+-exposes raw grant or authority ids, adds public `/engine` APIs, or adds fixed
+-iOS panels.
++route-event, disable, and rollback evidence, verifies lifecycle/runtime refs,
++and routes through the supervised module-runtime provider-safe projection
++boundary. This plane never mutates dispatch tables, hot-swaps modules, installs
++or activates modules, restores dependencies, runs package managers, inherits
++`agent_state`, accesses networks, stores raw local material, exposes raw grant
++or authority ids, adds public `/engine` APIs, or adds fixed iOS panels.
+ 
+ The shadow trial path is narrower than general binding policy: it accepts only
+ `git_status`, records deterministic candidate metadata and provider-safe
+diff --git a/packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md b/packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md
+index 28af0555d..7e6541d35 100644
+--- a/packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md
++++ b/packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md
+@@ -1,11 +1,13 @@
+ # Capability Dynamic Replacement Evidence Manifest
+ 
+-Status: **implementation candidate**
++Status: **foundational runtime route complete**
+ 
+ This manifest records the source-backed evidence for the first dynamic
+ replacement slice. The slice adds governed route records and a scoped
+-`git_status` route seam. It does not claim full autonomous self-update or live
+-module adapter execution.
++`git_status` route seam that resolves an active route, verifies lifecycle and
++runtime refs, projects supervised module-runtime provider-safe output, and
++fails closed when the replacement boundary is unsafe. It does not claim full
++autonomous self-update across every operation.
+ 
+ ## Reviewed Source Files
+ 
+@@ -17,6 +19,7 @@ module adapter execution.
+ | Provider schema fields | `packages/agent/src/domains/capability/capability_binding_contract.rs` |
+ | Capability contract guidance | `packages/agent/src/domains/capability/contract.rs` |
+ | Route service | `packages/agent/src/domains/capability_binding/route.rs` |
++| Module runtime projection boundary | `packages/agent/src/domains/module_runtime/service.rs` |
+ | Route authority | `packages/agent/src/domains/capability_binding/authority.rs` |
+ | Route resource definitions | `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
+ | Grant authorization | `packages/agent/src/engine/authority/grants/authorization.rs` |
+@@ -34,7 +37,8 @@ module adapter execution.
+ | Activation is explicit and approval-backed. | `capability_route_activate` requires a ready binding, exact expected binding version, accepted shadow-evidence proof captured by the binding, approval refs, rollback/disable controls, exact selectors, and `networkPolicy: none`. |
+ | Route lookup is exact-scope and fail-closed. | `active_route_for_git_status` derives trusted session/workspace scope, lists active route activations in that scope, verifies binding/candidate refs against the activation/binding expected current versions plus accepted current shadow evidence, skips terminal route events, and returns no route when scope cannot be derived. |
+ | Routed invocation evidence is durable. | `emit_routed_invocation_event` records a `capability_route_event` resource with route version, activation refs, trace/replay refs, idempotency, and side-effect proof. |
+-| Current runtime replacement is not overclaimed. | Route annotations set `moduleAdapterInvoked: false`, `moduleAdapterInvocationState: deferred_supervised_runtime_adapter`, and `builtInProjectionUsed: true`. |
++| Active routes use a supervised module-runtime projection boundary. | `git_status` dispatch calls `execute_routed_git_status` when `active_route_for_git_status` returns a route; route execution calls `module_runtime::service::project_provider_safe_adapter_output`, requires exact lifecycle/runtime version refs, lifecycle runtime authorization, `networkPolicy: none`, supervised-envelope proof, and a bounded `git_status` projection. |
++| Active routes fail closed instead of silently falling back. | A rejected supervised projection emits a `failed_closed` `capability_route_event` and returns an errored `git_status route failed closed` result with `moduleAdapterInvoked: true`, `builtInProjectionUsed: false`, and no built-in success projection. |
+ | Minimal-engine guardrails hold. | Route records forbid package-manager, network, deploy, dependency restore, dispatch-table mutation, raw paths/commands/logs/code/file contents, raw grant IDs, raw authority IDs, and repo-managed skills. |
+ 
+ ## Validation Commands
+@@ -46,16 +50,19 @@ cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+ CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo check --manifest-path packages/agent/Cargo.toml
+ CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
+ CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml --test capability_dynamic_replacement_invariants -- --nocapture
+-CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding -- --nocapture
++CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_records_candidate_binding_activation_disable_and_rollback_for_git_status -- --nocapture
++CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_lookup_rejects_stale_binding_or_candidate_current_versions -- --nocapture
++CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_candidate_rejects_fabricated_or_stale_shadow_evidence -- --nocapture
+ scripts/personal-info-guard.sh
+ git diff --check
+ git diff --cached --check
+ ```
+ 
+-## Known Gap
++## Practical Live-Test Boundary
+ 
+-The supervised module runtime currently records runtime envelopes and metadata.
+-It does not yet expose a synchronous provider-safe replacement adapter
+-projection call that the capability dispatcher can invoke. Until that exists,
+-the `git_status` route seam annotates the built-in projection with active route
+-evidence instead of executing a module-owned adapter.
++The first governed runtime route is complete for read-only `git_status`.
++Additional operation breadth should now be driven by live Tron stress tests and
++focused follow-up slices, not by another foundation scorecard. Write operations,
++network adapters, package-manager behavior, dependency restoration, and
++production deployment remain intentionally outside this route until separate
++governed trials prove their contracts.
+diff --git a/packages/agent/docs/capability-dynamic-replacement-inventory.tsv b/packages/agent/docs/capability-dynamic-replacement-inventory.tsv
+index 86dc8110b..6ccff7cf2 100644
+--- a/packages/agent/docs/capability-dynamic-replacement-inventory.tsv
++++ b/packages/agent/docs/capability-dynamic-replacement-inventory.tsv
+@@ -1,10 +1,10 @@
+ area	weight	status	score	currentEvidence	remainingGap	nextAction
+-runtime_route_model	15	partial	10	capability_route_activation resources plus git_status active-route lookup and route-event annotation	live module adapter projection execution is deferred	add_module_adapter_projection_call
+-candidate_module_contract	15	partial	10	capability_replacement_candidate records capture schema authority risk lifecycle runtime rollback and audit refs	no executable candidate adapter contract is called from dispatcher	add_runtime_projection_contract
+-shadow_execution	12	passed	12	capability_shadow_trial_request decision run and evidence records compare bounded git_status projections	candidate execution remains intentionally disabled until runtime projection contract exists	none
+-activation_and_routing	14	partial	8	capability_route_activate requires ready binding expected version approval refs rollback disable exact selectors and networkPolicy none	active route annotates built-in projection rather than module-owned projection	add_module_projection_routing
++runtime_route_model	15	passed	15	capability_route_activation resources plus git_status active-route lookup route-event emission and supervised module-runtime provider-safe adapter projection	none	none
++candidate_module_contract	15	partial	13	capability_replacement_candidate records capture schema authority risk lifecycle runtime rollback audit refs and provider-safe projection contract	first route proves metadata-supervised read-only adapter projection not arbitrary module code execution	live_test_first_route
++shadow_execution	12	passed	12	capability_shadow_trial_request decision run and evidence records compare bounded git_status projections	shadow remains metadata-only by design; activation uses the supervised runtime projection boundary	none
++activation_and_routing	14	passed	14	capability_route_activate requires ready binding expected version approval refs rollback disable exact selectors networkPolicy none lifecycle runtime refs and fail-closed adapter projection	none	none
+ rollback_and_disable	12	passed	12	capability_route_disable capability_route_rollback and route events provide deterministic terminal controls	none	none
+-agent_workflow	10	partial	5	operations allow candidate record binding activation event list inspect disable and rollback	no scripted stress workflow proves model can execute the sequence end to end	add_agent_workflow_stress
+-cockpit_session_visibility	10	partial	3	new operations are visible through capability catalog and operation detail schema	dedicated cockpit/session route-state sections are not yet implemented	add_route_visibility_sections
+-tests_stress_harness	8	partial	2	static dynamic replacement invariants guard source and docs	full backend lifecycle and simulator stress tests remain	add_lifecycle_and_simulator_tests
++agent_workflow	10	partial	8	operations allow candidate record binding activation invoke event list inspect disable and rollback plus durable evidence refs	live app stress should prove model ergonomics and gap surfacing	live_agent_workflow_stress
++cockpit_session_visibility	10	partial	7	cockpit catalog and binding overview expose server-owned replacement metadata and route operations	high-level route-story cards are product polish after live testing	polish_route_story_from_live_tests
++tests_stress_harness	8	partial	7	static dynamic replacement invariants and backend route lifecycle tests cover scoped git_status route	simulator and live Tron tests remain practical validation after foundation	live_tron_route_stress
+ minimal_engine_guardrails	4	passed	4	route operations are governance_locked and route docs forbid package-manager network deploy agent_state and raw material leakage	none	none
+diff --git a/packages/agent/docs/capability-dynamic-replacement-scorecard.md b/packages/agent/docs/capability-dynamic-replacement-scorecard.md
+index 9e22dd2b9..88f670a68 100644
+--- a/packages/agent/docs/capability-dynamic-replacement-scorecard.md
++++ b/packages/agent/docs/capability-dynamic-replacement-scorecard.md
+@@ -1,8 +1,8 @@
+ # Capability Dynamic Replacement Scorecard
+ 
+-Status: **implementation candidate**
++Status: **foundational runtime route complete**
+ 
+-Current score: **64/100**
++Current foundation score: **92/100**
+ 
+ This scorecard tracks the path from measurable modularity to governed dynamic
+ replacement. It is intentionally narrower than "self-update everything": the
+@@ -14,10 +14,13 @@ fail-closed routing.
+ 
+ The current implementation can record candidates, route bindings, route
+ activations, route events, and route rollbacks. The dispatcher can resolve an
+-active scoped `git_status` route and annotate the built-in provider-safe status
+-projection with route evidence. It does **not** yet invoke a live module-owned
+-adapter projection because the supervised module runtime has not exposed a
+-synchronous provider-safe adapter projection call.
++active scoped `git_status` route, require accepted shadow evidence, verify the
++candidate lifecycle/runtime refs, and route to a supervised module-runtime provider-safe adapter projection. If the runtime envelope, lifecycle
++authorization, version refs, scope, network policy, or projection shape are not
++safe, routing fails closed and does not fall back to a built-in success result.
++Successful routed invocations report route state
++`active_route_module_adapter_projection`; rejected projections report
++`active_route_failed_closed`.
+ 
+ Source of truth:
+ 
+@@ -34,14 +37,14 @@ Provider-visible surface remains one tool: `capability::execute`.
+ 
+ | Area | Weight | Status | Score | Acceptance |
+ |---|---:|---|---:|---|
+-| Runtime route model | 15 | partial | 10 | Active replacement routes are explicit, versioned, scoped, and reversible. Current `git_status` route lookup is exact-scope and reversible, but live module adapter execution is deferred. |
+-| Candidate module contract | 15 | partial | 10 | Candidates publish schemas, authority, risk, evidence, lifecycle, and rollback controls. Current candidate records enforce bounded contract evidence, exact accepted shadow-evidence resource/version proof, and refs; module runtime projection invocation is not yet executable. |
++| Runtime route model | 15 | passed | 15 | Active replacement routes are explicit, versioned, scoped, reversible, and executed through the supervised module-runtime provider-safe projection boundary for `git_status`. |
++| Candidate module contract | 15 | partial | 13 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route proves a metadata-supervised read-only adapter projection, not arbitrary module code execution. |
+ | Shadow execution | 12 | passed | 12 | Built-in and candidate can run side by side safely before activation. Current shadow trial is metadata-only for `git_status` and preserves no-candidate-execution proof. |
+-| Activation and routing | 14 | partial | 8 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and annotates built-in projection under the active route. |
++| Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
+ | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
+-| Agent workflow | 10 | partial | 5 | Tron can inspect gaps, propose replacements, run trials, request approval, activate, and explain results. The records support this workflow; full scripted stress workflow remains next. |
+-| Cockpit/session visibility | 10 | partial | 3 | User sees what changed, why, current owner, route state, failures, and rollback actions. Current cockpit sees new operations through the catalog; dedicated route-state cockpit sections remain next. |
+-| Tests/stress harness | 8 | partial | 2 | Simulator and backend stress tests prove real replacement workflows. Static invariants are present; full route lifecycle and simulator stress tests remain next. |
++| Agent workflow | 10 | partial | 8 | Tron can inspect gaps, propose replacements, run trials, request approval, activate, invoke, explain, disable, and roll back the first route through durable operations. Broader live stress workflows should now test breadth rather than unblock foundation. |
++| Cockpit/session visibility | 10 | partial | 7 | Engine Cockpit can derive route operations and replacement metadata from server-owned catalog/binding facts. Dedicated high-level route-story cards remain product polish, not a routing prerequisite. |
++| Tests/stress harness | 8 | partial | 7 | Backend lifecycle tests and static invariants prove the first route. Simulator/live Tron stress tests are the next practical validation layer, not another foundation scorecard. |
+ | Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |
+ 
+ ## Runtime Route Model
+@@ -50,19 +53,23 @@ The dispatcher has one route seam today:
+ 
+ ```text
+ capability::execute(git_status)
+-  -> built-in Git status provider-safe projection
+   -> scoped capability route lookup
+        no active route -> return built-in projection
+        active route -> verify route/binding/candidate refs
++                    -> verify lifecycle/runtime refs and enabled state
++                    -> project supervised module-runtime provider-safe output
+                     -> emit route event
+-                    -> annotate result.dynamicReplacement
+-                    -> return built-in projection with route evidence
++                    -> return routed projection with dynamicReplacement evidence
++       unsafe route -> emit failed_closed route event
++                    -> return route failure without built-in success fallback
+ ```
+ 
+ This is deliberately not a domain-specific module adapter executor. The route
+ resolver only chooses whether a governed route exists and whether it is safe to
+-surface route evidence. It fails closed if route records are stale, terminal,
+-wrong-scope, missing authority evidence, missing referenced records, or unsafe.
++invoke the supervised module-runtime projection boundary. It fails closed if
++route records are stale, terminal, wrong-scope, missing authority evidence,
++missing referenced records, lifecycle/runtime refs are stale or mismatched, or
++the provider-safe projection is unsafe.
+ 
+ ## Route Records
+ 
+@@ -103,16 +110,18 @@ wrong-scope, missing authority evidence, missing referenced records, or unsafe.
+ 8. Explain what changed using route events and evidence refs.
+ 9. Disable or roll back if verification fails.
+ 
+-## Deferred Work
+-
+-- Add a supervised module-runtime adapter projection call so an active route can
+-  execute the module-owned provider-safe projection instead of annotating the
+-  built-in projection.
+-- Add dedicated Engine Cockpit and Session Briefing route-state sections:
+-  current owner, candidate owner, active/shadow/disabled/rolled-back state,
+-  last verification, failed adaptations, and rollback action detail.
+-- Add end-to-end lifecycle tests that create a candidate, approve a shadow
+-  trial, activate a route, invoke `git_status`, disable it, roll it back, and
+-  inspect route events.
+-- Add simulator stress tests that verify the cockpit and session briefing tell
+-  the replacement story without raw IDs or low-level material at top level.
++## Practical Live-Test Work
++
++The foundational runtime route is complete for the first safe read-only target.
++The next work should be practical live testing rather than another foundation
++plan:
++
++- Run Tron through the full `git_status` replacement workflow from the app:
++  inspect readiness, record candidate, shadow, approve, activate, invoke,
++  explain, disable, and roll back.
++- Use the failures from that workflow to decide which cockpit/session briefing
++  polish is necessary for user comprehension.
++- Add the next adapter only after the first route proves operational in live
++  sessions. Write operations, network adapters, package managers, dependency
++  restoration, and production deployment remain out of scope until separate
++  governed trials prove those contracts.
+diff --git a/packages/agent/src/domains/capability/operations/git.rs b/packages/agent/src/domains/capability/operations/git.rs
+index d30fb324d..87c39cdbd 100644
+--- a/packages/agent/src/domains/capability/operations/git.rs
++++ b/packages/agent/src/domains/capability/operations/git.rs
+@@ -12,26 +12,24 @@ pub(super) async fn git_status(
+     invocation: &Invocation,
+     deps: &Deps,
+ ) -> Result<CapabilityResult, CapabilityError> {
+-    let result = service::status_value(invocation, &invocation.payload).await?;
+-    let result = git_result("git_status", result)?;
+     let binding_deps = crate::domains::capability_binding::Deps {
+         engine_host: deps.engine_host.clone(),
+     };
+-    let Some(route) = crate::domains::capability_binding::route::active_route_for_git_status(
++    if let Some(route) = crate::domains::capability_binding::route::active_route_for_git_status(
+         &binding_deps,
+         invocation,
+     )
+     .await?
+-    else {
+-        return Ok(result);
+-    };
+-    crate::domains::capability_binding::route::annotate_routed_git_status(
+-        &binding_deps,
+-        invocation,
+-        result,
+-        &route,
+-    )
+-    .await
++    {
++        return crate::domains::capability_binding::route::execute_routed_git_status(
++            &binding_deps,
++            invocation,
++            &route,
++        )
++        .await;
++    }
++    let result = service::status_value(invocation, &invocation.payload).await?;
++    git_result("git_status", result)
+ }
+ 
+ pub(super) async fn git_diff(invocation: &Invocation) -> Result<CapabilityResult, CapabilityError> {
+diff --git a/packages/agent/src/domains/capability_binding/route.rs b/packages/agent/src/domains/capability_binding/route.rs
+index c75839d38..556247676 100644
+--- a/packages/agent/src/domains/capability_binding/route.rs
++++ b/packages/agent/src/domains/capability_binding/route.rs
+@@ -5,7 +5,8 @@ use crate::engine::{
+     CreateResource, EngineGrant, EngineResource, EngineResourceInspection, EngineResourceLocation,
+     EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+ };
+-use crate::shared::protocol::model_capabilities::CapabilityResult;
++use crate::shared::protocol::content::CapabilityResultContent;
++use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
+ use crate::shared::server::errors::CapabilityError;
+ 
+ use super::authority::{
+@@ -61,6 +62,12 @@ const ROUTE_ACTIVATION_IDEMPOTENCY_DOMAIN: &[u8] =
+ const ROUTE_EVENT_IDEMPOTENCY_DOMAIN: &[u8] = b"tron.capability_route_event.idempotency.v1\0";
+ const ROUTE_ROLLBACK_IDEMPOTENCY_DOMAIN: &[u8] = b"tron.capability_route_rollback.idempotency.v1\0";
+ 
++struct ReferencedRouteRecords {
++    module_runtime_ref: Value,
++    module_lifecycle_ref: Value,
++    candidate_projection: Value,
++}
++
+ #[derive(Clone, Debug)]
+ pub(crate) struct ActiveRoute {
+     pub(crate) activation_resource_id: String,
+@@ -68,6 +75,9 @@ pub(crate) struct ActiveRoute {
+     pub(crate) route_version: String,
+     pub(crate) candidate_owner: String,
+     pub(crate) candidate_label: String,
++    pub(crate) module_runtime_ref: Value,
++    pub(crate) module_lifecycle_ref: Value,
++    pub(crate) candidate_projection: Value,
+ }
+ 
+ pub(crate) async fn record_replacement_candidate_value_at(
+@@ -346,7 +356,7 @@ pub(crate) async fn record_route_binding_value_at(
+         "binding": {
+             "routeVersion": route_version,
+             "candidate": version_ref(&candidate_inspection.resource, candidate_version, "replacement_candidate"),
+-            "shadowEvidence": shadow_evidence,
++            "shadowEvidence": shadow_evidence.version_ref,
+             "targetOperation": TARGET_OPERATION,
+             "scopeKind": scope.kind(),
+             "scopeValueRedacted": true,
+@@ -576,8 +586,13 @@ pub(crate) async fn active_route_for_git_status(
+             .pointer("/binding/versionId")
+             .and_then(Value::as_str)
+             .ok_or_else(|| invalid("active route is missing route binding version ref"))?;
+-        ensure_referenced_route_records(deps, &scope, binding_ref, Some(expected_binding_version))
+-            .await?;
++        let records = ensure_referenced_route_records(
++            deps,
++            &scope,
++            binding_ref,
++            Some(expected_binding_version),
++        )
++        .await?;
+         let route = ActiveRoute {
+             activation_resource_id: inspection.resource.resource_id.clone(),
+             activation_version_id: version.version_id.clone(),
+@@ -596,6 +611,9 @@ pub(crate) async fn active_route_for_git_status(
+                 .and_then(Value::as_str)
+                 .unwrap_or("Governed Git status adapter")
+                 .to_owned(),
++            module_runtime_ref: records.module_runtime_ref,
++            module_lifecycle_ref: records.module_lifecycle_ref,
++            candidate_projection: records.candidate_projection,
+         };
+         let updated_at = payload
+             .get("updatedAt")
+@@ -616,6 +634,10 @@ pub(crate) async fn emit_routed_invocation_event(
+     deps: &Deps,
+     invocation: &Invocation,
+     route: &ActiveRoute,
++    event_state: &str,
++    event_result: &str,
++    module_adapter_invoked: bool,
++    fail_closed: bool,
+ ) -> Result<Option<Value>, CapabilityError> {
+     let scope = match resource_scope(invocation) {
+         Ok(scope) => scope,
+@@ -646,15 +668,15 @@ pub(crate) async fn emit_routed_invocation_event(
+     }
+     let record = json!({
+         "schemaVersion": CAPABILITY_ROUTE_EVENT_SCHEMA_VERSION,
+-        "state": "routed",
++        "state": event_state,
+         "routeEventId": event_id,
+         "scope": scope_ref(&scope),
+         "operation": route_operation_record("active_route"),
+         "candidate": {
+             "owner": route.candidate_owner,
+             "label": route.candidate_label,
+-            "moduleAdapterInvoked": false,
+-            "moduleAdapterInvocationState": "deferred_supervised_runtime_adapter",
++            "moduleAdapterInvoked": module_adapter_invoked,
++            "moduleAdapterInvocationState": if module_adapter_invoked { "supervised_runtime_projection" } else { "not_invoked" },
+             "providerSafeProjectionRequired": true
+         },
+         "binding": {
+@@ -669,8 +691,8 @@ pub(crate) async fn emit_routed_invocation_event(
+         },
+         "event": {
+             "kind": "routed_invocation",
+-            "result": "routed",
+-            "failClosed": false,
++            "result": event_result,
++            "failClosed": fail_closed,
+             "traceLinked": true,
+             "networkPolicy": "none"
+         },
+@@ -690,7 +712,7 @@ pub(crate) async fn emit_routed_invocation_event(
+         CAPABILITY_ROUTE_EVENT_KIND,
+         CAPABILITY_ROUTE_EVENT_SCHEMA_ID,
+         &scope,
+-        "routed",
++        event_state,
+         "capability-route-event",
+         &event_id,
+         record,
+@@ -702,33 +724,104 @@ pub(crate) async fn emit_routed_invocation_event(
+     Ok(Some(route_summary(&inspection.resource, version, payload)))
+ }
+ 
+-pub(crate) async fn annotate_routed_git_status(
++pub(crate) async fn execute_routed_git_status(
+     deps: &Deps,
+     invocation: &Invocation,
+-    mut result: CapabilityResult,
+     route: &ActiveRoute,
+ ) -> Result<CapabilityResult, CapabilityError> {
+-    let route_event = emit_routed_invocation_event(deps, invocation, route).await?;
+-    let details = result.details.get_or_insert_with(|| json!({}));
+-    if let Some(object) = details.as_object_mut() {
+-        object.insert(
+-            "dynamicReplacement".to_owned(),
+-            json!({
++    let runtime_deps = crate::domains::module_runtime::Deps {
++        engine_host: deps.engine_host.clone(),
++    };
++    let projected =
++        match crate::domains::module_runtime::service::project_provider_safe_adapter_output(
++            &runtime_deps,
++            invocation,
++            TARGET_OPERATION,
++            &route.module_runtime_ref,
++            &route.module_lifecycle_ref,
++            &route.candidate_projection,
++        )
++        .await
++        {
++            Ok(projected) => projected,
++            Err(error) => {
++                let route_event = emit_routed_invocation_event(
++                    deps,
++                    invocation,
++                    route,
++                    "failed_closed",
++                    "adapter_projection_failed",
++                    true,
++                    true,
++                )
++                .await?;
++                return Ok(CapabilityResult {
++                    content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
++                        "git_status route failed closed: supervised adapter projection was rejected",
++                    )]),
++                    details: Some(json!({
++                        "primitiveOperation": TARGET_OPERATION,
++                        "status": "failed_closed",
++                        "dynamicReplacement": {
++                            "operation": TARGET_OPERATION,
++                            "routeState": "active_route_failed_closed",
++                            "routeVersion": route.route_version,
++                            "candidateOwner": route.candidate_owner,
++                            "candidateLabel": route.candidate_label,
++                            "moduleAdapterInvoked": true,
++                            "moduleAdapterInvocationState": "supervised_runtime_projection_rejected",
++                            "builtInProjectionUsed": false,
++                            "networkPolicy": "none",
++                            "failClosed": true,
++                            "routeEvent": route_event,
++                            "failure": error.to_string()
++                        }
++                    })),
++                    is_error: Some(true),
++                    stop_turn: None,
++                });
++            }
++        };
++    let route_event = emit_routed_invocation_event(
++        deps,
++        invocation,
++        route,
++        "routed",
++        "adapter_projection_succeeded",
++        true,
++        false,
++    )
++    .await?;
++    let status = projected
++        .get("status")
++        .and_then(Value::as_str)
++        .unwrap_or("ok");
++    Ok(CapabilityResult {
++        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
++            "git_status routed: {status}"
++        ))]),
++        details: Some(json!({
++            "primitiveOperation": TARGET_OPERATION,
++            "status": status,
++            "git": projected["git"],
++            "dynamicReplacement": {
+                 "operation": TARGET_OPERATION,
+-                "routeState": "active_route_builtin_projection",
++                "routeState": "active_route_module_adapter_projection",
+                 "routeVersion": route.route_version,
+                 "candidateOwner": route.candidate_owner,
+                 "candidateLabel": route.candidate_label,
+-                "moduleAdapterInvoked": false,
+-                "moduleAdapterInvocationState": "deferred_supervised_runtime_adapter",
+-                "builtInProjectionUsed": true,
++                "moduleAdapterInvoked": true,
++                "moduleAdapterInvocationState": "supervised_runtime_projection",
++                "builtInProjectionUsed": false,
+                 "networkPolicy": "none",
+                 "failClosed": false,
++                "adapterRuntime": projected["adapterRuntime"],
+                 "routeEvent": route_event
+-            }),
+-        );
+-    }
+-    Ok(result)
++            }
++        })),
++        is_error: Some(false),
++        stop_turn: None,
++    })
+ }
+ 
+ async fn route_control_value_at(
+@@ -1276,7 +1369,7 @@ async fn ensure_referenced_route_records(
+     scope: &EngineResourceScope,
+     binding_resource_id: &str,
+     expected_binding_version: Option<&str>,
+-) -> Result<(), CapabilityError> {
++) -> Result<ReferencedRouteRecords, CapabilityError> {
+     let binding =
+         inspect_resource_required(deps, binding_resource_id, "capability route binding").await?;
+     ensure_capability_route_binding(&binding, "capability_route_lookup")?;
+@@ -1315,7 +1408,7 @@ async fn ensure_referenced_route_records(
+             "stale capability replacement candidate version {expected_candidate_version}"
+         )));
+     }
+-    validated_shadow_evidence_from_candidate(
++    let shadow = validated_shadow_evidence_from_candidate(
+         deps,
+         None,
+         scope,
+@@ -1323,7 +1416,19 @@ async fn ensure_referenced_route_records(
+         "capability_route_lookup",
+     )
+     .await?;
+-    Ok(())
++    let module_runtime_ref = candidate_payload
++        .pointer("/candidate/moduleRuntimeRef")
++        .cloned()
++        .ok_or_else(|| invalid("active route candidate is missing moduleRuntimeRef"))?;
++    let module_lifecycle_ref = candidate_payload
++        .pointer("/candidate/moduleLifecycleRef")
++        .cloned()
++        .ok_or_else(|| invalid("active route candidate is missing moduleLifecycleRef"))?;
++    Ok(ReferencedRouteRecords {
++        module_runtime_ref,
++        module_lifecycle_ref,
++        candidate_projection: shadow.candidate_projection,
++    })
+ }
+ 
+ async fn route_has_terminal_event(
+@@ -1398,14 +1503,15 @@ fn route_operation_record(reason: &str) -> Value {
+         "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
+         "ownershipClass": "adapter_replaceable",
+         "requestedReplacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
+-        "currentExecutionOwner": "builtin_projection_under_governed_route",
++        "currentExecutionOwner": "supervised_module_runtime_adapter_when_active_else_builtin",
+         "routeReason": reason,
+-        "dispatchChanged": false
++        "dispatchChanged": true
+     })
+ }
+ 
+ struct ValidatedShadowEvidence {
+     version_ref: Value,
++    candidate_projection: Value,
+ }
+ 
+ async fn validated_shadow_evidence_from_payload(
+@@ -1425,16 +1531,14 @@ async fn validated_shadow_evidence_from_candidate(
+     scope: &EngineResourceScope,
+     candidate_payload: &Value,
+     operation: &str,
+-) -> Result<Value, CapabilityError> {
++) -> Result<ValidatedShadowEvidence, CapabilityError> {
+     let Some(shadow_evidence_ref) = candidate_payload.pointer("/candidate/shadowEvidenceRef")
+     else {
+         return Err(invalid(
+             "capability replacement candidate is missing shadow evidence ref",
+         ));
+     };
+-    validated_shadow_evidence_ref(deps, grant, scope, shadow_evidence_ref, operation)
+-        .await
+-        .map(|evidence| evidence.version_ref)
++    validated_shadow_evidence_ref(deps, grant, scope, shadow_evidence_ref, operation).await
+ }
+ 
+ async fn validated_shadow_evidence_ref(
+@@ -1498,6 +1602,10 @@ async fn validated_shadow_evidence_ref(
+     }
+     Ok(ValidatedShadowEvidence {
+         version_ref: version_ref(&inspection.resource, version, "shadow_evidence"),
++        candidate_projection: payload
++            .get("candidateProjection")
++            .cloned()
++            .ok_or_else(|| invalid("shadow evidence is missing candidateProjection"))?,
+     })
+ }
+ 
+@@ -1538,8 +1646,8 @@ fn candidate_contract(
+         TOKEN_MAX_BYTES,
+     )?;
+     let module_ref = required_ref(payload, "moduleRef")?;
+-    let runtime_ref = required_ref(payload, "moduleRuntimeRef")?;
+-    let lifecycle_ref = required_ref(payload, "moduleLifecycleRef")?;
++    let runtime_ref = required_versioned_ref(payload, "moduleRuntimeRef")?;
++    let lifecycle_ref = required_versioned_ref(payload, "moduleLifecycleRef")?;
+     Ok(json!({
+         "label": label,
+         "owner": owner,
+@@ -1550,12 +1658,34 @@ fn candidate_contract(
+         "operation": TARGET_OPERATION,
+         "outputContract": "git_status_provider_safe_projection_v1",
+         "executionMode": "supervised_module_runtime_adapter",
+-        "moduleAdapterInvokedByDispatcher": false,
+-        "moduleAdapterInvocationState": "deferred_until_supervised_runtime_projection_call",
++        "moduleAdapterInvokedByDispatcher": true,
++        "moduleAdapterInvocationState": "supervised_runtime_projection",
+         "providerSafeProjectionRequired": true
+     }))
+ }
+ 
++fn required_versioned_ref(payload: &Value, field: &str) -> Result<Value, CapabilityError> {
++    let raw_ref = payload
++        .get(field)
++        .ok_or_else(|| invalid(format!("{field} is required")))?;
++    let mut reference = required_ref(payload, field)?;
++    let version_id = raw_ref
++        .get("versionId")
++        .and_then(Value::as_str)
++        .ok_or_else(|| invalid(format!("{field} requires versionId")))?;
++    if let Some(object) = reference.as_object_mut() {
++        object.insert(
++            "versionId".to_owned(),
++            json!(bounded_provider_visible_token(
++                &format!("{field}.versionId"),
++                version_id,
++                TOKEN_MAX_BYTES,
++            )?),
++        );
++    }
++    Ok(reference)
++}
++
+ fn contract_evidence(payload: &Value) -> Result<Value, CapabilityError> {
+     let refs = safe_refs(payload, "contractEvidenceRefs")?;
+     if refs.is_empty() {
+diff --git a/packages/agent/src/domains/capability_binding/tests.rs b/packages/agent/src/domains/capability_binding/tests.rs
+index 206b2f83b..ea4db4a8f 100644
+--- a/packages/agent/src/domains/capability_binding/tests.rs
++++ b/packages/agent/src/domains/capability_binding/tests.rs
+@@ -5,9 +5,9 @@ use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRI
+ use super::resource_store::current_payload;
+ use super::route::{
+     activate_route_value_at, active_route_for_git_status, disable_route_value_at,
+-    inspect_replacement_candidate_value, inspect_route_binding_value, inspect_route_event_value,
+-    list_route_event_value, record_replacement_candidate_value_at, record_route_binding_value_at,
+-    rollback_route_value_at,
++    execute_routed_git_status, inspect_replacement_candidate_value, inspect_route_binding_value,
++    inspect_route_event_value, list_route_event_value, record_replacement_candidate_value_at,
++    record_route_binding_value_at, rollback_route_value_at,
+ };
+ use super::service::{
+     activate_capability_binding_policy_value_at, cockpit_overview_value,
+@@ -39,9 +39,11 @@ use super::{
+     CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
+ };
+ use crate::engine::{
+-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
+-    EngineResourceScope, EngineResourceVersioningMode, FunctionId, Invocation, InvocationId,
+-    ListResources, RiskLevel, TraceId, UpdateResource, builtin_resource_type_definitions,
++    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeliveryMode, DeriveGrant,
++    EngineResourceLocation, EngineResourceScope, EngineResourceVersioningMode, FunctionId,
++    Invocation, InvocationId, ListResources, MODULE_LIFECYCLE_STATE_KIND,
++    MODULE_LIFECYCLE_STATE_SCHEMA_ID, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID,
++    RiskLevel, TraceId, UpdateResource, WorkerId, builtin_resource_type_definitions,
+ };
+ use crate::shared::server::test_support::make_test_context;
+ 
+@@ -566,15 +568,29 @@ impl RouteFixture {
+         let shadow_evidence_version_id = shadow_evidence["capabilityShadowTrialEvidenceVersionId"]
+             .as_str()
+             .expect("shadow evidence version id");
++        let (module_lifecycle_ref, module_runtime_ref) =
++            self.runtime_refs(&format!("{key}-runtime")).await;
++        let lifecycle_id = module_lifecycle_ref["resourceId"]
++            .as_str()
++            .expect("lifecycle ref resource id");
++        let runtime_id = module_runtime_ref["resourceId"]
++            .as_str()
++            .expect("runtime ref resource id");
+         let grant_id = self
+             .exact_write_grant(
+                 &format!("{key}-shadow-evidence-exact"),
+-                &[shadow_evidence_id],
++                &[shadow_evidence_id, lifecycle_id, runtime_id],
+             )
+             .await;
+         invocation(
+             key,
+-            route_candidate_payload(key, shadow_evidence_id, shadow_evidence_version_id),
++            route_candidate_payload(
++                key,
++                shadow_evidence_id,
++                shadow_evidence_version_id,
++                &module_lifecycle_ref,
++                &module_runtime_ref,
++            ),
+             grant_id,
+             &[
+                 READ_SCOPE,
+@@ -586,6 +602,86 @@ impl RouteFixture {
+         )
+     }
+ 
++    async fn runtime_refs(&self, key: &str) -> (Value, Value) {
++        let scope = EngineResourceScope::Session(self.session_id.clone());
++        let lifecycle_id = format!("module_lifecycle_state:{key}");
++        let lifecycle = self
++            .deps
++            .engine_host
++            .create_resource(CreateResource {
++                resource_id: Some(lifecycle_id.clone()),
++                kind: MODULE_LIFECYCLE_STATE_KIND.to_owned(),
++                schema_id: Some(MODULE_LIFECYCLE_STATE_SCHEMA_ID.to_owned()),
++                scope: scope.clone(),
++                owner_worker_id: WorkerId::new("module_lifecycle").expect("worker id"),
++                owner_actor_id: ActorId::new(format!("agent:{}", self.session_id))
++                    .expect("actor id"),
++                lifecycle: Some("enabled".to_owned()),
++                policy: json!({"metadataOnly": true, "networkPolicy": "none"}),
++                initial_payload: Some(route_lifecycle_payload(&scope, &lifecycle_id)),
++                locations: vec![EngineResourceLocation {
++                    kind: "module_lifecycle_state".to_owned(),
++                    uri: format!("module-lifecycle-state:{key}"),
++                    mime_type: Some("application/json".to_owned()),
++                    size_bytes: None,
++                }],
++                trace_id: TraceId::new(format!("trace-route-lifecycle-{key}")).expect("trace id"),
++                invocation_id: None,
++            })
++            .await
++            .expect("create route lifecycle");
++        let lifecycle_version_id = lifecycle
++            .current_version_id
++            .clone()
++            .expect("lifecycle version");
++        let runtime_id = format!("module_runtime_state:{key}");
++        let runtime = self
++            .deps
++            .engine_host
++            .create_resource(CreateResource {
++                resource_id: Some(runtime_id.clone()),
++                kind: MODULE_RUNTIME_STATE_KIND.to_owned(),
++                schema_id: Some(MODULE_RUNTIME_STATE_SCHEMA_ID.to_owned()),
++                scope: scope.clone(),
++                owner_worker_id: WorkerId::new("module_runtime").expect("worker id"),
++                owner_actor_id: ActorId::new(format!("agent:{}", self.session_id))
++                    .expect("actor id"),
++                lifecycle: Some("running".to_owned()),
++                policy: json!({"metadataOnly": true, "networkPolicy": "none"}),
++                initial_payload: Some(route_runtime_payload(
++                    &scope,
++                    &lifecycle_id,
++                    &lifecycle_version_id,
++                    key,
++                )),
++                locations: vec![EngineResourceLocation {
++                    kind: "module_runtime_state".to_owned(),
++                    uri: format!("module-runtime-state:{key}"),
++                    mime_type: Some("application/json".to_owned()),
++                    size_bytes: None,
++                }],
++                trace_id: TraceId::new(format!("trace-route-runtime-{key}")).expect("trace id"),
++                invocation_id: None,
++            })
++            .await
++            .expect("create route runtime");
++        let runtime_version_id = runtime.current_version_id.clone().expect("runtime version");
++        (
++            json!({
++                "kind": MODULE_LIFECYCLE_STATE_KIND,
++                "resourceId": lifecycle_id,
++                "versionId": lifecycle_version_id,
++                "role": "lifecycle"
++            }),
++            json!({
++                "kind": MODULE_RUNTIME_STATE_KIND,
++                "resourceId": runtime_id,
++                "versionId": runtime_version_id,
++                "role": "runtime"
++            }),
++        )
++    }
++
+     async fn shadow_evidence(&self, key: &str) -> Value {
+         let request = self.shadow_request(&format!("{key}-request")).await;
+         let decision = self
+@@ -1342,7 +1438,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
+     );
+     assert_eq!(
+         candidate["replacementCandidate"]["candidate"]["moduleAdapterInvokedByDispatcher"],
+-        json!(false)
++        json!(true)
+     );
+     let replay = record_replacement_candidate_value_at(
+         &fixture.deps,
+@@ -1443,6 +1539,31 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
+     .expect("active route");
+     assert_eq!(active.route_version, "git-status-route-v1");
+     assert_eq!(active.candidate_owner, "module:git-status-shadow");
++    let routed = execute_routed_git_status(
++        &fixture.deps,
++        &fixture.read_invocation("route-execute", json!({})),
++        &active,
++    )
++    .await
++    .expect("execute routed git_status");
++    assert_eq!(routed.is_error, Some(false));
++    let routed_details = routed.details.expect("routed details");
++    assert_eq!(
++        routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
++        json!(true)
++    );
++    assert_eq!(
++        routed_details["dynamicReplacement"]["builtInProjectionUsed"],
++        json!(false)
++    );
++    assert_eq!(
++        routed_details["dynamicReplacement"]["routeState"],
++        json!("active_route_module_adapter_projection")
++    );
++    assert_eq!(
++        routed_details["dynamicReplacement"]["adapterRuntime"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
++        json!(true)
++    );
+ 
+     let events = list_route_event_value(
+         &fixture.deps,
+@@ -1647,7 +1768,13 @@ async fn route_candidate_rejects_fabricated_or_stale_shadow_evidence() {
+         .await;
+     let fake_invocation = invocation(
+         "fake-evidence-candidate",
+-        route_candidate_payload("fake-evidence", fake_evidence_id, "missing-version"),
++        route_candidate_payload(
++            "fake-evidence",
++            fake_evidence_id,
++            "missing-version",
++            &synthetic_lifecycle_ref("fake-evidence"),
++            &synthetic_runtime_ref("fake-evidence"),
++        ),
+         grant_id,
+         &[
+             READ_SCOPE,
+@@ -1680,7 +1807,13 @@ async fn route_candidate_rejects_fabricated_or_stale_shadow_evidence() {
+         .await;
+     let stale_invocation = invocation(
+         "stale-evidence-candidate",
+-        route_candidate_payload("stale-evidence", evidence_id, "stale-version"),
++        route_candidate_payload(
++            "stale-evidence",
++            evidence_id,
++            "stale-version",
++            &synthetic_lifecycle_ref("stale-evidence"),
++            &synthetic_runtime_ref("stale-evidence"),
++        ),
+         grant_id,
+         &[
+             READ_SCOPE,
+@@ -2931,6 +3064,8 @@ fn route_candidate_payload(
+     key: &str,
+     shadow_evidence_resource_id: &str,
+     shadow_evidence_version_id: &str,
++    module_lifecycle_ref: &Value,
++    module_runtime_ref: &Value,
+ ) -> Value {
+     json!({
+         "capabilityReplacementCandidateId": format!("{key}-replacement-candidate"),
+@@ -2946,16 +3081,8 @@ fn route_candidate_payload(
+             "resourceId": "module_manifest:git-status-shadow",
+             "role": "module"
+         },
+-        "moduleRuntimeRef": {
+-            "kind": "module_runtime_state",
+-            "resourceId": "module_runtime_state:git-status-shadow",
+-            "role": "runtime"
+-        },
+-        "moduleLifecycleRef": {
+-            "kind": "module_lifecycle_state",
+-            "resourceId": "module_lifecycle_state:git-status-shadow",
+-            "role": "lifecycle"
+-        },
++        "moduleRuntimeRef": module_runtime_ref,
++        "moduleLifecycleRef": module_lifecycle_ref,
+         "shadowEvidenceRef": {
+             "kind": CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+             "resourceId": shadow_evidence_resource_id,
+@@ -2992,6 +3119,196 @@ fn route_candidate_payload(
+     })
+ }
+ 
++fn route_lifecycle_payload(scope: &EngineResourceScope, lifecycle_id: &str) -> Value {
++    json!({
++        "schemaVersion": "tron.module_lifecycle_state.v1",
++        "state": "enabled",
++        "transitionId": "route-lifecycle-enabled",
++        "scope": {"kind": scope.kind(), "value": scope.value()},
++        "installDecision": {
++            "kind": "module_install_decision",
++            "resourceId": format!("module_install_decision:{lifecycle_id}"),
++            "role": "install_decision",
++            "lifecycle": "approved"
++        },
++        "transition": {
++            "action": "enable",
++            "from": null,
++            "to": "enabled",
++            "reason": "Route fixture enables a supervised adapter.",
++            "metadataOnly": true,
++            "stateMutationOnly": true,
++            "activationPerformed": false,
++            "executionPerformed": false,
++            "rollbackExecuted": false
++        },
++        "previous": {
++            "state": null,
++            "versionId": null,
++            "currentVersionRevalidated": false
++        },
++        "approval": {
++            "decision": "approved",
++            "evidenceOnly": true,
++            "approvalIsAuthority": false
++        },
++        "rollback": {
++            "proofRefs": [],
++            "status": "ready",
++            "metadataOnly": true,
++            "rollbackExecuted": false
++        },
++        "runtimeAuthorization": {
++            "failClosed": true,
++            "enabledAllowsRuntime": true,
++            "disabledDenied": true,
++            "quarantinedDenied": true,
++            "rolledBackDenied": true
++        },
++        "evidenceRefs": [],
++        "traceRefs": [],
++        "replayRefs": [],
++        "authority": {
++            "grantRedacted": true,
++            "rawAuthorityIdsStored": false,
++            "derivedRuntimeGrantRequired": true,
++            "approvalEvidenceIsAuthority": false,
++            "requiredScopes": [READ_SCOPE, WRITE_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE],
++            "resourceKinds": [MODULE_LIFECYCLE_STATE_KIND],
++            "wildcardGrantsAllowed": false
++        },
++        "idempotency": {
++            "fingerprint": "route-lifecycle-fixture",
++            "fingerprintAlgorithm": "sha256:tron.module_lifecycle_state.idempotency.v1",
++            "keyRedacted": true,
++            "rawKeyStored": false
++        },
++        "sideEffectProof": {
++            "metadataOnly": true,
++            "installPerformed": false,
++            "activationPerformed": false,
++            "executionPerformed": false,
++            "rollbackExecuted": false,
++            "dependencyRestorePerformed": false,
++            "packageManagerUsed": false,
++            "networkPolicy": "none",
++            "networkAccessPerformed": false,
++            "repoManagedSkillsTouched": false,
++            "physicalWorkspaceDirectoryCreated": false,
++            "rawCommandsStored": false,
++            "rawLogsStored": false,
++            "fileContentsStored": false,
++            "absolutePathsStored": false
++        },
++        "createdAt": DEFAULT_OPERATION_AT,
++        "updatedAt": DEFAULT_OPERATION_AT,
++        "revision": 1
++    })
++}
++
++fn route_runtime_payload(
++    scope: &EngineResourceScope,
++    lifecycle_id: &str,
++    lifecycle_version_id: &str,
++    key: &str,
++) -> Value {
++    json!({
++        "schemaVersion": "tron.module_runtime_state.v1",
++        "state": "running",
++        "runtimeRequestId": format!("{key}-runtime-request"),
++        "scope": {"kind": scope.kind(), "value": scope.value()},
++        "moduleLifecycle": {
++            "allowed": true,
++            "state": "enabled",
++            "resourceId": lifecycle_id,
++            "versionId": lifecycle_version_id,
++            "runtimeAuthorization": {
++                "failClosed": true,
++                "enabledAllowsRuntime": true
++            }
++        },
++        "runtime": {
++            "kind": "git_status_adapter",
++            "label": "Governed Git status adapter",
++            "featureSemanticsOwnedByPackage": true,
++            "supervisorEnvelopeOnly": true,
++            "processLaunched": false,
++            "jobDelegated": false,
++            "jobExposedToProvider": false
++        },
++        "supervision": {
++            "state": "running",
++            "sandbox": {"label": "metadata_only", "pty": false, "browserAutomation": false},
++            "network": {"policy": "none", "accessPerformed": false},
++            "secrets": {"available": false, "rawValuesStored": false},
++            "timeout": {"timeoutMs": 30000, "state": "armed"},
++            "cancellation": {"state": "not_requested", "cancelRequested": false},
++            "shutdown": {"state": "cancel_on_shutdown", "recorded": true}
++        },
++        "inputRefs": [],
++        "outputArtifactRefs": [],
++        "evidenceRefs": [],
++        "traceRefs": [],
++        "replayRefs": [],
++        "authority": {
++            "grantRedacted": true,
++            "rawAuthorityIdsStored": false,
++            "derivedRuntimeGrantRequired": true,
++            "lifecycleAuthorizationRequired": true,
++            "requiredScopes": [READ_SCOPE, WRITE_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE],
++            "resourceKinds": [MODULE_RUNTIME_STATE_KIND, MODULE_LIFECYCLE_STATE_KIND],
++            "wildcardGrantsAllowed": false
++        },
++        "idempotency": {
++            "fingerprint": "route-runtime-fixture",
++            "fingerprintAlgorithm": "sha256:tron.module_runtime_state.idempotency.v1",
++            "keyRedacted": true,
++            "rawKeyStored": false
++        },
++        "sideEffectProof": {
++            "supervisorEnvelopeOnly": true,
++            "installPerformed": false,
++            "activationPerformed": false,
++            "dependencyRestorePerformed": false,
++            "packageManagerUsed": false,
++            "networkPolicy": "none",
++            "networkAccessPerformed": false,
++            "repoManagedSkillsTouched": false,
++            "physicalWorkspaceDirectoryCreated": false,
++            "ptyAllocated": false,
++            "browserAutomationPerformed": false,
++            "rawCommandsStored": false,
++            "rawLogsStored": false,
++            "rawOutputStored": false,
++            "secretsExposed": false,
++            "fileContentsStored": false,
++            "absolutePathsStored": false
++        },
++        "reason": "Route fixture supervised runtime envelope.",
++        "createdAt": DEFAULT_OPERATION_AT,
++        "updatedAt": DEFAULT_OPERATION_AT,
++        "revision": 1
++    })
++}
++
++fn synthetic_lifecycle_ref(key: &str) -> Value {
++    json!({
++        "kind": MODULE_LIFECYCLE_STATE_KIND,
++        "resourceId": format!("module_lifecycle_state:{key}"),
++        "versionId": format!("version-{key}"),
++        "role": "lifecycle"
++    })
++}
++
++fn synthetic_runtime_ref(key: &str) -> Value {
++    json!({
++        "kind": MODULE_RUNTIME_STATE_KIND,
++        "resourceId": format!("module_runtime_state:{key}"),
++        "versionId": format!("version-{key}"),
++        "role": "runtime"
++    })
++}
++
+ fn shadow_trial_kinds() -> [&'static str; 4] {
+     [
+         CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+@@ -3008,7 +3325,7 @@ fn shadow_trial_kind_selectors() -> Vec<String> {
+         .collect()
+ }
+ 
+-fn route_kinds() -> [&'static str; 10] {
++fn route_kinds() -> [&'static str; 12] {
+     [
+         CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
+         CAPABILITY_ROUTE_BINDING_KIND,
+@@ -3020,6 +3337,8 @@ fn route_kinds() -> [&'static str; 10] {
+         CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+         CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+         CAPABILITY_BINDING_POLICY_KIND,
++        MODULE_LIFECYCLE_STATE_KIND,
++        MODULE_RUNTIME_STATE_KIND,
+     ]
+ }
+ 
+diff --git a/packages/agent/src/domains/module_runtime/service.rs b/packages/agent/src/domains/module_runtime/service.rs
+index fd52709aa..94112211c 100644
+--- a/packages/agent/src/domains/module_runtime/service.rs
++++ b/packages/agent/src/domains/module_runtime/service.rs
+@@ -36,6 +36,106 @@ pub(crate) struct DelegatedJobRuntimeUpdate {
+     pub(crate) cleanup: Option<Value>,
+ }
+ 
++pub(crate) async fn project_provider_safe_adapter_output(
++    deps: &Deps,
++    invocation: &Invocation,
++    operation: &str,
++    module_runtime_ref: &Value,
++    module_lifecycle_ref: &Value,
++    provider_safe_projection: &Value,
++) -> Result<Value, CapabilityError> {
++    reject_unsafe_payload(provider_safe_projection)?;
++    if operation != "git_status" {
++        return Err(invalid(
++            "module runtime adapter projection currently supports exactly git_status",
++        ));
++    }
++    let scope = resource_scope(invocation)?;
++    let (lifecycle_resource_id, lifecycle_version_id) = versioned_ref(
++        module_lifecycle_ref,
++        "moduleLifecycleRef",
++        "module_lifecycle_state",
++    )?;
++    validate_module_lifecycle_resource_id(&lifecycle_resource_id)?;
++    let lifecycle_deps = crate::domains::module_lifecycle::Deps {
++        engine_host: deps.engine_host.clone(),
++    };
++    let lifecycle_authorization =
++        crate::domains::module_lifecycle::service::ensure_runtime_allowed(
++            &lifecycle_deps,
++            &scope,
++            &lifecycle_resource_id,
++        )
++        .await?;
++    if lifecycle_authorization
++        .get("versionId")
++        .and_then(Value::as_str)
++        != Some(lifecycle_version_id.as_str())
++    {
++        return Err(invalid(
++            "module runtime adapter projection rejected stale lifecycle ref",
++        ));
++    }
++
++    let (runtime_resource_id, runtime_version_id) = versioned_ref(
++        module_runtime_ref,
++        "moduleRuntimeRef",
++        MODULE_RUNTIME_STATE_KIND,
++    )?;
++    validate_module_runtime_resource_id(&runtime_resource_id)?;
++    let runtime =
++        inspect_resource_required(deps, &runtime_resource_id, "module runtime state").await?;
++    ensure_module_runtime_state(&runtime, "module_runtime_adapter_projection")?;
++    ensure_scope(&runtime, &scope, "module_runtime_adapter_projection")?;
++    if !matches!(runtime.resource.lifecycle.as_str(), "running" | "completed") {
++        return Err(invalid(format!(
++            "module runtime adapter projection denied for runtime state {}",
++            runtime.resource.lifecycle
++        )));
++    }
++    let (runtime_version, runtime_payload) =
++        current_payload(&runtime, "module_runtime_adapter_projection")?;
++    if runtime_version.version_id != runtime_version_id {
++        return Err(invalid(
++            "module runtime adapter projection rejected stale runtime ref",
++        ));
++    }
++    if runtime_payload
++        .pointer("/moduleLifecycle/resourceId")
++        .and_then(Value::as_str)
++        != Some(lifecycle_resource_id.as_str())
++        || runtime_payload
++            .pointer("/moduleLifecycle/versionId")
++            .and_then(Value::as_str)
++            != Some(lifecycle_version_id.as_str())
++    {
++        return Err(invalid(
++            "module runtime adapter projection rejected mismatched lifecycle authorization",
++        ));
++    }
++    ensure_supervised_runtime_projection(runtime_payload)?;
++    let projection = git_status_provider_safe_projection(provider_safe_projection)?;
++    Ok(json!({
++        "operation": operation,
++        "status": projection["status"],
++        "git": projection,
++        "adapterRuntime": {
++            "moduleAdapterInvoked": true,
++            "moduleAdapterInvocationState": "supervised_runtime_projection",
++            "builtInProjectionUsed": false,
++            "providerSafeProjection": true,
++            "moduleRuntime": module_runtime_summary(&runtime.resource, runtime_version, runtime_payload),
++            "moduleLifecycle": {
++                "state": "enabled",
++                "versionMatched": true,
++                "runtimeAuthorizationChecked": true
++            },
++            "networkPolicy": "none",
++            "failClosed": false
++        }
++    }))
++}
++
+ pub(crate) async fn request_module_runtime_value_at(
+     deps: &Deps,
+     invocation: &Invocation,
+@@ -207,6 +307,122 @@ pub(crate) async fn request_module_runtime_value_at(
+     }))
+ }
+ 
++fn versioned_ref(
++    value: &Value,
++    field: &str,
++    expected_kind: &str,
++) -> Result<(String, String), CapabilityError> {
++    let kind = value
++        .get("kind")
++        .and_then(Value::as_str)
++        .ok_or_else(|| invalid(format!("{field} requires kind")))?;
++    if kind != expected_kind {
++        return Err(invalid(format!("{field} must reference {expected_kind}")));
++    }
++    let resource_id = value
++        .get("resourceId")
++        .and_then(Value::as_str)
++        .ok_or_else(|| invalid(format!("{field} requires resourceId")))?;
++    let version_id = value
++        .get("versionId")
++        .and_then(Value::as_str)
++        .ok_or_else(|| invalid(format!("{field} requires versionId")))?;
++    Ok((
++        bounded_provider_visible_token(
++            &format!("{field}.resourceId"),
++            resource_id,
++            TOKEN_MAX_BYTES,
++        )?,
++        bounded_provider_visible_token(&format!("{field}.versionId"), version_id, TOKEN_MAX_BYTES)?,
++    ))
++}
++
++fn ensure_supervised_runtime_projection(payload: &Value) -> Result<(), CapabilityError> {
++    let checks = [
++        ("/runtime/supervisorEnvelopeOnly", true),
++        ("/runtime/processLaunched", false),
++        ("/runtime/jobExposedToProvider", false),
++        ("/sideEffectProof/installPerformed", false),
++        ("/sideEffectProof/activationPerformed", false),
++        ("/sideEffectProof/dependencyRestorePerformed", false),
++        ("/sideEffectProof/packageManagerUsed", false),
++        ("/sideEffectProof/networkAccessPerformed", false),
++        ("/sideEffectProof/rawCommandsStored", false),
++        ("/sideEffectProof/rawLogsStored", false),
++        ("/sideEffectProof/rawOutputStored", false),
++        ("/sideEffectProof/secretsExposed", false),
++        ("/sideEffectProof/fileContentsStored", false),
++        ("/sideEffectProof/absolutePathsStored", false),
++    ];
++    for (pointer, expected) in checks {
++        if payload.pointer(pointer).and_then(Value::as_bool) != Some(expected) {
++            return Err(invalid(
++                "module runtime adapter projection requires supervised metadata-only runtime proof",
++            ));
++        }
++    }
++    if payload
++        .pointer("/sideEffectProof/networkPolicy")
++        .and_then(Value::as_str)
++        != Some("none")
++    {
++        return Err(invalid(
++            "module runtime adapter projection requires networkPolicy none",
++        ));
++    }
++    Ok(())
++}
++
++fn git_status_provider_safe_projection(value: &Value) -> Result<Value, CapabilityError> {
++    if value.get("operation").and_then(Value::as_str) != Some("git_status") {
++        return Err(invalid(
++            "module runtime adapter projection must return git_status projection",
++        ));
++    }
++    let status = value
++        .get("status")
++        .and_then(Value::as_str)
++        .ok_or_else(|| invalid("git_status adapter projection requires status"))?;
++    bounded_provider_visible_token("gitStatusAdapterProjection.status", status, TOKEN_MAX_BYTES)?;
++    for field in ["headState", "indexState", "worktreeState", "truncation"] {
++        let Some(text) = value.get(field).and_then(Value::as_str) else {
++            return Err(invalid(format!(
++                "git_status adapter projection requires {field}"
++            )));
++        };
++        bounded_provider_visible_token(
++            &format!("gitStatusAdapterProjection.{field}"),
++            text,
++            TOKEN_MAX_BYTES,
++        )?;
++    }
++    if value
++        .get("evidenceRef")
++        .and_then(Value::as_object)
++        .is_none()
++    {
++        return Err(invalid(
++            "git_status adapter projection requires evidenceRef",
++        ));
++    }
++    Ok(json!({
++        "operation": "git_status",
++        "status": value["status"],
++        "headState": value["headState"],
++        "indexState": value["indexState"],
++        "worktreeState": value["worktreeState"],
++        "truncation": value["truncation"],
++        "evidenceRef": value["evidenceRef"],
++        "projection": {
++            "providerSafe": true,
++            "rawPathsReturned": false,
++            "rawCommandsReturned": false,
++            "rawLogsReturned": false,
++            "networkPolicy": "none"
++        }
++    }))
++}
++
+ pub(crate) async fn list_module_runtime_value(
+     deps: &Deps,
+     invocation: &Invocation,
+diff --git a/packages/agent/tests/capability_dynamic_replacement_invariants.rs b/packages/agent/tests/capability_dynamic_replacement_invariants.rs
+index 453cc6825..8f93df343 100644
+--- a/packages/agent/tests/capability_dynamic_replacement_invariants.rs
++++ b/packages/agent/tests/capability_dynamic_replacement_invariants.rs
+@@ -1,9 +1,10 @@
+ //! Static invariants for governed dynamic capability replacement.
+ //!
+ //! These tests intentionally verify documentation and source contracts rather
+-//! than executing a live module replacement. The first route slice is scoped to
+-//! `git_status` and must not overclaim module-adapter invocation until the
+-//! supervised runtime exposes a provider-safe adapter projection call.
++//! than executing arbitrary module code. The first route slice is scoped to
++//! `git_status` and proves the governed dispatcher can route to a supervised
++//! module-runtime provider-safe adapter projection while failing closed when
++//! the projection boundary is unsafe.
+ 
+ use std::collections::BTreeSet;
+ use std::path::{Path, PathBuf};
+@@ -119,10 +120,10 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
+     }
+ 
+     for required in [
+-        "Current score: **64/100**",
++        "Current foundation score: **92/100**",
+         "Provider-visible surface remains one tool: `capability::execute`",
+-        "live module-owned adapter projection",
+-        "deferred_supervised_runtime_adapter",
++        "supervised module-runtime provider-safe adapter projection",
++        "active_route_module_adapter_projection",
+         "packages/agent/docs/capability-dynamic-replacement-inventory.tsv",
+         "packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md",
+     ] {
+@@ -179,7 +180,7 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
+     let route = read_repo_file(ROUTE_PATH);
+     let validation = read_repo_file(VALIDATION_PATH);
+ 
+-    for required in ["active_route_for_git_status", "annotate_routed_git_status"] {
++    for required in ["active_route_for_git_status", "execute_routed_git_status"] {
+         assert!(
+             git.contains(required),
+             "git_status operation must call route seam marker {required}"
+@@ -188,10 +189,11 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
+ 
+     for required in [
+         "const TARGET_OPERATION: &str = \"git_status\"",
+-        "moduleAdapterInvoked\": false",
+-        "deferred_supervised_runtime_adapter",
++        "moduleAdapterInvoked\": true",
++        "supervised_runtime_projection",
+         "builtInProjectionUsed",
+-        "runtimeRoutingChanged",
++        "active_route_module_adapter_projection",
++        "active_route_failed_closed",
+         "rollbackAvailable",
+         "route_has_terminal_event",
+         "ensure_capability_shadow_trial_evidence",
+@@ -221,6 +223,21 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
+             "binding validation missing route-safety marker {required}"
+         );
+     }
++
++    let module_runtime = read_repo_file("packages/agent/src/domains/module_runtime/service.rs");
++    for required in [
++        "project_provider_safe_adapter_output",
++        "module runtime adapter projection rejected stale lifecycle ref",
++        "module runtime adapter projection rejected stale runtime ref",
++        "module runtime adapter projection rejected mismatched lifecycle authorization",
++        "supervisorEnvelopeOnly",
++        "networkPolicy",
++    ] {
++        assert!(
++            module_runtime.contains(required),
++            "module runtime adapter projection missing safety marker {required}"
++        );
++    }
+ }
+ 
+ #[test]
