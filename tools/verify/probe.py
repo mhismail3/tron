@@ -12,8 +12,8 @@ name it (tools/ownership/cards.py), and the static `scripts/tron ownership` chec
 - silent: no test fails. The unit is either dead (delete it) or unguarded (add a test that
   fails before and passes after). The static check is reported separately.
 
-It measures and never gates; exit 0 after any verdict, 1 for a baseline that is not green, 2 for
-usage or Git errors. Logs and a JSON report go to test-results/probe/<sha>/<unit>/; baselines are
+It measures and never gates; exit 0 after any verdict, 1 when every guardian is already red at HEAD
+(a guardian red before the change is left out and reported), 2 for usage or Git errors. Logs and a JSON report go to test-results/probe/<sha>/<unit>/; baselines are
 shared by the probes of one commit (test-results/probe/<sha>/baseline.json); the scratch worktree
 is always removed.
 """
@@ -261,9 +261,13 @@ def main(argv: list[str]) -> int:
         baseline = {test: known[test] for test in tests}
         red = sorted(test for test, outcome in baseline.items() if outcome["outcome"] == "fail")
         if red:
-            print(f"probe: {len(red)} guardian(s) already fail at HEAD; fix them first: {', '.join(red)}", file=sys.stderr)
-            (out / "report.json").write_text(json.dumps({"unit": unit, "sha": sha, "baselineRed": red}, indent=2) + "\n")
-            return 1
+            # A guardian red before the change says nothing about the unit; the rest still can.
+            print(f"probe: {len(red)} guardian(s) already fail at HEAD and are left out; fix them: {', '.join(red)}",
+                  file=sys.stderr)
+            tests = [test for test in tests if test not in red]
+            if not tests:
+                (out / "report.json").write_text(json.dumps({"unit": unit, "sha": sha, "baselineRed": red}, indent=2) + "\n")
+                return 1
         before = static_check(scratch)
         manifests = sorted({modules[key]["manifest"] for key in modules for path in files if path in modules[key]["owned"]})
         renamed = {}
@@ -289,7 +293,7 @@ def main(argv: list[str]) -> int:
                if outcome["outcome"] == "fail" and baseline[test]["outcome"] == "pass"}
     verdict, vague = classify(failing, names)
     report = {"schema": "tron.probe.v1", "unit": unit, "action": action, "sha": sha, "files": files, "verdict": verdict,
-              "failing": sorted(failing), "vague": vague, "static": static,
+              "failing": sorted(failing), "vague": vague, "static": static, "baselineRed": red,
               "notRun": sorted(test for test, outcome in after.items() if outcome["outcome"] == "not-run"),
               "guardians": {test: {"why": why[test], "baseline": baseline[test], "after": after[test]} for test in tests}}
     (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")

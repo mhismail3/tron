@@ -10,7 +10,8 @@ helper verify imports into a disposable Git repository and probes one unit as a 
 4. A move that leaves its callers behind turns the callers' tests red and the card check names
    every file still using the old path; the caller's test is chosen because it names the caller,
    which names the tool.
-5. A guardian already red at HEAD stops the probe with exit 1 before any change.
+5. A guardian already red at HEAD is left out and reported; with no green guardian left the probe
+   stops with exit 1 before any change.
 6. SIGTERM stops every running test's process group and removes the scratch worktree.
 7. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
    checkout's (bundle-gateway.sh runs `npm ci`).
@@ -148,13 +149,24 @@ class ProbeTests(unittest.TestCase):
                             "tools/caller/caller.sh:" in line for line in report["static"]),
                         report["static"])
 
-    def test_a_red_baseline_stops_before_any_change(self) -> None:
+    def test_a_guardian_red_at_head_is_left_out_and_reported(self) -> None:
+        r = self.repo
+        r.write("tools/tool/tests/test-greeting-0.sh", "#!/usr/bin/env bash\n# Always red.\nexit 1\n")
+        r.commit("one red guardian")
+        result, report = r.probe("tools/tool/tool.sh")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(report["baselineRed"], ["tools/tool/tests/test-greeting-0.sh"])
+        self.assertEqual(report["verdict"], "precise")
+        self.assertNotIn("tools/tool/tests/test-greeting-0.sh", report["failing"])
+        self.assertIn("already fail at HEAD and are left out", result.stderr)
+
+    def test_with_every_guardian_red_at_head_nothing_is_changed(self) -> None:
         self.repo.write("tools/caller/tests/test-caller.sh", "#!/usr/bin/env bash\n# Always red.\nexit 1\n")
         self.repo.commit("red")
         result, report = self.repo.probe("tools/caller/caller.sh")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(report["baselineRed"], ["tools/caller/tests/test-caller.sh"])
-        self.assertIn("already fail at HEAD", result.stderr)
+        self.assertNotIn("verdict", report)
 
     def test_sigterm_stops_running_tests_and_removes_the_worktree(self) -> None:
         r = self.repo
