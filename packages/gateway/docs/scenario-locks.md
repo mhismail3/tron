@@ -1,13 +1,16 @@
 # Scenario locks
 
 A scenario lock drives one deterministic scenario through the real Gateway and the
-pinned Pi SDK. Goldens are kept only for what another party reads verbatim: persisted
-formats (the `store-*` locks and the corpus), the wire contract (`protocol-wire`,
-`client-event-schemas`) and model-visible text (the SDK behavior trace,
-`session-shapes`, the Home lock). Each such lock compares a normalized trace byte for
-byte with its committed golden, and a golden diff means the change altered what that
-party receives. Behavior (accepted effects, refusals, ordering, identity, persistence
-and recovery) is asserted inline in the owning lock, not through a golden (#2279).
+pinned Pi SDK. A golden lock compares a normalized trace byte for byte with its
+committed golden: a golden diff means the change altered what that trace records.
+The consolidated golden locks each own one thing another party reads verbatim:
+persisted formats (the `store-*` locks, the corpus, `session-entries`), the wire
+contract (`protocol-wire`, `client-event-schemas`) and model-visible text (the SDK
+behavior trace, `session-shapes`). A converted lock asserts its behavior (accepted
+effects, refusals, ordering, identity, persistence and recovery) inline, and keeps a
+narrowed golden only for what no consolidated lock pins (`notifications-push`,
+`notifications-waiting`). The other scenario locks in the table below still compare
+whole-scenario goldens until they are converted (#2279).
 
 ## Framework
 
@@ -39,8 +42,8 @@ and recovery) is asserted inline in the owning lock, not through a golden (#2279
 
 A lock's golden lives beside its test in `locks/<name>.golden.json`, owned by
 the test's module. `test-support/lock-scenarios.ts` holds the scenarios that a
-behavior lock and `client-event-schemas` both run, so the event schemas are recorded
-from exactly the runs the behavior locks assert. Goldens are darwin-specific, as for the SDK boundary trace:
+scenario lock and the consolidated locks (`client-event-schemas`, `session-entries`)
+both run; `client-event-schemas` adds one Session-scope `settings.change` of its own. Goldens are darwin-specific, as for the SDK boundary trace:
 the `computer` module registers only on darwin.
 
 ## Locks
@@ -72,16 +75,16 @@ the `computer` module registers only on darwin.
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 | `gateway/pi-sdk` | `session-shapes` | what the model receives for each kind of session (plain chat, extension tool, notifications, automations, Home task worker and its reminder, trusted and revoked project subdirectory, compaction): tool names, prompt sections and hash, canonical system entries (section text and tool schemas), and the product-written messages. Golden in `test-fixtures/pi-sdk/` |
+| `gateway/pi-sdk` | `session-entries` | every distinct Tron custom session entry (`tron.chat-invocation.v1`, `tron.settings.v1`, `tron.context-window.v1`, `tron.extension-activity.v1`) the shared scenarios persist, with its values; each lock's faux provider name becomes `<lock>`. Golden in `test-fixtures/pi-sdk/` |
 | `gateway/protocol` | `client-event-schemas` | every client event topic with the union of its payload paths, across the shared scenarios that together reach every shape (`test-support/lock-scenarios.ts`) |
 
-Store mutation-path locks (`store-path-lock.ts`) are now plain behavior tests with
-inline checks, each asserting the exact persisted documents after every write:
-`session-archive-paths`, `blob-store-paths`, `catalog-metadata-index-paths`
-(`gateway/session-catalog`), `session-attention-paths` (`gateway/projection`),
-`run-markers-paths` (`gateway/run`), `workspace-state-paths` (`gateway/workspace`) and
-`command-receipt-paths`, `-concurrency`, `-races` (`gateway/transport`, which pin the
-receipt file names and documents the store writes). `home-task-store-paths` keeps its
-golden.
+Store mutation-path tests assert inline, each driving one store's writes on a fresh
+home under a fixed clock and asserting each step's result or refusal and the exact
+persisted documents after it: `session-archive.lock`, `blob-store.lock`,
+`catalog-metadata-index.lock` (`gateway/session-catalog`), `session-attention.lock`
+(`gateway/projection`), `run-markers.lock` (`gateway/run`), `tron-workspace.lock`
+(`gateway/workspace`) and `command-receipts.lock` (`gateway/transport`; its paths test
+pins the receipt file names and documents the store writes).
 
 The delivery locks (`notifications-queue.lock`) script the relay's availability and run
 the owner on a clock they freeze and advance, so no retry comes due by host timing; their
@@ -182,14 +185,10 @@ Knowledge lock.
 | `gateway/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |
 | Pi session JSONL, `agent/` auth, MCP and settings | Pi SDK | Pi persisted-state corpus (`gateway/pi-sdk`) |
 
-Mutation-path locks (`test-support/store-path-lock.ts`) drive one store's
-writes on a fresh home under a fixed clock and pin each step's result or refusal
-and the exact files after it: session attention (`gateway/projection`), session
-archive, the blob store behind `gateway/blobs/` and `gateway/exports/`, and the
-cold-catalog metadata index `gateway/catalog-metadata-v3/` and its v2 migration
-(`gateway/session-catalog`), command receipts (`gateway/transport`), run
-markers (`gateway/run`), Home tasks and their
-authority (`gateway/home`), and the workspace-state markers (`gateway/workspace`).
+The Home tasks mutation-path lock (`home-task-store-paths`, `gateway/home`) still
+uses `test-support/store-path-lock.ts`: it drives the store's writes on a fresh home
+under a fixed clock and pins each step's result or refusal and the exact files after
+it in its golden.
 Generated ids come from the same counted `randomUUID` as corpus recording. A value
 the host file system assigns (the index's device and inode identity) is named by a
 stable alias, and the index lock sets each transcript's modification time itself. The
