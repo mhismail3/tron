@@ -27,18 +27,19 @@ const SHAPES = (JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "test
 }).shapes;
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const isShape = (entry: SessionShape | SessionShape["system"]): entry is SessionShape => entry !== undefined && !Array.isArray(entry);
 const withoutCwd = (sections: Record<string, unknown>) => Object.fromEntries(Object.entries(sections).filter(([key]) => key !== "cwd"));
 
 /** The session shape a provider request matches, by tools, prompt sections and prompt hash. */
 function requestShape(request: { tools?: unknown; promptSections?: unknown; promptHash?: unknown }): string | undefined {
-  return Object.entries(SHAPES).find(([, shape]) => !Array.isArray(shape) && shape.promptHash === request.promptHash
+  return Object.entries(SHAPES).find(([, shape]) => isShape(shape) && shape.promptHash === request.promptHash
     && same(shape.tools, request.tools) && same(shape.promptSections, request.promptSections))?.[0];
 }
 
 /** The session shape (and entry index) a canonical system entry matches, by its sections other than `cwd` and its tools. */
 function systemShape(message: { sections: Record<string, unknown>; toolsAdded?: unknown }): string | undefined {
   for (const [name, shape] of Object.entries(SHAPES)) {
-    const entries = Array.isArray(shape) ? shape : shape.system ?? [];
+    const entries = isShape(shape) ? shape.system ?? [] : shape ?? [];
     const index = entries.findIndex((entry) => same(withoutCwd(entry.sections), withoutCwd(message.sections)) && same(entry.toolsAdded, message.toolsAdded ?? null));
     if (index >= 0) return `${name}#${index}`;
   }
