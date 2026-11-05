@@ -17,6 +17,9 @@ and `tools/ownership/*.py`, and runs the command as a worker would:
    activity, residue and orphan directories are kept.
 4. Without `lsof` no worktree is pruned, and a `.scratch` symlink to a directory outside
    the checkout is neither aged nor pruned.
+5. `--here` reports only the current worktree's residue (untracked, unnamed ignored paths,
+   any scratch, worktrees its subagents left) and exits 0 only when it is clean;
+   `--here --landing` ignores scratch and subagent trees.
 
 The last run's output is kept in `test-results/tidy-cli/` for review.
 """
@@ -198,6 +201,44 @@ class ReportTests(TidyCase):
         f = self.f
         subprocess.run(["bash", "scripts/install-hooks.sh"], cwd=f.repo, env=f.env, check=True, capture_output=True)
         self.assertEqual(self.report()["hook"], [])
+
+
+class HereTests(TidyCase):
+    def here(self, cwd: Path, *args: str) -> subprocess.CompletedProcess:
+        result = subprocess.run([str(self.f.repo / "scripts/tron"), "tidy", "--here", *args], cwd=cwd, env=self.f.env,
+                                capture_output=True, text=True, check=False)
+        ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        with (ARTIFACTS / "runs.txt").open("a") as log:
+            log.write(f"$ (in {cwd.name}) scripts/tron tidy --here {' '.join(args)}\nexit {result.returncode}\n{result.stdout}{result.stderr}\n")
+        return result
+
+    def test_here_names_only_this_worktrees_residue_until_it_is_clean(self) -> None:
+        f = self.f
+        mine = f.worktree("mine", merged=False, idle_days=0)
+        other = f.worktree("other", merged=False, idle_days=0)
+        f.write("stray.txt", root=other)
+        f.write("notes.txt", root=mine)
+        f.write("build.log", root=mine)
+        f.write(".scratch/draft.md", root=mine)
+        child = f.trees / "worktrees" / "mine" / "child"
+        f.git(f.repo, "worktree", "add", "-q", "-b", "child", str(child), "main")
+        landing = self.here(mine, "--landing")
+        self.assertEqual(landing.returncode, 1, landing.stdout)
+        self.assertIn("tidy: untracked: notes.txt", landing.stdout)
+        self.assertIn("tidy: residue: build.log — ignored path with no named writer", landing.stdout)
+        self.assertNotIn("draft.md", landing.stdout)
+        result = self.here(mine)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("tidy: scratch: .scratch/draft.md — your scratch: delete it before you report", result.stdout)
+        self.assertIn(f"tidy: subagent_worktrees: {child}", result.stdout)
+        self.assertNotIn("stray.txt", result.stdout)
+        for path in ("notes.txt", "build.log"):
+            (mine / path).unlink()
+        shutil.rmtree(mine / ".scratch")
+        f.git(f.repo, "worktree", "remove", str(child))
+        clean = self.here(mine)
+        self.assertEqual(clean.returncode, 0, clean.stdout)
+        self.assertIn("clean", clean.stdout)
 
 
 class PruneTests(TidyCase):

@@ -208,8 +208,8 @@ def problems(modules: dict[str, dict], paths: list[str], read, uncarded: list[st
                 out.append(f"{label}: list its \"consumers\" (module ids) or say who uses it in \"external\"")
             is_path = name in owner or name in folders
             if "/" in name and not is_path:
-                users = sorted({source for module_edges in edges.values() for sources in module_edges.values()
-                                for target, files in sources.items() if target == name for source in files})
+                pattern = re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(name) + r"(?![A-Za-z0-9_-])")
+                users = [path for path in paths if is_source(path) and path not in owned and pattern.search(text(path))]
                 out.append(f"{label} is not a tracked path or directory" +
                            (f"; still named by {', '.join(users)}" if users else "") +
                            ": update the card to the path the module now owns, and its consumers with it")

@@ -36,6 +36,7 @@ LAYOUT = {
     "root": [".gitignore", "docs", "packages", "root.module.json", "scripts", "tools"],
     "scriptsTop": ["scripts/tron", "scripts/tron-frozen"],
     "frozen": ["scripts/tron", "scripts/tron-frozen"],
+    "uncarded": ["repo/root", "repo/tooling"],
 }
 
 

@@ -7,8 +7,8 @@ or `--move` without updating any caller), commits it and runs the same checks ag
 the tests `scripts/tron verify` selects for the unit plus the tests of every module whose files
 name it (tools/ownership/cards.py), and the static `scripts/tron ownership` check. The verdict:
 
-- precise: tests that passed now fail, at most PRECISE_LIMIT files, each naming the unit;
-- cascade: more failing files than that, or a failure whose output never names the unit;
+- precise: tests that passed now fail, and every failure's output names the unit;
+- cascade: some failure never names the unit, so its reader cannot tell what broke;
 - silent: no test fails. The unit is either dead (delete it) or unguarded (add a test that
   fails before and passes after). The static check is reported separately.
 
@@ -36,7 +36,6 @@ import verify  # noqa: E402  (selection and runners)
 sys.path.insert(0, str(verify.ROOT / "tools" / "ownership"))
 import cards  # noqa: E402  (references between modules)
 
-PRECISE_LIMIT = 5
 XCODE_RUNNERS = {"ios", "ios-lanes", "mac"}
 
 
@@ -133,7 +132,8 @@ def static_check(scratch: Path) -> list[str]:
     return [line for line in (done.stdout + done.stderr).splitlines() if line and not line.startswith("ownership: ")]
 
 
-def drop_owns(scratch: Path, manifests: list[str], files: list[str], renamed: dict[str, str]) -> None:
+def drop_owns(scratch: Path, manifests: list[str], files: list[str], renamed: dict[str, str],
+              removed_modules: set[str]) -> None:
     """Keep each manifest true to the tree: an exact owns entry follows its file, a deleted file loses it."""
     for manifest in manifests:
         path = scratch / manifest
@@ -152,13 +152,27 @@ def drop_owns(scratch: Path, manifests: list[str], files: list[str], renamed: di
         if owns != data.get("owns"):
             data["owns"] = owns
             path.write_text(json.dumps(data, indent=2) + "\n")
+    # A clean removal also drops the unit from the layout lists; a frozen path stays listed, so removing one is reported.
+    root = scratch / "root.module.json"
+    if root.exists():
+        data = json.loads(root.read_text())
+        layout = data.get("layout")
+        if isinstance(layout, dict):
+            gone_modules = set(removed_modules)
+            if isinstance(layout.get("scriptsTop"), list):
+                moved_top = [new for old, new in renamed.items() if old in layout["scriptsTop"] and new.count("/") == 1]
+                layout["scriptsTop"] = sorted({entry for entry in layout["scriptsTop"] if entry not in files and entry not in renamed}
+                                              | set(moved_top))
+            if isinstance(layout.get("uncarded"), list):
+                layout["uncarded"] = [entry for entry in layout["uncarded"] if entry not in gone_modules]
+            root.write_text(json.dumps(data, indent=2) + "\n")
 
 
 def classify(failing: dict[str, str], names: set[str]) -> tuple[str, list[str]]:
     if not failing:
         return "silent", []
     vague = [test for test, output in failing.items() if not any(name in output for name in names)]
-    if vague or len(failing) > PRECISE_LIMIT:
+    if vague:
         return "cascade", vague
     return "precise", []
 
@@ -214,7 +228,8 @@ def main(argv: list[str]) -> int:
             renamed = {files[0]: args.move}
         else:
             git(scratch, "rm", "-r", "-q", "--", *files)
-        drop_owns(scratch, manifests, [] if args.move else files, renamed)
+        removed = {unit} if unit in modules and not args.move else set()
+        drop_owns(scratch, manifests, [] if args.move else files, renamed, removed)
         git(scratch, "add", "-A")
         git(scratch, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid", "commit", "-q", "--no-verify",
             "-m", f"probe: {action} {unit}")

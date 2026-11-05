@@ -654,7 +654,7 @@ def main(argv: list[str]) -> int:
         print(f"  why: {reason}", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
-    plan_steps = ["ownership", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard", "git diff --check"] \
+    plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios build"] if ios_lane else []) + ["layers ios"] \
         + [name for group in sorted(groups) for name in test_step_names(group, shards, skipped_group(group))]
@@ -666,6 +666,7 @@ def main(argv: list[str]) -> int:
     baseline_docs = name == "all" or (name == "changed" and not selection["paths"])
     checks = [
         ("ownership", [tron, "ownership"], {}),
+        ("worktree residue", [tron, "tidy", "--here", "--landing"], {}),
         ("budgets", [tron, "budgets", "HEAD"], {}),
         ("documentation policy", ["python3", "scripts/check-documentation-policy.py"], {}),
         ("generated docs", [tron, "docs", "check", *([] if baseline_docs else ["--base", base])]
