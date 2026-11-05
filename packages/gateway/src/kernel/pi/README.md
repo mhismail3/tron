@@ -2,7 +2,7 @@
 
 ## Purpose
 
-K8, the Pi seam ([K-0 §4](../../../../../docs/restructure/k0-kernel.md#4-k8-pi-seam)):
+K8, the Pi seam ([K-0 §4](../../../docs/kernel.md#4-k8-pi-seam)):
 the one place Gateway production code reaches the pinned Pi SDK (`@earendil-works/*`).
 
 ## Owns

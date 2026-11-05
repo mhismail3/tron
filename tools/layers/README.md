@@ -82,7 +82,7 @@ For each pair of distinct modules A → B with at least one file edge:
 An edge into an L0 (platform) or L1 (contracts) module is never upward or
 undeclared: every module may import them. A cycle through one is still two-way.
 
-**Pi seam** (Gateway, decision D2 of [K-0](../../docs/restructure/k0-kernel.md#4-k8-pi-seam)):
+**Pi seam** (Gateway, decision D2 of [K-0](../../packages/gateway/docs/kernel.md#4-k8-pi-seam)):
 a production file not owned by `gateway/pi` (`src/kernel/pi/`) must neither import a
 `@earendil-works/*` file (any import kind the compiler reports, type-only included) nor
 name `@earendil-works` in its text (a runtime resolution such as `import.meta.resolve`).

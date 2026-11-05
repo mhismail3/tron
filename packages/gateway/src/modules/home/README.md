@@ -257,7 +257,7 @@ These are bounded diagnostics, not durable per-input telemetry or a complete 30-
 Home's read-only `task metrics` projects existing records and retained progress without
 opening worker sessions; all missing joins remain explicit. It is not the anonymous
 logger export: blocker text stays Home-private. See [task metrics](tasks.md#control-and-spend-status)
-and the [built-in improvement-loop design](../../../../../tools/home-retro/DESIGN.md).
+and the [built-in improvement-loop design](improvement-loop.md).
 
 ## Signals
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-K3, the module host ([K-0 §3](../../../../../docs/restructure/k0-kernel.md#3-module-host-contract-and-descriptor)):
+K3, the module host ([K-0 §3](../../../docs/kernel.md#3-module-host-contract-and-descriptor)):
 the contract a capability module implements and the owner of the started modules of
 one Gateway.
 
