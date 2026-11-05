@@ -12,7 +12,7 @@ narrowed golden: `notifications-waiting` its provider requests, and `notificatio
 its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock`
 scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`,
-`run-extension-ui`), `run-queue-control`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers`, `transport-reconnect-snapshot` and the store mutation-path tests in the paragraph after the table
+`run-extension-ui`), `run-queue-control`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers`, `automation-owned-run`, `transport-reconnect-snapshot` and the store mutation-path tests in the paragraph after the table
 assert inline only. The other scenario locks in
 the table below compare whole-scenario goldens.
 
@@ -75,7 +75,7 @@ the `computer` module registers only on darwin.
 | `gateway/notifications` | `notifications-waiting` | inline checks: a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished`. Golden: its provider requests |
 | `gateway/notifications` | `notifications-queued-restart` | inline checks: with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
 | `gateway/notifications` | `notifications-queued-cancel` | inline checks: removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
-| `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
+| `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged. Inline checks (`expectScenario`): every request and response, both sessions' canonical JSONL, provider conversations, the automation records, command receipts and run markers (none left) |
 | `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
 | `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
