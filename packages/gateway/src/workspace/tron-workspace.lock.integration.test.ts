@@ -84,7 +84,7 @@ it("workspace-state-paths: initialize, mark features, admission and availability
     await marker("episodic-initialized.json", value);
     expect(await first.workspace.featureInitialized("episodic").catch((error: Error) => `refused: ${error.message}`), `hand-written feature marker ${JSON.stringify(value)}`).toBe(expected);
   }
-  await expect(first.workspace.markFeatureInitialized("episodic"), "marking over an invalid feature marker").rejects.toThrow("episodic: invalid initialization record");
+  await expect(first.workspace.markFeatureInitialized("episodic"), "marking over an invalid feature marker").rejects.toThrow(expect.objectContaining({ message: "episodic: invalid initialization record" }));
   const withEpisodic = { ...marked, "episodic-initialized.json": {} };
   expect(await markers(), "the invalid marker is not overwritten").toEqual(withEpisodic);
   await first.workspace.dispose();
