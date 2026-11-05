@@ -136,9 +136,12 @@ describe("session lifecycle kernel locks", () => {
         attentionRead: labelled(read.result, roles, gateway),
       },
     };
-    expectSessionLock(trace.lock, { exchanges: recorded.exchanges, canonical: trace.canonicalJsonl, items: [],
+    expectSessionLock(trace.lock, { exchanges: (trace as { exchanges?: unknown[] }).exchanges ?? [],
+      canonical: (trace as { canonicalJsonl?: unknown[] }).canonicalJsonl ?? [], items: [],
       providers: recorded.providerRequests.map((request) => request.messages) }, EXPECTED[trace.lock]!);
-    expect(projectedSnapshot(trace.observed), `${trace.lock}: what the lock observed`).toEqual(EXPECTED[trace.lock]!.observed);
+    for (const [key, value] of Object.entries(EXPECTED[trace.lock]!.extra)) {
+      expect(projectedSnapshot((trace as unknown as Record<string, unknown>)[key]), `${trace.lock}: ${key}`).toEqual(value);
+    }
     expect(trace.observed.runtimeLifecycle).toContainEqual({ event: "runtime.evicted", session: "<session:A>", reason: "capacity" });
     expect(trace.observed.runtimeLifecycle.filter((entry) => JSON.stringify(entry).includes("<session:A>") && JSON.stringify(entry).includes("runtime.loaded"))).toHaveLength(2);
     expect(refusedWhileOpen.error).toMatchObject({ code: "busy" });
@@ -208,9 +211,12 @@ describe("session lifecycle kernel locks", () => {
         refused: { prompt: label(refusedPrompt), create: label(refusedCreate) },
       },
     };
-    expectSessionLock(trace.lock, { exchanges: recorded.exchanges, canonical: trace.canonicalJsonl, items: [],
+    expectSessionLock(trace.lock, { exchanges: (trace as { exchanges?: unknown[] }).exchanges ?? [],
+      canonical: (trace as { canonicalJsonl?: unknown[] }).canonicalJsonl ?? [], items: [],
       providers: recorded.providerRequests.map((request) => request.messages) }, EXPECTED[trace.lock]!);
-    expect(projectedSnapshot(trace.observed), `${trace.lock}: what the lock observed`).toEqual(EXPECTED[trace.lock]!.observed);
+    for (const [key, value] of Object.entries(EXPECTED[trace.lock]!.extra)) {
+      expect(projectedSnapshot((trace as unknown as Record<string, unknown>)[key]), `${trace.lock}: ${key}`).toEqual(value);
+    }
     expect(completed).toBe(true);
     expect(queued.ok, JSON.stringify(queued)).toBe(true);
     expect(JSON.stringify(trace.canonicalJsonl)).toContain("Queued follow-up answered.");
@@ -227,7 +233,7 @@ describe("session lifecycle kernel locks", () => {
 });
 
 /** What each converted lock in this file expects (`test-support/lock-projections.ts`), with what it observed. */
-const EXPECTED: Record<string, SessionLockExpectation & { observed: unknown }> = {
+const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, unknown> }> = {
   "run-cold-load-eviction": {
     "exchanges": [
       {
@@ -1401,148 +1407,155 @@ const EXPECTED: Record<string, SessionLockExpectation & { observed: unknown }> =
         }
       ]
     ],
-    "observed": {
-      "runtimeLifecycle": [
-        {
-          "event": "runtime.loaded",
-          "reason": "create",
-          "session": "<session:A>"
+    "extra": {
+      "observed": {
+        "runtimeLifecycle": [
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:A>"
+          },
+          {
+            "event": "runtime.evicted",
+            "reason": "capacity",
+            "session": "<session:A>"
+          },
+          {
+            "event": "runtime.loaded",
+            "reason": "create",
+            "session": "<session:B>"
+          },
+          {
+            "event": "runtime.evicted",
+            "reason": "capacity",
+            "session": "<session:B>"
+          },
+          {
+            "event": "runtime.loaded",
+            "reason": "open",
+            "session": "<session:A>"
+          }
+        ],
+        "liveAfterEviction": [
+          "B"
+        ],
+        "liveAfterColdLoad": [
+          "A"
+        ],
+        "canonicalUnchangedByEviction": true,
+        "list": {
+          "live": {
+            "archivedCount": 0,
+            "listRevision": 1,
+            "projectionToken": "<id>",
+            "sessions": [
+              {
+                "attentionRevision": 1,
+                "completionRevision": 1,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "remember the word lantern",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "id": "<session:A>",
+                "isUnread": true,
+                "kind": "user",
+                "messageCount": 2,
+                "phase": "idle",
+                "summaryRevision": 7,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              }
+            ]
+          },
+          "cold": {
+            "archivedCount": 0,
+            "listRevision": 2,
+            "projectionToken": "<id>",
+            "sessions": [
+              {
+                "attentionRevision": 0,
+                "completionRevision": 0,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "id": "<session:B>",
+                "isUnread": false,
+                "kind": "user",
+                "messageCount": 0,
+                "phase": "idle",
+                "summaryRevision": 1,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              },
+              {
+                "attentionRevision": 1,
+                "completionRevision": 1,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "remember the word lantern",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "id": "<session:A>",
+                "isUnread": true,
+                "kind": "user",
+                "messageCount": 2,
+                "phase": "idle",
+                "summaryRevision": 7,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              }
+            ]
+          },
+          "final": {
+            "archivedCount": 0,
+            "listRevision": 3,
+            "projectionToken": "<id>",
+            "sessions": [
+              {
+                "attentionRevision": 3,
+                "completionRevision": 2,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "remember the word lantern",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "id": "<session:A>",
+                "isUnread": true,
+                "kind": "user",
+                "messageCount": 4,
+                "phase": "idle",
+                "summaryRevision": 15,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              },
+              {
+                "attentionRevision": 1,
+                "completionRevision": 1,
+                "createdAt": "<timestamp>",
+                "cwd": "<tmp>/workspace",
+                "firstMessage": "a second session turn",
+                "foregroundPhase": "idle",
+                "hasActiveSubagents": false,
+                "id": "<session:B>",
+                "isUnread": true,
+                "kind": "user",
+                "messageCount": 2,
+                "phase": "idle",
+                "summaryRevision": 7,
+                "updatedAt": "<timestamp>",
+                "waitingForUser": false
+              }
+            ]
+          }
         },
-        {
-          "event": "runtime.evicted",
-          "reason": "capacity",
-          "session": "<session:A>"
-        },
-        {
-          "event": "runtime.loaded",
-          "reason": "create",
-          "session": "<session:B>"
-        },
-        {
-          "event": "runtime.evicted",
-          "reason": "capacity",
-          "session": "<session:B>"
-        },
-        {
-          "event": "runtime.loaded",
-          "reason": "open",
-          "session": "<session:A>"
+        "attentionRead": {
+          "attentionRevision": 2,
+          "completionRevision": 1,
+          "isUnread": false
         }
-      ],
-      "liveAfterEviction": [
-        "B"
-      ],
-      "liveAfterColdLoad": [
-        "A"
-      ],
-      "canonicalUnchangedByEviction": true,
-      "list": {
-        "live": {
-          "archivedCount": 0,
-          "listRevision": 1,
-          "projectionToken": "<id>",
-          "sessions": [
-            {
-              "attentionRevision": 1,
-              "completionRevision": 1,
-              "createdAt": "<timestamp>",
-              "cwd": "<tmp>/workspace",
-              "firstMessage": "remember the word lantern",
-              "foregroundPhase": "idle",
-              "hasActiveSubagents": false,
-              "isUnread": true,
-              "kind": "user",
-              "messageCount": 2,
-              "phase": "idle",
-              "summaryRevision": 7,
-              "updatedAt": "<timestamp>",
-              "waitingForUser": false
-            }
-          ]
-        },
-        "cold": {
-          "archivedCount": 0,
-          "listRevision": 2,
-          "projectionToken": "<id>",
-          "sessions": [
-            {
-              "attentionRevision": 0,
-              "completionRevision": 0,
-              "createdAt": "<timestamp>",
-              "cwd": "<tmp>/workspace",
-              "firstMessage": "",
-              "foregroundPhase": "idle",
-              "hasActiveSubagents": false,
-              "isUnread": false,
-              "kind": "user",
-              "messageCount": 0,
-              "phase": "idle",
-              "summaryRevision": 1,
-              "updatedAt": "<timestamp>",
-              "waitingForUser": false
-            },
-            {
-              "attentionRevision": 1,
-              "completionRevision": 1,
-              "createdAt": "<timestamp>",
-              "cwd": "<tmp>/workspace",
-              "firstMessage": "remember the word lantern",
-              "foregroundPhase": "idle",
-              "hasActiveSubagents": false,
-              "isUnread": true,
-              "kind": "user",
-              "messageCount": 2,
-              "phase": "idle",
-              "summaryRevision": 7,
-              "updatedAt": "<timestamp>",
-              "waitingForUser": false
-            }
-          ]
-        },
-        "final": {
-          "archivedCount": 0,
-          "listRevision": 3,
-          "projectionToken": "<id>",
-          "sessions": [
-            {
-              "attentionRevision": 3,
-              "completionRevision": 2,
-              "createdAt": "<timestamp>",
-              "cwd": "<tmp>/workspace",
-              "firstMessage": "remember the word lantern",
-              "foregroundPhase": "idle",
-              "hasActiveSubagents": false,
-              "isUnread": true,
-              "kind": "user",
-              "messageCount": 4,
-              "phase": "idle",
-              "summaryRevision": 15,
-              "updatedAt": "<timestamp>",
-              "waitingForUser": false
-            },
-            {
-              "attentionRevision": 1,
-              "completionRevision": 1,
-              "createdAt": "<timestamp>",
-              "cwd": "<tmp>/workspace",
-              "firstMessage": "a second session turn",
-              "foregroundPhase": "idle",
-              "hasActiveSubagents": false,
-              "isUnread": true,
-              "kind": "user",
-              "messageCount": 2,
-              "phase": "idle",
-              "summaryRevision": 7,
-              "updatedAt": "<timestamp>",
-              "waitingForUser": false
-            }
-          ]
-        }
-      },
-      "attentionRead": {
-        "attentionRevision": 2,
-        "completionRevision": 1,
-        "isUnread": false
       }
     }
   },
@@ -2265,119 +2278,127 @@ const EXPECTED: Record<string, SessionLockExpectation & { observed: unknown }> =
         }
       ]
     ],
-    "observed": {
-      "completed": true,
-      "drain": {
-        "idle": {
-          "blockerCount": 0,
-          "blockerCounts": {},
-          "blockers": [],
-          "drainId": "<id>",
-          "omittedCount": 0,
-          "phase": "idle",
-          "suspectProjectionCount": 0
-        },
-        "running": {
-          "blockerCount": 2,
-          "blockerCounts": {
-            "foreground-agent-operation": 1,
-            "queued-mutation": 1
+    "extra": {
+      "observed": {
+        "completed": true,
+        "drain": {
+          "idle": {
+            "blockerCount": 0,
+            "blockerCounts": {},
+            "blockers": [],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "idle",
+            "suspectProjectionCount": 0
           },
-          "blockers": [
-            {
-              "admittedAt": "<timestamp>",
-              "ageMs": "<duration>",
-              "category": "foreground-agent-operation",
-              "progressAt": "<timestamp>",
-              "state": "active"
+          "running": {
+            "blockerCount": 2,
+            "blockerCounts": {
+              "foreground-agent-operation": 1,
+              "queued-mutation": 1
             },
-            {
-              "admittedAt": "<timestamp>",
-              "ageMs": "<duration>",
-              "category": "queued-mutation",
-              "progressAt": "<timestamp>",
-              "state": "active"
-            }
-          ],
-          "drainId": "<id>",
-          "omittedCount": 0,
-          "phase": "idle",
-          "suspectProjectionCount": 0
-        },
-        "begun": {
-          "blockerCount": 2,
-          "blockerCounts": {
-            "foreground-agent-operation": 1,
-            "queued-mutation": 1
+            "blockers": [
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "foreground-agent-operation",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:running>",
+                "state": "active"
+              },
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "queued-mutation",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:running>",
+                "state": "active"
+              }
+            ],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "idle",
+            "suspectProjectionCount": 0
           },
-          "blockers": [
-            {
-              "admittedAt": "<timestamp>",
-              "ageMs": "<duration>",
-              "category": "foreground-agent-operation",
-              "progressAt": "<timestamp>",
-              "state": "active"
+          "begun": {
+            "blockerCount": 2,
+            "blockerCounts": {
+              "foreground-agent-operation": 1,
+              "queued-mutation": 1
             },
-            {
-              "admittedAt": "<timestamp>",
-              "ageMs": "<duration>",
-              "category": "queued-mutation",
-              "progressAt": "<timestamp>",
-              "state": "active"
-            }
-          ],
-          "drainId": "<id>",
-          "omittedCount": 0,
-          "phase": "preparing",
-          "suspectProjectionCount": 0
-        },
-        "waiting": {
-          "blockerCount": 2,
-          "blockerCounts": {
-            "foreground-agent-operation": 1,
-            "queued-mutation": 1
+            "blockers": [
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "foreground-agent-operation",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:running>",
+                "state": "active"
+              },
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "queued-mutation",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:running>",
+                "state": "active"
+              }
+            ],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "preparing",
+            "suspectProjectionCount": 0
           },
-          "blockers": [
-            {
-              "admittedAt": "<timestamp>",
-              "ageMs": "<duration>",
-              "category": "foreground-agent-operation",
-              "progressAt": "<timestamp>",
-              "state": "active"
+          "waiting": {
+            "blockerCount": 2,
+            "blockerCounts": {
+              "foreground-agent-operation": 1,
+              "queued-mutation": 1
             },
-            {
-              "admittedAt": "<timestamp>",
-              "ageMs": "<duration>",
-              "category": "queued-mutation",
-              "progressAt": "<timestamp>",
-              "state": "active"
-            }
-          ],
-          "drainId": "<id>",
-          "omittedCount": 0,
-          "phase": "waiting",
-          "suspectProjectionCount": 0
+            "blockers": [
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "foreground-agent-operation",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:running>",
+                "state": "active"
+              },
+              {
+                "admittedAt": "<timestamp>",
+                "ageMs": "<duration>",
+                "category": "queued-mutation",
+                "progressAt": "<timestamp>",
+                "sessionId": "<session:running>",
+                "state": "active"
+              }
+            ],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "waiting",
+            "suspectProjectionCount": 0
+          },
+          "complete": {
+            "blockerCount": 0,
+            "blockerCounts": {},
+            "blockers": [],
+            "drainId": "<id>",
+            "omittedCount": 0,
+            "phase": "complete",
+            "suspectProjectionCount": 0
+          }
         },
-        "complete": {
-          "blockerCount": 0,
-          "blockerCounts": {},
-          "blockers": [],
-          "drainId": "<id>",
-          "omittedCount": 0,
-          "phase": "complete",
-          "suspectProjectionCount": 0
-        }
-      },
-      "refused": {
-        "prompt": {
-          "code": "busy",
-          "message": "The Gateway is draining accepted work",
-          "retryable": true
-        },
-        "create": {
-          "code": "busy",
-          "message": "The Gateway is draining accepted work",
-          "retryable": true
+        "refused": {
+          "prompt": {
+            "code": "busy",
+            "message": "The Gateway is draining accepted work",
+            "retryable": true
+          },
+          "create": {
+            "code": "busy",
+            "message": "The Gateway is draining accepted work",
+            "retryable": true
+          }
         }
       }
     }

@@ -22,12 +22,17 @@ const VOLATILE = new Set([
  */
 const HOST_DERIVED = new Set(["tokensBefore"]);
 
+/** A role label a lock gave a session (`<session:A>`) names which session it is, so it is never dropped. */
+function isRoleLabel(value: unknown): boolean {
+  return typeof value === "string" && value.startsWith("<session:");
+}
+
 /** A record without its per-run values, and each lock's faux provider named `<LOCK>`. */
 export function projected(value: unknown): unknown {
   const strip = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(strip);
     if (node === null || typeof node !== "object") return typeof node === "string" ? node.replace(/tron-lock-[a-z0-9-]+/gu, "<LOCK>") : node;
-    return Object.fromEntries(Object.entries(node).filter(([key]) => !VOLATILE.has(key))
+    return Object.fromEntries(Object.entries(node).filter(([key, child]) => !VOLATILE.has(key) || isRoleLabel(child))
       .map(([key, child]) => [key, HOST_DERIVED.has(key) ? "<value>" : strip(child)]));
   };
   return strip(value);
@@ -64,7 +69,9 @@ export function projectedSnapshot(value: unknown): unknown {
   const strip = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(strip);
     if (node === null || typeof node !== "object") return node;
-    return Object.fromEntries(Object.entries(node).filter(([key]) => !SNAPSHOT_VOLATILE.has(key)).map(([key, child]) => [key, strip(child)]));
+    return Object.fromEntries(Object.entries(node)
+      .filter(([key, child]) => !SNAPSHOT_VOLATILE.has(key) || isRoleLabel(child))
+      .map(([key, child]) => [key, strip(child)]));
   };
   return strip(projected(value));
 }
