@@ -10,7 +10,9 @@ import { CatalogMetadataIndex, catalogActivityTimestamp, type CatalogMetadataInd
  * summary, sharded saves and their bounds, appends, reconcile with its stop and
  * unproven candidates, legacy document and row admission, and disposal. File times are
  * set explicitly, so sizes, times and tail hashes are the index's own arithmetic over
- * real files; each persisted manifest and shard is asserted as the exact document.
+ * real files. Each persisted manifest and shard is asserted as the exact document, except
+ * shard digests: those hash bytes that carry the temporary root, so they are checked by
+ * shape and by equality across steps whose shard bytes are unchanged.
  */
 it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admission and dispose", async () => {
   const home = join(await realpath(await mkdtemp(join(tmpdir(), "tron-catalog-metadata-"))), "home");
@@ -107,6 +109,7 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   await writeFile(join(home, "blocked"), "");
   await expect(new CatalogMetadataIndex(join(home, "blocked", "gateway")).save(root, [row]), "a save into a state directory that is a file")
     .rejects.toThrow(`ENOTDIR: not a directory, mkdir '${join(home, "blocked", "gateway", "catalog-metadata-v3")}'`);
+  expect(await persisted(), "the refused save leaves this store unchanged").toEqual(saved);
   expect(await index.append(row), "an unchanged row appends nothing").toEqual(row);
 
   await appendFile(one, message("assistant", "hi there", 2) + `${JSON.stringify({ type: "session_info", name: "Named" })}\n` + message("user", "again", 3));
@@ -207,18 +210,22 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   expect(await persisted(), "reconcile leaves the saved cut").toEqual({
     "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest }, { shard: "26", digest }], refused: [] },
     "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]), "catalog-metadata-v3/shard-26.json": shardDocument("26", [twoRow]) });
+  const reconcileCut = await persisted();
+  const shard13Digest = (await manifestDigests()).find(({ shard }) => shard === "13")!.digest;
   await appendFile(two, message("assistant", "reply", 2));
   await stamp(two);
   rebuilt.length = 0;
   expect(await index.reconcile(root, [await candidate("s2", two)], rebuild), "reconcile appends a grown row").toEqual({ rows: [await fileRow("s2", two,
     { tailBoundaryHash: "tsQ05_K6612aZrprQNotjfv5vlmml67zxir82zWJ8N0", updatedAt: "2026-01-01T00:02:00.000Z", messageCount: 8 })], unproven: [] });
   expect(rebuilt, "without a rebuild").toEqual([]);
+  expect(await persisted(), "reconciling a grown row writes nothing").toEqual(reconcileCut);
   await writeFile(two, header("s2") + message("user", "replaced", 1));
   await stamp(two);
   rebuilt.length = 0;
   expect(await index.reconcile(root, [await candidate("s2", two)], rebuild), "reconcile rebuilds a row whose file was replaced")
     .toEqual({ rows: [await fileRow("s2", two, { tailBoundaryHash: "r44hzeWEZKxuC4JuseTRFgLzBGRJvQZoFzHqZ-VnT1Q" })], unproven: [] });
   expect(rebuilt).toEqual(["s2"]);
+  expect(await persisted(), "reconciling a replaced row writes nothing").toEqual(reconcileCut);
   {
     const locked = await session("locked", header("s6") + message("user", "locked", 1));
     const lockedRow = (await index.entryFromSummary(summary("s6", locked)))!;
@@ -236,18 +243,22 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     expect(await persisted(), "a save replaces the shards it no longer holds").toEqual({
       "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest }, { shard: "32", digest }], refused: [] },
       "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]), "catalog-metadata-v3/shard-32.json": shardDocument("32", [lockedRow]) });
+    expect((await manifestDigests())[0], "the unchanged shard keeps its digest").toEqual({ shard: "13", digest: shard13Digest });
   }
+  const lockedCut = await persisted();
   {
     const progress: unknown[] = [];
     expect(await index.reconcile(root, [await candidate("s1", one)], rebuild, (state) => { progress.push(state); return true; }),
       "a stopped reconcile reports every candidate unproven").toEqual({ rows: [], unproven: [one] });
     expect(progress).toEqual([{ proven: 0, unproven: 0 }]);
+    expect(await persisted(), "a stopped reconcile writes nothing").toEqual(lockedCut);
   }
   {
     let asked = 0;
     expect(await index.reconcile(root, [await candidate("s3", three)], rebuild, () => { asked += 1; return asked > 1; }),
       "a reconcile stopped before a rebuild reports it unproven").toEqual({ rows: [], unproven: [three] });
     expect(asked).toBe(2);
+    expect(await persisted(), "a reconcile stopped before a rebuild writes nothing").toEqual(lockedCut);
   }
   {
     const progress: unknown[] = [];
@@ -255,6 +266,7 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     const result = await index.reconcile(root, many, rebuild, (state) => { progress.push(state); return false; });
     expect({ rows: result?.rows.length, unproven: result?.unproven, progress }, "reconcile proves seventeen candidates in two batches")
       .toEqual({ rows: 17, unproven: [], progress: [{ proven: 0, unproven: 0 }, { proven: 16, unproven: 0 }] });
+    expect(await persisted(), "proving seventeen candidates writes nothing").toEqual(lockedCut);
   }
 
   // The index binds a document to the catalog root's canonical path.
@@ -334,5 +346,6 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   await new CatalogMetadataIndex(gateway).save(root, [row]);
   expect(await index.reconcile(root, [await candidate("s1", one)], rebuild), "a disposed index proves no candidate").toEqual({ rows: [], unproven: [one] });
   expect(await persisted(), "and leaves another owner's save alone").toEqual({
-    "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest }], refused: [] }, "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]) });
+    "catalog-metadata-v3/manifest.json": { version: 3, root, shards: [{ shard: "13", digest: shard13Digest }], refused: [] },
+    "catalog-metadata-v3/shard-13.json": shardDocument("13", [row]) });
 });
