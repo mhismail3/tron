@@ -17,7 +17,10 @@ import { awaitsWithin } from "../../test-support/wait-for.js";
  * it. For each shape: the declared tool names in order, the system-prompt section
  * headings and a hash of the normalized prompt text; and for the requests whose
  * text the product writes itself (the compaction summary prompts and the task
- * worker's report reminder), the messages too.
+ * worker's report reminder), the messages too. Each chat shape, the task
+ * worker and the project chat also record their canonical system entries: the
+ * prompt sections' text and the tool schemas (names, descriptions, parameters)
+ * added, as the session JSONL persists them.
  *
  * Shapes: a plain chat; a chat with an extension tool; a chat with push
  * notifications (the `notify` tool) with and without an extension; a chat with
@@ -36,7 +39,8 @@ const gateways: LockGateway[] = [];
 const releases: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const release of releases.splice(0).reverse()) await release();
-  await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose()));
+  // Sequentially, newest first: each Gateway restores the agent-dir environment it found.
+  for (const gateway of gateways.splice(0).reverse()) await gateway.dispose();
 });
 
 const SELECT_TOOL = { name: "lock-select.ts", source: `
@@ -75,7 +79,15 @@ const shape = (request: ProviderRequestRecord, messages = false): TraceValue => 
   ...(messages ? { messages: request.messages as TraceValue[] } : {}),
 });
 
-/** A Gateway whose chat answers one prompt; returns that request's shape. */
+/** The session's canonical system entries (prompt sections and the tool schemas added), normalized. */
+async function systemEntries(gateway: LockGateway, sessionId: string): Promise<TraceValue[]> {
+  return (await gateway.canonical(sessionId)).flatMap((entry) => {
+    const message = (entry as { message?: { role?: string; sections?: TraceValue; toolsAdded?: TraceValue } }).message;
+    return message?.role === "system" ? [{ sections: message.sections ?? null, toolsAdded: message.toolsAdded ?? null } as TraceValue] : [];
+  });
+}
+
+/** A Gateway whose chat answers one prompt; returns that request's shape and the session's system entries. */
 async function chatShape(name: string, options: LockGatewayOptions = {}): Promise<TraceValue> {
   const gateway = await startLockGateway(name, options);
   gateways.push(gateway);
@@ -89,7 +101,7 @@ async function chatShape(name: string, options: LockGatewayOptions = {}): Promis
   await gateway.settled(sessionId);
   const requests = gateway.record().providerRequests;
   expect(requests).toHaveLength(1);
-  return shape(requests[0]!);
+  return { ...(shape(requests[0]!) as Record<string, TraceValue>), system: await systemEntries(gateway, sessionId) };
 }
 
 /** Open and sync a session as a phone does before prompting. */
@@ -146,7 +158,7 @@ describe("gateway/pi-sdk session shapes", () => {
       await gateway.settled(lease.slot.id);
       const requests = gateway.record().providerRequests;
       expect(requests).toHaveLength(2);
-      shapes.taskWorker = shape(requests[0]!);
+      shapes.taskWorker = { ...(shape(requests[0]!) as Record<string, TraceValue>), system: await systemEntries(gateway, lease.slot.id) };
       shapes.taskWorkerReminder = shape(requests[1]!, true);
     }
 
@@ -200,6 +212,8 @@ export default function (pi) {
       expect(requests).toHaveLength(2);
       shapes.trustedProjectSubdirectory = shape(requests[0]!);
       shapes.revokedProjectSubdirectory = shape(requests[1]!);
+      // Both prompts' system entries, in session order: the trusted prompt, then what revoking changed.
+      shapes.projectSubdirectorySystem = await systemEntries(gateway, sessionId);
     }
 
     // A manual compaction: the summary of the cut history, then the prefix of the split turn.
@@ -233,7 +247,7 @@ export default function (pi) {
       actualPath: resolve(process.cwd(), "test-results", "session-shapes.actual.json"),
       diffPath: resolve(process.cwd(), "test-results", "session-shapes.diff"),
       trace: { lock: "session-shapes", shapes }, update: lockUpdateRequested("gateway/pi-sdk"),
-      validate: () => { expect(Object.keys(shapes)).toHaveLength(12); },
+      validate: () => { expect(Object.keys(shapes)).toHaveLength(13); },
     });
   }, 120_000);
 });
