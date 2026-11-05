@@ -399,7 +399,7 @@ const SHARED_TOOL_SCHEMAS = new Set([
 ]);
 const TOOL_SCHEMA_PATH = /(?:^|\.)(?:toolsAdded|availableTools)\[\]\.(?:parameters(?=[:.\[])|description:)/u;
 
-function withoutSharedToolSchemas(value: unknown): unknown {
+export function withoutSharedToolSchemas(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(withoutSharedToolSchemas);
   if (value === null || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value).map(([key, child]) => {

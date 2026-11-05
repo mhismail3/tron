@@ -12,12 +12,16 @@ narrowed golden: `notifications-waiting` its provider requests, and `notificatio
 its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock`
 scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`,
-`run-extension-ui`) and the store mutation-path tests in the paragraph after the table
+`run-extension-ui`), `run-queue-control` and the store mutation-path tests in the paragraph after the table
 assert inline only. The other scenario locks in
 the table below compare whole-scenario goldens.
 
 ## Framework
 
+- `test-support/lock-projections.ts` `expectScenario` asserts a converted lock's
+  normalized trace exactly: its events leave the trace (owned by `client-event-schemas`),
+  and each provider request's tools, prompt sections and prompt hash, and each system
+  entry's sections and tools, must equal a `session-shapes` shape, named by reference.
 - `test-support/scenario-lock.ts` owns all normalization in one place:
   identity keys and UUIDs become `<id>`; ISO and session-file timestamps become
   `<timestamp>`; durations, counters, temp roots, package paths, per-run path
@@ -63,7 +67,7 @@ the `computer` module registers only on darwin.
 | `gateway/run` | `run-extension-ui` | an extension tool's `select` waits for `extension.respond`. Inline checks: the projected transcript, canonical messages and entry order, invocation receipts and provider conversations |
 | `gateway/run` | `run-cold-load-eviction` | under a one-runtime cap an open session is never reclaimed; once closed, a settled session is evicted for capacity, stays listed with its unread attention, and `session.open` cold-loads it with its JSONL and context |
 | `gateway/run` | `run-drain-snapshot` | the administrative drain (`waitUntilIdle`) through `gateway.drain.status`: a live run and its queued follow-up block it, new work is refused, it completes after both |
-| `gateway/run` | `run-queue-control` | three follow-ups queue behind a held run and a retried `commandId` replays; `session.queue.replace` refuses a stale revision and an unknown item, then reorders and drops; `session.abort` refuses a stale operation; `session.clearQueue` clears queued follow-ups; a steer queued at Stop becomes the next turn |
+| `gateway/run` | `run-queue-control` | three follow-ups queue behind a held run and a retried `commandId` replays; `session.queue.replace` refuses a stale revision and an unknown item, then reorders and drops; `session.abort` refuses a stale operation; `session.clearQueue` clears queued follow-ups; a steer queued at Stop becomes the next turn. Inline checks (`expectScenario`): every request and response, the transcript, canonical JSONL, provider conversations and each queue state |
 | `gateway/run` | `run-lifecycle-rpcs` | `gateway.restart`/`gateway.stop` refused unsupervised or malformed; `session.reloadResources` while idle and refused mid-run; a restart over a live run drains it (second restart, stop and new work refused; `restartNow` asks again) and completes after it; an idle stop |
 | `gateway/run` | `run-eviction-choice` | under a three-runtime cap each capacity eviction takes the least recently used closed, saved session, never an open one or an unsaved draft |
 | `gateway/run` | `run-drain-blockers` | the drain waits on blockers that are not a live run: an extension command awaiting its select (its prompt's preflight work) and a detached extension run, until the answer and the run's terminal artifact |

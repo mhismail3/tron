@@ -1,68 +1,78 @@
-/**
- * What a behavior lock asserts about a session (#2279): the parts of the transcript
- * projection, the canonical messages and the provider requests a client or the
- * model acts on, without the per-run identities, times and token counts. Each
- * function keeps every remaining field of its record, so a changed classification,
- * grouping, ordering or text fails the lock; the identities it drops are checked
- * by relation instead (`toolCallsResolve`).
- */
-
-/** Per-run values: identities, times, counters and host-derived numbers. */
-const VOLATILE = new Set([
-  "id", "parentId", "timestamp", "presentationId", "invocationId", "operationId", "toolCallId", "toolSegmentId", "groupId",
-  "receiptId", "sequence", "progressSequence", "startedAt", "completedAt", "lastProgressAt", "durationMs", "usage", "api",
-  "canonicalEntryId",
-]);
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { expect } from "vitest";
+import { withoutSharedToolSchemas } from "./scenario-lock.js";
 
 /**
- * Values whose numbers the host and checkout decide (`tokensBefore` estimates the
- * context from serialized absolute paths): their presence is kept, as `<value>`.
+ * A behavior lock's inline expectation (#2279). The lock builds the same trace the
+ * harness normalizes (`scenario-lock.ts`: per-run identities, times and token
+ * counts become `<id>`, `<timestamp>`, `<value>`) and compares it exactly with its
+ * expectation, so a changed response, transcript row, canonical entry, receipt,
+ * provider conversation or observed state fails it. Two parts have one owner each
+ * and are checked here by reference: client event schemas (`client-event-schemas`)
+ * leave the trace, and each provider request's tools, prompt sections and prompt
+ * hash, and each system entry's prompt sections and tools, must equal a session
+ * shape in `session-shapes`, named in the expectation as `{ sessionShape }`.
  */
-const HOST_DERIVED = new Set(["tokensBefore"]);
 
-/** A record without its per-run values, and each lock's faux provider named `<LOCK>`. */
-export function projected(value: unknown): unknown {
-  const strip = (node: unknown): unknown => {
-    if (Array.isArray(node)) return node.map(strip);
-    if (node === null || typeof node !== "object") return typeof node === "string" ? node.replace(/tron-lock-[a-z0-9-]+/gu, "<LOCK>") : node;
-    return Object.fromEntries(Object.entries(node).filter(([key]) => !VOLATILE.has(key))
-      .map(([key, child]) => [key, HOST_DERIVED.has(key) ? "<value>" : strip(child)]));
-  };
-  return strip(value);
+interface SessionShape {
+  readonly tools: readonly string[];
+  readonly promptSections: readonly string[];
+  readonly promptHash: string;
+  readonly system?: ReadonlyArray<{ sections: Record<string, unknown>; toolsAdded: unknown }>;
 }
 
-/** The canonical session messages after the system entry, projected. */
-export function canonicalMessages(entries: readonly unknown[]): unknown[] {
-  return entries.flatMap((entry) => {
-    const record = entry as { type?: string; message?: { role?: string } };
-    return record.type === "message" && record.message?.role !== "system" ? [projected(record.message)] : [];
-  });
+const SHAPES = (JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "test-fixtures", "pi-sdk", "session-shapes.golden.json"), "utf8")) as {
+  shapes: Record<string, SessionShape | SessionShape["system"]>;
+}).shapes;
+
+const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const isShape = (entry: SessionShape | SessionShape["system"]): entry is SessionShape => entry !== undefined && !Array.isArray(entry);
+const withoutCwd = (sections: Record<string, unknown>) => Object.fromEntries(Object.entries(sections).filter(([key]) => key !== "cwd"));
+
+/** The session shape a provider request matches, by tools, prompt sections and prompt hash. */
+function requestShape(request: { tools?: unknown; promptSections?: unknown; promptHash?: unknown }): string | undefined {
+  return Object.entries(SHAPES).find(([, shape]) => isShape(shape) && shape.promptHash === request.promptHash
+    && same(shape.tools, request.tools) && same(shape.promptSections, request.promptSections))?.[0];
 }
 
-/** Every tool call in the transcript is answered by exactly one tool result naming it, in its group. */
-export function toolCallsResolve(items: readonly unknown[]): boolean {
-  const calls = new Map<string, string | undefined>();
-  const results: Array<{ toolCallId?: string; groupId?: string }> = [];
-  for (const item of items as Array<{ role?: string; content?: Array<{ type?: string; toolCallId?: string; groupId?: string }>; toolCallId?: string; groupId?: string }>) {
-    for (const block of item.content ?? []) if (block.type === "toolCall") calls.set(block.toolCallId!, block.groupId);
-    if (item.role === "toolResult") results.push(item);
+/** The session shape (and entry index) a canonical system entry matches, by its sections other than `cwd` and its tools. */
+function systemShape(message: { sections: Record<string, unknown>; toolsAdded?: unknown }): string | undefined {
+  for (const [name, shape] of Object.entries(SHAPES)) {
+    const entries = isShape(shape) ? shape.system ?? [] : shape ?? [];
+    const index = entries.findIndex((entry) => same(withoutCwd(entry.sections), withoutCwd(message.sections)) && same(entry.toolsAdded, message.toolsAdded ?? null));
+    if (index >= 0) return `${name}#${index}`;
   }
-  return results.length === calls.size && [...calls.keys()].every((id) => typeof id === "string" && id.length > 0)
-    && results.every((result) => typeof result.toolCallId === "string" && calls.has(result.toolCallId) && calls.get(result.toolCallId) === result.groupId);
+  return undefined;
 }
 
-/** A session snapshot's per-run values beyond a record's: its subscription, sync and runtime identities and revisions. */
-const SNAPSHOT_VOLATILE = new Set([
-  "sessionId", "subscriptionToken", "syncToken", "hostEpoch", "eventSequence", "revision", "extensionActivityAsOf", "asOf",
-  "leafEntryId", "runtimeGeneration",
-]);
+/** The trace with its model-visible parts replaced by the session shape each one equals (unmatched parts stay, and fail). */
+export function shapeReferenced(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(shapeReferenced);
+  if (value === null || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (typeof record.promptHash === "string" && Array.isArray(record.tools) && Array.isArray(record.promptSections)) {
+    const name = requestShape(record);
+    if (name !== undefined) {
+      const { tools: _tools, promptSections: _sections, promptHash: _hash, ...rest } = record;
+      return { sessionShape: name, ...(shapeReferenced(rest) as Record<string, unknown>) };
+    }
+  }
+  if (record.role === "system" && record.sections !== null && typeof record.sections === "object") {
+    const name = systemShape(record as { sections: Record<string, unknown>; toolsAdded?: unknown });
+    if (name !== undefined) {
+      const { sections, toolsAdded: _tools, ...rest } = record as { sections: Record<string, unknown> } & Record<string, unknown>;
+      return { ...(shapeReferenced(rest) as Record<string, unknown>), sections: { cwd: sections.cwd, sessionShape: name } };
+    }
+  }
+  return Object.fromEntries(Object.entries(record).map(([key, child]) => [key, shapeReferenced(child)]));
+}
 
-/** A recorded (normalized) `session.open` response without its per-run values: what a client starts from. */
-export function projectedSnapshot(value: unknown): unknown {
-  const strip = (node: unknown): unknown => {
-    if (Array.isArray(node)) return node.map(strip);
-    if (node === null || typeof node !== "object") return node;
-    return Object.fromEntries(Object.entries(node).filter(([key]) => !SNAPSHOT_VOLATILE.has(key)).map(([key, child]) => [key, strip(child)]));
-  };
-  return strip(projected(value));
+/**
+ * Assert a lock's normalized trace exactly against its expectation, without its
+ * event schemas and with its model-visible parts checked against `session-shapes`.
+ */
+export function expectScenario(trace: Record<string, unknown>, expected: unknown): void {
+  const { events: _events, ...rest } = trace;
+  expect(shapeReferenced(withoutSharedToolSchemas(JSON.parse(JSON.stringify(rest)))), `${String(trace.lock)}: the scenario's trace`).toEqual(expected);
 }
