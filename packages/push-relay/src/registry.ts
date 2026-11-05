@@ -1,5 +1,5 @@
 import { sendToApns } from "./apns";
-import { verifyAssertion, verifyAttestation } from "./app-attest";
+import { AttestationRejected, verifyAssertion, verifyAttestation } from "./app-attest";
 import { verifyGrantSignature } from "./authentication";
 import {
   CHALLENGE_PATH,
@@ -169,7 +169,7 @@ export class PushRegistry {
     let counter: number;
     try {
       if (registration.proof === "attestation") {
-        if (existing) throw new Error("key_already_attested");
+        if (existing) throw new AttestationRejected("key_already_attested");
         const verified = await verifyAttestation({
           attestationObject: registration.attestationObject,
           keyId: registration.keyId,
@@ -180,7 +180,7 @@ export class PushRegistry {
         publicKeySpki = verified.publicKeySpki;
         counter = verified.counter;
       } else {
-        if (!existing || existing.route !== registration.route || existing.enabled !== 1) throw new Error("unknown_attestation_key");
+        if (!existing || existing.route !== registration.route || existing.enabled !== 1) throw new AttestationRejected("unknown_attestation_key");
         publicKeySpki = existing.public_key_spki;
         counter = await verifyAssertion({
           assertionObject: registration.assertionObject,
@@ -190,8 +190,10 @@ export class PushRegistry {
           previousCounter: Number(existing.assertion_counter),
         });
       }
-    } catch {
-      return json({ error: "invalid_attestation" }, 401);
+    } catch (error) {
+      if (error instanceof AttestationRejected) return json({ error: "invalid_attestation" }, 401);
+      // Anything else is a server fault: it propagates, and the Worker answers 503 temporarily_unavailable.
+      throw error;
     }
 
     const tokenHash = await sha256Hex(utf8(registration.apnsToken));

@@ -16,6 +16,8 @@
     "scripts/tron test gateway src/sessions/home-research-tools.integration.test.ts"
   ],
   "dependsOn": [
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/run",
+    "gateway/session-catalog"
   ]
 }

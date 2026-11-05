@@ -6,6 +6,13 @@
   "dependsOn": [
     "gateway/pi",
     "gateway/settings",
-    "gateway/host"
+    "gateway/host",
+    "gateway/delegation",
+    "gateway/extensions",
+    "gateway/projection",
+    "gateway/providers",
+    "gateway/resources",
+    "gateway/run",
+    "gateway/security"
   ]
 }

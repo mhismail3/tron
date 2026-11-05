@@ -2076,8 +2076,9 @@ with open(state / 'events', 'a', encoding='utf-8') as events:
         waiter = next(name for name in names if name not in running)
         # The waiter says who holds the slots and for how long, rather than failing.
         stderr = self.root / f"{waiter}.stderr"
+        # The waiter prints this only after its scan of every slot has failed, so
+        # no further start can happen before a holder is released.
         self.wait_until(lambda: "slots are held" in stderr.read_text(), "the waiting job to name the holders")
-        time.sleep(1)
         self.assertEqual(len(self.started()), self.cap, "a job started beyond the cap")
         self.assertIsNone(self.jobs[waiter].poll(), "the job beyond the cap must wait, not exit")
         message = stderr.read_text()
@@ -2137,6 +2138,9 @@ with open(state / 'events', 'a', encoding='utf-8') as events:
         job_pid = int((self.state / "running" / running[0]).read_text())
         holder.kill()
         holder.wait(timeout=10)
+        # The waiter's rescans emit nothing observable (it reports only every
+        # HOST_SLOT_REPORT_SECONDS), so a fixed window spanning several rescans
+        # is what lets a wrongly freed slot be taken before this check.
         time.sleep(1)
         self.assertEqual(len(self.started()), self.cap, "a killed holder's live job lost its slot")
 
@@ -4140,7 +4144,8 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         (worktree / "packages/gateway").mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
-        # The compiled-in Node pins `verify-ci-toolchain.sh` checks (scripts/node-pin-mirrors.py, #1119).
+        # Copies the compiled-in Node pin sources (scripts/node-pin-mirrors.py, #1119); the check that
+        # reads them against .node-version is scripts/test-tron-node.py.
         for name in ("packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
                      "packages/mac-app/native-gateway-client/node-headers.json",
                      "packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",

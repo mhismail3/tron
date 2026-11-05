@@ -5,6 +5,8 @@
   ],
   "dependsOn": [
     "gateway/pi",
-    "gateway/receipts"
+    "gateway/receipts",
+    "gateway/home",
+    "gateway/security"
   ]
 }

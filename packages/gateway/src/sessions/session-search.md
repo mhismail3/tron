@@ -20,8 +20,11 @@ work before closing SQLite. A caller's abort cancels its wait, not that owner.
 ## Dependencies
 
 The real Registry/Pi source and catalog cuts, SQLite, credential redaction and
-an optional embedding provider. No second transcript mirror or search cache is
-canonical. Editing an open session goes through its existing SDK owner.
+an optional embedding provider. The Gateway composition (`gateway-main.ts`) is
+the provider's only owner: it admits the signed helper (or the development
+override) and passes it through `setSemanticClient`; the service never reads a
+helper path itself. No second transcript mirror or search cache is canonical.
+Editing an open session goes through its existing SDK owner.
 
 ## Failure and lifecycle
 

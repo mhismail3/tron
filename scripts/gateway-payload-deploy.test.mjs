@@ -11,7 +11,7 @@ import { after, test } from "node:test";
 
 import {
   payloadFingerprint, buildSourcePayload, stagePayload, runBounded,
-  captureLocalProcess, captureLocalListenerProcess, waitForDrainCompletion,
+  captureLocalProcess, captureLocalListenerProcess, waitForDrainCompletion, selectInitialDevCandidate,
 } from "./gateway-payload-deploy.mjs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -215,6 +215,39 @@ test("tron-dev candidate source stages through the real payload manifest validat
       assert.equal(staged.sourceRevision, head);
       assert.equal(staged.version, version);
     }
+  } finally {
+    await makeTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// The manifest and selection key sets, schema and kinds are shared with the
+// launcher and the bundler through gateway-payload-contract.json. The writers
+// here emit the on-disk documents the launcher reads.
+const payloadContract = JSON.parse(await readFile(
+  new URL("../packages/mac-app/scripts/gateway-payload-contract.json", import.meta.url), "utf8"));
+
+test("deploy writers emit the shared payload and selection contract", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-payload-contract-"));
+  try {
+    const source = await makePreflightFixture(join(root, "source"));
+    const manifestPath = join(source, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify({ ...JSON.parse(await readFile(manifestPath, "utf8")), channel: "dev" }));
+    const home = join(root, "home");
+    const { manifest } = await stagePayload({
+      home, channel: "dev", source, version: "contract", sourceRevision: "0123456789abcdef0123456789abcdef01234567",
+    });
+    const channelRoot = join(home, "gateway", "payloads", "dev");
+    const staged = JSON.parse(await readFile(join(channelRoot, "versions", "contract", "manifest.json"), "utf8"));
+    assert.deepEqual(Object.keys(staged).sort(), [...payloadContract.manifestKeys].sort());
+    assert.equal(staged.schema, payloadContract.schema);
+    assert.equal(staged.kind, payloadContract.payloadKind);
+    assert.equal(staged.dependencyTreeCoverage, payloadContract.dependencyTreeCoverage);
+    await selectInitialDevCandidate({ home, version: "contract", expectedFingerprint: manifest.payloadFingerprint });
+    const selection = JSON.parse(await readFile(join(channelRoot, "current.json"), "utf8"));
+    assert.deepEqual(Object.keys(selection).sort(), [...payloadContract.selectionKeys].sort());
+    assert.equal(selection.schema, payloadContract.schema);
+    assert.equal(selection.kind, payloadContract.selectionKind);
   } finally {
     await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });

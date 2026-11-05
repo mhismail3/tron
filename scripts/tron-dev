@@ -94,14 +94,16 @@ acquire_command_lock() {
 }
 
 stop_dev() {
-  local supervisor_pid="" supervisor_identity="" child_pid="" child_identity=""
+  local supervisor_pid="" supervisor_identity="" child_pid="" child_identity="" stopping_recorded=yes
   if [[ -f "$STATE_FILE" ]]; then
     supervisor_pid="$("$NODE_BIN" "$STATE_HELPER" get "$STATE_FILE" supervisorPid)"
     supervisor_identity="$("$NODE_BIN" "$STATE_HELPER" get "$STATE_FILE" supervisorStartIdentity)"
     child_pid="$("$NODE_BIN" "$STATE_HELPER" get "$STATE_FILE" childPid)"
     child_identity="$("$NODE_BIN" "$STATE_HELPER" get "$STATE_FILE" childStartIdentity)"
   fi
-  "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true 2>/dev/null || true
+  # A refused transition is reported, but the processes are still signalled:
+  # stopping the Gateway must not depend on the state file being writable.
+  "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true || stopping_recorded=no
   kill_child "$child_pid" "$child_identity"
   pid_current "$supervisor_pid" "$supervisor_identity" && kill -TERM "$supervisor_pid" 2>/dev/null || true
   for _ in $(seq 1 80); do
@@ -112,6 +114,7 @@ stop_dev() {
   done
   [[ -z "$child_pid" && -z "$supervisor_pid" ]] || { echo "Debug Gateway stop timed out; inspect $LOG_FILE" >&2; return 1; }
   rm -f "$PID_FILE"
+  [[ "$stopping_recorded" == yes ]] || { echo "Debug Gateway processes stopped but the stopping transition could not be recorded in $STATE_FILE; inspect $LOG_FILE" >&2; return 1; }
   "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopped intentionalExit=true supervisorPid= supervisorStartIdentity= childPid= childStartIdentity=
 }
 
@@ -123,13 +126,18 @@ supervise() {
   "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" starting expectedHost="$HOST" expectedPort=9848 expectedHome="$HOME/.tron-dev" supervisorPid="$$" supervisorStartIdentity="$supervisor_identity" intentionalExit=false restartCount=0
   handle_termination() {
     terminating=1
-    "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true 2>/dev/null || true
+    local recorded=yes
+    "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true || recorded=no
     if pid_current "$child" "$child_identity"; then
       kill_child "$child" "$child_identity"
       set +e; wait "$child"; set -e
     fi
-    "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopped intentionalExit=true childPid= childStartIdentity= supervisorPid= supervisorStartIdentity= 2>/dev/null || true
+    "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopped intentionalExit=true childPid= childStartIdentity= supervisorPid= supervisorStartIdentity= || recorded=no
     rm -f "$PID_FILE"
+    if [[ "$recorded" != yes ]]; then
+      echo "Debug Gateway supervisor stopped its child but could not record its lifecycle transitions in $STATE_FILE" >&2
+      exit 1
+    fi
     exit 0
   }
   trap handle_termination TERM INT

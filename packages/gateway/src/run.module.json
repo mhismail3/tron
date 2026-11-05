@@ -77,6 +77,11 @@
     "gateway/host",
     "gateway/pi",
     "gateway/receipts",
-    "gateway/settings"
+    "gateway/settings",
+    "gateway/delegation",
+    "gateway/extension-activity",
+    "gateway/projection",
+    "gateway/resources",
+    "gateway/session-catalog"
   ]
 }

@@ -1,8 +1,6 @@
 import type { ImageContent } from "../pi/ai.js";
 import type { QueuedMessageState, ResourceInvocation } from "../../protocol/types.js";
 
-export const MAXIMUM_PROMPT_ATTACHMENTS = 10;
-
 export type QueueBehavior = QueuedMessageState["behavior"];
 
 export type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";

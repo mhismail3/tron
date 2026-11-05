@@ -1419,6 +1419,15 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   checkins: HomeTaskCheckin[];
   pendingGrant: boolean;
 }
+/** home.taskStatus: the fields a client reads from one task's current status. The
+ * Gateway's status value is checked against this type where the RPC returns it. */
+export interface HomeTaskStatusResult {
+  taskId: string;
+  lifecycle: HomeTaskSummary["lifecycle"];
+  operationId: string | null;
+  spend: HomeTaskSummary["spend"];
+  terminalEvidence: { outcome: NonNullable<HomeTaskSummary["outcome"]> } | null;
+}
 /** A finite lineage event: every operation, including those with no check-ins, and
  * every accepted canonical check-in. Operation state is current, not state at check-in. */
 export interface HomeTaskHistoryItem {

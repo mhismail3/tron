@@ -91,6 +91,26 @@ print(digest.hexdigest())
 PY
 }
 
+step "manifest template matches the shared payload contract"
+python3 - "$SCRIPT_DIR" <<'PY' || fail "bundle-gateway.sh manifest template diverges from gateway-payload-contract.json"
+import json, re, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+contract = json.loads((root / "gateway-payload-contract.json").read_text(encoding="utf-8"))
+templates = [line for line in (root / "bundle-gateway.sh").read_text(encoding="utf-8").splitlines()
+             if '"kind":"tron-gateway-payload"' in line]
+if len(templates) != 1:
+    sys.exit(f"expected one payload manifest template, found {len(templates)}")
+template = templates[0]
+keys = re.findall(r'"([A-Za-z]+)":', template)
+if sorted(keys) != sorted(contract["manifestKeys"]):
+    sys.exit(f"manifest template keys {sorted(keys)} differ from the contract")
+for literal in (f'"schema":{contract["schema"]},"kind":"{contract["payloadKind"]}"',
+                f'"dependencyTreeCoverage":"{contract["dependencyTreeCoverage"]}"'):
+    if literal not in template:
+        sys.exit(f"manifest template lacks the contract literal {literal}")
+PY
+
 step "cleanup removes immutable nested trees without following symlinks or holding ancestor streams"
 fixture="$TMP/cleanup-repository"
 mkdir -p "$fixture/config" "$fixture/packages/mac-app/scripts"

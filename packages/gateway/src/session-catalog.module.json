@@ -32,6 +32,7 @@
     "gateway/automations-contract",
     "gateway/pi",
     "gateway/receipts",
-    "gateway/settings"
+    "gateway/settings",
+    "gateway/resources"
   ]
 }
