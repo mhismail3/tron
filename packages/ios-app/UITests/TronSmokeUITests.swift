@@ -1307,7 +1307,16 @@ final class TronSmokeUITests: XCTestCase {
         let windowHeight = app.windows.firstMatch.frame.height
         for (row, done) in [("home-manage-profile", "home-sheet-done-profile"), ("home-manage-memory-browser", "home-sheet-done-memory"),
                             ("home-manage-chapters", "home-sheet-done-chapters"), ("home-manage-tasks", "home-sheet-done-tasks")] {
-            tapManageRow(app, row)
+            let rowElement = app.descendants(matching: .any)[row]
+            XCTAssertTrue(rowElement.waitForExistence(timeout: 5), row)
+            // The medium detent crops the Manage Home list at the window's bottom edge, where a row's centre is off
+            // screen. Drag the list up until the row sits clear of that edge, then tap its centre.
+            for _ in 0..<3 where rowElement.frame.maxY > windowHeight - 60 {
+                let window = app.windows.firstMatch
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+                    .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+            }
+            rowElement.tap()
             let doneButton = app.buttons[done]
             XCTAssertTrue(doneButton.waitForExistence(timeout: 5), row)
             XCTAssertLessThan(doneButton.frame.minY, windowHeight * 0.6, "\(row) must open at the medium detent")
