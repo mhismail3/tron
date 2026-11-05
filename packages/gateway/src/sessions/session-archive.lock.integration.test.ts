@@ -1,62 +1,94 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { it } from "vitest";
-import { storePathLock } from "../../test-support/store-path-lock.js";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { SessionArchiveStore } from "./session-archive-store.js";
 
+const T0 = "2026-01-01T00:00:00.000Z";
+const T1 = "2026-01-01T00:00:01.000Z";
+
 /**
- * `gateway/session-catalog` mutation-path lock for the session archive store (plan §6.5
- * V4, §6.6; test-support/store-path-lock.ts): every write path, its refusals, the
- * change revision and the exact document it commits.
+ * `gateway/session-catalog` session archive store: every write path, its refusals,
+ * the change revision and the exact document each step commits. The committed
+ * corpus read-back is `store-session-archive-attention`.
  */
 it("session-archive-paths: archive, rekey, prune, remove and admission", async () => {
-  const log = await storePathLock({ module: "gateway/session-catalog", name: "session-archive-paths", testFileUrl: import.meta.url, owned: "gateway/session-archive.json" });
-  const path = join(log.home, "gateway", "session-archive.json");
-  let store = new SessionArchiveStore(log.home);
+  const home = await mkdtemp(join(tmpdir(), "tron-session-archive-"));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.parse(T0));
+  onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
+  const path = join(home, "gateway", "session-archive.json");
+  /** The committed document, or `undefined` before the first write. */
+  const committed = async () => readFile(path, "utf8").then((text) => JSON.parse(text) as unknown,
+    (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+  const sessions = (records: Record<string, string>) =>
+    ({ version: 1, sessions: Object.fromEntries(Object.entries(records).map(([id, archivedAt]) => [id, { archivedAt }])) });
+  let store = new SessionArchiveStore(home);
   const view = (...ids: string[]) => ({ revision: store.revision, archivedAt: Object.fromEntries(ids.map((id) => [id, store.archivedAt(id) ?? null])) });
-  await log.step("read before initialize", () => view("a"));
-  await log.step("archive before initialize", () => store.archive("a"));
-  await mkdir(join(log.home, "gateway"), { recursive: true });
-  await log.step("initialize empty", async () => { await store.initialize(); return view("a"); });
-  await log.step("archive a", async () => ({ archivedAt: await store.archive("a"), ...view("a") }));
-  log.advance(1_000);
-  await log.step("archive a again keeps its first time", async () => ({ archivedAt: await store.archive("a"), ...view("a") }));
-  await log.step("archive b later", async () => ({ archivedAt: await store.archive("b"), ...view("a", "b") }));
-  await log.step("rekey a to c", async () => ({ rekeyed: await store.rekey("a", "c"), ...view("a", "c") }));
-  await log.step("rekey the absent a again", async () => ({ rekeyed: await store.rekey("a", "c"), ...view("a", "c") }));
-  await log.step("rekey c to itself", () => store.rekey("c", "c"));
-  await log.step("rekey c onto b is refused", () => store.rekey("c", "b"), "refused");
-  await log.step("assert b absent is refused", () => store.assertAbsent("b"), "refused");
-  await log.step("assert d absent", () => store.assertAbsent("d"));
-  await log.step("prune keeping b and c is unchanged", async () => ({ pruned: await store.prune(new Set(["b", "c"])), ...view("b", "c") }));
-  await log.step("archive d", () => store.archive("d"));
-  await log.step("prune keeping c names the dropped ids", async () => ({ pruned: await store.prune(new Set(["c"])), ...view("b", "c", "d") }));
-  await log.step("reopen reads the committed document", async () => {
-    store = new SessionArchiveStore(log.home);
-    await store.initialize();
-    return view("b", "c");
-  });
-  await log.step("remove c", async () => ({ removed: await store.remove("c"), ...view("c") }));
-  await log.step("remove c again", async () => ({ removed: await store.remove("c"), ...view("c") }));
-  const refused = async (label: string, document: unknown) => log.step(label, async () => {
+
+  expect(view("a"), "read before initialize").toEqual({ revision: 0, archivedAt: { a: null } });
+  await expect(store.archive("a"), "archive before initialize").rejects.toThrow("Session archive store is not initialized");
+  expect(await committed()).toBeUndefined();
+  await mkdir(join(home, "gateway"), { recursive: true });
+  await store.initialize();
+  expect(view("a"), "initialize empty").toEqual({ revision: 1, archivedAt: { a: null } });
+  expect(await committed()).toEqual(sessions({}));
+
+  expect(await store.archive("a")).toBe(T0);
+  expect(view("a")).toEqual({ revision: 2, archivedAt: { a: T0 } });
+  expect(await committed()).toEqual(sessions({ a: T0 }));
+  vi.setSystemTime(Date.parse(T1));
+  expect(await store.archive("a"), "archive a again keeps its first time").toBe(T0);
+  expect(view("a"), "and does not change the revision").toEqual({ revision: 2, archivedAt: { a: T0 } });
+  expect(await store.archive("b")).toBe(T1);
+  expect(view("a", "b")).toEqual({ revision: 3, archivedAt: { a: T0, b: T1 } });
+  expect(await committed()).toEqual(sessions({ a: T0, b: T1 }));
+
+  expect(await store.rekey("a", "c"), "rekey a to c").toBe(true);
+  expect(view("a", "c"), "keeps a's archive time").toEqual({ revision: 4, archivedAt: { a: null, c: T0 } });
+  expect(await committed()).toEqual(sessions({ b: T1, c: T0 }));
+  expect(await store.rekey("a", "c"), "rekey the absent a again").toBe(false);
+  expect(await store.rekey("c", "c"), "rekey c to itself").toBe(false);
+  expect(store.revision).toBe(4);
+  await expect(store.rekey("c", "b"), "rekey c onto b").rejects.toThrow("Replacement session already has archive state");
+  await expect(store.assertAbsent("b")).rejects.toThrow("New session identity already has archive state");
+  await expect(store.assertAbsent("d")).resolves.toBeUndefined();
+  expect(await committed(), "refusals commit nothing").toEqual(sessions({ b: T1, c: T0 }));
+
+  expect(await store.prune(new Set(["b", "c"])), "prune keeping b and c").toEqual([]);
+  expect(store.revision, "an empty prune is unchanged").toBe(4);
+  expect(await store.archive("d")).toBe(T1);
+  expect(await committed()).toEqual(sessions({ b: T1, c: T0, d: T1 }));
+  expect(await store.prune(new Set(["c"])), "prune keeping c names the dropped ids").toEqual(["b", "d"]);
+  expect(view("b", "c", "d")).toEqual({ revision: 6, archivedAt: { b: null, c: T0, d: null } });
+  expect(await committed()).toEqual(sessions({ c: T0 }));
+
+  store = new SessionArchiveStore(home);
+  await store.initialize();
+  expect(view("b", "c"), "reopen reads the committed document").toEqual({ revision: 0, archivedAt: { b: null, c: T0 } });
+  expect(await store.remove("c")).toBe(true);
+  expect(view("c")).toEqual({ revision: 1, archivedAt: { c: null } });
+  expect(await committed()).toEqual(sessions({}));
+  expect(await store.remove("c"), "remove c again").toBe(false);
+  expect(store.revision).toBe(1);
+
+  // Admission of a hand-written document: the current owner reads exactly what it
+  // would write and refuses anything else, by document or by record.
+  const reopen = async (document: unknown) => {
     await writeFile(path, JSON.stringify(document));
-    const reopened = new SessionArchiveStore(log.home);
+    const reopened = new SessionArchiveStore(home);
     await reopened.initialize();
     return reopened.archivedAt("x") ?? null;
-  }, label.startsWith("admit") ? "result" : "refused");
-  await refused("admit a valid hand-written record", { version: 1, sessions: { x: { archivedAt: "2026-01-01T00:00:00.000Z" } } });
-  await refused("refuse another version", { version: 2, sessions: {} });
-  await refused("refuse a bad time", { version: 1, sessions: { x: { archivedAt: "never" } } });
-  await refused("refuse an extra record key", { version: 1, sessions: { x: { archivedAt: "2026-01-01T00:00:00.000Z", by: "me" } } });
-  await refused("refuse an empty session id", { version: 1, sessions: { "": { archivedAt: "2026-01-01T00:00:00.000Z" } } });
-  await refused("refuse an array of sessions", { version: 1, sessions: [] });
-  await refused("refuse a non-object document", [1]);
-  await refused("refuse a null document", null);
-  await refused("refuse a string document", "sessions");
-  await refused("refuse null sessions", { version: 1, sessions: null });
-  await refused("refuse string sessions", { version: 1, sessions: "x" });
-  await refused("refuse a null record", { version: 1, sessions: { x: null } });
-  await refused("refuse an array record", { version: 1, sessions: { x: [] } });
-  await refused("refuse a string record", { version: 1, sessions: { x: "2026-01-01T00:00:00.000Z" } });
-  await log.finish();
+  };
+  expect(await reopen(sessions({ x: T0 })), "admit a valid hand-written record").toBe(T0);
+  for (const document of [{ version: 2, sessions: {} }, { version: 1, sessions: [] }, [1], null, "sessions",
+    { version: 1, sessions: null }, { version: 1, sessions: "x" }]) {
+    await expect(reopen(document), JSON.stringify(document)).rejects.toThrow("Invalid session archive document");
+    expect(await committed(), "a refused document is kept, never reset to empty").toEqual(document);
+  }
+  for (const record of [{ x: { archivedAt: "never" } }, { x: { archivedAt: T0, by: "me" } }, { "": { archivedAt: T0 } },
+    { x: null }, { x: [] }, { x: T0 }]) {
+    await expect(reopen({ version: 1, sessions: record }), JSON.stringify(record)).rejects.toThrow("Invalid session archive record");
+    expect(await committed(), "a refused document is kept, never reset to empty").toEqual({ version: 1, sessions: record });
+  }
 });
