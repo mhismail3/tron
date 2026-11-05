@@ -4,151 +4,274 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { GatewayError } from "../errors.js";
-import { storePathLock } from "../../test-support/store-path-lock.js";
 import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 
 /**
- * `gateway/transport` mutation-path lock for command receipts (plan §6.5 V4, §6.6;
- * test-support/store-path-lock.ts): fresh execution, replay, definitive and uncertain
- * failures, route bindings, early prompt responses, bounds, capacity, expiry, malformed
- * evidence and shutdown, each with the exact receipt files it leaves.
+ * The receipt files the store writes are named by a key derived from the identity,
+ * method and command id; these are the literal names for this test's commands (the
+ * phone's unless noted), so a changed derivation is a failure here, not a silent
+ * rename that orphans every stored receipt.
+ */
+const PHONE_HASH = "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI";
+const RECEIPT_FILE: Record<string, string> = {
+  "rename-0001|session.rename": "ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU",
+  "tablet:rename-0001|session.rename": "ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno",
+  "rename-0001|session.archive": "FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M",
+  "delete-0001|session.delete": "gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI",
+  "fork-0001|session.fork": "E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU",
+  "steer-0001|home.steerTask": "fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc",
+  "prompt-0001|session.prompt": "buU3IMhRdft8xqINjbscedLiCLkHW0gG12WtgtxnSug",
+  "export-0001|session.export": "DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ",
+  "editor-0001|extension.editor.update": "je0FSFERaKJTKu7TJlzhN9WEBUi8lTxKKKeMJIpFutw",
+  "fill-0001|session.rename": "_n163GzFvRszO2dm5FAAerVEwzwUPleDYubLByHwIFE",
+  "fill-0003|session.rename": "X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw",
+  "bytes-0002|session.rename": "f4KMxAISjfqbRmINkc8QHg65UpEFlTZ-cbTuPjmHX40",
+  "bytes-0003|session.rename": "7WSZyHvcSn5MxhroEbJkfYAy-dYys67tLH7Fzp_NMZg",
+  "bytes-0004|session.rename": "r-l6dBaHzgHxxD6pWcXRbVa70byqM0Glqgz-nMyXiP8",
+  "lane-0001|session.rename": "Krnr4svwkFdQRTuAobmLudH-rwe0oPTVanuVljT4cq8",
+};
+const fileOf = (key: string) => `${RECEIPT_FILE[key] ?? expect.unreachable(`no literal receipt name for ${key}`)}.json`;
+/** A receipt document exactly as the store writes it. */
+const receiptDocument = (commandId: string, method: string, status: "pending" | "completed", createdAt: string,
+  extra: { result?: unknown; binding?: unknown; identityHash?: string } = {}) => ({
+  version: extra.binding === undefined ? 1 : 2, identityHash: extra.identityHash ?? PHONE_HASH,
+  ...(extra.binding === undefined ? {} : { binding: extra.binding }), commandId, method, status, createdAt,
+  ...(extra.result === undefined ? {} : { result: extra.result }) });
+
+/**
+ * `gateway/transport` command receipts: fresh execution, replay, definitive and
+ * uncertain failures, route bindings, early prompt responses, bounds, capacity, expiry,
+ * malformed evidence and shutdown, each with the exact receipt files it leaves (every
+ * file in the directory, by name, after every step).
  */
 it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", async () => {
-  const log = await storePathLock({ module: "gateway/transport", name: "command-receipt-paths", testFileUrl: import.meta.url, owned: "gateway/command-receipts" });
-  const phone = "device:lock-phone";
+  const h = await receiptHome();
+  const phone = PHONE;
   const other = "device:lock-tablet";
-  let calls = 0;
-  const run = (result: unknown) => async () => { calls += 1; return result as never; };
-  const fail = (error: Error) => async () => { calls += 1; throw error; };
+  const T = (minutes: number) => new Date(EPOCH + minutes * 60_000).toISOString();
+  /** Every file in the receipt directory: JSON parsed, anything else by size. */
+  const files = async (): Promise<Record<string, unknown>> => {
+    const names = await readdir(h.directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
+    const found: Record<string, unknown> = {};
+    for (const name of names.sort()) {
+      const bytes = await readFile(join(h.directory, name));
+      try { found[name] = JSON.parse(bytes.toString("utf8")); } catch { found[name] = `<${bytes.length} bytes>`; }
+    }
+    return found;
+  };
+  /** The files the store must hold; each step updates it, then the directory must equal it. */
+  let expected: Record<string, unknown> = {};
+  const holds = async (label: string) => { expect(await files(), `${label}: receipt files`).toEqual(expected); };
   const uncertain = () => new GatewayError("conflict", "effect may have applied", false, { outcomeUnknown: true });
-  let store = new CommandReceiptStore(log.home);
-  const counted = async (work: () => Promise<unknown>) => { const before = calls; const result = await work(); return { result, ran: calls - before }; };
+  const fenced = (message: string) => ({ refused: message, code: "conflict", retryable: false, details: { outcomeUnknown: true } });
+  const plain = (message: string) => ({ refused: message, code: null, retryable: null, details: null });
+  let store = new CommandReceiptStore(h.home);
 
-  await log.step("refuse an unstable command id", () => store.execute(phone, "session.rename", "short", run({ ok: true })), "refused");
-  await log.step("status of a missing receipt", () => store.status(phone, "session.rename", "rename-0001"));
-  await log.step("execute fresh", () => counted(() => store.execute(phone, "session.rename", "rename-0001", run({ updated: true }))));
-  await log.step("replay returns the stored result without running", () => counted(() => store.execute(phone, "session.rename", "rename-0001", run({ updated: false }))));
-  await log.step("status of a completed receipt", () => store.status(phone, "session.rename", "rename-0001"));
-  await log.step("the same command id from another identity runs", () => counted(() => store.execute(other, "session.rename", "rename-0001", run({ updated: "other" }))));
-  await log.step("the same command id for another method runs", () => counted(() => store.execute(phone, "session.archive", "rename-0001", run(null))));
-  await log.step("a definitive rejection leaves no receipt", () => store.execute(phone, "session.delete", "delete-0001", fail(new GatewayError("not_found", "no such session"))));
-  await log.step("the rejected command may run again", () => counted(() => store.execute(phone, "session.delete", "delete-0001", run({ deleted: true }))));
-  await log.step("an uncertain failure keeps a pending fence", () => store.execute(phone, "session.fork", "fork-0001", fail(uncertain())));
-  await log.step("status of the pending fence", () => store.status(phone, "session.fork", "fork-0001"));
-  await log.step("the fenced command is refused without running", () => counted(() => store.execute(phone, "session.fork", "fork-0001", run({ forked: true }))), "refused");
-  await log.step("operations run so far", () => calls);
+  expect(await outcome(() => store.execute(phone, "session.rename", "short", h.run({ ok: true }))), "refuse an unstable command id")
+    .toEqual({ refused: "Mutating requests require a stable commandId", code: "invalid_request", retryable: false, details: null });
+  expect(await store.status(phone, "session.rename", "rename-0001"), "status of a missing receipt").toEqual({ status: "missing" });
+  await holds("before any execution");
+  expect(await h.counted(() => store.execute(phone, "session.rename", "rename-0001", h.run({ updated: true }))), "execute fresh").toEqual({ result: { updated: true }, ran: 1 });
+  expected[fileOf("rename-0001|session.rename")] = receiptDocument("rename-0001", "session.rename", "completed", T(0), { result: { updated: true } });
+  await holds("execute fresh");
+  expect(await h.counted(() => store.execute(phone, "session.rename", "rename-0001", h.run({ updated: false }))), "replay returns the stored result without running")
+    .toEqual({ result: { updated: true }, ran: 0 });
+  expect(await store.status(phone, "session.rename", "rename-0001"), "status of a completed receipt").toEqual({ status: "completed", result: { updated: true } });
+  await holds("replay");
+  expect(await h.counted(() => store.execute(other, "session.rename", "rename-0001", h.run({ updated: "other" }))), "the same command id from another identity runs")
+    .toEqual({ result: { updated: "other" }, ran: 1 });
+  expected[fileOf("tablet:rename-0001|session.rename")] = receiptDocument("rename-0001", "session.rename", "completed", T(0),
+    { result: { updated: "other" }, identityHash: "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A" });
+  await holds("another identity");
+  expect(await h.counted(() => store.execute(phone, "session.archive", "rename-0001", h.run(null))), "the same command id for another method runs").toEqual({ result: null, ran: 1 });
+  expected[fileOf("rename-0001|session.archive")] = receiptDocument("rename-0001", "session.archive", "completed", T(0), { result: null });
+  await holds("another method");
+  expect(await outcome(() => store.execute(phone, "session.delete", "delete-0001", h.fail(new GatewayError("not_found", "no such session")))),
+    "a definitive rejection").toEqual({ refused: "no such session", code: "not_found", retryable: false, details: null });
+  await holds("a definitive rejection leaves no receipt");
+  expect(await h.counted(() => store.execute(phone, "session.delete", "delete-0001", h.run({ deleted: true }))), "the rejected command may run again")
+    .toEqual({ result: { deleted: true }, ran: 1 });
+  expected[fileOf("delete-0001|session.delete")] = receiptDocument("delete-0001", "session.delete", "completed", T(0), { result: { deleted: true } });
+  await holds("the rejected command ran again");
+  expect(await outcome(() => store.execute(phone, "session.fork", "fork-0001", h.fail(uncertain()))), "an uncertain failure").toEqual(fenced("effect may have applied"));
+  expected[fileOf("fork-0001|session.fork")] = receiptDocument("fork-0001", "session.fork", "pending", T(0));
+  await holds("an uncertain failure keeps a pending fence");
+  expect(await store.status(phone, "session.fork", "fork-0001"), "status of the pending fence").toEqual({ status: "pending" });
+  expect(await outcome(() => h.counted(() => store.execute(phone, "session.fork", "fork-0001", h.run({ forked: true })))), "the fenced command is refused")
+    .toEqual(fenced("Previous command outcome is uncertain; refresh authoritative state instead of replaying"));
+  expect(h.calls(), "without running: operations run so far").toBe(6);
+  await holds("the fence");
   const routes: string[] = [];
   const bound = { onRouteBound: (category: string) => { routes.push(category); }, resolveBinding: () => ({ homeId: "home-1", bindingRevision: 2, physicalSessionId: "chapter-1" }) };
-  await log.step("a bound command records its route", async () => ({ result: await store.execute(phone, "home.steerTask", "steer-0001", run({ steered: true }), bound), routes: [...routes] }));
-  await log.step("its replay reports a replayed route", async () => ({ result: await store.execute(phone, "home.steerTask", "steer-0001", run({ steered: false }), bound), routes: [...routes] }));
-  await log.step("an early response is refused for a non-prompt method", () => store.execute(phone, "session.rename", "early-0001", run({}), { respondBeforeCompletion: true }), "refused");
+  expect(await store.execute(phone, "home.steerTask", "steer-0001", h.run({ steered: true }), bound), "a bound command").toEqual({ steered: true });
+  expect(routes, "records its route").toEqual(["fresh"]);
+  expected[fileOf("steer-0001|home.steerTask")] = receiptDocument("steer-0001", "home.steerTask", "completed", T(0),
+    { result: { steered: true }, binding: { homeId: "home-1", bindingRevision: 2, physicalSessionId: "chapter-1" } });
+  await holds("a bound command writes a version 2 receipt with its binding");
+  expect(await store.execute(phone, "home.steerTask", "steer-0001", h.run({ steered: false }), bound), "its replay").toEqual({ steered: true });
+  expect(routes, "reports a replayed route").toEqual(["fresh", "replay"]);
+  expect(await outcome(() => store.execute(phone, "session.rename", "early-0001", h.run({}), { respondBeforeCompletion: true })),
+    "an early response is refused for a non-prompt method").toEqual(plain("Early receipt responses are restricted to prompt methods"));
+  await holds("the bound replay and the early refusal");
   const completions: Promise<void>[] = [];
-  await log.step("a prompt answers before its completion is durable", async () => {
-    const result = await store.execute(phone, "session.prompt", "prompt-0001", run({ accepted: true }), { respondBeforeCompletion: true, onCompletion: (completion) => { completions.push(completion); } });
-    await Promise.all(completions);
-    return { result, completions: completions.length };
-  });
-  await log.step("an oversized result is refused and stays fenced", () => store.execute(phone, "session.export", "export-0001", run({ text: "x".repeat(1_100_000) })), "refused");
-  await log.step("status of the oversized command", () => store.status(phone, "session.export", "export-0001"));
-  await log.step("an editor update", () => store.execute(phone, "extension.editor.update", "editor-0001", run({ saved: true })));
-  await mkdir(join(log.home, "gateway", "command-receipts"), { recursive: true });
-  await writeFile(join(log.home, "gateway", "command-receipts", `${"A".repeat(43)}.json.123.0123456789ab.tmp`), "{");
-  log.advance(11 * 60_000);
-  await log.step("prune after eleven minutes drops the editor update and the crash temporary", () => store.prune());
-  log.advance(24 * 60 * 60_000);
-  await log.step("prune after a day drops completed receipts and keeps pending fences", () => store.prune());
-  await log.step("a pruned command runs again", () => counted(() => store.execute(phone, "session.rename", "rename-0001", run({ updated: "again" }))));
+  expect(await store.execute(phone, "session.prompt", "prompt-0001", h.run({ accepted: true }), { respondBeforeCompletion: true,
+    onCompletion: (completion) => { completions.push(completion); } }), "a prompt answers before its completion is durable").toEqual({ accepted: true });
+  await Promise.all(completions);
+  expect(completions.length, "and hands its completion to the caller").toBe(1);
+  expected[fileOf("prompt-0001|session.prompt")] = receiptDocument("prompt-0001", "session.prompt", "completed", T(0), { result: { accepted: true } });
+  await holds("the prompt's completed receipt");
+  expect(await outcome(() => store.execute(phone, "session.export", "export-0001", h.run({ text: "x".repeat(1_100_000) }))), "an oversized result is refused")
+    .toEqual(fenced("Successful command receipt exceeds its bounded capacity; refresh authoritative state instead of replaying"));
+  expected[fileOf("export-0001|session.export")] = receiptDocument("export-0001", "session.export", "pending", T(0));
+  await holds("and stays fenced");
+  expect(await store.status(phone, "session.export", "export-0001"), "status of the oversized command").toEqual({ status: "pending" });
+  expect(await store.execute(phone, "extension.editor.update", "editor-0001", h.run({ saved: true })), "an editor update").toEqual({ saved: true });
+  const editor = fileOf("editor-0001|extension.editor.update");
+  expected[editor] = receiptDocument("editor-0001", "extension.editor.update", "completed", T(0), { result: { saved: true } });
+  await holds("an editor update");
+  await mkdir(h.directory, { recursive: true });
+  const crashTemporary = `${"A".repeat(43)}.json.123.0123456789ab.tmp`;
+  await writeFile(join(h.directory, crashTemporary), "{");
+  expected[crashTemporary] = "<1 bytes>";
+  await holds("a crash temporary");
+  h.advance(11 * 60_000);
+  await store.prune();
+  delete expected[editor];
+  delete expected[crashTemporary];
+  await holds("prune after eleven minutes drops the editor update and the crash temporary");
+  h.advance(24 * 60 * 60_000);
+  await store.prune();
+  expected = { [fileOf("fork-0001|session.fork")]: expected[fileOf("fork-0001|session.fork")], [fileOf("export-0001|session.export")]: expected[fileOf("export-0001|session.export")] };
+  await holds("prune after a day drops completed receipts and keeps pending fences");
+  expect(await h.counted(() => store.execute(phone, "session.rename", "rename-0001", h.run({ updated: "again" }))), "a pruned command runs again")
+    .toEqual({ result: { updated: "again" }, ran: 1 });
+  expected[fileOf("rename-0001|session.rename")] = receiptDocument("rename-0001", "session.rename", "completed", T(24 * 60 + 11), { result: { updated: "again" } });
+  await holds("the pruned command's new receipt");
   await store.dispose();
-  store = new CommandReceiptStore(log.home, undefined, { maximumEntries: 4, maximumAgeMs: 60_000 });
-  await log.step("a full store refuses new commands while fences remain", async () => {
-    await store.execute(phone, "session.rename", "fill-0001", run({}));
-    return store.execute(phone, "session.rename", "fill-0002", run({}));
-  });
-  log.advance(2 * 60_000);
-  await log.step("an expired receipt is pruned at the capacity boundary to admit a command", () => counted(() => store.execute(phone, "session.rename", "fill-0003", run({ admitted: true }))));
-  await log.step("an invalid capacity is refused", () => new CommandReceiptStore(log.home, undefined, { maximumEntries: 0 }), "refused");
-  const forged = async (label: string, method: string, commandId: string, content: string) => log.step(label, async () => {
-    const { createHash } = await import("node:crypto");
-    const identityHash = createHash("sha256").update(phone).digest("base64url");
-    const key = createHash("sha256").update(identityHash).update("\0").update(method).update("\0").update(commandId).digest("base64url");
-    await writeFile(join(log.home, "gateway", "command-receipts", `${key}.json`), content.replaceAll("<identity>", identityHash));
-    return store.status(phone, method, commandId);
-  }, label.startsWith("admit") ? "result" : "refused");
-  await forged("refuse an empty receipt", "session.rename", "empty-0001", "");
-  await forged("refuse a malformed receipt", "session.rename", "broken-0001", "{");
+
+  store = new CommandReceiptStore(h.home, undefined, { maximumEntries: 4, maximumAgeMs: 60_000 });
+  expect(await store.execute(phone, "session.rename", "fill-0001", h.run({})), "fill one entry").toEqual({});
+  expected[fileOf("fill-0001|session.rename")] = receiptDocument("fill-0001", "session.rename", "completed", T(24 * 60 + 11), { result: {} });
+  expect(await outcome(() => store.execute(phone, "session.rename", "fill-0002", h.run({}))), "a full store refuses new commands while fences remain").toEqual(CAPACITY_FULL);
+  await holds("the full store");
+  h.advance(2 * 60_000);
+  expect(await h.counted(() => store.execute(phone, "session.rename", "fill-0003", h.run({ admitted: true }))),
+    "an expired receipt is pruned at the capacity boundary to admit a command").toEqual({ result: { admitted: true }, ran: 1 });
+  delete expected[fileOf("rename-0001|session.rename")];
+  delete expected[fileOf("fill-0001|session.rename")];
+  expected[fileOf("fill-0003|session.rename")] = receiptDocument("fill-0003", "session.rename", "completed", T(24 * 60 + 13), { result: { admitted: true } });
+  await holds("the capacity-boundary prune");
+  expect(() => new CommandReceiptStore(h.home, undefined, { maximumEntries: 0 }), "an invalid capacity is refused").toThrow(expect.objectContaining({ message: "Invalid command receipt capacity" }));
+
+  const forged = async (label: string, method: string, commandId: string, content: string, expectedOutcome: unknown) => {
+    const key = createHash("sha256").update(PHONE_HASH).update("\0").update(method).update("\0").update(commandId).digest("base64url");
+    const written = content.replaceAll("<identity>", PHONE_HASH);
+    await writeFile(join(h.directory, `${key}.json`), written);
+    let stored: unknown;
+    try { stored = JSON.parse(written); } catch { stored = `<${Buffer.byteLength(written)} bytes>`; }
+    expected[`${key}.json`] = stored;
+    expect(await outcome(() => store.status(phone, method, commandId)), label).toEqual(expectedOutcome);
+    await holds(`${label} leaves the forged receipt in place`);
+  };
+  const malformed = fenced("Idempotency receipt is malformed; refresh authoritative state instead of replaying");
+  await forged("refuse an empty receipt", "session.rename", "empty-0001", "", fenced("Idempotency receipt is empty; refresh authoritative state instead of replaying"));
+  await forged("refuse a malformed receipt", "session.rename", "broken-0001", "{", fenced("Idempotency receipt is malformed or oversized; refresh authoritative state instead of replaying"));
   await forged("refuse a receipt with an unknown key", "session.rename", "extra-0001",
-    JSON.stringify({ version: 1, identityHash: "<identity>", commandId: "extra-0001", method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z", note: 1 }));
+    JSON.stringify({ version: 1, identityHash: "<identity>", commandId: "extra-0001", method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z", note: 1 }), malformed);
   await forged("refuse a receipt for another command", "session.rename", "other-0001",
-    JSON.stringify({ version: 1, identityHash: "<identity>", commandId: "other-0002", method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }));
+    JSON.stringify({ version: 1, identityHash: "<identity>", commandId: "other-0002", method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }), IDENTITY_MISMATCH);
   await forged("refuse a completed receipt without a result", "session.rename", "noresult-0001",
-    JSON.stringify({ version: 1, identityHash: "<identity>", commandId: "noresult-0001", method: "session.rename", status: "completed", createdAt: "2026-01-01T00:00:00.000Z" }));
+    JSON.stringify({ version: 1, identityHash: "<identity>", commandId: "noresult-0001", method: "session.rename", status: "completed", createdAt: "2026-01-01T00:00:00.000Z" }), malformed);
   await forged("refuse a version 2 receipt without a binding", "session.rename", "nobind-0001",
-    JSON.stringify({ version: 2, identityHash: "<identity>", commandId: "nobind-0001", method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }));
+    JSON.stringify({ version: 2, identityHash: "<identity>", commandId: "nobind-0001", method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }), malformed);
   const receipt = (commandId: string, extra: Record<string, unknown>) => JSON.stringify({ version: 2, identityHash: "<identity>", commandId,
     method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z", ...extra });
   const binding = { homeId: "home-1", bindingRevision: 1, physicalSessionId: "chapter-1" };
-  await forged("refuse a null receipt", "session.rename", "null-0001", "null");
-  await forged("refuse an array receipt", "session.rename", "array-0001", "[]");
-  await forged("admit a version 2 receipt with a binding", "session.rename", "bound-0001", receipt("bound-0001", { binding }));
-  await forged("refuse a null binding", "session.rename", "bind-0001", receipt("bind-0001", { binding: null }));
-  await forged("refuse an array binding", "session.rename", "bind-0002", receipt("bind-0002", { binding: [] }));
-  await forged("refuse an empty home id", "session.rename", "bind-0003", receipt("bind-0003", { binding: { ...binding, homeId: "" } }));
-  await forged("refuse a long home id", "session.rename", "bind-0004", receipt("bind-0004", { binding: { ...binding, homeId: "h".repeat(201) } }));
-  await forged("refuse a zero binding revision", "session.rename", "bind-0005", receipt("bind-0005", { binding: { ...binding, bindingRevision: 0 } }));
-  await forged("refuse a fractional binding revision", "session.rename", "bind-0006", receipt("bind-0006", { binding: { ...binding, bindingRevision: 1.5 } }));
-  await forged("refuse an empty physical session", "session.rename", "bind-0007", receipt("bind-0007", { binding: { ...binding, physicalSessionId: "" } }));
-  await forged("refuse a long physical session", "session.rename", "bind-0008", receipt("bind-0008", { binding: { ...binding, physicalSessionId: "p".repeat(201) } }));
-  await forged("refuse a binding with an extra key", "session.rename", "bind-0009", receipt("bind-0009", { binding: { ...binding, chapter: 1 } }));
-  await forged("refuse a version 1 receipt with a binding", "session.rename", "bind-0010", receipt("bind-0010", { version: 1, binding }));
-  await forged("refuse an unknown version", "session.rename", "bind-0011", receipt("bind-0011", { version: 3 }));
-  await forged("refuse a bad identity hash", "session.rename", "hash-0001", receipt("hash-0001", { version: 1, identityHash: "short" }));
-  await forged("refuse an unknown status", "session.rename", "status-0001", receipt("status-0001", { version: 1, status: "running" }));
-  await forged("refuse a pending receipt with a result", "session.rename", "result-0001", receipt("result-0001", { version: 1, result: 1 }));
-  await forged("refuse a bad creation time", "session.rename", "time-0001", receipt("time-0001", { version: 1, createdAt: "yesterday" }));
-  await log.step("execute over a malformed receipt is refused without running", () => counted(() => store.execute(phone, "session.rename", "broken-0001", run({}))), "refused");
-  await log.step("operations run so far", () => calls);
+  await forged("refuse a null receipt", "session.rename", "null-0001", "null", malformed);
+  await forged("refuse an array receipt", "session.rename", "array-0001", "[]", malformed);
+  await forged("admit a version 2 receipt with a binding", "session.rename", "bound-0001", receipt("bound-0001", { binding }), { result: { status: "pending" } });
+  for (const [label, commandId, extra] of [
+    ["refuse a null binding", "bind-0001", { binding: null }],
+    ["refuse an array binding", "bind-0002", { binding: [] }],
+    ["refuse an empty home id", "bind-0003", { binding: { ...binding, homeId: "" } }],
+    ["refuse a long home id", "bind-0004", { binding: { ...binding, homeId: "h".repeat(201) } }],
+    ["refuse a zero binding revision", "bind-0005", { binding: { ...binding, bindingRevision: 0 } }],
+    ["refuse a fractional binding revision", "bind-0006", { binding: { ...binding, bindingRevision: 1.5 } }],
+    ["refuse an empty physical session", "bind-0007", { binding: { ...binding, physicalSessionId: "" } }],
+    ["refuse a long physical session", "bind-0008", { binding: { ...binding, physicalSessionId: "p".repeat(201) } }],
+    ["refuse a binding with an extra key", "bind-0009", { binding: { ...binding, chapter: 1 } }],
+    ["refuse a version 1 receipt with a binding", "bind-0010", { version: 1, binding }],
+    ["refuse an unknown version", "bind-0011", { version: 3 }],
+    ["refuse a bad identity hash", "hash-0001", { version: 1, identityHash: "short" }],
+    ["refuse an unknown status", "status-0001", { version: 1, status: "running" }],
+    ["refuse a pending receipt with a result", "result-0001", { version: 1, result: 1 }],
+    ["refuse a bad creation time", "time-0001", { version: 1, createdAt: "yesterday" }],
+  ] as const) await forged(label, "session.rename", commandId, receipt(commandId, extra), malformed);
+  expect(await outcome(() => h.counted(() => store.execute(phone, "session.rename", "broken-0001", h.run({})))), "execute over a malformed receipt is refused")
+    .toEqual(fenced("Idempotency receipt is malformed or oversized; refresh authoritative state instead of replaying"));
+  await holds("without writing");
+  expect(h.calls(), "without running: operations run so far").toBe(13);
   await store.dispose();
-  await log.step("a disposed store refuses work", () => store.execute(phone, "session.rename", "late-0001", run({})), "refused");
-  log.advance(60 * 60_000);
+  expect(await outcome(() => store.execute(phone, "session.rename", "late-0001", h.run({}))), "a disposed store refuses work")
+    .toEqual({ refused: "Command receipt store is shutting down", code: "conflict", retryable: true, details: null });
+  await holds("a disposed store writes nothing");
+  h.advance(60 * 60_000);
+
   // One receipt's worth of aggregate bytes: a second receipt only fits once the first expires.
   let failWrite: "pending" | "completed" | undefined;
+  let afterCompleted: (() => Promise<void>) | undefined;
   const writer = async (path: string, value: unknown, mode?: number) => {
     if (failWrite !== undefined && (value as { status?: unknown }).status === failWrite) {
       failWrite = undefined;
       throw new Error(`injected ${(value as { status: string }).status} receipt write failure`);
     }
-    const { durableAtomicWriteJson } = await import("../foundation/durable-json.js");
     await durableAtomicWriteJson(path, value, mode);
     const hook = afterCompleted;
     if (hook && (value as { status?: unknown }).status === "completed") { afterCompleted = undefined; await hook(); }
   };
-  let afterCompleted: (() => Promise<void>) | undefined;
-  const { rm } = await import("node:fs/promises");
-  await rm(join(log.home, "gateway", "command-receipts"), { recursive: true, force: true });
-  store = new CommandReceiptStore(log.home, writer, { maximumAggregateBytes: 1_048_576 + 4 * 1_024, maximumAgeMs: 60_000 });
+  await rm(h.directory, { recursive: true, force: true });
+  expected = {};
+  store = new CommandReceiptStore(h.home, writer, { maximumAggregateBytes: RECEIPT_BYTES, maximumAgeMs: 60_000 });
   failWrite = "pending";
-  await log.step("a failed pending write leaves no receipt and no reservation", () => store.execute(phone, "session.rename", "bytes-0001", run({})));
-  await log.step("one receipt fits the aggregate bytes", () => counted(() => store.execute(phone, "session.rename", "bytes-0002", run({ first: true }))));
-  await log.step("a second receipt exceeds them", () => store.execute(phone, "session.rename", "bytes-0003", run({})));
-  log.advance(2 * 60_000);
-  await log.step("an explicit prune frees the bytes", () => store.prune());
-  await log.step("the second receipt then fits", () => counted(() => store.execute(phone, "session.rename", "bytes-0003", run({ second: true }))));
-  log.advance(2 * 60_000);
+  expect(await outcome(() => store.execute(phone, "session.rename", "bytes-0001", h.run({}))), "a failed pending write").toEqual(plain("injected pending receipt write failure"));
+  await holds("a failed pending write leaves no receipt");
+  const bytesAt = T(24 * 60 + 13 + 60);
+  expect(await h.counted(() => store.execute(phone, "session.rename", "bytes-0002", h.run({ first: true }))), "and no reservation: one receipt fits the aggregate bytes")
+    .toEqual({ result: { first: true }, ran: 1 });
+  expected[fileOf("bytes-0002|session.rename")] = receiptDocument("bytes-0002", "session.rename", "completed", bytesAt, { result: { first: true } });
+  await holds("one receipt");
+  expect(await outcome(() => store.execute(phone, "session.rename", "bytes-0003", h.run({}))), "a second receipt exceeds them").toEqual(CAPACITY_FULL);
+  await holds("the refused second receipt");
+  h.advance(2 * 60_000);
+  await store.prune();
+  expected = {};
+  await holds("an explicit prune frees the bytes");
+  expect(await h.counted(() => store.execute(phone, "session.rename", "bytes-0003", h.run({ second: true }))), "the second receipt then fits")
+    .toEqual({ result: { second: true }, ran: 1 });
+  expected[fileOf("bytes-0003|session.rename")] = receiptDocument("bytes-0003", "session.rename", "completed", T(24 * 60 + 13 + 62), { result: { second: true } });
+  await holds("the second receipt");
+  h.advance(2 * 60_000);
   await store.prune();
   failWrite = "completed";
-  await log.step("a failed completed write keeps the pending fence", () => store.execute(phone, "session.rename", "bytes-0004", run({})));
-  await log.step("status after the failed completed write", () => store.status(phone, "session.rename", "bytes-0004"));
+  expect(await outcome(() => store.execute(phone, "session.rename", "bytes-0004", h.run({}))), "a failed completed write").toEqual(plain("injected completed receipt write failure"));
+  expected = { [fileOf("bytes-0004|session.rename")]: receiptDocument("bytes-0004", "session.rename", "pending", T(24 * 60 + 13 + 64)) };
+  await holds("a failed completed write keeps the pending fence");
+  expect(await store.status(phone, "session.rename", "bytes-0004"), "status after the failed completed write").toEqual({ status: "pending" });
   await store.dispose();
-  await rm(join(log.home, "gateway", "command-receipts"), { recursive: true, force: true });
-  store = new CommandReceiptStore(log.home, writer);
+  await rm(h.directory, { recursive: true, force: true });
+  store = new CommandReceiptStore(h.home, writer);
   // A prune that lands while the command still owns its lane must keep the receipt the
   // command's duplicates are about to read.
-  afterCompleted = async () => { log.advance(1_000); await store.prune(0); };
-  await log.step("a prune during the command's own completion keeps its receipt", () => counted(() => store.execute(phone, "session.rename", "lane-0001", run({ once: true }))));
-  await log.step("so its duplicate replays instead of running", () => counted(() => store.execute(phone, "session.rename", "lane-0001", run({ twice: true }))));
+  afterCompleted = async () => { h.advance(1_000); await store.prune(0); };
+  expect(await h.counted(() => store.execute(phone, "session.rename", "lane-0001", h.run({ once: true }))), "a prune during the command's own completion")
+    .toEqual({ result: { once: true }, ran: 1 });
+  expected = { [fileOf("lane-0001|session.rename")]: receiptDocument("lane-0001", "session.rename", "completed", T(24 * 60 + 13 + 64), { result: { once: true } }) };
+  await holds("keeps its receipt");
+  expect(await h.counted(() => store.execute(phone, "session.rename", "lane-0001", h.run({ twice: true }))), "so its duplicate replays instead of running")
+    .toEqual({ result: { once: true }, ran: 0 });
+  await holds("the replay");
   await store.dispose();
-  await log.finish();
 });
 
 const EPOCH = Date.parse("2026-01-01T00:00:00.000Z");
@@ -171,6 +294,8 @@ async function receiptHome() {
   return {
     home, directory,
     advance: (ms: number) => { vi.setSystemTime(Date.now() + ms); },
+    /** Every operation run so far. */
+    calls: () => calls,
     run: (result: unknown) => async () => { calls += 1; return result as never; },
     fail: (error: Error) => async () => { calls += 1; throw error; },
     /** The operations run (`ran`) while `work` was outstanding. */
@@ -215,7 +340,7 @@ it("command-receipt-concurrency: bounds, rebuild windows and lane lifetimes", as
 
   for (const capacity of [{ maximumAggregateBytes: RECEIPT_BYTES - 1 }, { maximumAggregateBytes: RECEIPT_BYTES + 0.5 },
     { maximumAgeMs: -1 }, { maximumAgeMs: 0.5 }, { maximumEntries: 1.5 }]) {
-    expect(() => new CommandReceiptStore(h.home, undefined, capacity), JSON.stringify(capacity)).toThrow("Invalid command receipt capacity");
+    expect(() => new CommandReceiptStore(h.home, undefined, capacity), JSON.stringify(capacity)).toThrow(expect.objectContaining({ message: "Invalid command receipt capacity" }));
   }
   for (const capacity of [{ maximumAggregateBytes: RECEIPT_BYTES }, { maximumAgeMs: 0 }]) {
     expect(() => new CommandReceiptStore(h.home, undefined, capacity), JSON.stringify(capacity)).not.toThrow();
