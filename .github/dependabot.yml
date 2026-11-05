@@ -24,6 +24,7 @@ updates:
     schedule:
       interval: weekly
     labels: ["kind:maintenance", "area:relay"]
+    # A wrangler bump moves the miniflare override with it (packages/push-relay/README.md).
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
