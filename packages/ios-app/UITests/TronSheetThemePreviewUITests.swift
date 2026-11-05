@@ -73,7 +73,9 @@ final class TronSheetThemePreviewUITests: XCTestCase {
             close(app); close(app)
             open(app, "settings-link-Agent Behavior")
             expand(app, title: "Agent Behavior")
-            app.buttons["Add Project"].tap()
+            open(app, "Trusted Projects")
+            open(app, "Add Project")
+            open(app, "project-lifecycle-existing")
             XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
             capture(app, "workspace-trusted-\(mode)")
             app.terminate()
@@ -116,7 +118,9 @@ final class TronSheetThemePreviewUITests: XCTestCase {
                 } else {
                     open(app, "settings-link-Agent Behavior")
                     expand(app, title: "Agent Behavior")
-                    open(app, "trusted-projects-add")
+                    open(app, "Trusted Projects")
+                    open(app, "Add Project")
+                    open(app, "project-lifecycle-existing")
                 }
                 XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
                 let title = app.navigationBars.staticTexts["/fixture/projects"].firstMatch
