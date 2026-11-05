@@ -617,6 +617,7 @@ export class RuntimeRegistry implements SessionOperations {
    * owner closes its root watchers. */
   private artifactDiscoveryInFlight: Promise<void> | undefined;
   private slotAdmissionsInFlight = 0;
+  private readonly slotAdmissionIdleWaiters: Array<() => void> = [];
   private administrativeDrainStarted = false;
   private readonly workRegistry: GatewayWorkRegistry;
   private drainId: string;
@@ -4276,6 +4277,7 @@ export class RuntimeRegistry implements SessionOperations {
     // admitted before the cutoff. Graceful restart never cancels accepted work.
     this.beginAdministrativeDrain();
     try {
+      // Polled, not awaited: continueDrain's stall clock must be re-evaluated on each tick.
       while (this.slotAdmissionsInFlight > 0) {
         if (continueDrain && !continueDrain(this.administrativeDrainSnapshot())) {
           this.failAdministrativeDrain();
@@ -4303,6 +4305,7 @@ export class RuntimeRegistry implements SessionOperations {
       );
       let lastArtifactReconciliation = Number.NEGATIVE_INFINITY;
       this.setDrainPhase("waiting");
+      // Polled: isDrainBusy is derived from runtime-owned blockers with no single settlement event, and each tick re-runs continueDrain and the artifact reconciliation clock.
       while (!preparationSettled || this.workRegistry.size > 0 || slots.some((slot) => slot.isDrainBusy)) {
         const snapshot = this.administrativeDrainSnapshot();
         if (continueDrain && !continueDrain(snapshot)) {
@@ -4375,9 +4378,7 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private async performDispose(): Promise<void> {
-    while (this.slotAdmissionsInFlight > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
+    await this.waitForSlotAdmissionsIdle();
     const entries = await this.mutex.run(() => [...this.slots.entries()]);
     const results = await Promise.allSettled(entries.map(([, slot]) => slot.shutdown()));
     // Admission closed with the timer, so at most the pass already in flight
@@ -4464,8 +4465,17 @@ export class RuntimeRegistry implements SessionOperations {
       if (finished) return;
       finished = true;
       this.slotAdmissionsInFlight -= 1;
+      if (this.slotAdmissionsInFlight === 0) {
+        for (const waiter of this.slotAdmissionIdleWaiters.splice(0)) waiter();
+      }
       work.settle();
     };
+  }
+
+  /** Resolves once no slot admission is in flight. Dispose closes admission first, so the count only falls. */
+  private waitForSlotAdmissionsIdle(): Promise<void> {
+    if (this.slotAdmissionsInFlight === 0) return Promise.resolve();
+    return new Promise((resolve) => this.slotAdmissionIdleWaiters.push(resolve));
   }
 
   private assertSlotAdmissionOpen(): void {
