@@ -1722,20 +1722,24 @@ class FullGatewayLockTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def start(self, env=None):
+    def start(self, env=None, stderr=subprocess.PIPE):
         inherited = {key: value for key, value in os.environ.items() if key != 'TRON_FULL_GATEWAY_LOCK_HELD'}
         return subprocess.Popen(['python3', str(self.gateway), 'some.test.ts'], env={**inherited, **(env or {})},
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                stdout=subprocess.PIPE, stderr=stderr, text=True)
 
     def test_a_run_waits_for_the_held_lock_then_records_itself(self):
         import fcntl
+        errors = Path(self.temporary.name) / 'stderr'
         with self.lock.open('a') as held:
             fcntl.flock(held, fcntl.LOCK_EX)
-            run = self.start()
-            time.sleep(2)
-            self.assertIsNone(run.poll(), 'the run waits while another holder has the lock')
-            self.assertFalse(self.ran.exists(), 'Vitest does not start before the lock is free')
-        out, err = run.communicate(timeout=30)
+            with errors.open('w') as sink:
+                run = self.start(stderr=sink)
+                # The run announces its wait only after its own non-blocking try on the held lock has failed.
+                wait_until(lambda: 'waiting for ' in errors.read_text(), 'the run to announce that it waits')
+                self.assertIsNone(run.poll(), 'the run waits while another holder has the lock')
+                self.assertFalse(self.ran.exists(), 'Vitest does not start before the lock is free')
+        out, _ = run.communicate(timeout=30)
+        err = errors.read_text()
         self.assertEqual(run.returncode, 0, out + err)
         self.assertIn('waiting for ' + str(self.lock), err)
         self.assertEqual(self.ran.read_text().split(), ['run', 'some.test.ts'])

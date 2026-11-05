@@ -2076,8 +2076,9 @@ with open(state / 'events', 'a', encoding='utf-8') as events:
         waiter = next(name for name in names if name not in running)
         # The waiter says who holds the slots and for how long, rather than failing.
         stderr = self.root / f"{waiter}.stderr"
+        # The waiter prints this only after its scan of every slot has failed, so
+        # no further start can happen before a holder is released.
         self.wait_until(lambda: "slots are held" in stderr.read_text(), "the waiting job to name the holders")
-        time.sleep(1)
         self.assertEqual(len(self.started()), self.cap, "a job started beyond the cap")
         self.assertIsNone(self.jobs[waiter].poll(), "the job beyond the cap must wait, not exit")
         message = stderr.read_text()
