@@ -194,7 +194,10 @@ accepted new work would be lost.
 pre-cutover set with `scripts/tron mac reinstall --recovery-relocate --operation-id <id>
 --source <root>` and check it with `--recovery-verify --operation-id <id>`; the rename is
 exclusive and resumable. Retention is manual: keep one coherent set until its successor passed
-restore and continuity checks. These are local checkpoints, not off-device backups.
+restore and continuity checks. These are local checkpoints, not off-device backups. A rehearsal
+copy is scratch of the operation it rehearses: delete it when that operation finishes. A
+forward-only migration keeps its original archive and the prior app and payloads it needs in its
+own operation directory until the maintainer retires it.
 
 ## One-tap Mac app replacement
 

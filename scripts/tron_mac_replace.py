@@ -620,11 +620,11 @@ def remove_tree(path):
             for directory, _, _ in os.walk(path):
                 os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
             # A build checkout is a worktree of the source repository: drop its registration too.
-            unregistered = not (path / '.git').is_file() or git_succeeds(path, 'worktree', 'remove', '--force', path,
+            registration_dropped = not (path / '.git').is_file() or git_succeeds(path, 'worktree', 'remove', '--force', path,
                                                                          timeout=600)
             if path.exists():
                 shutil.rmtree(path)
-            if not unregistered:
+            if not registration_dropped:
                 return [f'{path}: deleted, but git worktree remove failed; `git worktree prune` drops its registration']
         else:
             path.unlink(missing_ok=True)

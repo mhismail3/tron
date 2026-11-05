@@ -46,6 +46,8 @@ git diff --quiet "$BRANCH" HEAD && git push origin HEAD:main
 git checkout "$BRANCH"
 ```
 
+If you pushed the task branch, delete it on origin once main contains it
+(`git push origin --delete <branch>`); `refs/archive/*` keeps anything abandoned.
 A non-fast-forward refusal preserves your candidate. Fetch/integrate again;
 rerun tests only if integration changed their dependencies. An uncertain network
 result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
