@@ -100,3 +100,37 @@ it("cancels only the query wait and reopens the index from the current canonical
     }
   }
 }, 60_000);
+
+// Transcript text reaches only a helper the Gateway composition admitted
+// (gateway-main.ts: development override or the signed bundled helper). The
+// variable alone, outside that admission, never arms semantic indexing.
+it("never arms an embedding helper the Gateway composition did not admit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-search-helper-owner-"));
+  const helper = join(root, "unadmitted-helper");
+  await writeFile(helper, `#!/bin/sh\necho ran >> "${join(root, "helper-ran")}"\nexit 1\n`, { mode: 0o755 });
+  vi.stubEnv("HOME", root);
+  vi.stubEnv("TMPDIR", root);
+  vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
+  vi.stubEnv("PI_OFFLINE", "1");
+  vi.stubEnv("TRON_SEARCH_EMBEDDING_HELPER", helper);
+  let registry: Awaited<ReturnType<typeof createTestRegistry>> | undefined;
+  let search: SessionSearchService | undefined;
+  try {
+    const agentDir = join(root, "agent");
+    await mkdir(agentDir, { recursive: true });
+    registry = await createTestRegistry({ agentDir, trust: new TrustService(agentDir), tronHome: join(root, "tron"),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    await registry.initialize();
+    // Startup warms search after the first catalog cut; an unknown id joins that cut.
+    expect(await registry.sessionFile("no-such-session")).toBeUndefined();
+    search = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "search.sqlite")));
+    await search.warm();
+    const { semantic } = await search.search({ query: "anything" });
+    expect(semantic).toEqual({ state: "unavailable", vectorsIndexed: 0, vectorsTotal: 0,
+      reason: "The signed NaturalLanguage helper is unavailable or not qualified" });
+  } finally {
+    try { await search?.close(); } finally {
+      try { await registry?.dispose(); } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+    }
+  }
+}, 60_000);
