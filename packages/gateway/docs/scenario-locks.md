@@ -1,10 +1,13 @@
 # Scenario locks
 
-A scenario lock records what one deterministic scenario makes the real Gateway
-and the pinned Pi SDK emit, persist and send, normalizes it, and compares it
-byte for byte with a committed golden.
-Restructure slices must leave every golden unchanged; a golden diff means the
-slice changed behavior.
+A scenario lock drives one deterministic scenario through the real Gateway and the
+pinned Pi SDK. Goldens are kept only for what another party reads verbatim: persisted
+formats (the `store-*` locks and the corpus), the wire contract (`protocol-wire`,
+`client-event-schemas`) and model-visible text (the SDK behavior trace,
+`session-shapes`, the Home lock). Each such lock compares a normalized trace byte for
+byte with its committed golden, and a golden diff means the change altered what that
+party receives. Behavior (accepted effects, refusals, ordering, identity, persistence
+and recovery) is asserted inline in the owning lock, not through a golden (#2279).
 
 ## Framework
 
@@ -35,7 +38,9 @@ slice changed behavior.
   with scripted requests.
 
 A lock's golden lives beside its test in `locks/<name>.golden.json`, owned by
-the test's module. Goldens are darwin-specific, as for the SDK boundary trace:
+the test's module. `test-support/lock-scenarios.ts` holds the scenarios that a
+behavior lock and `client-event-schemas` both run, so the event schemas are recorded
+from exactly the runs the behavior locks assert. Goldens are darwin-specific, as for the SDK boundary trace:
 the `computer` module registers only on darwin.
 
 ## Locks
@@ -57,21 +62,33 @@ the `computer` module registers only on darwin.
 | `gateway/session-catalog` | `project-root-trust` | a chat in a subdirectory of an untrusted Git project: trust resolves to the root and refuses creation, a client's decision is saved for the root, and the chat keeps its cwd while the root's settings, compaction budgets, skill and extension (not the subdirectory's) load; revoking the decision reloads it without them |
 | `gateway/session-catalog` | `project-root-resources` | `packages.list` and `hooks.list` for a subdirectory of a Git project (harness option `administrativeResources`: the production package and hook owners) list the root's package and extension, never the subdirectory's, once the project is trusted |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Global scope: resolution, a live chat, history, files, notifications |
-| `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
-| `gateway/notifications` | `notifications-waiting` | a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished` |
-| `gateway/notifications` | `notifications-queued-restart` | with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
-| `gateway/notifications` | `notifications-queued-cancel` | removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
+| `gateway/notifications` | `notifications-push` | inline checks: a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat (exact relay envelopes, receipts, inbox); a presented chat's are suppressed; a Home task worker's end pushes nothing. Golden: its client event schemas and provider requests |
+| `gateway/notifications` | `notifications-waiting` | inline checks: a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished`. Golden: its provider requests |
+| `gateway/notifications` | `notifications-queued-restart` | inline checks: with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
+| `gateway/notifications` | `notifications-queued-cancel` | inline checks: removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
 | `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
 | `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
+| `gateway/pi-sdk` | `session-shapes` | what the model receives for each kind of session (plain chat, extension tool, notifications, automations, Home task worker and its reminder, trusted and revoked project subdirectory, compaction): tool names, prompt sections and hash, canonical system entries (section text and tool schemas), and the product-written messages. Golden in `test-fixtures/pi-sdk/` |
+| `gateway/protocol` | `client-event-schemas` | every client event topic with the union of its payload paths, across the shared scenarios that together reach every shape (`test-support/lock-scenarios.ts`) |
+
+Store mutation-path locks (`store-path-lock.ts`) are now plain behavior tests with
+inline checks, each asserting the exact persisted documents after every write:
+`session-archive-paths`, `blob-store-paths`, `catalog-metadata-index-paths`
+(`gateway/session-catalog`), `session-attention-paths` (`gateway/projection`),
+`run-markers-paths` (`gateway/run`), `workspace-state-paths` (`gateway/workspace`) and
+`command-receipt-paths`, `-concurrency`, `-races` (`gateway/transport`, which pin the
+receipt file names and documents the store writes). `home-task-store-paths` keeps its
+golden.
 
 The delivery locks (`notifications-queue.lock`) script the relay's availability and run
 the owner on a clock they freeze and advance, so no retry comes due by host timing; their
 restart is a new `NotificationService` over the same Tron home, the push store being the
 persistence authority, not a whole-process restart. Dedupe keys and relay request ids are
-digests of per-run session ids, relabelled by first appearance. The waiting lock prompts
+digests of per-run session ids, checked by shape and identity: a retry reuses its request
+id, and a push's receipt, queued intent and inbox entry share one dedupe key. The waiting lock prompts
 again only once the previous turn's terminal work has left the drain's blockers (#1567).
 `home-contention-restart` restarts by disposing the first Gateway (its registry aborts
 the worker's turn, as a `restartNow` shutdown does; not a crash) and starting another
