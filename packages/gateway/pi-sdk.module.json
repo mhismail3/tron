@@ -24,6 +24,7 @@
     "src/sessions/model-runtime-config-lifetime.integration.test.ts",
     "src/sessions/pi-persisted-state-corpus.integration.test.ts",
     "src/sessions/sdk-behavior-trace.integration.test.ts",
+    "src/sessions/session-shapes.lock.integration.test.ts",
     "test-fixtures/pi-sdk/**",
     "test-support/pi-persisted-state-corpus.ts",
     "test-support/subagent-parity-approved.json",

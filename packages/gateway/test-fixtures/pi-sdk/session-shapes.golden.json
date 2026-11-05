@@ -1,0 +1,291 @@
+{
+  "lock": "session-shapes",
+  "shapes": {
+    "chat": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:b8cc443b344d755fdfd3c4ce1081f89888dfd3241afaae9bacc5135e00d235a1"
+    },
+    "chatWithExtensionSelect": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:b8cc443b344d755fdfd3c4ce1081f89888dfd3241afaae9bacc5135e00d235a1"
+    },
+    "chatWithExtensionBackground": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_background",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:b8cc443b344d755fdfd3c4ce1081f89888dfd3241afaae9bacc5135e00d235a1"
+    },
+    "chatWithNotificationsSelect": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:278f06a14b3b9547f4d8b53f92f82f6e4da4f7a23477a36cf4887c313fbe7573"
+    },
+    "chatWithNotificationsBackground": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_background",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:278f06a14b3b9547f4d8b53f92f82f6e4da4f7a23477a36cf4887c313fbe7573"
+    },
+    "chatWithAutomations": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "schedule"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:d49fa3ce051a2abb1562a067fa6eb717b20e2881b7b340b5acb579be51dd7b17"
+    },
+    "taskWorker": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify",
+        "checkin",
+        "report"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:a2504dce373d6fd932735654d814fd3e0f35cce53b0315b5ffe3d894d8cbf29c"
+    },
+    "taskWorkerReminder": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_select",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify",
+        "checkin",
+        "report"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:a2504dce373d6fd932735654d814fd3e0f35cce53b0315b5ffe3d894d8cbf29c",
+      "messages": [
+        {
+          "role": "user",
+          "text": "do the lock task"
+        },
+        {
+          "role": "assistant",
+          "text": "Worker reply without a report."
+        },
+        {
+          "role": "user",
+          "text": "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report."
+        }
+      ]
+    },
+    "trustedProjectSubdirectory": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "project_probe",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "project_context",
+        "skills",
+        "available_skills",
+        "cwd"
+      ],
+      "promptHash": "sha256:58a1df1c48fc29f86c08703c9176dd224bf06a2c988f1fc5fd85ff215f296489"
+    },
+    "revokedProjectSubdirectory": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "project_context",
+        "cwd"
+      ],
+      "promptHash": "sha256:9999e2aaa47fbbf2a79fe3a2194a3ae7db8b6adc913a35da1d16c6dc4c6ca712"
+    },
+    "compactionSummary": {
+      "tools": [],
+      "promptSections": [],
+      "promptHash": "sha256:c464889dcfa60441e642f291445b49523f263e6fb2725d0c25075543a2ec3f8f",
+      "messages": [
+        {
+          "role": "user",
+          "text": "<conversation>\n[User]: first question\n\n[Assistant]: First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context \n</conversation>\n\nThe messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.\n\nUse this EXACT format:\n\n## Goal\n[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]\n\n## Constraints & Preferences\n- [Any constraints, preferences, or requirements mentioned by user]\n- [Or \"(none)\" if none were mentioned]\n\n## Progress\n### Done\n- [x] [Completed tasks/changes]\n\n### In Progress\n- [ ] [Current work]\n\n### Blocked\n- [Issues preventing progress, if any]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n## Next Steps\n1. [Ordered list of what should happen next]\n\n## Critical Context\n- [Any data, examples, or references needed to continue]\n- [Or \"(none)\" if not applicable]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages."
+        }
+      ]
+    },
+    "compactionTurnPrefix": {
+      "tools": [],
+      "promptSections": [],
+      "promptHash": "sha256:c464889dcfa60441e642f291445b49523f263e6fb2725d0c25075543a2ec3f8f",
+      "messages": [
+        {
+          "role": "user",
+          "text": "# Conversation\n[User]: second question\n\n# Instructions\nThe messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.\n\nCreate a concise checkpoint of the user's request and the progress shown above. This checkpoint will be placed before the later messages so the conversation can continue with the necessary context.\n\n## Original Request\n[What did the user ask for?]\n\n## Progress So Far\n- [Key decisions and work completed in these messages]\n\n## Context Needed to Continue\n- [Information from these messages needed to understand the later work]\n\nOnly summarize information explicitly present above. Do not infer or recreate later messages."
+        }
+      ]
+    }
+  }
+}
