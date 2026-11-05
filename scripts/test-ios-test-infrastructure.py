@@ -4141,7 +4141,8 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         (worktree / "packages/gateway").mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
-        # The compiled-in Node pins `verify-ci-toolchain.sh` checks (scripts/node-pin-mirrors.py, #1119).
+        # Copies the compiled-in Node pin sources (scripts/node-pin-mirrors.py, #1119); the check that
+        # reads them against .node-version is scripts/test-tron-node.py.
         for name in ("packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
                      "packages/mac-app/native-gateway-client/node-headers.json",
                      "packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift",
