@@ -37,7 +37,14 @@ REGENERABLE = {  # deleting loses nothing; the writer recreates it
     "packages/mac-app/Sources/Resources/Gateway",
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS",
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources",
+    # scripts/tron-ios-device: device-build DerivedData and the IPA it stages for the share host.
+    "packages/ios-app/build/DerivedData", "packages/ios-app/build/DerivedData-fast-debug", "packages/ios-app/build/share",
+    # SwiftPM, when MacTerminalSSH is built on its own; the package's .gitignore keeps it out.
+    "packages/ios-app/MacTerminalSSH/Package.resolved",
 }
+# Pi's subagent tool tells agents to write workflow scripts under the request cwd "such as
+# .pi/<name>.js": loose files directly in .pi/ are scratch, aged and pruned like .scratch/.
+PI_SCRATCH = ".pi"
 LOCAL = {".claude", "progress.md", "packages/mac-app/.env.local"}  # per-user state: reported never, pruned never
 PROTECTED_BRANCHES = {"main"}
 TEST_NAME = re.compile(r"(^test[-_])|(\.test\.)")
@@ -81,12 +88,32 @@ def activity_days(worktree: Path) -> float:
     return round((time.time() - max(times)) / DAY, 1) if times else 0.0
 
 
-def known(rel: str) -> str | None:
+def known(rel: str, tree: Path) -> str | None:
     if rel in LOCAL:
         return "local"
-    if rel in REGENERABLE or rel.endswith("__pycache__") or (rel.startswith("packages/") and rel.endswith("/" + EVIDENCE)):
+    if rel in REGENERABLE or rel.endswith("__pycache__") or (rel.startswith("packages/") and rel.endswith("/" + EVIDENCE)) \
+            or (pi_scratch(rel) and (tree / rel).is_file()):
         return "regenerable"
     return None
+
+
+def pi_scratch(rel: str) -> bool:
+    return rel.startswith(PI_SCRATCH + "/") and rel.count("/") == 1
+
+
+def ignored_entries(tree: Path, rel: str) -> list[str]:
+    """Git collapses an ignored directory to one entry; split one that holds a named writer's output."""
+    if not any(known_path.startswith(rel + "/") for known_path in REGENERABLE | LOCAL):
+        return [rel]
+    folder = tree / rel
+    if folder.is_symlink() or not folder.is_dir():
+        return [rel]
+    return [entry for child in sorted(folder.iterdir()) for entry in ignored_entries(tree, f"{rel}/{child.name}")]
+
+
+def tracked_ignored(tree: Path) -> list[str]:
+    """Tracked files the ignore rules also match: `git add` or `git clean -X` would treat them as ignored."""
+    return git("ls-files", "-c", "-i", "--exclude-standard", cwd=tree, check=False).splitlines()
 
 
 def worktrees() -> list[dict]:
@@ -158,7 +185,7 @@ def hook_drift() -> list[str]:
 def report(prune: bool) -> dict:
     trees = worktrees()
     primary = Path(trees[0]["worktree"])
-    out: dict[str, list] = {k: [] for k in ("untracked", "residue", "expired", "bytecode", "dead_tooling",
+    out: dict[str, list] = {k: [] for k in ("untracked", "residue", "tracked_ignored", "expired", "bytecode", "dead_tooling",
                                             "orphan_worktree_dirs", "hook", "worktrees", "branches", "notes", "pruned")}
     cwds = live_cwds()
     if cwds is None:
@@ -167,23 +194,43 @@ def report(prune: bool) -> dict:
     for tree in [Path(w["worktree"]) for w in trees if not w.get("prunable")]:
         tops = {p.split("/", 1)[0] for p in git("ls-files", cwd=tree, check=False).splitlines()}
         status = git("status", "--porcelain", "--ignored", "--untracked-files=normal", cwd=tree, check=False)
+        dirty = False
         for line in status.splitlines():
             code, rel = line[:2], unquote(line[3:]).rstrip("/")
             if code == "??":
                 out["untracked"].append(str(tree / rel))
             elif code == "!!":
-                if rel.endswith("__pycache__"):
-                    out["bytecode"].append(str(tree / rel))
-                elif known(rel) is None:
-                    out["residue"].append(str(tree / rel))
+                for entry in ignored_entries(tree, rel):
+                    if entry.endswith("__pycache__"):
+                        out["bytecode"].append(str(tree / entry))
+                    elif known(entry, tree) is None:
+                        out["residue"].append(str(tree / entry))
+                    # The same predicate as worktree removal: anything but regenerable output is local data.
+                    if not entry.endswith("__pycache__") and known(entry, tree) != "regenerable":
+                        dirty = True
+            if code != "!!":
+                dirty = True
+        if tree == primary:
+            out["tracked_ignored"] = tracked_ignored(tree)
         for entry in sorted(tree.iterdir()):  # git status does not list empty ignored directories
-            if entry.is_dir() and entry.name not in tops | {".git"} and known(entry.name) is None \
+            if entry.is_dir() and entry.name not in tops | {".git"} and known(entry.name, tree) is None \
                     and not any(entry.iterdir()):
                 out["residue"].append(str(entry))
+        # A linked worktree with a live process or local changes is another worker's: its
+        # scratch and evidence are theirs to keep. The shared primary checkout ages by policy.
+        real = os.path.realpath(tree)
+        if tree != primary and (dirty or cwds is None or any(c == real or c.startswith(real + os.sep) for c in cwds)):
+            continue
         for folder, days in ((SCRATCH, SCRATCH_DAYS), (EVIDENCE, EVIDENCE_DAYS)):
             for base in [tree / folder, *tree.glob(f"packages/*/{folder}")]:
                 if base.is_dir() and not base.is_symlink():  # never age, or prune, files outside the checkout
                     out["expired"] += [str(p) for p in sorted(base.iterdir()) if age_days(p) > days]
+        pi = tree / PI_SCRATCH
+        if pi.is_dir() and not pi.is_symlink():
+            ignored = set(git("ls-files", "-o", "-i", "--exclude-standard", "--directory", "--", PI_SCRATCH,
+                              cwd=tree, check=False).splitlines())
+            out["expired"] += [str(tree / rel) for rel in sorted(ignored)
+                               if pi_scratch(rel) and (tree / rel).is_file() and age_days(tree / rel) > SCRATCH_DAYS]
 
     for w in trees[1:]:
         path = Path(w["worktree"])
@@ -191,7 +238,7 @@ def report(prune: bool) -> dict:
         status = git("status", "--porcelain", "--ignored", "--untracked-files=normal", cwd=path, check=False)
         # Anything but regenerable output is local data: `git worktree remove` would delete ignored
         # files (such as .env.local) without asking, so such a worktree is never pruned.
-        dirty = any(not line.startswith("!! ") or known(unquote(line[3:]).rstrip("/")) != "regenerable"
+        dirty = any(not line.startswith("!! ") or known(unquote(line[3:]).rstrip("/"), path) != "regenerable"
                     for line in status.splitlines())
         real = os.path.realpath(path)
         live = cwds is None or any(c == real or c.startswith(real + os.sep) for c in cwds)
@@ -224,7 +271,8 @@ def report(prune: bool) -> dict:
             if not path.exists() and not path.is_symlink():
                 out["pruned"].append(str(path))
         for w in out["worktrees"]:
-            if w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
+            # A detached worktree belongs to the tool that made it (verify batch lanes, base checks).
+            if w["branch"] and w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
                 # --force only because what remains is regenerable ignored output (node_modules, build).
                 if subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", w["path"]],
                                   capture_output=True).returncode == 0:
@@ -242,6 +290,7 @@ def report(prune: bool) -> dict:
 FIXES = {
     "untracked": "commit it with an owner, move it to .scratch/, or delete it",
     "residue": "ignored path with no named writer: delete it, or name its writer in tools/ownership/tidy.py",
+    "tracked_ignored": "tracked but matched by .gitignore; add a !negation for it, or untrack it",
     "expired": f"older than {SCRATCH_DAYS} days (scratch) or {EVIDENCE_DAYS} days (evidence): scripts/tron tidy --prune",
     "bytecode": "scripts/tron tidy --prune",
     "dead_tooling": "no code, config or test names it: add its scripts/tron subcommand or caller, or delete it",

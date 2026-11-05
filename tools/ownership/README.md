@@ -120,9 +120,11 @@ without the comparison. A repository without `layout` gets ownership checks only
 
 `scripts/tron tidy` (`tidy.py`) reports, for the primary checkout and every
 registered worktree: untracked files; ignored paths with no named writer
-(including empty ignored directories, which Git does not list); `__pycache__`;
-`.scratch/` entries older than 7 days and `test-results/` entries older than 14
-days, aged by the newest file inside; tooling no tracked code, config or test names
+(including empty ignored directories, which Git does not list, and the parts of an
+ignored directory such as `packages/ios-app/build/` that its writer does not own);
+tracked files the ignore rules also match; `__pycache__`; `.scratch/` entries and
+loose `.pi/` files (the workflow scripts Pi's subagent tool asks for) older than 7
+days and `test-results/` entries older than 14 days, aged by the newest file inside; tooling no tracked code, config or test names
 (report-only, by file name); directories in `<checkout>-worktrees/` that are not
 registered worktrees; a pre-commit hook that differs from what
 `scripts/install-hooks.sh` writes; each worktree's merged/dirty/live state and last
@@ -130,9 +132,12 @@ HEAD activity; and branches merged into `origin/main` or idle over 14 days. Exit
 means something needs a decision; `--json` prints the same report.
 
 `--prune` deletes only expired scratch and evidence (never through a symlinked
-`.scratch` or `test-results`), bytecode, branches merged into `origin/main` (not
+`.scratch` or `test-results`, and never in a linked worktree with a live process,
+local changes or unknown ignored data, or in any linked worktree without `lsof`:
+that is another worker's), bytecode, branches merged into `origin/main` (not
 merely into a local main) that no worktree has checked out (printing `git branch <name> <sha>`
-to restore each), and merged worktrees with no untracked, modified or
+to restore each), and merged worktrees on a branch (a detached worktree belongs to the tool that
+made it, such as a verify batch lane) with no untracked, modified or
 non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
 working directory is inside, and no HEAD activity for 3 days. Without `lsof` it
 prunes no worktree. Unmerged branches, residue and orphan directories are only
@@ -142,7 +147,7 @@ reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 ## Verify
 
 `scripts/tron test tooling scripts/test-tron-ownership.py tools/ownership/tests/test-layout.py
-tools/ownership/tests/test-tidy.py` runs the CLIs against disposable Git repositories:
+tools/ownership/tests/test-tidy.py tools/ownership/tests/test-tidy-scope.py` runs the CLIs against disposable Git repositories:
 ownership (valid layouts, coverage and schema violations, placement, Git-only
-discovery), one case per layout rule and the shrink-only lists, and tidy's report
-and prune safety. The last runs are kept under `test-results/{ownership,layout,tidy}-cli/`.
+discovery), one case per layout rule and the shrink-only lists, and tidy's report,
+prune safety and ownership scope. The last runs are kept under `test-results/{ownership,layout,tidy}-cli/`.
