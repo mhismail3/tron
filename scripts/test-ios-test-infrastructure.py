@@ -6396,15 +6396,10 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         self.assertIn(f"PID {pid}", stderr)
         self.assertRegex(stderr, r"started \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
-    def test_install_cli_keeps_modes_identity_and_legacy_input_at_the_build_boundary(self) -> None:
+    def test_install_cli_keeps_modes_and_identity_at_the_build_boundary(self) -> None:
         worktree = self.make_worktree("device build with spaces")
-        for caller, arguments, legacy in (
-            ("optimized", (), False), ("fast", ("--fast-debug",), False),
-            ("legacy", ("--fast-debug",), True),
-        ):
+        for caller, arguments in (("optimized", ()), ("fast", ("--fast-debug",))):
             with self.subTest(mode=caller):
-                if legacy:
-                    self.environment.update(TRON_IOS_SCHEME="Tron Fast", TRON_IOS_CONFIGURATION="ProdDebug")
                 result = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE,
                                        *arguments, caller=caller)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -6486,6 +6481,10 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
                                     caller="unsafe")
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("refusing", refused.stderr)
+        self.environment.update(TRON_IOS_SCHEME="Tron Fast", TRON_IOS_CONFIGURATION="ProdDebug")
+        refused = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE, caller="unsafe")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("unsupported device install pair 'Tron Fast' + 'ProdDebug'", refused.stderr)
         self.assertEqual(self.tool_calls("unsafe"), [])
 
     def test_status_and_stop_cli_parse_padded_rows_and_leave_other_processes_alone(self) -> None:
