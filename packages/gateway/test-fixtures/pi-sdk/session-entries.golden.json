@@ -1,0 +1,1002 @@
+{
+  "lock": "session-entries",
+  "entries": [
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "canonicalEntryId": "<id>",
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "operationId": "<id>",
+        "receiptId": "<id>",
+        "receiptKind": "binding",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "errorCode": "queue-cleared",
+        "invocationId": "<id>",
+        "lifecycle": "interrupted",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "errorCode": "queue-replaced",
+        "invocationId": "<id>",
+        "lifecycle": "interrupted",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "errorCode": "user-abort",
+        "invocationId": "<id>",
+        "lifecycle": "interrupted",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "accepted",
+        "operationId": "<id>",
+        "receiptId": "<id>",
+        "receiptKind": "transition",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "completed",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "gateway",
+          "ownerId": "<id>",
+          "title": "Automation"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "completed",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "staged",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "gateway",
+          "ownerId": "<id>",
+          "title": "Automation"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "start",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "staged",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "start",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.context-window.v1",
+      "data": {
+        "contextWindow": 128000,
+        "modelId": "faux-1",
+        "provider": "<lock>",
+        "version": 1
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.extension-activity.v1",
+      "data": {
+        "activityId": "<id>",
+        "mode": "asynchronous",
+        "observedAt": "<timestamp>",
+        "owner": {
+          "id": "<id>",
+          "kind": "extension",
+          "source": "auto",
+          "title": "Lock Background"
+        },
+        "runId": "<id>",
+        "sessionId": "<id>",
+        "startedAt": "<timestamp>",
+        "state": "completed",
+        "summary": {},
+        "terminalAt": "<timestamp>",
+        "toolCallId": "<id>",
+        "version": 1
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer",
+              "schedule"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {
+          "context.images.block": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": false
+          }
+        },
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer",
+              "schedule"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {},
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {
+          "context.images.block": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": false
+          }
+        },
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {},
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "lock_background",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {
+          "context.images.block": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": false
+          }
+        },
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "lock_background",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {},
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "lock_select",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {
+          "context.images.block": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": false
+          }
+        },
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "lock_select",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {},
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "project_probe",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {
+          "context.images.block": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": false
+          }
+        },
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "context.images.autoResize": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": true
+          },
+          "model.contextWindow": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1"
+            },
+            "ref": "<id>",
+            "value": 128000
+          },
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "<lock>"
+            }
+          },
+          "model.thinking[role=chat]": {
+            "at": "<timestamp>",
+            "from": "global",
+            "qualifiers": {
+              "model": "<lock>/faux-1",
+              "role": "chat"
+            },
+            "ref": "<id>",
+            "value": "off"
+          },
+          "tools.active": {
+            "at": "<timestamp>",
+            "from": "global",
+            "ref": "<id>",
+            "value": [
+              "read",
+              "bash",
+              "edit",
+              "write",
+              "project_probe",
+              "jev",
+              "web_search",
+              "settings",
+              "projects",
+              "ask_user",
+              "display",
+              "swift_app",
+              "computer"
+            ]
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {},
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    }
+  ]
+}

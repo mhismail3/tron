@@ -574,3 +574,162 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   const stored = await document();
   return { gateway, relayRequests, responses, inbox, stored, workerRoles, sessionId };
 }
+
+export interface Opened { readonly sessionId: string; readonly subscriptionToken: string }
+
+export async function createAndOpen(gateway: LockGateway, client: LockClient): Promise<Opened> {
+  const created = await client.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
+  expect(created.ok, JSON.stringify(created)).toBe(true);
+  return openExisting(client, created.result.sessionId as string);
+}
+
+export async function openExisting(client: LockClient, sessionId: string): Promise<Opened> {
+  const opened = await client.request("session.open", { sessionId });
+  expect(opened.ok, JSON.stringify(opened)).toBe(true);
+  expect((await client.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
+  return { sessionId, subscriptionToken: opened.result.subscriptionToken as string };
+}
+
+
+export const WAITING_COMMAND = `
+  export default function (pi) {
+    pi.registerCommand("lockask", {
+      description: "Ask which lock path to take",
+      handler: async (_args, ctx) => { await ctx.ui.select("Choose a lock path", ["Keep", "Change"]); },
+    });
+  }
+`;
+
+/** An extension tool that starts a declared asynchronous run: its status artifact
+ * lives under the project's async run root, and the tool returns at once. */
+export const DETACHED_RUN = `
+  import { mkdirSync, writeFileSync } from "node:fs";
+  import { join } from "node:path";
+  export default function (pi) {
+    pi.registerTool({
+      name: "lock_background", label: "Lock background", description: "Start the lock's background run",
+      parameters: { type: "object", properties: {} },
+      execute: async (_id, _params, _signal, _update, ctx) => {
+        const runId = "lock-background-run";
+        const asyncDir = join(ctx.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+        mkdirSync(asyncDir, { recursive: true });
+        writeFileSync(join(asyncDir, "status.json"), JSON.stringify({ runId, state: "running", startedAt: Date.now(), lastUpdate: Date.now() }));
+        return { content: [{ type: "text", text: "Background run started." }], details: { runId, asyncDir, state: "running" } };
+      },
+    });
+  }
+`;
+
+
+/**
+ * `run-drain-blockers`: a detached extension run and an extension command awaiting
+ * its select hold the administrative drain until the answer and the run's terminal
+ * artifact; the drain status is read before, while waiting, after the answer and
+ * at completion.
+ */
+export async function drainBlockersScenario(gateway: LockGateway) {
+  const phone = await gateway.connect("phone");
+  gateway.script([
+    () => fauxAssistantMessage([fauxToolCall("lock_background", {}, { id: "lock-background-call" })], { stopReason: "toolUse" }),
+    () => fauxAssistantMessage("The background run is under way."),
+  ]);
+  const asking = await createAndOpen(gateway, phone);
+  const detached = await createAndOpen(gateway, phone);
+  const roles = new Map([[asking.sessionId, "command"], [detached.sessionId, "detached"]]);
+  // Each RPC's own work settles just after its response frame; wait for it, so
+  // each status names only the blockers under test.
+  const rpcSettled = () => waitFor(() => !gateway.registry.administrativeDrainSnapshot().blockers
+    .some((blocker) => blocker.category === "rpc-mutation"), "the RPCs' own work to settle");
+
+  // The detached session's turn starts the background run and ends; the run stays live.
+  expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: detached.sessionId, text: "start the background run" })).ok).toBe(true);
+  // The slot stays busy while it owns the run, so the turn's end is its settled operation.
+  const detachedSlot = await gateway.registry.acquire(detached.sessionId);
+  await waitFor(() => !detachedSlot.snapshot().operation && gateway.record().providerRequests.length === 2
+    && detachedSlot.snapshot().extensionActivities?.some((activity) => activity.status === "running")
+    && gateway.registry.administrativeDrainSnapshot().blockers.every((blocker) => blocker.category === "detached-extension-run"),
+  "the detached turn and its receipts to settle with its run live");
+  // The command session waits on the user's answer, with no agent run.
+  const command = phone.send("session.prompt", { commandId: gateway.commandId(), sessionId: asking.sessionId, text: "/lockask" });
+  const pending = await waitFor(() => {
+    for (const event of phone.events) {
+      // A command runs no agent turn, so its select arrives on the presentation topic alone.
+      if (event.topic !== "session.extensionPresentation" || event.sessionId !== asking.sessionId) continue;
+      const shown = (event.payload as { data?: { interactionList?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> } })
+        ?.data?.interactionList?.[0];
+      if (shown) return shown;
+    }
+    return undefined;
+  }, "the command's select to reach the phone");
+  await rpcSettled();
+  const statusBefore = await phone.request("gateway.drain.status", {});
+
+  gateway.registry.beginAdministrativeDrain();
+  const drained = gateway.registry.waitUntilIdle();
+  await waitFor(() => gateway.registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait");
+  await rpcSettled();
+  const statusWaiting = await phone.request("gateway.drain.status", {});
+
+  // The answer settles the command; the detached run still holds the drain.
+  expect((await phone.request("extension.respond", {
+    commandId: gateway.commandId(), sessionId: asking.sessionId, interactionId: pending.id,
+    hostEpoch: pending.hostEpoch, presentationRevision: pending.presentationRevision, value: "Keep",
+  })).ok).toBe(true);
+  const commandResponse = await command;
+  await waitFor(() => !gateway.registry.administrativeDrainSnapshot().blockers.some((blocker) => blocker.sessionId === asking.sessionId),
+    "the answered command to leave the drain");
+  await rpcSettled();
+  const statusAfterAnswer = await phone.request("gateway.drain.status", {});
+
+  // The run's terminal artifact ends it, and the drain completes.
+  const endedAt = Date.now();
+  await writeFile(join(gateway.cwd, ".pi", "subagents", "async-subagent-runs", "lock-background-run", "status.json"), JSON.stringify({
+    runId: "lock-background-run", state: "complete", startedAt: endedAt - 1_000, endedAt, lastUpdate: endedAt + 1,
+  }));
+  const completed = await awaitsWithin(drained, "the drain to complete");
+  const statusComplete = await phone.request("gateway.drain.status", {});
+  const activities = detachedSlot.snapshot().extensionActivities ?? [];
+  return { phone, asking, detached, roles, commandResponse, statusBefore, statusWaiting, statusAfterAnswer, completed, statusComplete, activities };
+}
+
+/** The extension the extension-UI scenario's chat loads: a tool whose `select` waits for the client. */
+export const EXTENSION_UI_OPTIONS: LockGatewayOptions = { extensions: [{ name: "lock-select.ts", source: `
+  export default function (pi) {
+    pi.registerTool({
+      name: "lock_select", label: "Lock select", description: "Ask the user which lock path to take",
+      parameters: { type: "object", properties: {} },
+      execute: async (_id, _params, _signal, _update, ctx) => {
+        const answer = await ctx.ui.select("Choose a lock path", ["Keep", "Change"]);
+        return { content: [{ type: "text", text: "chosen: " + (answer ?? "cancelled") }], details: { answer: answer ?? null } };
+      },
+    });
+  }
+` }] };
+
+/** `run-extension-ui`: an extension tool's select waits for the client's answer and resumes the turn with it. */
+export async function extensionUiScenario(session: LockSession) {
+  session.gateway.script([
+    async () => {
+      await session.gateway.observeLiveOperation(session.client, session.sessionId);
+      return fauxAssistantMessage([fauxToolCall("lock_select", {}, { id: "lock-select" })], { stopReason: "toolUse" });
+    },
+    () => fauxAssistantMessage("Keeping the lock path."),
+  ]);
+  const running = session.prompt("ask me which path");
+  // The client answers what it was shown: the interaction arrives on an event.
+  const pending = await waitFor(() => {
+    for (const event of session.client.events) {
+      const shown = (event.payload as { extensionPresentation?: { pendingInteractions?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> } })
+        ?.extensionPresentation?.pendingInteractions?.[0];
+      if (shown) return shown;
+    }
+    return undefined;
+  }, "the pending select to reach the client");
+  const answered = await session.client.request("extension.respond", {
+    commandId: session.gateway.commandId(), sessionId: session.sessionId, interactionId: pending.id,
+    hostEpoch: pending.hostEpoch, presentationRevision: pending.presentationRevision, value: "Keep",
+  });
+  expect(answered.ok, JSON.stringify(answered)).toBe(true);
+  expect((await running).ok).toBe(true);
+  return { pending, answered };
+}
