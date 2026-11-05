@@ -132,8 +132,9 @@ HEAD activity; and branches merged into `origin/main` or idle over 14 days. Exit
 means something needs a decision; `--json` prints the same report.
 
 `--prune` deletes only expired scratch and evidence (never through a symlinked
-`.scratch` or `test-results`, and never in a linked worktree with a live process or
-local changes: that is another worker's), bytecode, branches merged into `origin/main` (not
+`.scratch` or `test-results`, and never in a linked worktree with a live process,
+local changes or unknown ignored data, or in any linked worktree without `lsof`:
+that is another worker's), bytecode, branches merged into `origin/main` (not
 merely into a local main) that no worktree has checked out (printing `git branch <name> <sha>`
 to restore each), and merged worktrees on a branch (a detached worktree belongs to the tool that
 made it, such as a verify batch lane) with no untracked, modified or
