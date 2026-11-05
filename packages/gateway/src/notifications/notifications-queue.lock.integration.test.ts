@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { NotificationGrantStore } from "./grant-store.js";
 import { NotificationService } from "./notification-service.js";
@@ -28,6 +29,9 @@ import { PushRelayClient } from "./relay-client.js";
  *
  * Plain integration regressions additionally cover overlapping waiting admissions
  * and controlled admission rejection.
+ *
+ * `notifications-waiting` keeps a golden for its provider requests only: the
+ * model-visible tool list and prompt for a session with an extension tool.
  *
  * Each check asserts the relay requests (method, path, status and the exact
  * envelope the relay reads) and the store's receipts, queue, revocations and inbox.
@@ -264,8 +268,17 @@ describe("gateway/notifications delivery locks", () => {
     expect(sessionKey).toEqual(DIGEST);
     dedupeKeysJoin(document);
     // The turns ran as scripted: four provider requests, the user's three prompts in order.
-    expect(gateway.record().providerRequests.map((request) => request.messages.filter((message) => message.role === "user").map((message) => message.text)),
+    const providerRequests = gateway.record().providerRequests;
+    expect(providerRequests.map((request) => request.messages.filter((message) => message.role === "user").map((message) => message.text)),
       "the scripted turns").toEqual([[title], [title], [title, "is it still running"], [title, "is it still running", "and now"]]);
+    // What the model receives (tool names, prompt sections and hash, messages) is
+    // model-visible text; this session's tool list, with its extension tool, is pinned
+    // only here, so it stays a golden.
+    await compareWithGolden({
+      module: "gateway/notifications", ...lockPaths(import.meta.url, "notifications-waiting"), update: lockUpdateRequested("gateway/notifications"),
+      trace: { lock: "notifications-waiting", providerRequests: providerRequests as unknown as TraceValue[] },
+      validate: () => { expect(providerRequests).toHaveLength(4); },
+    });
   }, 60_000);
 
   it("overlapping terminal admissions send one waiting push per live background episode", async () => {

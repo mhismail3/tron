@@ -1,0 +1,189 @@
+{
+  "lock": "notifications-waiting",
+  "providerRequests": [
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_background",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:278f06a14b3b9547f4d8b53f92f82f6e4da4f7a23477a36cf4887c313fbe7573",
+      "messages": [
+        {
+          "role": "user",
+          "text": "start the background run"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_background",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:278f06a14b3b9547f4d8b53f92f82f6e4da4f7a23477a36cf4887c313fbe7573",
+      "messages": [
+        {
+          "role": "user",
+          "text": "start the background run"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_background"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "Background run started.",
+          "toolName": "lock_background"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_background",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:278f06a14b3b9547f4d8b53f92f82f6e4da4f7a23477a36cf4887c313fbe7573",
+      "messages": [
+        {
+          "role": "user",
+          "text": "start the background run"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_background"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "Background run started.",
+          "toolName": "lock_background"
+        },
+        {
+          "role": "assistant",
+          "text": "The background run is under way."
+        },
+        {
+          "role": "user",
+          "text": "is it still running"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "lock_background",
+        "jev",
+        "web_search",
+        "settings",
+        "projects",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer",
+        "notify"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "cwd"
+      ],
+      "promptHash": "sha256:278f06a14b3b9547f4d8b53f92f82f6e4da4f7a23477a36cf4887c313fbe7573",
+      "messages": [
+        {
+          "role": "user",
+          "text": "start the background run"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "lock_background"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "Background run started.",
+          "toolName": "lock_background"
+        },
+        {
+          "role": "assistant",
+          "text": "The background run is under way."
+        },
+        {
+          "role": "user",
+          "text": "is it still running"
+        },
+        {
+          "role": "assistant",
+          "text": "Still waiting on the background run."
+        },
+        {
+          "role": "user",
+          "text": "and now"
+        }
+      ]
+    }
+  ]
+}
