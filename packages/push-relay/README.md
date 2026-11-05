@@ -198,6 +198,10 @@ development toolchain, so that `npm audit` stays clean (#489):
   `miniflare`/`workerd`.
 - The current `miniflare` (5.20261006.0-alpha) pins `sharp` 0.35.4. The
   override raises it to the patched 0.35.5.
+- It also pins `undici` 7.29.1; the override raises it to the patched 7.30.1.
+  Newer `miniflare` releases that depend on a fixed `undici` drop exports the
+  pool 0.22.0 imports, so the pool cannot move with them yet.
+- The pool 0.22.0 pins `zod` 4.4.3; the override raises it to the patched 4.6.6.
 
 Remove each entry once an upstream release depends on a fixed version itself.
 Check each change with `npm audit`, `npm test` and both dry-run builds. An
