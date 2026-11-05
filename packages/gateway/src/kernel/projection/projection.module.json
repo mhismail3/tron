@@ -22,6 +22,8 @@
   ],
   "dependsOn": [
     "gateway/pi",
-    "gateway/receipts"
+    "gateway/receipts",
+    "gateway/resources",
+    "gateway/session-catalog"
   ]
 }

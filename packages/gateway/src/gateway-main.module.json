@@ -22,6 +22,14 @@
     "gateway/automations",
     "gateway/notifications",
     "gateway/run",
-    "gateway/session-catalog"
+    "gateway/session-catalog",
+    "gateway/delegation",
+    "gateway/integrations",
+    "gateway/machine",
+    "gateway/projects",
+    "gateway/resources",
+    "gateway/security",
+    "gateway/session-search",
+    "gateway/transport"
   ]
 }

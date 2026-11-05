@@ -10,6 +10,19 @@
     "gateway/integrations-contract",
     "gateway/pi",
     "gateway/receipts",
-    "gateway/settings"
+    "gateway/settings",
+    "gateway/admin",
+    "gateway/automations",
+    "gateway/display",
+    "gateway/extensions",
+    "gateway/home",
+    "gateway/machine",
+    "gateway/notifications",
+    "gateway/projection",
+    "gateway/providers",
+    "gateway/resources",
+    "gateway/run",
+    "gateway/security",
+    "gateway/session-catalog"
   ]
 }

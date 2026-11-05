@@ -6,6 +6,9 @@
   "dependsOn": [
     "gateway/integrations-contract",
     "gateway/host",
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/extensions",
+    "gateway/providers",
+    "gateway/resources"
   ]
 }
