@@ -1,9 +1,9 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
+import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { NotificationGrantStore } from "./grant-store.js";
 import { NotificationService } from "./notification-service.js";
@@ -28,14 +28,17 @@ import { PushRelayClient } from "./relay-client.js";
  *   the grant's revocation reaches the relay once it is available.
  *
  * Plain integration regressions additionally cover overlapping waiting admissions
- * and controlled admission rejection. The original three golden locks are unchanged.
+ * and controlled admission rejection.
  *
- * Dedupe keys, session keys and relay request ids are digests of per-run
- * session ids; each is relabelled by first appearance (`<digest:n>`), so a retry
- * under the same request id, or an inbox row naming it, reads as the same label.
+ * `notifications-waiting` keeps a golden for its provider requests only: the
+ * model-visible tool list and prompt for a session with an extension tool.
+ *
+ * Each check asserts the relay requests (method, path, status and the exact
+ * envelope the relay reads) and the store's receipts, queue, revocations and inbox.
+ * Dedupe keys, session keys and relay request ids are digests of per-run session
+ * ids, so they are checked by shape and by identity: a retry reuses its request id,
+ * and a push's receipt, queued intent and inbox entry share one dedupe key.
  */
-
-const MODULE = "gateway/notifications";
 const RELAY_ORIGIN = "https://relay.lock.invalid";
 /** An extension tool that starts a declared asynchronous run: its status artifact
  * lives under the project's async run root, and the tool returns at once. */
@@ -61,7 +64,7 @@ const DETACHED_RUN = `
  * shared normalization would blind, so a retry's identity stays visible. */
 interface RelayRequest { method: string; path: string; requestDigest: string; status: number; envelope: unknown }
 interface PushDocument {
-  receipts: Array<{ result: string; kind?: string }>;
+  receipts: Array<{ result: string; kind?: string; dedupeKey: string; sessionKey: string }>;
   pending: Array<{ kind: string; targets: Array<{ attempts: number; outcome: string }> }>;
   revocations: unknown[];
   inbox: unknown[];
@@ -87,23 +90,65 @@ class Relay {
   };
 }
 
+const ISO = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
 /** A per-run digest (`notificationHash`: base64url SHA-256). */
-const DIGEST = /^[A-Za-z0-9_-]{43}$/;
+const DIGEST = expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u);
+const GRANT = "lock-grant-0001";
+const SECRET = Buffer.alloc(32, 7).toString("base64url");
 
-/** The trace with each digest relabelled by its first appearance. */
-function relabelled(trace: Record<string, unknown>): TraceValue {
-  const labels = new Map<string, string>();
-  const walk = (value: unknown): unknown => {
-    if (typeof value === "string" && DIGEST.test(value)) {
-      if (!labels.has(value)) labels.set(value, `<digest:${labels.size + 1}>`);
-      return labels.get(value);
-    }
-    if (Array.isArray(value)) return value.map(walk);
-    if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, walk(child)]));
-    return value;
-  };
-  return walk(trace) as TraceValue;
+/** The relay envelope of one push, exactly: the cross-component format the relay reads. */
+function envelope(sessionId: string, title: string, notificationKind: string, message: string) {
+  return { version: 1, kind: "agent_alert", notificationKind, machineId: "lock-machine", sessionId, title, message, requestId: DIGEST, expiresAt: ISO };
 }
+
+/** The POSTs the relay received: status and envelope, with each request's id. */
+function posts(relay: Relay) {
+  return relay.requests.filter((request) => request.method === "POST").map((request) => {
+    expect(request.path).toBe("/v3/notifications");
+    expect((request.envelope as { requestId: string }).requestId, "the relay request id is the envelope's").toBe(request.requestDigest);
+    return { status: request.status, id: request.requestDigest, envelope: request.envelope };
+  });
+}
+
+/**
+ * One delivered or queued push as the store holds it: its receipt, its inbox entry
+ * and (while queued) its pending intent, joined by one dedupe key and naming the
+ * relay request the push went out under.
+ */
+function push(input: { sessionKey: unknown; requestId: string; envelope: unknown; result: string; title: string; kind: string; message: string; sessionId: string }) {
+  const dedupeKey = DIGEST;
+  return {
+    receipt: { dedupeKey, sessionKey: input.sessionKey, grantIds: [GRANT], createdAt: ISO, expiresAt: ISO, result: input.result },
+    inbox: { id: expect.any(String), dedupeKey, kind: input.kind, machineId: "lock-machine", message: input.message, outcome: input.result,
+      requestIds: [input.requestId], sessionId: input.sessionId, title: input.title, createdAt: ISO, updatedAt: ISO },
+    pending: (attempts: number, outcome: string) => ({ id: expect.any(String), dedupeKey, kind: input.kind, sessionKey: input.sessionKey,
+      createdAt: ISO, expiresAt: ISO, targets: [{ grantId: GRANT, attempts, outcome, nextAttemptAt: ISO, requestId: input.requestId,
+        title: input.title, message: input.message, route: { machineId: "lock-machine", sessionId: input.sessionId }, relayEnvelope: input.envelope }] }),
+  };
+}
+
+/** The store's receipts, queue, revocations and inbox (the parts the push contract owns), each queued target's relay envelope parsed. */
+function parsed(document: PushDocument) {
+  return { receipts: document.receipts, revocations: document.revocations, inbox: document.inbox, pending: document.pending.map((intent) => ({ ...intent, targets: intent.targets.map((target) => {
+    const stored = (target as { relayEnvelope?: unknown }).relayEnvelope;
+    return typeof stored === "string" ? { ...target, relayEnvelope: JSON.parse(stored) as unknown } : target;
+  }) })) };
+}
+
+/** Each entry of one dedupe key shares it, and different pushes do not. */
+function dedupeKeysJoin(document: PushDocument): void {
+  const keys = document.receipts.map((receipt) => receipt.dedupeKey);
+  expect(new Set(keys).size, "one dedupe key per push").toBe(keys.length);
+  expect((document.inbox as Array<{ dedupeKey: string }>).map((entry) => entry.dedupeKey), "the inbox names each push's receipt").toEqual(keys);
+  for (const intent of document.pending as unknown as Array<{ dedupeKey: string }>) expect(keys, "each queued intent has its receipt").toContain(intent.dedupeKey);
+}
+
+/** A response frame as the phone reads it. */
+const answer = (frame: { ok: boolean; result?: unknown; error?: unknown }) => ({ ok: frame.ok, result: frame.result ?? null, error: frame.error ?? null });
+
+/** The registration the phone made, as the Gateway reported it. */
+const REGISTERED = { available: true, deviceRegistered: true, enabledDeviceCount: 1, notifyWhenAskPresented: true, notifyWhenFinished: true,
+  notifyWhenWaiting: true, pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false };
 
 interface PushLock {
   readonly gateway: LockGateway;
@@ -138,11 +183,11 @@ async function pushLock(name: string, extensions: Array<{ name: string; source: 
   gateway = await startLockGateway(name, { extensions, notifications: async (tronHome) => { home = tronHome; return build(); } });
   owned.push(() => gateway.dispose());
   const phone = await gateway.connect("phone", { clientRole: "mobile" });
-  expect((await phone.request("push.registration.upsert", {
-    commandId: gateway.commandId(), installationId: "lock-installation", grantId: "lock-grant-0001",
-    secret: Buffer.alloc(32, 7).toString("base64url"), previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
+  expect(answer(await phone.request("push.registration.upsert", {
+    commandId: gateway.commandId(), installationId: "lock-installation", grantId: GRANT,
+    secret: SECRET, previewsEnabled: false, relayOrigin: RELAY_ORIGIN,
     notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true,
-  })).ok).toBe(true);
+  })), "the registration").toEqual({ ok: true, result: REGISTERED, error: null });
   const created = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
   const sessionId = created.result.sessionId as string;
   const opened = await phone.request("session.open", { sessionId });
@@ -152,7 +197,7 @@ async function pushLock(name: string, extensions: Array<{ name: string; source: 
     service: () => current,
     freeze: () => { frozen = Date.now(); },
     advance: (milliseconds) => { skew += milliseconds; },
-    document: async () => (await gateway.file(`${gateway.tronHome}/gateway/notifications.json`)) as unknown as PushDocument,
+    document: async () => JSON.parse(await readFile(join(gateway.tronHome, "gateway", "notifications.json"), "utf8")) as PushDocument,
     prompt: (text) => phone.send("session.prompt", { commandId: gateway.commandId(), sessionId, text }),
   };
 }
@@ -163,20 +208,6 @@ function pushes(relay: Relay): string[] {
     const envelope = request.envelope as { notificationKind?: string; title?: string; message?: string };
     return `${request.status} ${envelope.notificationKind} [${envelope.title}]: ${envelope.message}`;
   }, 60_000);
-}
-
-/** The store's queue, receipts, revocations and inbox; each target's stored relay
- * envelope is parsed, so its values are normalized like every other. */
-function storeRecord(document: PushDocument, gateway: LockGateway): TraceValue {
-  const pending = document.pending.map((intent) => ({
-    ...intent,
-    targets: intent.targets.map((target) => {
-      const envelope = (target as { relayEnvelope?: unknown }).relayEnvelope;
-      return typeof envelope === "string" ? { ...target, relayEnvelope: JSON.parse(envelope) as unknown } : target;
-    }),
-  }));
-  return normalizeTraceValue({ receipts: document.receipts, pending, revocations: document.revocations, inbox: document.inbox } as unknown as TraceValue,
-    gateway.normalization);
 }
 
 describe("gateway/notifications delivery locks", () => {
@@ -217,23 +248,36 @@ describe("gateway/notifications delivery locks", () => {
     await waitFor(() => pushes(relay).length === 2, "the finished push");
     await waitFor(async () => (await lock.document()).pending.length === 0, "the finished push to settle");
 
-    const recorded = gateway.record();
-    const trace = relabelled({
-      lock: "notifications-waiting",
-      relayRequests: normalizeTraceValue(relay.requests as unknown as TraceValue, gateway.normalization),
-      store: storeRecord(await lock.document(), gateway),
-      exchanges: recorded.exchanges,
-      providerRequests: recorded.providerRequests as unknown as TraceValue[],
-    });
+    expect(afterSecondTurn, "the second turn in the same waiting episode pushes nothing").toEqual(["200 waiting [start the background run]: The agent is waiting on 1 background task."]);
+    const title = "start the background run";
+    const sent = posts(relay);
+    expect(sent, "one waiting push, then one finished push, each accepted").toEqual([
+      { status: 200, id: DIGEST, envelope: envelope(sessionId, title, "waiting", "The agent is waiting on 1 background task.") },
+      { status: 200, id: DIGEST, envelope: envelope(sessionId, title, "agent_finished", "The agent finished responding.") },
+    ]);
+    expect(sent[0]!.id, "distinct pushes go out under distinct request ids").not.toBe(sent[1]!.id);
+    expect(relay.requests.every((request) => request.method === "POST"), "nothing is revoked").toBe(true);
+    const document = await lock.document();
+    const sessionKey = document.receipts[0]!.sessionKey;
+    const waiting = push({ sessionKey, requestId: sent[0]!.id, envelope: sent[0]!.envelope, result: "accepted_by_apns", title, kind: "waiting",
+      message: "The agent is waiting on 1 background task.", sessionId });
+    const finished = push({ sessionKey, requestId: sent[1]!.id, envelope: sent[1]!.envelope, result: "accepted_by_apns", title, kind: "agent_finished",
+      message: "The agent finished responding.", sessionId });
+    expect(parsed(document), "both pushes delivered: receipts and inbox, nothing pending").toEqual({
+      receipts: [waiting.receipt, finished.receipt], pending: [], revocations: [], inbox: [waiting.inbox, finished.inbox] });
+    expect(sessionKey).toEqual(DIGEST);
+    dedupeKeysJoin(document);
+    // The turns ran as scripted: four provider requests, the user's three prompts in order.
+    const providerRequests = gateway.record().providerRequests;
+    expect(providerRequests.map((request) => request.messages.filter((message) => message.role === "user").map((message) => message.text)),
+      "the scripted turns").toEqual([[title], [title], [title, "is it still running"], [title, "is it still running", "and now"]]);
+    // What the model receives (tool names, prompt sections and hash, messages) is
+    // model-visible text; this session's tool list, with its extension tool, is pinned
+    // only here, so it stays a golden.
     await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, (trace as { lock: string }).lock), trace, update: lockUpdateRequested(MODULE),
-      validate: () => {
-        expect(afterSecondTurn).toEqual(["200 waiting [start the background run]: The agent is waiting on 1 background task."]);
-        expect(pushes(relay)).toEqual([
-          "200 waiting [start the background run]: The agent is waiting on 1 background task.",
-          "200 agent_finished [start the background run]: The agent finished responding.",
-        ]);
-      },
+      module: "gateway/notifications", ...lockPaths(import.meta.url, "notifications-waiting"), update: lockUpdateRequested("gateway/notifications"),
+      trace: { lock: "notifications-waiting", providerRequests: providerRequests as unknown as TraceValue[] },
+      validate: () => { expect(providerRequests).toHaveLength(4); },
     });
   }, 60_000);
 
@@ -362,31 +406,38 @@ describe("gateway/notifications delivery locks", () => {
     await waitFor(async () => (await lock.document()).pending.length === 0, "the restarted owner to deliver the queue");
     const inbox = await lock.service().inbox();
 
-    const recorded = gateway.record();
-    const trace = relabelled({
-      lock: "notifications-queued-restart",
-      relayRequests: normalizeTraceValue(relay.requests as unknown as TraceValue, gateway.normalization),
-      queued: storeRecord(queued, gateway),
-      delivered: storeRecord(await lock.document(), gateway),
-      inbox: normalizeTraceValue(inbox as unknown as TraceValue, gateway.normalization),
-      exchanges: recorded.exchanges,
-    });
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, (trace as { lock: string }).lock), trace, update: lockUpdateRequested(MODULE),
-      validate: () => {
-        expect(pushes(relay)).toEqual([
-          "503 agent_finished [finish while the relay is down]: The agent finished responding.",
-          "503 agent_finished [finish while the relay is down]: The agent was stopped.",
-          "200 agent_finished [finish while the relay is down]: The agent finished responding.",
-          "200 agent_finished [finish while the relay is down]: The agent was stopped.",
-        ]);
-        const ids = relay.requests.filter((request) => request.method === "POST").map((request) => request.requestDigest);
-        expect(ids[2]).toBe(ids[0]);
-        expect(ids[3]).toBe(ids[1]);
-        expect(ids[0]).not.toBe(ids[1]);
-        expect(queued.pending.map((intent) => intent.targets[0]!.outcome)).toEqual(["retryable", "retryable"]);
-      },
-    });
+    const title = "finish while the relay is down";
+    const finishedMessage = "The agent finished responding.";
+    const stoppedMessage = "The agent was stopped.";
+    const sent = posts(relay);
+    const finishedEnvelope = envelope(sessionId, title, "agent_finished", finishedMessage);
+    const stoppedEnvelope = envelope(sessionId, title, "agent_finished", stoppedMessage);
+    expect(sent, "each push is refused once while the relay is down, then delivered in order by the restarted owner").toEqual([
+      { status: 503, id: DIGEST, envelope: finishedEnvelope }, { status: 503, id: DIGEST, envelope: stoppedEnvelope },
+      { status: 200, id: DIGEST, envelope: finishedEnvelope }, { status: 200, id: DIGEST, envelope: stoppedEnvelope },
+    ]);
+    expect(sent[2]!.id, "the finished push is retried under its own request id").toBe(sent[0]!.id);
+    expect(sent[3]!.id, "the stopped push is retried under its own request id").toBe(sent[1]!.id);
+    expect(sent[0]!.id).not.toBe(sent[1]!.id);
+    expect(sent[2]!.envelope, "and with the same envelope").toEqual(sent[0]!.envelope);
+    expect(sent[3]!.envelope).toEqual(sent[1]!.envelope);
+    const sessionKey = queued.receipts[0]!.sessionKey;
+    const finished = (result: string) => push({ sessionKey, requestId: sent[0]!.id, envelope: sent[0]!.envelope, result, title, kind: "agent_finished", message: finishedMessage, sessionId });
+    const stopped = (result: string) => push({ sessionKey, requestId: sent[1]!.id, envelope: sent[1]!.envelope, result, title, kind: "agent_finished", message: stoppedMessage, sessionId });
+    expect(parsed(queued), "both pushes stay queued after one retryable attempt each").toEqual({
+      receipts: [finished("queued").receipt, stopped("queued").receipt],
+      pending: [finished("queued").pending(1, "retryable"), stopped("queued").pending(1, "retryable")],
+      revocations: [], inbox: [finished("queued").inbox, stopped("queued").inbox] });
+    dedupeKeysJoin(queued);
+    const delivered = await lock.document();
+    expect(parsed(delivered), "the restarted owner delivers both").toEqual({
+      receipts: [finished("accepted_by_apns").receipt, stopped("accepted_by_apns").receipt], pending: [], revocations: [],
+      inbox: [finished("accepted_by_apns").inbox, stopped("accepted_by_apns").inbox] });
+    expect(delivered.receipts.map((receipt) => receipt.dedupeKey), "under the queued receipts")
+      .toEqual(queued.receipts.map((receipt) => receipt.dedupeKey));
+    const entry = (message: string) => ({ version: 1, id: expect.any(String), kind: "agent_finished", title, message, outcome: "accepted_by_apns",
+      sessionId, isUnread: true, createdAt: ISO, updatedAt: ISO });
+    expect(inbox, "the phone's inbox lists both, newest first, unread").toEqual({ notifications: [entry(stoppedMessage), entry(finishedMessage)], revision: expect.stringMatching(/^[0-9a-f]{32}$/u), unreadCount: 2 });
   }, 60_000);
 
   it("notifications-queued-cancel: removing the registration cancels a queued push and revokes the grant once the relay is back", async () => {
@@ -417,24 +468,28 @@ describe("gateway/notifications delivery locks", () => {
     await lock.service().drain();
     const inbox = await lock.service().inbox();
 
-    const recorded = gateway.record();
-    const trace = relabelled({
-      lock: "notifications-queued-cancel",
-      relayRequests: normalizeTraceValue(relay.requests as unknown as TraceValue, gateway.normalization),
-      queued: storeRecord(queued, gateway),
-      cancelled: storeRecord(cancelled, gateway),
-      final: storeRecord(await lock.document(), gateway),
-      inbox: normalizeTraceValue(inbox as unknown as TraceValue, gateway.normalization),
-      exchanges: recorded.exchanges,
-    });
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, (trace as { lock: string }).lock), trace, update: lockUpdateRequested(MODULE),
-      validate: () => {
-        expect(pushes(relay)).toEqual(["503 agent_finished [finish while the relay is down]: The agent finished responding."]);
-        expect(cancelled.pending).toEqual([]);
-        expect(cancelled.receipts.at(-1)?.result).toBe("failed");
-        expect(relay.requests.filter((request) => request.method === "DELETE").map((request) => request.status)).toEqual([503, 200]);
-      },
-    });
+    const title = "finish while the relay is down";
+    const message = "The agent finished responding.";
+    const sent = posts(relay);
+    expect(sent, "the push is attempted once and never again").toEqual([{ status: 503, id: DIGEST, envelope: envelope(sessionId, title, "agent_finished", message) }]);
+    const revocations = relay.requests.filter((request) => request.method === "DELETE");
+    expect(revocations.map(({ path, status, envelope: body }) => ({ path, status, body })), "the grant is revoked once the relay is back")
+      .toEqual([{ path: `/v3/grants/${GRANT}`, status: 503, body: null }, { path: `/v3/grants/${GRANT}`, status: 200, body: null }]);
+    expect(revocations[1]!.requestDigest, "under one request id").toBe(revocations[0]!.requestDigest);
+    expect(revocations[0]!.requestDigest).toEqual(DIGEST);
+    expect(revocations[0]!.requestDigest).not.toBe(sent[0]!.id);
+    expect(relay.requests.map((request) => request.method), "in this order").toEqual(["POST", "DELETE", "DELETE"]);
+    const sessionKey = queued.receipts[0]!.sessionKey;
+    const finished = (result: string) => push({ sessionKey, requestId: sent[0]!.id, envelope: sent[0]!.envelope, result, title, kind: "agent_finished", message, sessionId });
+    expect(parsed(queued), "the push is queued after one retryable attempt").toEqual({
+      receipts: [finished("queued").receipt], pending: [finished("queued").pending(1, "retryable")], revocations: [], inbox: [finished("queued").inbox] });
+    dedupeKeysJoin(queued);
+    const failed = { receipts: [finished("failed").receipt], pending: [], inbox: [finished("failed").inbox] };
+    expect(parsed(cancelled), "removing the registration cancels it: receipt and inbox failed, the grant's revocation queued").toEqual({ ...failed,
+      revocations: [{ grantId: GRANT, secret: SECRET, requestId: revocations[0]!.requestDigest, attempts: 1, createdAt: ISO, nextAttemptAt: ISO }] });
+    expect(parsed(await lock.document()), "the delivered revocation leaves the store").toEqual({ ...failed, revocations: [] });
+    expect(inbox, "the phone's inbox keeps the failed push, unread").toEqual({ notifications: [{ version: 1, id: expect.any(String), kind: "agent_finished",
+      title, message, outcome: "failed", sessionId, isUnread: true, createdAt: ISO, updatedAt: ISO }], revision: expect.stringMatching(/^[0-9a-f]{32}$/u), unreadCount: 1 });
+    expect(answer(removed), "the phone's removal").toEqual({ ok: true, result: { removed: true }, error: null });
   }, 60_000);
 });
