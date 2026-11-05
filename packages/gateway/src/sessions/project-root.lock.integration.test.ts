@@ -1,10 +1,9 @@
-import { spawnSync } from "node:child_process";
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
+import { projectRootTrustScenario } from "../../test-support/lock-scenarios.js";
 
 /**
  * Project-root lock (restructure plan §6.4, V3; K-0 §7 E0e) guarding the Pi seam
@@ -31,89 +30,12 @@ const MODULE = "gateway/session-catalog";
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
-function git(cwd: string, ...args: string[]): void {
-  const result = spawnSync("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
-  });
-  if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
-}
-
-async function write(path: string, text: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, text);
-}
-
-/** A project extension whose tool reports where the SDK says the chat is. */
-const probeExtension = (tool: string) => `
-export default function (pi) {
-  pi.registerTool({
-    name: ${JSON.stringify(tool)}, label: "Project probe", description: "Report the chat's cwd and Project root",
-    parameters: { type: "object", properties: {} },
-    execute: async (_id, _params, _signal, _update, ctx) => ({
-      content: [{ type: "text", text: "cwd=" + ctx.cwd + " projectDir=" + ctx.projectDir }], details: {},
-    }),
-  });
-}
-`;
-
-const skill = (name: string, description: string) => `---\nname: ${name}\ndescription: ${description}\n---\n\nFollow ${name}.\n`;
-
 describe("gateway/session-catalog project-root lock", () => {
   it("projectDir: a subdirectory chat of a trusted Git project loads the root's Project layer and keeps its cwd", async () => {
     const gateway = await startLockGateway("project-root-trust");
     gateways.push(gateway);
-    // Trust and the SDK name canonical paths; the temp root is a symlink on macOS.
-    const root = await realpath(gateway.root);
-    const project = join(root, "project");
-    const nested = join(project, "packages", "app");
-    await write(join(project, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 7 }, compaction: { reserveTokens: 4_096, keepRecentTokens: 240 }, skills: ["../lock-skills"] })}\n`);
-    await write(join(project, ".pi", "extensions", "root-probe.ts"), probeExtension("project_probe"));
-    await write(join(project, "lock-skills", "root-lock-skill", "SKILL.md"), skill("root-lock-skill", "The project root's lock skill"));
-    await write(join(project, "AGENTS.md"), "ROOT-INSTRUCTIONS: the project root's AGENTS.md.\n");
-    await write(join(nested, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 9 }, compaction: { reserveTokens: 8_192, keepRecentTokens: 480 }, skills: ["../nested-skills"] })}\n`);
-    await write(join(nested, ".pi", "extensions", "nested-probe.ts"), probeExtension("nested_probe"));
-    await write(join(nested, "nested-skills", "nested-lock-skill", "SKILL.md"), skill("nested-lock-skill", "A subdirectory skill that must not load"));
-    await write(join(nested, "AGENTS.md"), "NESTED-INSTRUCTIONS: the subdirectory's AGENTS.md.\n");
-    git(project, "init", "-q");
-
-    const phone = await gateway.connect("phone");
-    let systemPrompt = "";
-    gateway.script([
-      async (context) => {
-        await gateway.observeLiveOperation(phone, sessionId);
-        systemPrompt = getCurrentSystemPrompt(context.messages) ?? "";
-        return fauxAssistantMessage([fauxToolCall("project_probe", {}, { id: "lock-project-probe" })], { stopReason: "toolUse" });
-      },
-      () => fauxAssistantMessage("The chat runs in the subdirectory of the trusted project."),
-      () => fauxAssistantMessage("Trust was revoked for the project."),
-    ]);
-
-    const undecided = await phone.request("trust.inspect", { cwd: nested });
-    const refused = await phone.request("session.create", { commandId: gateway.commandId(), cwd: nested });
-    const decided = await phone.request("settings.change", {
-      commandId: gateway.commandId(), target: { kind: "global" }, reason: "Trust the lock project",
-      changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: true, qualifiers: { project: nested } }],
-    });
-    const rootInspection = await phone.request("trust.inspect", { cwd: project });
-    const nestedInspection = await phone.request("trust.inspect", { cwd: nested });
-    const created = await phone.request("session.create", { commandId: gateway.commandId(), cwd: nested });
-    expect(created.ok, JSON.stringify(created)).toBe(true);
-    const sessionId = created.result.sessionId as string;
-    const opened = await phone.request("session.open", { sessionId });
-    expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
-    const chatSettings = await phone.request("settings.resolve", { target: { kind: "session", sessionId }, keys: ["run.retry.maxRetries"] });
-    const projectSettings = await phone.request("settings.resolve", { target: { kind: "project", cwd: nested }, keys: ["run.retry.maxRetries", "permissions.projectTrust"] });
-    expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "where does this chat run?" })).ok).toBe(true);
-    await gateway.settled(sessionId);
-    // Revoking the root's decision reloads the chat through its projectDir without the Project layer.
-    const revoked = await phone.request("settings.change", {
-      commandId: gateway.commandId(), target: { kind: "global" }, reason: "Stop trusting the lock project",
-      changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: false, qualifiers: { project: nested } }],
-    });
-    expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "and after revoking trust?" })).ok).toBe(true);
-    await gateway.settled(sessionId);
-    const transcript = await phone.request("session.transcript", { sessionId });
+    const { root, project, nested, phone, systemPrompt, undecided, refused, decided, rootInspection, nestedInspection, created, sessionId, opened,
+      chatSettings, projectSettings, revoked, transcript } = await projectRootTrustScenario(gateway);
 
     const recorded = gateway.record();
     const trace = {
@@ -129,7 +51,7 @@ describe("gateway/session-catalog project-root lock", () => {
         .map(([path, trusted]) => ({ path, trusted })), gateway.normalization) },
       // The prompt hash already covers the whole text; these name what it must hold.
       observed: Object.fromEntries(["root-lock-skill", "nested-lock-skill", "ROOT-INSTRUCTIONS", "NESTED-INSTRUCTIONS"]
-        .map((marker) => [marker, systemPrompt.includes(marker)])),
+        .map((marker) => [marker, systemPrompt().includes(marker)])),
     };
     await compareWithGolden({
       module: MODULE, ...lockPaths(import.meta.url, trace.lock), trace, update: lockUpdateRequested(MODULE),
