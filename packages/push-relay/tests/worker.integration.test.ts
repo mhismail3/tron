@@ -679,4 +679,18 @@ describe("v3 Worker boundary", () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "invalid_attestation" });
   });
+
+  test("reports an unreadable stored assertion key as a server fault, not a rejected proof", async () => {
+    // initializeAndSeed stores 'test-spki' for this installation: the server's own state, which
+    // no client presentation can repair. The valid assertion must not be blamed on the client.
+    const registration = await assertionRegistration();
+    await initializeAndSeed();
+    const response = await SELF.fetch("https://push.test/v3/installations", registration.request);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "temporarily_unavailable" });
+    const counter = await runInDurableObject(stub(), async (_instance: PushRegistry, state) => state.storage.sql.exec<{ assertion_counter: number }>(
+      "SELECT assertion_counter FROM installations WHERE installation_id = ?", testGrant.installationId,
+    ).one().assertion_counter);
+    expect(counter).toBe(1);
+  });
 });
