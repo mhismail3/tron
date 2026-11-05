@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-KEYS = {"root", "scriptsTop", "frozen"}
+KEYS = {"root", "scriptsTop", "frozen", "uncarded"}
 TEST_NAME = re.compile(r"(^test[-_].+\.(py|sh|js|mjs)$)|(\.test\.(ts|mjs|js)$)|(Tests?\.swift$)")
 SWIFT_TEST_DIRS = {"UITests", "E2ETests", "ProfilingTests", "SwiftAppUITests", "Tests"}
 NO_TESTS = {"docs", "config", ".agents", ".github"}
@@ -98,10 +98,12 @@ def problems(layout: dict, paths: list[str], modes: dict[str, str], read, base: 
                            "SwiftAppUITests/, Tests/), not app sources")
 
     if base is not None and not schema(base):
-        for key in ("root", "scriptsTop"):
+        for key in ("root", "scriptsTop", "uncarded"):
+            fix = "card the module instead (tools/ownership/README.md, \"Purpose cards\")" if key == "uncarded" \
+                else f"put the file where it belongs instead ({WHERE})"
             for entry in sorted(set(layout[key]) - set(base[key])):
                 out.append(f"layout: root.module.json layout.{key} gained {entry!r} since origin/main; these lists only "
-                           f"shrink: put the file where it belongs instead ({WHERE})")
+                           f"shrink: {fix}")
         for path in sorted(set(base["frozen"]) - set(frozen) - tracked):
             out.append(f"layout: {path} was frozen at origin/main and this change unfreezes and removes it; code older "
                        "than this checkout still runs it, so keep it until the maintainer's checkpoint ships without it")
