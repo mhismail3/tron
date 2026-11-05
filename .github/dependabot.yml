@@ -1,4 +1,7 @@
 version: 2
+# Security alerts cover every lockfile without configuration. Version updates arrive as one
+# grouped minor/patch PR per package; majors stay separate for a maintainer decision. Agents
+# fold a PR by redoing the bump on main and landing it with plain Git, then close the PR.
 updates:
   - package-ecosystem: npm
     directory: /packages/gateway
@@ -6,16 +9,22 @@ updates:
       interval: weekly
     labels: ["kind:maintenance", "area:gateway"]
     ignore:
+      # The Pi SDK and its vendored fork move together only through the Pi updater
+      # (packages/gateway/docs/pi-sdk-maintenance.md); a partial bump splits the SDK.
+      - dependency-name: "@earendil-works/*"
       # The Node types follow the runtime's major (.node-version); a Node major
       # moves through its own runbook (#245), not a types-only bump.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
-      pi-sdk:
-        patterns:
-          - "@earendil-works/pi-*"
-  - package-ecosystem: github-actions
-    directory: /
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: npm
+    directory: /packages/push-relay
     schedule:
       interval: weekly
-    labels: ["kind:maintenance", "area:tooling"]
+    labels: ["kind:maintenance", "area:relay"]
+    # A wrangler bump moves the miniflare override with it (packages/push-relay/README.md).
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
