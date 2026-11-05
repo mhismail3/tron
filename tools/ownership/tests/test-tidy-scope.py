@@ -6,8 +6,9 @@ origin) and runs the command as a worker would:
 
 1. A detached-HEAD worktree belongs to the tool that made it (verify batch lanes, base
    checks): it is reported but never pruned, even when merged, clean and idle.
-2. Scratch and evidence in a linked worktree with a live process or local changes are
-   another worker's: they are not aged or pruned there; the primary checkout's still are.
+2. Scratch and evidence in a linked worktree with a live process, local changes or
+   unknown ignored data are another worker's (as is every linked worktree when `lsof` is
+   missing): they are not aged or pruned there; the primary checkout's still are.
 3. Loose files in `.pi/` are agent workflow scratch (Pi's subagent tool writes them there):
    aged and pruned like `.scratch/`, never reported as residue; tracked `.pi/prompts/`
    stay untouched.
@@ -85,6 +86,23 @@ class OwnershipScopeTests(ScopeCase):
         for tree in (f.repo, idle):
             self.assertFalse((tree / ".scratch/old.js").exists(), f"{tree} kept scratch: {json.dumps(result)}")
             self.assertFalse((tree / "test-results/run").exists(), f"{tree} kept evidence: {json.dumps(result)}")
+
+    def test_unknown_ignored_data_or_no_lsof_keeps_a_worktrees_scratch(self) -> None:
+        f = self.f
+        parked = f.worktree("parked-work", merged=False, idle_days=0)
+        f.write("junk/data.bin", root=parked)  # ignored, no named writer: someone's local data
+        age(f.write(".scratch/old.js", root=parked), 10)
+        self.report("--prune")
+        self.assertTrue((parked / ".scratch/old.js").exists())
+        plain = f.worktree("plain-work", merged=False, idle_days=0)
+        age(f.write(".scratch/old.js", root=plain), 10)
+        tools = {str(Path(shutil.which(name)).parent) for name in ("git", "python3", "bash")}
+        path = ":".join(sorted(tools - {"/usr/sbin"}) + ["/usr/bin", "/bin"])
+        self.assertIsNone(shutil.which("lsof", path=path))
+        result = f.tidy("--prune", env={**f.env, "PATH": path})
+        self.assertTrue((plain / ".scratch/old.js").exists(), result.stdout + result.stderr)
+        self.assertIn(result.returncode, (0, 1), result.stdout + result.stderr)
+        self.assertIn("tidy: lsof is unavailable; no worktree is pruned", result.stdout)
 
     def test_pi_workflow_scripts_are_scratch(self) -> None:
         f = self.f

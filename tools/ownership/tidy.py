@@ -205,7 +205,8 @@ def report(prune: bool) -> dict:
                         out["bytecode"].append(str(tree / entry))
                     elif known(entry, tree) is None:
                         out["residue"].append(str(tree / entry))
-                    elif known(entry, tree) == "local":
+                    # The same predicate as worktree removal: anything but regenerable output is local data.
+                    if not entry.endswith("__pycache__") and known(entry, tree) != "regenerable":
                         dirty = True
             if code != "!!":
                 dirty = True
