@@ -1,10 +1,8 @@
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { createAndOpen, DETACHED_RUN, drainBlockersScenario, openExisting, WAITING_COMMAND } from "../../test-support/lock-scenarios.js";
 
 /**
  * Heap and drain locks (restructure plan §6.4, V3; K-0 §7, guarding E5's run
@@ -34,56 +32,12 @@ async function tick(): Promise<void> {
   while (Date.now() <= last) await new Promise<void>((resolve) => { setImmediate(resolve); });
 }
 
-interface Opened { readonly sessionId: string; readonly subscriptionToken: string }
-
-async function createAndOpen(gateway: LockGateway, client: LockClient): Promise<Opened> {
-  const created = await client.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
-  expect(created.ok, JSON.stringify(created)).toBe(true);
-  return open(client, created.result.sessionId as string);
-}
-
-async function open(client: LockClient, sessionId: string): Promise<Opened> {
-  const opened = await client.request("session.open", { sessionId });
-  expect(opened.ok, JSON.stringify(opened)).toBe(true);
-  expect((await client.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
-  return { sessionId, subscriptionToken: opened.result.subscriptionToken as string };
-}
-
 /** Replace each session id by its role, so a normalized record still says which session. */
 function labelled(value: unknown, roles: ReadonlyMap<string, string>, gateway: LockGateway): TraceValue {
   let text = JSON.stringify(value ?? null);
   for (const [sessionId, role] of roles) text = text.split(sessionId).join(`<session:${role}>`);
   return normalizeTraceValue(JSON.parse(text), { ...gateway.normalization, stableIds: [...roles.values()].map((role) => `<session:${role}>`) });
 }
-
-const WAITING_COMMAND = `
-  export default function (pi) {
-    pi.registerCommand("lockask", {
-      description: "Ask which lock path to take",
-      handler: async (_args, ctx) => { await ctx.ui.select("Choose a lock path", ["Keep", "Change"]); },
-    });
-  }
-`;
-
-/** An extension tool that starts a declared asynchronous run: its status artifact
- * lives under the project's async run root, and the tool returns at once. */
-const DETACHED_RUN = `
-  import { mkdirSync, writeFileSync } from "node:fs";
-  import { join } from "node:path";
-  export default function (pi) {
-    pi.registerTool({
-      name: "lock_background", label: "Lock background", description: "Start the lock's background run",
-      parameters: { type: "object", properties: {} },
-      execute: async (_id, _params, _signal, _update, ctx) => {
-        const runId = "lock-background-run";
-        const asyncDir = join(ctx.cwd, ".pi", "subagents", "async-subagent-runs", runId);
-        mkdirSync(asyncDir, { recursive: true });
-        writeFileSync(join(asyncDir, "status.json"), JSON.stringify({ runId, state: "running", startedAt: Date.now(), lastUpdate: Date.now() }));
-        return { content: [{ type: "text", text: "Background run started." }], details: { runId, asyncDir, state: "running" } };
-      },
-    });
-  }
-`;
 
 describe("gateway/run heap and drain locks", () => {
   it("run-eviction-choice: capacity evicts the least recently used eligible runtime, never an open session or an unsaved draft", async () => {
@@ -115,10 +69,10 @@ describe("gateway/run heap and drain locks", () => {
     const a = await settledAndClosed("A");
     const b = await settledAndClosed("B");
     const c = await settledAndClosed("C");
-    const openC = await open(phone, c);
+    const openC = await openExisting(phone, c);
     await tick();
     for (const sessionId of [a, b]) {
-      const reopened = await open(phone, sessionId);
+      const reopened = await openExisting(phone, sessionId);
       expect((await phone.request("session.close", { sessionId, subscriptionToken: reopened.subscriptionToken })).ok).toBe(true);
       await tick();
     }
@@ -182,67 +136,8 @@ describe("gateway/run heap and drain locks", () => {
       extensions: [{ name: "lock-ask.ts", source: WAITING_COMMAND }, { name: "lock-background.ts", source: DETACHED_RUN }],
     });
     gateways.push(gateway);
-    const phone = await gateway.connect("phone");
-    gateway.script([
-      () => fauxAssistantMessage([fauxToolCall("lock_background", {}, { id: "lock-background-call" })], { stopReason: "toolUse" }),
-      () => fauxAssistantMessage("The background run is under way."),
-    ]);
-    const asking = await createAndOpen(gateway, phone);
-    const detached = await createAndOpen(gateway, phone);
-    const roles = new Map([[asking.sessionId, "command"], [detached.sessionId, "detached"]]);
-    // Each RPC's own work settles just after its response frame; wait for it, so
-    // each status names only the blockers under test.
-    const rpcSettled = () => waitFor(() => !gateway.registry.administrativeDrainSnapshot().blockers
-      .some((blocker) => blocker.category === "rpc-mutation"), "the RPCs' own work to settle");
-
-    // The detached session's turn starts the background run and ends; the run stays live.
-    expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: detached.sessionId, text: "start the background run" })).ok).toBe(true);
-    // The slot stays busy while it owns the run, so the turn's end is its settled operation.
-    const detachedSlot = await gateway.registry.acquire(detached.sessionId);
-    await waitFor(() => !detachedSlot.snapshot().operation && gateway.record().providerRequests.length === 2
-      && detachedSlot.snapshot().extensionActivities?.some((activity) => activity.status === "running")
-      && gateway.registry.administrativeDrainSnapshot().blockers.every((blocker) => blocker.category === "detached-extension-run"),
-    "the detached turn and its receipts to settle with its run live");
-    // The command session waits on the user's answer, with no agent run.
-    const command = phone.send("session.prompt", { commandId: gateway.commandId(), sessionId: asking.sessionId, text: "/lockask" });
-    const pending = await waitFor(() => {
-      for (const event of phone.events) {
-        // A command runs no agent turn, so its select arrives on the presentation topic alone.
-        if (event.topic !== "session.extensionPresentation" || event.sessionId !== asking.sessionId) continue;
-        const shown = (event.payload as { data?: { interactionList?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> } })
-          ?.data?.interactionList?.[0];
-        if (shown) return shown;
-      }
-      return undefined;
-    }, "the command's select to reach the phone");
-    await rpcSettled();
-    const statusBefore = await phone.request("gateway.drain.status", {});
-
-    gateway.registry.beginAdministrativeDrain();
-    const drained = gateway.registry.waitUntilIdle();
-    await waitFor(() => gateway.registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait");
-    await rpcSettled();
-    const statusWaiting = await phone.request("gateway.drain.status", {});
-
-    // The answer settles the command; the detached run still holds the drain.
-    expect((await phone.request("extension.respond", {
-      commandId: gateway.commandId(), sessionId: asking.sessionId, interactionId: pending.id,
-      hostEpoch: pending.hostEpoch, presentationRevision: pending.presentationRevision, value: "Keep",
-    })).ok).toBe(true);
-    const commandResponse = await command;
-    await waitFor(() => !gateway.registry.administrativeDrainSnapshot().blockers.some((blocker) => blocker.sessionId === asking.sessionId),
-      "the answered command to leave the drain");
-    await rpcSettled();
-    const statusAfterAnswer = await phone.request("gateway.drain.status", {});
-
-    // The run's terminal artifact ends it, and the drain completes.
-    const endedAt = Date.now();
-    await writeFile(join(gateway.cwd, ".pi", "subagents", "async-subagent-runs", "lock-background-run", "status.json"), JSON.stringify({
-      runId: "lock-background-run", state: "complete", startedAt: endedAt - 1_000, endedAt, lastUpdate: endedAt + 1,
-    }));
-    const completed = await awaitsWithin(drained, "the drain to complete");
-    const statusComplete = await phone.request("gateway.drain.status", {});
-    const activities = detachedSlot.snapshot().extensionActivities ?? [];
+    const { phone, asking, detached, roles, commandResponse, statusBefore, statusWaiting, statusAfterAnswer, completed, statusComplete, activities } =
+      await drainBlockersScenario(gateway);
 
     const recorded = gateway.record();
     const label = (response: { result?: unknown; error?: unknown }) => labelled(response.result ?? response.error ?? null, roles, gateway);
