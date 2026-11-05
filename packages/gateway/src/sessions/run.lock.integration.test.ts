@@ -18,8 +18,10 @@ import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, openLock
  * provider request carried, all without per-run identities, times and token
  * counts (`test-support/lock-projections.ts`). Event schemas, model-visible session
  * shapes and Tron's persisted entry values are pinned once by `client-event-schemas`,
- * `session-shapes` and `session-entries`, over the shared scenarios that together
- * reach every shape these locks produce.
+ * `session-shapes` and `session-entries`: every event topic and payload path, prompt
+ * shape and Tron entry these scenarios produce is in those locks (their coverage was
+ * checked against these scenarios' former goldens), though not every scenario here is
+ * one those locks run.
  */
 
 const gateways: LockGateway[] = [];
