@@ -3,7 +3,8 @@ import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
+import { normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
+import { expectScenario } from "../../test-support/lock-projections.js";
 
 /**
  * Project-root resources lock (restructure plan §6.4, V3; K-0 §7 E0e follow-up)
@@ -18,7 +19,6 @@ import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue,
  * Project layer: the root's package and extension, never the subdirectory's.
  */
 
-const MODULE = "gateway/session-catalog";
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -90,23 +90,490 @@ describe("gateway/session-catalog project-root resources lock", () => {
       observed: normalizeTraceValue(JSON.parse(JSON.stringify({ packagesUntrusted, hooksUntrusted, packagesTrusted, hooksTrusted, hooksGlobal }),
         (key, value: unknown) => key === "encodedBytes" ? "<bytes>" : value) as TraceValue, gateway.normalization),
     };
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, trace.lock), trace, update: lockUpdateRequested(MODULE),
-      validate: () => {
-        for (const response of [packagesUntrusted, hooksUntrusted, packagesTrusted, hooksTrusted, hooksGlobal]) {
-          expect(response.ok, JSON.stringify(response)).toBe(true);
-        }
-        const packages = JSON.stringify(packagesTrusted.result);
-        expect(packages).toContain("root-package");
-        expect(packages).toContain("root_package_tool");
-        expect(packages).not.toContain("nested-package");
-        const hooks = JSON.stringify(hooksTrusted.result);
-        expect(hooks).toContain("root-hooks.ts");
-        expect(hooks).toContain("root-package");
-        expect(hooks).not.toContain("nested");
-        expect(JSON.stringify(hooksUntrusted.result)).not.toContain("root-hooks.ts");
-        expect(JSON.stringify(hooksGlobal.result)).not.toContain("root-hooks.ts");
-      },
-    });
+    expectScenario(trace as unknown as Record<string, unknown>, EXPECTED["project-root-resources"]);
+    for (const response of [packagesUntrusted, hooksUntrusted, packagesTrusted, hooksTrusted, hooksGlobal]) {
+      expect(response.ok, JSON.stringify(response)).toBe(true);
+    }
+    const packages = JSON.stringify(packagesTrusted.result);
+    expect(packages).toContain("root-package");
+    expect(packages).toContain("root_package_tool");
+    expect(packages).not.toContain("nested-package");
+    const hooks = JSON.stringify(hooksTrusted.result);
+    expect(hooks).toContain("root-hooks.ts");
+    expect(hooks).toContain("root-package");
+    expect(hooks).not.toContain("nested");
+    expect(JSON.stringify(hooksUntrusted.result)).not.toContain("root-hooks.ts");
+    expect(JSON.stringify(hooksGlobal.result)).not.toContain("root-hooks.ts");
   }, 60_000);
 });
+
+/** Each lock's expected trace (`test-support/lock-projections.ts` `expectScenario`): the scenario's normalized trace without event schemas, with model-visible parts named by session shape. */
+const EXPECTED: Record<string, unknown> = {
+  "project-root-resources": {
+    "lock": "project-root-resources",
+    "requests": [
+      {
+        "client": "phone",
+        "method": "packages.list",
+        "params": {
+          "cwd": "<tmp>/project/packages/app"
+        }
+      },
+      {
+        "client": "phone",
+        "method": "hooks.list",
+        "params": {
+          "cwd": "<tmp>/project/packages/app"
+        }
+      },
+      {
+        "client": "phone",
+        "method": "settings.change",
+        "params": {
+          "changes": [
+            {
+              "key": "permissions.projectTrust",
+              "layer": "global",
+              "op": "set",
+              "qualifiers": {
+                "project": "<tmp>/project/packages/app"
+              },
+              "value": true
+            }
+          ],
+          "commandId": "lock-command-0001",
+          "reason": "Trust the lock project",
+          "target": {
+            "kind": "global"
+          }
+        }
+      },
+      {
+        "client": "phone",
+        "method": "packages.list",
+        "params": {
+          "cwd": "<tmp>/project/packages/app"
+        }
+      },
+      {
+        "client": "phone",
+        "method": "hooks.list",
+        "params": {
+          "cwd": "<tmp>/project/packages/app"
+        }
+      },
+      {
+        "client": "phone",
+        "method": "hooks.list",
+        "params": {}
+      }
+    ],
+    "observed": {
+      "hooksGlobal": {
+        "id": "<id>",
+        "ok": true,
+        "result": {
+          "extensionLoadErrors": [],
+          "extensionLoadWarnings": [],
+          "extensions": [
+            {
+              "commands": [],
+              "handlers": [],
+              "name": "builtin:codemode",
+              "origin": "top-level",
+              "path": "builtin:codemode",
+              "resolvedPath": "builtin:codemode",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": [
+                "codemode"
+              ]
+            },
+            {
+              "commands": [],
+              "handlers": [],
+              "name": "builtin:tool-search",
+              "origin": "top-level",
+              "path": "builtin:tool-search",
+              "resolvedPath": "builtin:tool-search",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": [
+                "tool_search"
+              ]
+            },
+            {
+              "commands": [
+                "mcp"
+              ],
+              "handlers": [
+                {
+                  "count": 1,
+                  "event": "session_start"
+                },
+                {
+                  "count": 1,
+                  "event": "before_agent_start"
+                },
+                {
+                  "count": 1,
+                  "event": "tool_call"
+                },
+                {
+                  "count": 1,
+                  "event": "turn_start"
+                },
+                {
+                  "count": 1,
+                  "event": "mcp_servers_change"
+                },
+                {
+                  "count": 1,
+                  "event": "session_shutdown"
+                }
+              ],
+              "name": "builtin:mcp",
+              "origin": "top-level",
+              "path": "builtin:mcp",
+              "resolvedPath": "builtin:mcp",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": []
+            }
+          ],
+          "hookInventory": {
+            "encodedBytes": "<bytes>",
+            "encodedBytesLimit": 262144,
+            "extensions": {
+              "omitted": 0,
+              "retained": 3,
+              "total": 3
+            },
+            "handlerEvents": {
+              "omitted": 0,
+              "retained": 6,
+              "total": 6
+            },
+            "loadErrors": {
+              "omitted": 0,
+              "retained": 0,
+              "total": 0
+            },
+            "loadWarnings": {
+              "omitted": 0,
+              "retained": 0,
+              "total": 0
+            },
+            "textFieldsOmitted": 0
+          }
+        },
+        "type": "response"
+      },
+      "hooksTrusted": {
+        "id": "<id>",
+        "ok": true,
+        "result": {
+          "extensionLoadErrors": [],
+          "extensionLoadWarnings": [],
+          "extensions": [
+            {
+              "commands": [],
+              "handlers": [
+                {
+                  "count": 1,
+                  "event": "tool_call"
+                }
+              ],
+              "name": "root-hooks.ts",
+              "origin": "top-level",
+              "path": "<tmp>/project/.pi/extensions/root-hooks.ts",
+              "resolvedPath": "<tmp>/project/.pi/extensions/root-hooks.ts",
+              "scope": "project",
+              "source": "auto",
+              "tools": [
+                "root_project_tool"
+              ]
+            },
+            {
+              "commands": [],
+              "handlers": [
+                {
+                  "count": 1,
+                  "event": "tool_call"
+                }
+              ],
+              "name": "root-package.ts",
+              "origin": "package",
+              "path": "<tmp>/project/vendor/root-package/extensions/root-package.ts",
+              "resolvedPath": "<tmp>/project/vendor/root-package/extensions/root-package.ts",
+              "scope": "project",
+              "source": "../vendor/root-package",
+              "tools": [
+                "root_package_tool"
+              ]
+            },
+            {
+              "commands": [],
+              "handlers": [],
+              "name": "builtin:codemode",
+              "origin": "top-level",
+              "path": "builtin:codemode",
+              "resolvedPath": "builtin:codemode",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": [
+                "codemode"
+              ]
+            },
+            {
+              "commands": [],
+              "handlers": [],
+              "name": "builtin:tool-search",
+              "origin": "top-level",
+              "path": "builtin:tool-search",
+              "resolvedPath": "builtin:tool-search",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": [
+                "tool_search"
+              ]
+            },
+            {
+              "commands": [
+                "mcp"
+              ],
+              "handlers": [
+                {
+                  "count": 1,
+                  "event": "session_start"
+                },
+                {
+                  "count": 1,
+                  "event": "before_agent_start"
+                },
+                {
+                  "count": 1,
+                  "event": "tool_call"
+                },
+                {
+                  "count": 1,
+                  "event": "turn_start"
+                },
+                {
+                  "count": 1,
+                  "event": "mcp_servers_change"
+                },
+                {
+                  "count": 1,
+                  "event": "session_shutdown"
+                }
+              ],
+              "name": "builtin:mcp",
+              "origin": "top-level",
+              "path": "builtin:mcp",
+              "resolvedPath": "builtin:mcp",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": []
+            }
+          ],
+          "hookInventory": {
+            "encodedBytes": "<bytes>",
+            "encodedBytesLimit": 262144,
+            "extensions": {
+              "omitted": 0,
+              "retained": 5,
+              "total": 5
+            },
+            "handlerEvents": {
+              "omitted": 0,
+              "retained": 8,
+              "total": 8
+            },
+            "loadErrors": {
+              "omitted": 0,
+              "retained": 0,
+              "total": 0
+            },
+            "loadWarnings": {
+              "omitted": 0,
+              "retained": 0,
+              "total": 0
+            },
+            "textFieldsOmitted": 0
+          }
+        },
+        "type": "response"
+      },
+      "hooksUntrusted": {
+        "id": "<id>",
+        "ok": true,
+        "result": {
+          "extensionLoadErrors": [],
+          "extensionLoadWarnings": [],
+          "extensions": [
+            {
+              "commands": [],
+              "handlers": [],
+              "name": "builtin:codemode",
+              "origin": "top-level",
+              "path": "builtin:codemode",
+              "resolvedPath": "builtin:codemode",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": [
+                "codemode"
+              ]
+            },
+            {
+              "commands": [],
+              "handlers": [],
+              "name": "builtin:tool-search",
+              "origin": "top-level",
+              "path": "builtin:tool-search",
+              "resolvedPath": "builtin:tool-search",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": [
+                "tool_search"
+              ]
+            },
+            {
+              "commands": [
+                "mcp"
+              ],
+              "handlers": [
+                {
+                  "count": 1,
+                  "event": "session_start"
+                },
+                {
+                  "count": 1,
+                  "event": "before_agent_start"
+                },
+                {
+                  "count": 1,
+                  "event": "tool_call"
+                },
+                {
+                  "count": 1,
+                  "event": "turn_start"
+                },
+                {
+                  "count": 1,
+                  "event": "mcp_servers_change"
+                },
+                {
+                  "count": 1,
+                  "event": "session_shutdown"
+                }
+              ],
+              "name": "builtin:mcp",
+              "origin": "top-level",
+              "path": "builtin:mcp",
+              "resolvedPath": "builtin:mcp",
+              "scope": "temporary",
+              "source": "builtin",
+              "tools": []
+            }
+          ],
+          "hookInventory": {
+            "encodedBytes": "<bytes>",
+            "encodedBytesLimit": 262144,
+            "extensions": {
+              "omitted": 0,
+              "retained": 3,
+              "total": 3
+            },
+            "handlerEvents": {
+              "omitted": 0,
+              "retained": 6,
+              "total": 6
+            },
+            "loadErrors": {
+              "omitted": 0,
+              "retained": 0,
+              "total": 0
+            },
+            "loadWarnings": {
+              "omitted": 0,
+              "retained": 0,
+              "total": 0
+            },
+            "textFieldsOmitted": 0
+          }
+        },
+        "type": "response"
+      },
+      "packagesTrusted": {
+        "id": "<id>",
+        "ok": true,
+        "result": {
+          "packages": [
+            {
+              "filtered": false,
+              "installedPath": "<tmp>/project/vendor/root-package",
+              "provides": {
+                "commands": [],
+                "prompts": [],
+                "skills": [],
+                "subagents": [],
+                "themes": [],
+                "tools": [
+                  "root_package_tool"
+                ]
+              },
+              "scope": "project",
+              "source": "../vendor/root-package"
+            }
+          ],
+          "providesDiagnostic": "subagent catalog unavailable: managed pi-subagents is not installed",
+          "resources": {
+            "extensions": [
+              {
+                "enabled": true,
+                "metadata": {
+                  "baseDir": "<tmp>/project/.pi",
+                  "origin": "top-level",
+                  "scope": "project",
+                  "source": "auto"
+                },
+                "path": "<tmp>/project/.pi/extensions/root-hooks.ts"
+              },
+              {
+                "enabled": true,
+                "metadata": {
+                  "baseDir": "<tmp>/project/vendor/root-package",
+                  "origin": "package",
+                  "packageRoot": "<tmp>/project/vendor/root-package",
+                  "scope": "project",
+                  "source": "../vendor/root-package"
+                },
+                "path": "<tmp>/project/vendor/root-package/extensions/root-package.ts"
+              }
+            ],
+            "prompts": [],
+            "skills": [],
+            "themes": []
+          }
+        },
+        "type": "response"
+      },
+      "packagesUntrusted": {
+        "id": "<id>",
+        "ok": true,
+        "result": {
+          "packages": [],
+          "providesDiagnostic": "subagent catalog unavailable: managed pi-subagents is not installed",
+          "resources": {
+            "extensions": [],
+            "prompts": [],
+            "skills": [],
+            "themes": []
+          }
+        },
+        "type": "response"
+      }
+    }
+  },
+};
