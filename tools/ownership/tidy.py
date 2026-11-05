@@ -276,8 +276,12 @@ def report(prune: bool) -> dict:
             if w["branch"] and w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
                 # --force only because what remains is regenerable ignored output (node_modules, build).
                 # bundle-gateway.sh seals its payload read-only, and Xcode copies it into DerivedData.
-                for directory, _, _ in os.walk(w["path"]):
-                    os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
+                try:
+                    for directory, _, _ in os.walk(w["path"]):
+                        os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
+                except OSError as error:
+                    out["notes"].append(f"could not remove worktree {w['path']}: {error}")
+                    continue
                 removed = subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", w["path"]],
                                          capture_output=True, text=True)
                 if removed.returncode == 0:

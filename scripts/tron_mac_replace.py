@@ -14,6 +14,7 @@ A failure stops at its step with the exact error and log path; after the swap
 it automatically restores the previous app. A retry reuses the verified build.
 """
 import argparse
+import contextlib
 import ctypes
 import fcntl
 import json
@@ -483,8 +484,11 @@ class Runner:
     def step_finish(self):
         if self.data['path'] != 'full':
             return 'replacement complete'
-        # A prune failure is reported, never raised: raising here would roll back a verified install.
-        failures = prune_store(self.platform, self.journal.directory, self.revision)
+        # Pruning reports and never raises: a raise here would roll back a verified install.
+        try:
+            failures = prune_store(self.platform, self.journal.directory, self.revision)
+        except Exception as error:  # noqa: BLE001
+            failures = [f'{self.platform.store}: {type(error).__name__}: {error}']
         for failure in failures:
             self.journal.note(f'prune: {failure}')
         return 'replacement complete' + (f'; could not prune {len(failures)} superseded path(s), see journal.log'
@@ -596,36 +600,36 @@ def prune_store(platform, operation, revision):
     Older rollback sets are superseded: rollback restores only this operation's previous app
     and payloads, and an older ~/.tron snapshot is never restored over newer data. Returns the
     paths it could not delete, with the reason."""
-    failures = []
     builds = platform.store / 'builds'
-    for entry in sorted(builds.iterdir()) if builds.is_dir() else []:
-        if entry.name != revision:
-            failures += remove_tree(entry, worktree=True)
-    for other in sorted(platform.store.iterdir()):
-        if other == operation or other.is_symlink() or not (other / 'journal.json').is_file():
-            continue
-        for entry in sorted(other.iterdir()):
-            if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name):
-                failures += remove_tree(entry)
-        if not any(other.iterdir()):
+    targets = [entry for entry in sorted(builds.iterdir()) if entry.name != revision] if builds.is_dir() else []
+    operations = [other for other in sorted(platform.store.iterdir())
+                  if other != operation and not other.is_symlink() and (other / 'journal.json').is_file()]
+    targets += [entry for other in operations for entry in sorted(other.iterdir())
+                if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name)]
+    failures = [failure for path in targets for failure in remove_tree(path)]
+    for other in operations:
+        with contextlib.suppress(OSError):  # only a directory left empty goes
             other.rmdir()
     return failures
 
 
-def remove_tree(path, worktree=False):
+def remove_tree(path):
     """Delete `path`, including Gateway payloads bundle-gateway.sh sealed read-only (`chmod -R a-w`)."""
     try:
         if path.is_dir() and not path.is_symlink():
             for directory, _, _ in os.walk(path):
                 os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
-            if worktree:  # also drops the build checkout's registration in the source repository
-                git_succeeds(path, 'worktree', 'remove', '--force', path, timeout=600)
+            # A build checkout is a worktree of the source repository: drop its registration too.
+            unregistered = not (path / '.git').is_file() or git_succeeds(path, 'worktree', 'remove', '--force', path,
+                                                                         timeout=600)
             if path.exists():
                 shutil.rmtree(path)
+            if not unregistered:
+                return [f'{path}: deleted, but git worktree remove failed; `git worktree prune` drops its registration']
         else:
             path.unlink(missing_ok=True)
-    except OSError as error:
-        return [f'{path}: {error.strerror or error}']
+    except (OSError, subprocess.SubprocessError) as error:
+        return [f'{path}: {getattr(error, "strerror", None) or error}']
     return []
 
 

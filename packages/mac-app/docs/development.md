@@ -238,7 +238,7 @@ scripts/tron mac replace --status --follow
   verify --require-bundled`. Builds live in `~/.tron-maintenance/replace/builds/<revision>`;
   git and builds run with Homebrew's bin on `PATH` for git-lfs.
 - **Retention.** A finished full replacement keeps only its own operation (journal and rollback
-  set) and the build it installed. It deletes older builds and every older operation's journal
+  set) and the build it installed. It deletes every other build and every older operation's journal
   and rollback set (`previous-app-<n>`, `retired-stable-payloads-<n>`, `state-snapshot-<n>`,
   `failed-*`): those are superseded, because rollback restores only this operation's set and a
   snapshot is never restored over newer data. Other entries in an operation directory (a

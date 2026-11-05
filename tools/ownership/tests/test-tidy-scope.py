@@ -158,7 +158,6 @@ class OwnershipScopeTests(ScopeCase):
         f.commit(f.repo, "negate")
         self.assertEqual(self.report()["tracked_ignored"], [])
 
-
     def test_a_sealed_read_only_payload_does_not_block_pruning(self) -> None:
         f = self.f
         f.write(".gitignore", (f.repo / ".gitignore").read_text() + "packages/mac-app/Sources/Resources/Gateway/\n")
@@ -173,6 +172,7 @@ class OwnershipScopeTests(ScopeCase):
         result = self.f.tidy("--prune")
         self.assertFalse(tree.exists(), result.stdout + result.stderr)
         self.assertIn(f"tidy: pruned worktree {tree} (branch merged-sealed is on main)", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

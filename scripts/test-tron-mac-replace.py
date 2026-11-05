@@ -945,9 +945,12 @@ def retention_journey():
             sealed(old_build / 'packages/mac-app/Sources/Resources/Gateway')
             sealed(current_build / 'Gateway')
             older, foreign, current = store / 'older-op', store / 'migration-op', store / 'current-op'
+            runner = replace.Runner(SimpleNamespace(store=store), replace.Journal.create(
+                current, 'current-op', 'full', 'fixture', {'revision': 'b' * 40}))
             for operation in (older, foreign, current):
-                (operation / 'logs').mkdir(parents=True)
-                (operation / 'journal.json').write_text('{}')
+                (operation / 'logs').mkdir(parents=True, exist_ok=True)
+                if operation != current:
+                    (operation / 'journal.json').write_text('{}')
                 sealed(operation / 'retired-stable-payloads-1')
                 (operation / 'state-snapshot-1').mkdir()
                 (operation / 'previous-app-1/Tron.app.kept').mkdir(parents=True)
@@ -957,9 +960,10 @@ def retention_journey():
             (locked / 'flagged').write_text('')
             subprocess.run(['chflags', 'uchg', locked / 'flagged'], check=True)
             try:
-                failures = replace.prune_store(SimpleNamespace(store=store), current, 'b' * 40)
+                detail = runner.step_finish()
             finally:
                 subprocess.run(['chflags', 'nouchg', locked / 'flagged'], check=True)
+            notes = runner.journal.log_path.read_text()
 
             def record(condition, message):
                 evidence.append({'check': message, 'pass': bool(condition)})
@@ -972,11 +976,21 @@ def retention_journey():
             record(not older.exists(), 'an older operation holding only replace-owned files is deleted whole')
             record(sorted(p.name for p in foreign.iterdir()) == ['failed-app-2', 'knowledge-cutover-1'],
                    f'another tool\'s archive in an older operation is kept: {sorted(p.name for p in foreign.iterdir())}')
-            record(sorted(p.name for p in current.iterdir()) == ['journal.json', 'logs', 'previous-app-1',
+            record(sorted(p.name for p in current.iterdir()) == ['journal.json', 'journal.log', 'logs', 'previous-app-1',
                                                                   'retired-stable-payloads-1', 'state-snapshot-1'],
                    'this operation keeps its whole rollback set')
-            record(len(failures) == 1 and 'failed-app-2' in failures[0],
-                   f'an undeletable path is reported, not swallowed: {failures}')
+            record(detail.endswith('could not prune 1 superseded path(s), see journal.log')
+                   and 'prune: ' in notes and 'failed-app-2' in notes,
+                   f'an undeletable path is reported in the finish step and journal, not swallowed: {detail}')
+            # A store it cannot even list (an unreadable builds/) is reported; finish does not raise into a rollback.
+            (store / 'builds').chmod(0)
+            try:
+                detail = runner.step_finish()
+            finally:
+                (store / 'builds').chmod(0o755)
+            record(detail.endswith('could not prune 1 superseded path(s), see journal.log')
+                   and 'PermissionError' in runner.journal.log_path.read_text(),
+                   f'a failure outside one path is reported and finish still completes: {detail}')
             subprocess.run(['chmod', '-R', 'u+w', root], check=True)
             passed = all(item['pass'] for item in evidence)
     except Exception as error:  # noqa: BLE001 - retain RED evidence as well as GREEN.
