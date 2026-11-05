@@ -3525,7 +3525,14 @@ export class RuntimeRegistry implements SessionOperations {
     } finally {
       if (!committed) {
         const originalExists = await lstat(path).then(() => true).catch(() => false);
-        if (!originalExists) await rename(quarantine, path).catch(() => {});
+        // A refused restore strands the transcript beside its path: that is the
+        // outcome to report, replacing the retryable failure that preceded it.
+        if (!originalExists) await rename(quarantine, path).catch((error: unknown) => {
+          const failure = new GatewayError("conflict",
+            "Tron session deletion failed and its file could not be restored; it remains beside the original as a .tron-delete file");
+          failure.cause = error;
+          throw failure;
+        });
       }
     }
   }
