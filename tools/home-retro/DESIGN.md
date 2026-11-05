@@ -4,7 +4,7 @@
 
 Home improves its existing prompt, brief and profile using outcomes of work it already
 owns. No standing audit worker, second task database, model judge, new queue, scheduler
-or implicit permission. [Diagnosis](FINDINGS.md) separates observations from hypotheses.
+or implicit permission.
 The source owners remain authoritative; projections are disposable and never write back.
 
 **Slice 1 is implemented:** read-only task metrics through the existing Home `task`
@@ -126,8 +126,7 @@ Proposed slice-2 brief discipline:
   retired guidance or infer a ruling from the summarizer's paraphrase.
 
 This requires a brief/prompt change and dedicated tests, **not included in slice 1**.
-It addresses standing-decision application drift. The separate follow-up in FINDINGS
-establishes a lost task-completion attribution, not a deleted standing decision.
+It addresses standing-decision application drift.
 
 ## Maintainer-owed closure
 
