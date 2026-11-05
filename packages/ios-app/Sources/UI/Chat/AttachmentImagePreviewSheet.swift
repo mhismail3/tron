@@ -300,9 +300,11 @@ private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDel
 
     func setImage(_ image: UIImage, accessibilityLabel: String) {
         imageView.accessibilityLabel = accessibilityLabel
-        // Identity is the decoded pixels: a parent re-render that wraps the same
-        // CGImage in a new UIImage must not reset an active zoom.
-        guard imageView.image?.cgImage !== image.cgImage else { return }
+        // Identity is the decoded pixels and their orientation: a parent re-render that
+        // wraps the same CGImage in a new UIImage must not reset an active zoom. An image
+        // without a CGImage has no pixel identity, so only the same object is unchanged.
+        if let current = imageView.image, current === image
+            || (image.cgImage != nil && current.cgImage === image.cgImage && current.imageOrientation == image.imageOrientation) { return }
         setZoomScale(minimumZoomScale, animated: false)
         contentOffset = .zero
         imageView.image = image
