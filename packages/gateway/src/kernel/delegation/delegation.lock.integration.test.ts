@@ -23,7 +23,7 @@ import { waitFor } from "../../../test-support/wait-for.js";
  * session, asserted exactly (`expectScenario`). The entries no other lock
  * covers stay in the narrowed `locks/delegation-subagent.golden.json`: both
  * sessions' system entries (the parent's prompt with the `subagent` tool and its
- * skills, the `task-child` prompt with its acceptance contract) and the task
+ * skills, the `task-child` prompt with its acceptance contract) and the parent
  * session's settings, context-window and extension-activity entries. Each is
  * an ordered `{ narrowedGolden }` placeholder in the inline trace.
  */
