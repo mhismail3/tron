@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { resolveBindHost } from "../config.js";
 import { resolveTronHome } from "../tron-home.js";
-import type { ContentPart, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
+import type { ContentPart, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, HomeTaskStatusResult, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../kernel/receipts/invocation-receipts.js";
@@ -388,7 +388,7 @@ async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, co
       await client.request("home.reconfirmPermissions", { commandId: randomUUID() });
       process.stdout.write("Home task standing permissions reconfirmed. Revoked scopes and one-use grants were not renewed.\n");
     } else if (command.kind === "task" || command.kind === "stop-task" || command.kind === "steer-task" || command.kind === "interrupt-task") {
-      const task = await client.request("home.taskStatus", { taskId: command.taskId }) as unknown as import("../modules/home/home-task-store.js").HomeTaskRecord;
+      const task = await client.request("home.taskStatus", { taskId: command.taskId }) as unknown as HomeTaskStatusResult;
       if (command.kind === "task") {
         const spend = task.spend;
         process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.cacheReadTokens === undefined ? `${spend?.inputTokens ?? 0} input/cache` : `${spend.inputTokens} input + ${spend.cacheReadTokens} cache read + ${spend.cacheWriteTokens} cache write`} + ${spend?.outputTokens ?? 0} output tokens.\n`);
