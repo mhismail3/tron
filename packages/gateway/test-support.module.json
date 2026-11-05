@@ -17,6 +17,7 @@
     "test-support/catalog-metadata-fixture.ts",
     "test-support/session-settings-change.ts",
     "test-support/lock-scenarios.ts",
+    "test-support/lock-projections.ts",
     "test-support/episodic-chapter-source.ts",
     "test-support/fixed-recording.ts",
     "test-support/fixture-process-owner.mjs",

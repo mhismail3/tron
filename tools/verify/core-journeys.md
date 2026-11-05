@@ -38,8 +38,8 @@ All rows below were executed on `7964f6dd9` (clean worktree). Raw logs, xcresult
 | `TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground` | Native | Pair by invitation, type unique prompt, Send → sent row present; streamed reply reaches its completion marker | Then reconnect phases (row 6) | N pass |
 | `TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools` | Process | Prompt with commandId, accepted response dropped → `command.status` completed with operationId; reconnect snapshot idle with reply; prompt appears exactly once | Lost response; detached completion after client retirement | E fail then pass |
 
-**GAP #2230:** the assistant reply is counted once only inside the lock's golden-gated
-`validate`; the Process/Native rows assert presence, not exactly-once or canonical persistence.
+**GAP #2230:** the assistant reply is counted exactly once only by the lock's inline
+canonical-message check; the Process/Native rows assert presence, not exactly-once or canonical persistence.
 
 ## 2. Delegate / result — real child result returns; owned cancellation and settlement
 
@@ -111,7 +111,7 @@ only when the whole trace equals its golden, so these goldens gate the assertion
 
 | Journey | Golden (under `packages/gateway/src/`) | Whole-prompt / schema content | Owner |
 |---|---|---|---|
-| Prompt/reply | `sessions/locks/run-prompt-stream.golden.json`, `run-abort`, `run-steer` | prompt hash + section headings | #2189 |
+| Prompt/reply | `test-fixtures/pi-sdk/session-shapes.golden.json` (`session-shapes.lock`); the transcript, messages and responses are inline checks in `sessions/run.lock.integration.test.ts` | prompt hash + section headings + system entry | #2189 |
 | Delegate | `kernel/delegation/locks/delegation-subagent.golden.json` | tool parameter schemas | #2189 |
 | Home wake | `modules/home/locks/home-activation-wake.golden.json` | prompt hashes + full tool schemas | #2189 |
 | Home restart | `modules/home/locks/home-contention-restart.golden.json` | full tool descriptions/schemas | #2236 |
