@@ -95,7 +95,11 @@ class OwnershipScopeTests(ScopeCase):
         old = f.write(".pi/2248-review.js", "// workflow\n")
         age(old, 10)
         new = f.write(".pi/2276-review.js", "// workflow\n")
+        runs = f.write(".pi/subagents/artifacts/run.jsonl").parent.parent  # a directory is not a workflow script
+        age(runs / "artifacts/run.jsonl", 60)
         result = self.report()
+        self.assertIn(str(runs), result["residue"])
+        self.assertNotIn(str(runs), result["expired"])
         self.assertNotIn(str(old), result["residue"])
         self.assertNotIn(str(new), result["residue"])
         self.assertIn(str(old), result["expired"])
@@ -104,6 +108,7 @@ class OwnershipScopeTests(ScopeCase):
         self.assertFalse(old.exists())
         self.assertTrue(new.exists())
         self.assertTrue(prompt.exists())
+        self.assertTrue(runs.exists())
 
     def test_a_writers_output_inside_an_ignored_directory_is_known(self) -> None:
         f = self.f

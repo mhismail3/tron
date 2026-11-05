@@ -39,6 +39,8 @@ REGENERABLE = {  # deleting loses nothing; the writer recreates it
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources",
     # scripts/tron-ios-device: device-build DerivedData and the IPA it stages for the share host.
     "packages/ios-app/build/DerivedData", "packages/ios-app/build/DerivedData-fast-debug", "packages/ios-app/build/share",
+    # SwiftPM, when MacTerminalSSH is built on its own; the package's .gitignore keeps it out.
+    "packages/ios-app/MacTerminalSSH/Package.resolved",
 }
 # Pi's subagent tool tells agents to write workflow scripts under the request cwd "such as
 # .pi/<name>.js": loose files directly in .pi/ are scratch, aged and pruned like .scratch/.
@@ -86,11 +88,11 @@ def activity_days(worktree: Path) -> float:
     return round((time.time() - max(times)) / DAY, 1) if times else 0.0
 
 
-def known(rel: str) -> str | None:
+def known(rel: str, tree: Path) -> str | None:
     if rel in LOCAL:
         return "local"
     if rel in REGENERABLE or rel.endswith("__pycache__") or (rel.startswith("packages/") and rel.endswith("/" + EVIDENCE)) \
-            or pi_scratch(rel):
+            or (pi_scratch(rel) and (tree / rel).is_file()):
         return "regenerable"
     return None
 
@@ -201,16 +203,16 @@ def report(prune: bool) -> dict:
                 for entry in ignored_entries(tree, rel):
                     if entry.endswith("__pycache__"):
                         out["bytecode"].append(str(tree / entry))
-                    elif known(entry) is None:
+                    elif known(entry, tree) is None:
                         out["residue"].append(str(tree / entry))
-                    elif known(entry) == "local":
+                    elif known(entry, tree) == "local":
                         dirty = True
             if code != "!!":
                 dirty = True
         if tree == primary:
             out["tracked_ignored"] = tracked_ignored(tree)
         for entry in sorted(tree.iterdir()):  # git status does not list empty ignored directories
-            if entry.is_dir() and entry.name not in tops | {".git"} and known(entry.name) is None \
+            if entry.is_dir() and entry.name not in tops | {".git"} and known(entry.name, tree) is None \
                     and not any(entry.iterdir()):
                 out["residue"].append(str(entry))
         # A linked worktree with a live process or local changes is another worker's: its
@@ -235,7 +237,7 @@ def report(prune: bool) -> dict:
         status = git("status", "--porcelain", "--ignored", "--untracked-files=normal", cwd=path, check=False)
         # Anything but regenerable output is local data: `git worktree remove` would delete ignored
         # files (such as .env.local) without asking, so such a worktree is never pruned.
-        dirty = any(not line.startswith("!! ") or known(unquote(line[3:]).rstrip("/")) != "regenerable"
+        dirty = any(not line.startswith("!! ") or known(unquote(line[3:]).rstrip("/"), path) != "regenerable"
                     for line in status.splitlines())
         real = os.path.realpath(path)
         live = cwds is None or any(c == real or c.startswith(real + os.sep) for c in cwds)
