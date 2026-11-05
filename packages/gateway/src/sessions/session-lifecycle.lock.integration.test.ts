@@ -245,12 +245,16 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "sessionId": "<present>"
+          }
         }
       },
       {
         "method": "session.open",
-        "params": {},
+        "params": {
+          "sessionId": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -275,6 +279,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
                   "requestedThinkingLevel": "off",
@@ -302,6 +307,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
+                  "id": "<present>",
                   "provider": "<LOCK>"
                 },
                 "override": 128000,
@@ -310,6 +316,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
+              "eventSequence": "<present>",
+              "extensionActivityAsOf": "<present>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -338,7 +346,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
+                "hostEpoch": "<present>",
                 "pendingInteractions": [],
+                "revision": "<present>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -357,20 +367,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
+              "leafEntryId": "<present>",
               "liveActivityRevision": 0,
               "model": {
+                "id": "<present>",
                 "provider": "<LOCK>"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
+                "asOf": "<present>",
                 "problemCount": 0,
                 "recentCount": 0,
+                "revision": "<present>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
+              "revision": "<present>",
+              "runtimeGeneration": "<present>",
+              "sessionId": "<present>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -390,10 +407,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
+                  "id": "<present>",
                   "kind": "modelChange",
                   "modelRef": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -403,13 +423,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 },
                 {
+                  "id": "<present>",
                   "kind": "thinkingChange",
                   "level": "off",
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -419,20 +443,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
-            }
+            },
+            "subscriptionToken": "<present>",
+            "syncToken": "<present>"
           }
         }
       },
       {
         "method": "session.sync",
-        "params": {},
+        "params": {
+          "sessionId": "<present>",
+          "syncToken": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -445,12 +476,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0002",
+          "sessionId": "<present>",
           "text": "remember the word lantern"
         },
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "operationId": "<present>"
+          }
         }
       },
       {
@@ -472,6 +506,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "remember the word lantern",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
+                "id": "<present>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 2,
@@ -502,7 +537,10 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
       },
       {
         "method": "session.close",
-        "params": {},
+        "params": {
+          "sessionId": "<present>",
+          "subscriptionToken": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -520,12 +558,16 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "sessionId": "<present>"
+          }
         }
       },
       {
         "method": "session.open",
-        "params": {},
+        "params": {
+          "sessionId": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -550,6 +592,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
                   "requestedThinkingLevel": "off",
@@ -577,6 +620,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
+                  "id": "<present>",
                   "provider": "<LOCK>"
                 },
                 "override": 128000,
@@ -585,6 +629,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
+              "eventSequence": "<present>",
+              "extensionActivityAsOf": "<present>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -613,7 +659,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
+                "hostEpoch": "<present>",
                 "pendingInteractions": [],
+                "revision": "<present>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -632,20 +680,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
+              "leafEntryId": "<present>",
               "liveActivityRevision": 0,
               "model": {
+                "id": "<present>",
                 "provider": "<LOCK>"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
+                "asOf": "<present>",
                 "problemCount": 0,
                 "recentCount": 0,
+                "revision": "<present>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
+              "revision": "<present>",
+              "runtimeGeneration": "<present>",
+              "sessionId": "<present>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -665,10 +720,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
+                  "id": "<present>",
                   "kind": "modelChange",
                   "modelRef": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -678,13 +736,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 },
                 {
+                  "id": "<present>",
                   "kind": "thinkingChange",
                   "level": "off",
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -694,20 +756,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
-            }
+            },
+            "subscriptionToken": "<present>",
+            "syncToken": "<present>"
           }
         }
       },
       {
         "method": "session.sync",
-        "params": {},
+        "params": {
+          "sessionId": "<present>",
+          "syncToken": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -735,6 +804,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
+                "id": "<present>",
                 "isUnread": false,
                 "kind": "user",
                 "messageCount": 0,
@@ -751,6 +821,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "remember the word lantern",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
+                "id": "<present>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 2,
@@ -767,17 +838,23 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0005",
+          "sessionId": "<present>",
           "text": "a second session turn"
         },
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "operationId": "<present>"
+          }
         }
       },
       {
         "method": "session.close",
-        "params": {},
+        "params": {
+          "sessionId": "<present>",
+          "subscriptionToken": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -788,7 +865,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
       },
       {
         "method": "session.open",
-        "params": {},
+        "params": {
+          "sessionId": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -813,6 +892,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
                   "requestedThinkingLevel": "off",
@@ -840,6 +920,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
+                  "id": "<present>",
                   "provider": "<LOCK>"
                 },
                 "override": 128000,
@@ -847,6 +928,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
+              "eventSequence": "<present>",
+              "extensionActivityAsOf": "<present>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -875,7 +958,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
+                "hostEpoch": "<present>",
                 "pendingInteractions": [],
+                "revision": "<present>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -894,20 +979,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
+              "leafEntryId": "<present>",
               "liveActivityRevision": 0,
               "model": {
+                "id": "<present>",
                 "provider": "<LOCK>"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
+                "asOf": "<present>",
                 "problemCount": 0,
                 "recentCount": 0,
+                "revision": "<present>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
+              "revision": "<present>",
+              "runtimeGeneration": "<present>",
+              "sessionId": "<present>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -928,10 +1020,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
+                  "id": "<present>",
                   "kind": "modelChange",
                   "modelRef": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -941,13 +1036,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 },
                 {
+                  "id": "<present>",
                   "kind": "thinkingChange",
                   "level": "off",
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -957,44 +1056,58 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 },
                 {
                   "content": [
                     {
+                      "id": "<present>",
                       "ordinal": 0,
                       "text": "remember the word lantern",
                       "type": "text"
                     }
                   ],
+                  "id": "<present>",
                   "kind": "message",
+                  "parentId": "<present>",
+                  "presentationId": "<present>",
                   "role": "user",
                   "semantic": {
                     "contextEffect": "modelInput",
                     "delivery": "stored",
                     "direction": "inboundContext",
+                    "invocationId": "<present>",
                     "kind": "resourcePrompt",
                     "lifecycle": "completed",
+                    "operationId": "<present>",
                     "origin": {
                       "confidence": "boundary",
                       "kind": "user"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 },
                 {
                   "content": [
                     {
+                      "id": "<present>",
                       "ordinal": 0,
                       "text": "First answer before eviction.",
                       "type": "text"
                     }
                   ],
+                  "id": "<present>",
                   "kind": "message",
                   "modelId": "faux-1",
+                  "parentId": "<present>",
+                  "presentationId": "<present>",
                   "provider": "<LOCK>",
                   "role": "assistant",
                   "semantic": {
@@ -1006,22 +1119,30 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "assistant"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
                   },
                   "stopReason": "stop",
-                  "thinkingLevel": "off"
+                  "thinkingLevel": "off",
+                  "timestamp": "<present>",
+                  "usage": "<present>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 4
-            }
+            },
+            "subscriptionToken": "<present>",
+            "syncToken": "<present>"
           }
         }
       },
       {
         "method": "session.sync",
-        "params": {},
+        "params": {
+          "sessionId": "<present>",
+          "syncToken": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -1033,6 +1154,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
       {
         "method": "session.attention.read",
         "params": {
+          "sessionId": "<present>",
           "throughCompletionRevision": 1
         },
         "response": {
@@ -1049,17 +1171,22 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0006",
+          "sessionId": "<present>",
           "text": "which word?"
         },
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "operationId": "<present>"
+          }
         }
       },
       {
         "method": "session.transcript",
-        "params": {},
+        "params": {
+          "sessionId": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -1067,10 +1194,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "end": 6,
             "items": [
               {
+                "id": "<present>",
                 "kind": "modelChange",
                 "modelRef": {
+                  "id": "<present>",
                   "provider": "<LOCK>"
                 },
+                "parentId": "<present>",
                 "semantic": {
                   "contextEffect": "none",
                   "delivery": "stored",
@@ -1080,13 +1210,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "gateway"
                   },
+                  "sequence": "<present>",
                   "version": 1,
                   "visibility": "visible"
-                }
+                },
+                "timestamp": "<present>"
               },
               {
+                "id": "<present>",
                 "kind": "thinkingChange",
                 "level": "off",
+                "parentId": "<present>",
                 "semantic": {
                   "contextEffect": "none",
                   "delivery": "stored",
@@ -1096,44 +1230,58 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "gateway"
                   },
+                  "sequence": "<present>",
                   "version": 1,
                   "visibility": "visible"
-                }
+                },
+                "timestamp": "<present>"
               },
               {
                 "content": [
                   {
+                    "id": "<present>",
                     "ordinal": 0,
                     "text": "remember the word lantern",
                     "type": "text"
                   }
                 ],
+                "id": "<present>",
                 "kind": "message",
+                "parentId": "<present>",
+                "presentationId": "<present>",
                 "role": "user",
                 "semantic": {
                   "contextEffect": "modelInput",
                   "delivery": "stored",
                   "direction": "inboundContext",
+                  "invocationId": "<present>",
                   "kind": "resourcePrompt",
                   "lifecycle": "completed",
+                  "operationId": "<present>",
                   "origin": {
                     "confidence": "boundary",
                     "kind": "user"
                   },
+                  "sequence": "<present>",
                   "version": 1,
                   "visibility": "visible"
-                }
+                },
+                "timestamp": "<present>"
               },
               {
                 "content": [
                   {
+                    "id": "<present>",
                     "ordinal": 0,
                     "text": "First answer before eviction.",
                     "type": "text"
                   }
                 ],
+                "id": "<present>",
                 "kind": "message",
                 "modelId": "faux-1",
+                "parentId": "<present>",
+                "presentationId": "<present>",
                 "provider": "<LOCK>",
                 "role": "assistant",
                 "semantic": {
@@ -1145,46 +1293,61 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "assistant"
                   },
+                  "sequence": "<present>",
                   "version": 1,
                   "visibility": "visible"
                 },
                 "stopReason": "stop",
-                "thinkingLevel": "off"
+                "thinkingLevel": "off",
+                "timestamp": "<present>",
+                "usage": "<present>"
               },
               {
                 "content": [
                   {
+                    "id": "<present>",
                     "ordinal": 0,
                     "text": "which word?",
                     "type": "text"
                   }
                 ],
+                "id": "<present>",
                 "kind": "message",
+                "parentId": "<present>",
+                "presentationId": "<present>",
                 "role": "user",
                 "semantic": {
                   "contextEffect": "modelInput",
                   "delivery": "stored",
                   "direction": "inboundContext",
+                  "invocationId": "<present>",
                   "kind": "resourcePrompt",
                   "lifecycle": "completed",
+                  "operationId": "<present>",
                   "origin": {
                     "confidence": "boundary",
                     "kind": "user"
                   },
+                  "sequence": "<present>",
                   "version": 1,
                   "visibility": "visible"
-                }
+                },
+                "timestamp": "<present>"
               },
               {
                 "content": [
                   {
+                    "id": "<present>",
                     "ordinal": 0,
                     "text": "Answer after the cold load.",
                     "type": "text"
                   }
                 ],
+                "id": "<present>",
                 "kind": "message",
                 "modelId": "faux-1",
+                "parentId": "<present>",
+                "presentationId": "<present>",
                 "provider": "<LOCK>",
                 "role": "assistant",
                 "semantic": {
@@ -1196,13 +1359,18 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "confidence": "boundary",
                     "kind": "assistant"
                   },
+                  "sequence": "<present>",
                   "version": 1,
                   "visibility": "visible"
                 },
                 "stopReason": "stop",
-                "thinkingLevel": "off"
+                "thinkingLevel": "off",
+                "timestamp": "<present>",
+                "usage": "<present>"
               }
             ],
+            "leafEntryId": "<present>",
+            "runtimeGeneration": "<present>",
             "start": 0,
             "total": 6
           }
@@ -1227,6 +1395,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "remember the word lantern",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
+                "id": "<present>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 4,
@@ -1243,6 +1412,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "firstMessage": "a second session turn",
                 "foregroundPhase": "idle",
                 "hasActiveSubagents": false,
+                "id": "<present>",
                 "isUnread": true,
                 "kind": "user",
                 "messageCount": 2,
@@ -1264,20 +1434,25 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "type": "text"
           }
         ],
-        "role": "user"
+        "role": "user",
+        "timestamp": "<present>"
       },
       {
+        "api": "<present>",
         "content": [
           {
             "text": "First answer before eviction.",
             "type": "text"
           }
         ],
+        "durationMs": "<present>",
         "model": "faux-1",
         "provider": "<LOCK>",
         "role": "assistant",
         "stopReason": "stop",
-        "thinkingLevel": "off"
+        "thinkingLevel": "off",
+        "timestamp": "<present>",
+        "usage": "<present>"
       },
       {
         "content": [
@@ -1286,20 +1461,25 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "type": "text"
           }
         ],
-        "role": "user"
+        "role": "user",
+        "timestamp": "<present>"
       },
       {
+        "api": "<present>",
         "content": [
           {
             "text": "Answer after the cold load.",
             "type": "text"
           }
         ],
+        "durationMs": "<present>",
         "model": "faux-1",
         "provider": "<LOCK>",
         "role": "assistant",
         "stopReason": "stop",
-        "thinkingLevel": "off"
+        "thinkingLevel": "off",
+        "timestamp": "<present>",
+        "usage": "<present>"
       }
     ],
     "types": [
@@ -1363,19 +1543,123 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "source": "plain"
       }
     ],
+    "envelopes": [
+      {
+        "id": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      }
+    ],
     "sessionEntries": [
       {
         "cwd": "<tmp>/workspace",
+        "id": "<present>",
+        "timestamp": "<present>",
         "type": "session",
         "version": 3
       },
       {
+        "id": "<present>",
         "modelId": "faux-1",
+        "parentId": "<present>",
         "provider": "<LOCK>",
+        "timestamp": "<present>",
         "type": "model_change"
       },
       {
+        "id": "<present>",
+        "parentId": "<present>",
         "thinkingLevel": "off",
+        "timestamp": "<present>",
         "type": "thinking_level_change"
       }
     ],
@@ -1570,12 +1854,16 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "sessionId": "<present>"
+          }
         }
       },
       {
         "method": "session.open",
-        "params": {},
+        "params": {
+          "sessionId": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -1600,6 +1888,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
                   "requestedThinkingLevel": "off",
@@ -1627,6 +1916,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
+                  "id": "<present>",
                   "provider": "<LOCK>"
                 },
                 "override": 128000,
@@ -1635,6 +1925,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
+              "eventSequence": "<present>",
+              "extensionActivityAsOf": "<present>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -1663,7 +1955,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
+                "hostEpoch": "<present>",
                 "pendingInteractions": [],
+                "revision": "<present>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -1682,20 +1976,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
+              "leafEntryId": "<present>",
               "liveActivityRevision": 0,
               "model": {
+                "id": "<present>",
                 "provider": "<LOCK>"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
+                "asOf": "<present>",
                 "problemCount": 0,
                 "recentCount": 0,
+                "revision": "<present>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
+              "revision": "<present>",
+              "runtimeGeneration": "<present>",
+              "sessionId": "<present>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -1715,10 +2016,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
+                  "id": "<present>",
                   "kind": "modelChange",
                   "modelRef": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1728,13 +2032,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 },
                 {
+                  "id": "<present>",
                   "kind": "thinkingChange",
                   "level": "off",
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1744,20 +2052,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
-            }
+            },
+            "subscriptionToken": "<present>",
+            "syncToken": "<present>"
           }
         }
       },
       {
         "method": "session.sync",
-        "params": {},
+        "params": {
+          "sessionId": "<present>",
+          "syncToken": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -1775,12 +2090,16 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "sessionId": "<present>"
+          }
         }
       },
       {
         "method": "session.open",
-        "params": {},
+        "params": {
+          "sessionId": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -1805,6 +2124,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
                   "requestedThinkingLevel": "off",
@@ -1832,6 +2152,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
+                  "id": "<present>",
                   "provider": "<LOCK>"
                 },
                 "override": 128000,
@@ -1840,6 +2161,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
+              "eventSequence": "<present>",
+              "extensionActivityAsOf": "<present>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -1868,7 +2191,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
+                "hostEpoch": "<present>",
                 "pendingInteractions": [],
+                "revision": "<present>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -1887,20 +2212,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
+              "leafEntryId": "<present>",
               "liveActivityRevision": 0,
               "model": {
+                "id": "<present>",
                 "provider": "<LOCK>"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
+                "asOf": "<present>",
                 "problemCount": 0,
                 "recentCount": 0,
+                "revision": "<present>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
+              "revision": "<present>",
+              "runtimeGeneration": "<present>",
+              "sessionId": "<present>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -1920,10 +2252,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
+                  "id": "<present>",
                   "kind": "modelChange",
                   "modelRef": {
+                    "id": "<present>",
                     "provider": "<LOCK>"
                   },
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1933,13 +2268,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 },
                 {
+                  "id": "<present>",
                   "kind": "thinkingChange",
                   "level": "off",
+                  "parentId": "<present>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1949,20 +2288,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
+                    "sequence": "<present>",
                     "version": 1,
                     "visibility": "visible"
-                  }
+                  },
+                  "timestamp": "<present>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
-            }
+            },
+            "subscriptionToken": "<present>",
+            "syncToken": "<present>"
           }
         }
       },
       {
         "method": "session.sync",
-        "params": {},
+        "params": {
+          "sessionId": "<present>",
+          "syncToken": "<present>"
+        },
         "response": {
           "error": null,
           "ok": true,
@@ -1984,6 +2330,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "idle",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           }
         }
@@ -1992,12 +2339,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0003",
+          "sessionId": "<present>",
           "text": "hold this run open"
         },
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "operationId": "<present>"
+          }
         }
       },
       {
@@ -2005,12 +2355,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "params": {
           "behavior": "followUp",
           "commandId": "lock-command-0004",
+          "sessionId": "<present>",
           "text": "queued before the drain"
         },
         "response": {
           "error": null,
           "ok": true,
-          "result": {}
+          "result": {
+            "operationId": "<present>"
+          }
         }
       },
       {
@@ -2030,20 +2383,25 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "foreground-agent-operation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
+                "sessionId": "<present>",
                 "state": "active"
               },
               {
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "queued-mutation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
+                "sessionId": "<present>",
                 "state": "active"
               }
             ],
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "idle",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           }
         }
@@ -2065,20 +2423,25 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "foreground-agent-operation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
+                "sessionId": "<present>",
                 "state": "active"
               },
               {
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "queued-mutation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
+                "sessionId": "<present>",
                 "state": "active"
               }
             ],
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "waiting",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           }
         }
@@ -2087,6 +2450,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0005",
+          "sessionId": "<present>",
           "text": "new work during the drain"
         },
         "response": {
@@ -2128,6 +2492,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "complete",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           }
         }
@@ -2141,20 +2506,25 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "type": "text"
           }
         ],
-        "role": "user"
+        "role": "user",
+        "timestamp": "<present>"
       },
       {
+        "api": "<present>",
         "content": [
           {
             "text": "Held run settled.",
             "type": "text"
           }
         ],
+        "durationMs": "<present>",
         "model": "faux-1",
         "provider": "<LOCK>",
         "role": "assistant",
         "stopReason": "stop",
-        "thinkingLevel": "off"
+        "thinkingLevel": "off",
+        "timestamp": "<present>",
+        "usage": "<present>"
       },
       {
         "content": [
@@ -2163,20 +2533,25 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "type": "text"
           }
         ],
-        "role": "user"
+        "role": "user",
+        "timestamp": "<present>"
       },
       {
+        "api": "<present>",
         "content": [
           {
             "text": "Queued follow-up answered.",
             "type": "text"
           }
         ],
+        "durationMs": "<present>",
         "model": "faux-1",
         "provider": "<LOCK>",
         "role": "assistant",
         "stopReason": "stop",
-        "thinkingLevel": "off"
+        "thinkingLevel": "off",
+        "timestamp": "<present>",
+        "usage": "<present>"
       }
     ],
     "types": [
@@ -2240,19 +2615,123 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         "source": "plain"
       }
     ],
+    "envelopes": [
+      {
+        "id": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      },
+      {
+        "id": "<present>",
+        "parentId": "<present>",
+        "timestamp": "<present>"
+      }
+    ],
     "sessionEntries": [
       {
         "cwd": "<tmp>/workspace",
+        "id": "<present>",
+        "timestamp": "<present>",
         "type": "session",
         "version": 3
       },
       {
+        "id": "<present>",
         "modelId": "faux-1",
+        "parentId": "<present>",
         "provider": "<LOCK>",
+        "timestamp": "<present>",
         "type": "model_change"
       },
       {
+        "id": "<present>",
+        "parentId": "<present>",
         "thinkingLevel": "off",
+        "timestamp": "<present>",
         "type": "thinking_level_change"
       }
     ],
@@ -2289,6 +2768,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "idle",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           },
           "running": {
@@ -2302,6 +2782,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "foreground-agent-operation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
                 "sessionId": "<session:running>",
                 "state": "active"
@@ -2310,6 +2791,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "queued-mutation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
                 "sessionId": "<session:running>",
                 "state": "active"
@@ -2318,6 +2800,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "idle",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           },
           "begun": {
@@ -2331,6 +2814,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "foreground-agent-operation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
                 "sessionId": "<session:running>",
                 "state": "active"
@@ -2339,6 +2823,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "queued-mutation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
                 "sessionId": "<session:running>",
                 "state": "active"
@@ -2347,6 +2832,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "preparing",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           },
           "waiting": {
@@ -2360,6 +2846,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "foreground-agent-operation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
                 "sessionId": "<session:running>",
                 "state": "active"
@@ -2368,6 +2855,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "admittedAt": "<timestamp>",
                 "ageMs": "<duration>",
                 "category": "queued-mutation",
+                "id": "<present>",
                 "progressAt": "<timestamp>",
                 "sessionId": "<session:running>",
                 "state": "active"
@@ -2376,6 +2864,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "waiting",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           },
           "complete": {
@@ -2385,6 +2874,7 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "drainId": "<id>",
             "omittedCount": 0,
             "phase": "complete",
+            "revision": "<present>",
             "suspectProjectionCount": 0
           }
         },
