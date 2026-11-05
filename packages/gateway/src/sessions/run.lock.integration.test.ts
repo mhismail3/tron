@@ -2,7 +2,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { type LockGateway, type LockGatewayOptions } from "../../test-support/gateway-lock-harness.js";
 import { normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
-import { expectSessionLock, projected, projectedSnapshot, type SessionLockExpectation } from "../../test-support/lock-projections.js";
+import { expectScenario } from "../../test-support/lock-projections.js";
 import { awaitsWithin } from "../../test-support/wait-for.js";
 import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, openLockSession, promptStreamScenario, type LockSession } from "../../test-support/lock-scenarios.js";
 
@@ -59,11 +59,7 @@ async function finish(session: Session, lock: string, validate: (trace: RunLockT
     transcript: (recorded.exchanges.at(-1) as { response: TraceValue }).response,
     ...(observed === undefined ? {} : { observed: normalizeTraceValue(observed, session.gateway.normalization) }),
   };
-  expectSessionLock(lock, {
-    exchanges: recorded.exchanges, canonical: trace.canonicalJsonl, providers: recorded.providerRequests.map((request) => request.messages),
-    items: (transcript.result as { items: unknown[] }).items,
-    window: Object.fromEntries(Object.entries(transcript.result as Record<string, unknown>).filter(([key]) => key !== "items")),
-  }, EXPECTED[lock]!);
+  expectScenario(trace as unknown as Record<string, unknown>, EXPECTED[lock]);
   validate(trace);
 }
 
@@ -158,15 +154,6 @@ describe("gateway/run kernel locks", () => {
     const session = await openSession("run-compaction");
     await compactionScenario(session);
     await finish(session, "run-compaction", (trace) => {
-      const entry = trace.canonicalJsonl.find((candidate) => (candidate as { type?: unknown }).type === "compaction") as { firstKeptEntryId: string };
-      expect(projected(entry), "the compaction entry").toEqual({
-        id: "<present>", parentId: "<present>", timestamp: "<present>", usage: "<present>",
-        details: { modifiedFiles: [], readFiles: [] }, firstKeptEntryId: "<id>", fromHook: false,
-        summary: "Summary: two answered turns about the lock context.\n\n---\n\n**Turn Context (split turn):**\n\nTurn prefix: the second question.",
-        systemMessage: { contentChars: 0, sectionNames: ["cwd", "docs", "preamble", "rules", "tools"],
-          toolsAdded: ["read", "bash", "edit", "write", "jev", "web_search", "settings", "projects", "ask_user", "display", "swift_app", "computer"] },
-        tokensBefore: "<value>", type: "compaction",
-      });
       expect(canonicalTypes(trace)).toContain("compaction");
       const compaction = trace.canonicalJsonl.find((entry) => (entry as { type?: unknown }).type === "compaction") as { summary?: string };
       expect(compaction.summary).toContain("two answered turns");
@@ -181,17 +168,19 @@ describe("gateway/run kernel locks", () => {
     await finish(session, "run-extension-ui", (trace) => {
       const result = trace.canonicalJsonl.find((entry) => (entry as { message?: { role?: string } }).message?.role === "toolResult");
       expect(JSON.stringify(result)).toContain("chosen: Keep");
-      expect(projectedSnapshot(trace.observed), "the pending select the client was shown").toEqual(EXPECTED["run-extension-ui"]!.extra.observed);
     }, pending as unknown as TraceValue);
   });
 });
 
 
-/** What each run lock expects (`test-support/lock-projections.ts`), generated from its former golden. */
-const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, unknown> }> = {
+
+/** Each lock's expected trace (`test-support/lock-projections.ts` `expectScenario`): its normalized exchanges, transcript, canonical JSONL, provider conversations and observed state, with model-visible parts named by session shape. */
+const EXPECTED: Record<string, unknown> = {
   "run-prompt-stream": {
+    "lock": "run-prompt-stream",
     "exchanges": [
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0001",
@@ -201,14 +190,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -234,8 +224,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-prompt-stream"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -262,8 +252,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-prompt-stream"
                 },
                 "override": 128000,
                 "source": "session",
@@ -271,8 +261,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -301,9 +291,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -322,27 +312,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-prompt-stream"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -362,13 +352,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-prompt-stream"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -378,17 +368,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -398,26 +388,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -428,478 +419,966 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0002",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "read the notes"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
+          }
+        }
+      },
+      {
+        "client": "phone",
+        "method": "session.transcript",
+        "params": {
+          "sessionId": "<id>"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "end": 6,
+            "items": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-prompt-stream"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "read the notes",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "Reading the lock notes.",
+                    "thinkingRunOrdinal": 0,
+                    "type": "thinking"
+                  },
+                  {
+                    "id": "<id>",
+                    "ordinal": 1,
+                    "text": "Reading notes.",
+                    "type": "text"
+                  },
+                  {
+                    "arguments": {
+                      "path": "notes.txt"
+                    },
+                    "groupCount": 1,
+                    "groupFinalized": true,
+                    "groupId": "<id>",
+                    "groupIndex": 0,
+                    "id": "<id>",
+                    "name": "read",
+                    "ordinal": 2,
+                    "toolCallId": "<id>",
+                    "toolSegmentId": "<id>",
+                    "type": "toolCall"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-prompt-stream",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "toolUse",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              },
+              {
+                "completedAt": "<timestamp>",
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "lock notes\n",
+                    "type": "text"
+                  }
+                ],
+                "durationMs": "<duration>",
+                "groupCount": 1,
+                "groupFinalized": true,
+                "groupId": "<id>",
+                "groupIndex": 0,
+                "id": "<id>",
+                "isError": false,
+                "kind": "message",
+                "lastProgressAt": "<timestamp>",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "progressSequence": "<n>",
+                "role": "toolResult",
+                "semantic": {
+                  "contextEffect": "toolResult",
+                  "delivery": "toolResult",
+                  "direction": "agentInvocation",
+                  "kind": "tool",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "startedAt": "<timestamp>",
+                "timestamp": "<timestamp>",
+                "toolCallId": "<id>",
+                "toolName": "read",
+                "toolSegmentId": "<id>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "The notes say: lock notes.",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-prompt-stream",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              }
+            ],
+            "leafEntryId": "<id>",
+            "runtimeGeneration": "<id>",
+            "start": 0,
+            "total": 6
           }
         }
       }
     ],
-    "items": [
+    "providerRequests": [
       {
-        "id": "<present>",
-        "kind": "modelChange",
-        "modelRef": {
-          "id": "<present>",
-          "provider": "<LOCK>"
-        },
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "kind": "thinkingChange",
-        "level": "off",
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "read the notes",
-            "type": "text"
+            "role": "user",
+            "text": "read the notes"
           }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
-          "lifecycle": "completed",
-          "operationId": "<present>",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "user"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
+        ]
       },
       {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "Reading the lock notes.",
-            "thinkingRunOrdinal": 0,
-            "type": "thinking"
+            "role": "user",
+            "text": "read the notes"
           },
           {
-            "id": "<present>",
-            "ordinal": 1,
+            "role": "assistant",
             "text": "Reading notes.",
-            "type": "text"
+            "toolCalls": [
+              "read"
+            ]
           },
           {
-            "arguments": {
-              "path": "notes.txt"
-            },
-            "groupCount": 1,
-            "groupFinalized": true,
-            "groupId": "<present>",
-            "groupIndex": 0,
-            "id": "<present>",
-            "name": "read",
-            "ordinal": 2,
-            "toolCallId": "<present>",
-            "toolSegmentId": "<present>",
-            "type": "toolCall"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "toolUse",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "completedAt": "<present>",
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
+            "role": "toolResult",
             "text": "lock notes\n",
-            "type": "text"
+            "toolName": "read"
           }
-        ],
-        "durationMs": "<present>",
-        "groupCount": 1,
-        "groupFinalized": true,
-        "groupId": "<present>",
-        "groupIndex": 0,
-        "id": "<present>",
-        "isError": false,
-        "kind": "message",
-        "lastProgressAt": "<present>",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "progressSequence": "<present>",
-        "role": "toolResult",
-        "semantic": {
-          "contextEffect": "toolResult",
-          "delivery": "toolResult",
-          "direction": "agentInvocation",
-          "kind": "tool",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "startedAt": "<present>",
-        "timestamp": "<present>",
-        "toolCallId": "<present>",
-        "toolName": "read",
-        "toolSegmentId": "<present>"
-      },
-      {
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "The notes say: lock notes.",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        ]
       }
     ],
-    "window": {
-      "end": 6,
-      "leafEntryId": "<present>",
-      "runtimeGeneration": "<present>",
-      "start": 0,
-      "total": 6
-    },
-    "messages": [
-      {
-        "content": [
-          {
-            "text": "read the notes",
-            "type": "text"
-          }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "thinking": "Reading the lock notes.",
-            "type": "thinking"
-          },
-          {
-            "text": "Reading notes.",
-            "type": "text"
-          },
-          {
-            "arguments": {
-              "path": "notes.txt"
-            },
-            "id": "<present>",
-            "name": "read",
-            "type": "toolCall"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "toolUse",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "content": [
-          {
-            "text": "lock notes\n",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "isError": false,
-        "role": "toolResult",
-        "timestamp": "<present>",
-        "toolCallId": "<present>",
-        "toolName": "read"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "text": "The notes say: lock notes.",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      }
-    ],
-    "types": [
-      "session",
-      "model_change",
-      "thinking_level_change",
-      "custom:tron.context-window.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:system",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "message:toolResult",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1"
-    ],
-    "receipts": [
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      }
-    ],
-    "envelopes": [
-      {
-        "id": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      }
-    ],
-    "sessionEntries": [
+    "canonicalJsonl": [
       {
         "cwd": "<tmp>/workspace",
-        "id": "<present>",
-        "timestamp": "<present>",
+        "id": "<id>",
+        "timestamp": "<timestamp>",
         "type": "session",
         "version": 3
       },
       {
-        "id": "<present>",
+        "id": "<id>",
         "modelId": "faux-1",
-        "parentId": "<present>",
-        "provider": "<LOCK>",
-        "timestamp": "<present>",
+        "parentId": "<id>",
+        "provider": "tron-lock-run-prompt-stream",
+        "timestamp": "<timestamp>",
         "type": "model_change"
       },
       {
-        "id": "<present>",
-        "parentId": "<present>",
+        "id": "<id>",
+        "parentId": "<id>",
         "thinkingLevel": "off",
-        "timestamp": "<present>",
+        "timestamp": "<timestamp>",
         "type": "thinking_level_change"
+      },
+      {
+        "customType": "tron.context-window.v1",
+        "data": {
+          "contextWindow": 128000,
+          "modelId": "faux-1",
+          "provider": "tron-lock-run-prompt-stream",
+          "version": 1
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-prompt-stream/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-prompt-stream"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-prompt-stream/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {},
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-prompt-stream/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-prompt-stream"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-prompt-stream/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {
+            "context.images.block": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": false
+            }
+          },
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": "",
+          "role": "system",
+          "timestamp": "<timestamp>",
+          "sections": {
+            "cwd": "<cwd>\n<tmp>/workspace\n</cwd>",
+            "sessionShape": "chat#0"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "read the notes",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "thinking": "Reading the lock notes.",
+              "type": "thinking"
+            },
+            {
+              "text": "Reading notes.",
+              "type": "text"
+            },
+            {
+              "arguments": {
+                "path": "notes.txt"
+              },
+              "id": "<id>",
+              "name": "read",
+              "type": "toolCall"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-prompt-stream",
+          "role": "assistant",
+          "stopReason": "toolUse",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "lock notes\n",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "isError": false,
+          "role": "toolResult",
+          "timestamp": "<timestamp>",
+          "toolCallId": "<id>",
+          "toolName": "read"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "The notes say: lock notes.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-prompt-stream",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       }
     ],
-    "providers": [
-      [
-        {
-          "role": "user",
-          "text": "read the notes"
-        }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "read the notes"
-        },
-        {
-          "role": "assistant",
-          "text": "Reading notes.",
-          "toolCalls": [
-            "read"
-          ]
-        },
-        {
-          "role": "toolResult",
-          "text": "lock notes\n",
-          "toolName": "read"
-        }
-      ]
-    ],
-    "extra": {}
+    "transcript": {
+      "error": null,
+      "ok": true,
+      "result": {
+        "end": 6,
+        "items": [
+          {
+            "id": "<id>",
+            "kind": "modelChange",
+            "modelRef": {
+              "id": "<id>",
+              "provider": "tron-lock-run-prompt-stream"
+            },
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "id": "<id>",
+            "kind": "thinkingChange",
+            "level": "off",
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "read the notes",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "completed",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "Reading the lock notes.",
+                "thinkingRunOrdinal": 0,
+                "type": "thinking"
+              },
+              {
+                "id": "<id>",
+                "ordinal": 1,
+                "text": "Reading notes.",
+                "type": "text"
+              },
+              {
+                "arguments": {
+                  "path": "notes.txt"
+                },
+                "groupCount": 1,
+                "groupFinalized": true,
+                "groupId": "<id>",
+                "groupIndex": 0,
+                "id": "<id>",
+                "name": "read",
+                "ordinal": 2,
+                "toolCallId": "<id>",
+                "toolSegmentId": "<id>",
+                "type": "toolCall"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-prompt-stream",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "toolUse",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          },
+          {
+            "completedAt": "<timestamp>",
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "lock notes\n",
+                "type": "text"
+              }
+            ],
+            "durationMs": "<duration>",
+            "groupCount": 1,
+            "groupFinalized": true,
+            "groupId": "<id>",
+            "groupIndex": 0,
+            "id": "<id>",
+            "isError": false,
+            "kind": "message",
+            "lastProgressAt": "<timestamp>",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "progressSequence": "<n>",
+            "role": "toolResult",
+            "semantic": {
+              "contextEffect": "toolResult",
+              "delivery": "toolResult",
+              "direction": "agentInvocation",
+              "kind": "tool",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "startedAt": "<timestamp>",
+            "timestamp": "<timestamp>",
+            "toolCallId": "<id>",
+            "toolName": "read",
+            "toolSegmentId": "<id>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "The notes say: lock notes.",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-prompt-stream",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "stop",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          }
+        ],
+        "leafEntryId": "<id>",
+        "runtimeGeneration": "<id>",
+        "start": 0,
+        "total": 6
+      }
+    }
   },
   "run-steer": {
+    "lock": "run-steer",
     "exchanges": [
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0001",
@@ -909,14 +1388,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -942,8 +1422,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-steer"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -970,8 +1450,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-steer"
                 },
                 "override": 128000,
                 "source": "session",
@@ -979,8 +1459,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -1009,9 +1489,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -1030,27 +1510,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-steer"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -1070,13 +1550,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-steer"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1086,17 +1566,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -1106,26 +1586,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -1136,762 +1617,1469 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0002",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "hold a turn open"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "behavior": "steer",
           "commandId": "lock-command-0003",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "steer the run"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "behavior": "followUp",
           "commandId": "lock-command-0004",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "then follow up"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
+          }
+        }
+      },
+      {
+        "client": "phone",
+        "method": "session.transcript",
+        "params": {
+          "sessionId": "<id>"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "end": 9,
+            "items": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-steer"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "hold a turn open",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "arguments": {
+                      "path": "notes.txt"
+                    },
+                    "groupCount": 1,
+                    "groupFinalized": true,
+                    "groupId": "<id>",
+                    "groupIndex": 0,
+                    "id": "<id>",
+                    "name": "read",
+                    "ordinal": 0,
+                    "toolCallId": "<id>",
+                    "toolSegmentId": "<id>",
+                    "type": "toolCall"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-steer",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "toolUse",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              },
+              {
+                "completedAt": "<timestamp>",
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "lock notes\n",
+                    "type": "text"
+                  }
+                ],
+                "durationMs": "<duration>",
+                "groupCount": 1,
+                "groupFinalized": true,
+                "groupId": "<id>",
+                "groupIndex": 0,
+                "id": "<id>",
+                "isError": false,
+                "kind": "message",
+                "lastProgressAt": "<timestamp>",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "progressSequence": "<n>",
+                "role": "toolResult",
+                "semantic": {
+                  "contextEffect": "toolResult",
+                  "delivery": "toolResult",
+                  "direction": "agentInvocation",
+                  "kind": "tool",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "startedAt": "<timestamp>",
+                "timestamp": "<timestamp>",
+                "toolCallId": "<id>",
+                "toolName": "read",
+                "toolSegmentId": "<id>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "steer the run",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "Steered work acknowledged.",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-steer",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "then follow up",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "Follow-up work acknowledged.",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-steer",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              }
+            ],
+            "leafEntryId": "<id>",
+            "runtimeGeneration": "<id>",
+            "start": 0,
+            "total": 9
           }
         }
       }
     ],
-    "items": [
+    "providerRequests": [
       {
-        "id": "<present>",
-        "kind": "modelChange",
-        "modelRef": {
-          "id": "<present>",
-          "provider": "<LOCK>"
-        },
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "kind": "thinkingChange",
-        "level": "off",
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "hold a turn open",
-            "type": "text"
+            "role": "user",
+            "text": "hold a turn open"
           }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
-          "lifecycle": "completed",
-          "operationId": "<present>",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "user"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
+        ]
       },
       {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "arguments": {
-              "path": "notes.txt"
-            },
-            "groupCount": 1,
-            "groupFinalized": true,
-            "groupId": "<present>",
-            "groupIndex": 0,
-            "id": "<present>",
-            "name": "read",
-            "ordinal": 0,
-            "toolCallId": "<present>",
-            "toolSegmentId": "<present>",
-            "type": "toolCall"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
+            "role": "user",
+            "text": "hold a turn open"
           },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "toolUse",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "completedAt": "<present>",
-        "content": [
           {
-            "id": "<present>",
-            "ordinal": 0,
+            "role": "assistant",
+            "text": "",
+            "toolCalls": [
+              "read"
+            ]
+          },
+          {
+            "role": "toolResult",
             "text": "lock notes\n",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "groupCount": 1,
-        "groupFinalized": true,
-        "groupId": "<present>",
-        "groupIndex": 0,
-        "id": "<present>",
-        "isError": false,
-        "kind": "message",
-        "lastProgressAt": "<present>",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "progressSequence": "<present>",
-        "role": "toolResult",
-        "semantic": {
-          "contextEffect": "toolResult",
-          "delivery": "toolResult",
-          "direction": "agentInvocation",
-          "kind": "tool",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
+            "toolName": "read"
           },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "startedAt": "<present>",
-        "timestamp": "<present>",
-        "toolCallId": "<present>",
-        "toolName": "read",
-        "toolSegmentId": "<present>"
+          {
+            "role": "user",
+            "text": "steer the run"
+          }
+        ]
       },
       {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "steer the run",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
-          "lifecycle": "completed",
-          "operationId": "<present>",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "user"
+            "role": "user",
+            "text": "hold a turn open"
           },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "Steered work acknowledged.",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
+            "role": "assistant",
+            "text": "",
+            "toolCalls": [
+              "read"
+            ]
           },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "content": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "then follow up",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
-          "lifecycle": "completed",
-          "operationId": "<present>",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "user"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "Follow-up work acknowledged.",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      }
-    ],
-    "window": {
-      "end": 9,
-      "leafEntryId": "<present>",
-      "runtimeGeneration": "<present>",
-      "start": 0,
-      "total": 9
-    },
-    "messages": [
-      {
-        "content": [
-          {
-            "text": "hold a turn open",
-            "type": "text"
-          }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "arguments": {
-              "path": "notes.txt"
-            },
-            "id": "<present>",
-            "name": "read",
-            "type": "toolCall"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "toolUse",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "content": [
-          {
+            "role": "toolResult",
             "text": "lock notes\n",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "isError": false,
-        "role": "toolResult",
-        "timestamp": "<present>",
-        "toolCallId": "<present>",
-        "toolName": "read"
-      },
-      {
-        "content": [
+            "toolName": "read"
+          },
           {
-            "text": "steer the run",
-            "type": "text"
-          }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
+            "role": "user",
+            "text": "steer the run"
+          },
           {
-            "text": "Steered work acknowledged.",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "content": [
+            "role": "assistant",
+            "text": "Steered work acknowledged."
+          },
           {
-            "text": "then follow up",
-            "type": "text"
+            "role": "user",
+            "text": "then follow up"
           }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "text": "Follow-up work acknowledged.",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        ]
       }
     ],
-    "types": [
-      "session",
-      "model_change",
-      "thinking_level_change",
-      "custom:tron.context-window.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:system",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "message:toolResult",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1"
-    ],
-    "receipts": [
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      }
-    ],
-    "envelopes": [
-      {
-        "id": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      }
-    ],
-    "sessionEntries": [
+    "canonicalJsonl": [
       {
         "cwd": "<tmp>/workspace",
-        "id": "<present>",
-        "timestamp": "<present>",
+        "id": "<id>",
+        "timestamp": "<timestamp>",
         "type": "session",
         "version": 3
       },
       {
-        "id": "<present>",
+        "id": "<id>",
         "modelId": "faux-1",
-        "parentId": "<present>",
-        "provider": "<LOCK>",
-        "timestamp": "<present>",
+        "parentId": "<id>",
+        "provider": "tron-lock-run-steer",
+        "timestamp": "<timestamp>",
         "type": "model_change"
       },
       {
-        "id": "<present>",
-        "parentId": "<present>",
+        "id": "<id>",
+        "parentId": "<id>",
         "thinkingLevel": "off",
-        "timestamp": "<present>",
+        "timestamp": "<timestamp>",
         "type": "thinking_level_change"
+      },
+      {
+        "customType": "tron.context-window.v1",
+        "data": {
+          "contextWindow": 128000,
+          "modelId": "faux-1",
+          "provider": "tron-lock-run-steer",
+          "version": 1
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-steer/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-steer"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-steer/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {},
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-steer/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-steer"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-steer/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {
+            "context.images.block": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": false
+            }
+          },
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": "",
+          "role": "system",
+          "timestamp": "<timestamp>",
+          "sections": {
+            "cwd": "<cwd>\n<tmp>/workspace\n</cwd>",
+            "sessionShape": "chat#0"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "hold a turn open",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "arguments": {
+                "path": "notes.txt"
+              },
+              "id": "<id>",
+              "name": "read",
+              "type": "toolCall"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-steer",
+          "role": "assistant",
+          "stopReason": "toolUse",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "lock notes\n",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "isError": false,
+          "role": "toolResult",
+          "timestamp": "<timestamp>",
+          "toolCallId": "<id>",
+          "toolName": "read"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "steer the run",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "Steered work acknowledged.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-steer",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "then follow up",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "Follow-up work acknowledged.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-steer",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       }
     ],
-    "providers": [
-      [
-        {
-          "role": "user",
-          "text": "hold a turn open"
-        }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "hold a turn open"
-        },
-        {
-          "role": "assistant",
-          "text": "",
-          "toolCalls": [
-            "read"
-          ]
-        },
-        {
-          "role": "toolResult",
-          "text": "lock notes\n",
-          "toolName": "read"
-        },
-        {
-          "role": "user",
-          "text": "steer the run"
-        }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "hold a turn open"
-        },
-        {
-          "role": "assistant",
-          "text": "",
-          "toolCalls": [
-            "read"
-          ]
-        },
-        {
-          "role": "toolResult",
-          "text": "lock notes\n",
-          "toolName": "read"
-        },
-        {
-          "role": "user",
-          "text": "steer the run"
-        },
-        {
-          "role": "assistant",
-          "text": "Steered work acknowledged."
-        },
-        {
-          "role": "user",
-          "text": "then follow up"
-        }
-      ]
-    ],
-    "extra": {}
+    "transcript": {
+      "error": null,
+      "ok": true,
+      "result": {
+        "end": 9,
+        "items": [
+          {
+            "id": "<id>",
+            "kind": "modelChange",
+            "modelRef": {
+              "id": "<id>",
+              "provider": "tron-lock-run-steer"
+            },
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "id": "<id>",
+            "kind": "thinkingChange",
+            "level": "off",
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "hold a turn open",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "completed",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "arguments": {
+                  "path": "notes.txt"
+                },
+                "groupCount": 1,
+                "groupFinalized": true,
+                "groupId": "<id>",
+                "groupIndex": 0,
+                "id": "<id>",
+                "name": "read",
+                "ordinal": 0,
+                "toolCallId": "<id>",
+                "toolSegmentId": "<id>",
+                "type": "toolCall"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-steer",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "toolUse",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          },
+          {
+            "completedAt": "<timestamp>",
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "lock notes\n",
+                "type": "text"
+              }
+            ],
+            "durationMs": "<duration>",
+            "groupCount": 1,
+            "groupFinalized": true,
+            "groupId": "<id>",
+            "groupIndex": 0,
+            "id": "<id>",
+            "isError": false,
+            "kind": "message",
+            "lastProgressAt": "<timestamp>",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "progressSequence": "<n>",
+            "role": "toolResult",
+            "semantic": {
+              "contextEffect": "toolResult",
+              "delivery": "toolResult",
+              "direction": "agentInvocation",
+              "kind": "tool",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "startedAt": "<timestamp>",
+            "timestamp": "<timestamp>",
+            "toolCallId": "<id>",
+            "toolName": "read",
+            "toolSegmentId": "<id>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "steer the run",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "completed",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "Steered work acknowledged.",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-steer",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "stop",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "then follow up",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "completed",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "Follow-up work acknowledged.",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-steer",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "stop",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          }
+        ],
+        "leafEntryId": "<id>",
+        "runtimeGeneration": "<id>",
+        "start": 0,
+        "total": 9
+      }
+    }
   },
   "run-abort": {
+    "lock": "run-abort",
     "exchanges": [
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0001",
@@ -1901,14 +3089,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -1934,8 +3123,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-abort"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -1962,8 +3151,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-abort"
                 },
                 "override": 128000,
                 "source": "session",
@@ -1971,8 +3160,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -2001,9 +3190,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -2022,27 +3211,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-abort"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -2062,13 +3251,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-abort"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2078,17 +3267,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2098,26 +3287,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -2128,26 +3318,28 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0002",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "start a turn to abort"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.abort",
         "params": {
           "commandId": "lock-command-0003",
-          "operationId": "<present>",
-          "sessionId": "<present>"
+          "operationId": "<id>",
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -2156,290 +3348,636 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "aborted": true
           }
         }
-      }
-    ],
-    "items": [
-      {
-        "id": "<present>",
-        "kind": "modelChange",
-        "modelRef": {
-          "id": "<present>",
-          "provider": "<LOCK>"
-        },
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
       },
       {
-        "id": "<present>",
-        "kind": "thinkingChange",
-        "level": "off",
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
+        "client": "phone",
+        "method": "session.transcript",
+        "params": {
+          "sessionId": "<id>"
         },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "start a turn to abort",
-            "type": "text"
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "end": 4,
+            "items": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-abort"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "start a turn to abort",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "interrupted",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [],
+                "errorInfo": {
+                  "category": "aborted",
+                  "message": "Request cancelled",
+                  "providerMessage": "Request was aborted"
+                },
+                "errorMessage": "Request was aborted",
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-abort",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "aborted",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              }
+            ],
+            "leafEntryId": "<id>",
+            "runtimeGeneration": "<id>",
+            "start": 0,
+            "total": 4
           }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
-          "lifecycle": "interrupted",
-          "operationId": "<present>",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "user"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [],
-        "errorInfo": {
-          "category": "aborted",
-          "message": "Request cancelled",
-          "providerMessage": "Request was aborted"
-        },
-        "errorMessage": "Request was aborted",
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "aborted",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        }
       }
     ],
-    "window": {
-      "end": 4,
-      "leafEntryId": "<present>",
-      "runtimeGeneration": "<present>",
-      "start": 0,
-      "total": 4
-    },
-    "messages": [
+    "providerRequests": [
       {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "text": "start a turn to abort",
-            "type": "text"
+            "role": "user",
+            "text": "start a turn to abort"
           }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [],
-        "durationMs": "<present>",
-        "errorMessage": "Request was aborted",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "aborted",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        ]
       }
     ],
-    "types": [
-      "session",
-      "model_change",
-      "thinking_level_change",
-      "custom:tron.context-window.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:system",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1"
-    ],
-    "receipts": [
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "interrupted",
-        "errorCode": "user-abort",
-        "source": "plain"
-      }
-    ],
-    "envelopes": [
-      {
-        "id": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      }
-    ],
-    "sessionEntries": [
+    "canonicalJsonl": [
       {
         "cwd": "<tmp>/workspace",
-        "id": "<present>",
-        "timestamp": "<present>",
+        "id": "<id>",
+        "timestamp": "<timestamp>",
         "type": "session",
         "version": 3
       },
       {
-        "id": "<present>",
+        "id": "<id>",
         "modelId": "faux-1",
-        "parentId": "<present>",
-        "provider": "<LOCK>",
-        "timestamp": "<present>",
+        "parentId": "<id>",
+        "provider": "tron-lock-run-abort",
+        "timestamp": "<timestamp>",
         "type": "model_change"
       },
       {
-        "id": "<present>",
-        "parentId": "<present>",
+        "id": "<id>",
+        "parentId": "<id>",
         "thinkingLevel": "off",
-        "timestamp": "<present>",
+        "timestamp": "<timestamp>",
         "type": "thinking_level_change"
+      },
+      {
+        "customType": "tron.context-window.v1",
+        "data": {
+          "contextWindow": 128000,
+          "modelId": "faux-1",
+          "provider": "tron-lock-run-abort",
+          "version": 1
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-abort/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-abort"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-abort/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {},
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-abort/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-abort"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-abort/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {
+            "context.images.block": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": false
+            }
+          },
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": "",
+          "role": "system",
+          "timestamp": "<timestamp>",
+          "sections": {
+            "cwd": "<cwd>\n<tmp>/workspace\n</cwd>",
+            "sessionShape": "chat#0"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "start a turn to abort",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [],
+          "durationMs": "<duration>",
+          "errorMessage": "Request was aborted",
+          "model": "faux-1",
+          "provider": "tron-lock-run-abort",
+          "role": "assistant",
+          "stopReason": "aborted",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "errorCode": "user-abort",
+          "invocationId": "<id>",
+          "lifecycle": "interrupted",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       }
     ],
-    "providers": [
-      [
-        {
-          "role": "user",
-          "text": "start a turn to abort"
-        }
-      ]
-    ],
-    "extra": {}
+    "transcript": {
+      "error": null,
+      "ok": true,
+      "result": {
+        "end": 4,
+        "items": [
+          {
+            "id": "<id>",
+            "kind": "modelChange",
+            "modelRef": {
+              "id": "<id>",
+              "provider": "tron-lock-run-abort"
+            },
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "id": "<id>",
+            "kind": "thinkingChange",
+            "level": "off",
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "start a turn to abort",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "interrupted",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [],
+            "errorInfo": {
+              "category": "aborted",
+              "message": "Request cancelled",
+              "providerMessage": "Request was aborted"
+            },
+            "errorMessage": "Request was aborted",
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-abort",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "aborted",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          }
+        ],
+        "leafEntryId": "<id>",
+        "runtimeGeneration": "<id>",
+        "start": 0,
+        "total": 4
+      }
+    }
   },
   "run-compaction": {
+    "lock": "run-compaction",
     "exchanges": [
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0001",
@@ -2449,14 +3987,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -2482,8 +4021,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-compaction"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -2510,8 +4049,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-compaction"
                 },
                 "override": 128000,
                 "source": "session",
@@ -2519,8 +4058,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -2549,9 +4088,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -2570,27 +4109,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-compaction"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -2610,13 +4149,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-compaction"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2626,17 +4165,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -2646,26 +4185,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -2676,40 +4216,43 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0002",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "first question"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0003",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "second question"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.compact",
         "params": {
           "commandId": "lock-command-0004",
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -2719,502 +4262,1108 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "queued": false
           }
         }
+      },
+      {
+        "client": "phone",
+        "method": "session.transcript",
+        "params": {
+          "sessionId": "<id>"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "end": 7,
+            "items": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-compaction"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "first question",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-compaction",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "second question",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "Second answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-compaction",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              },
+              {
+                "details": {
+                  "modifiedFiles": [],
+                  "readFiles": []
+                },
+                "fromHook": false,
+                "id": "<id>",
+                "kind": "compaction",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "summary": "Summary: two answered turns about the lock context.\n\n---\n\n**Turn Context (split turn):**\n\nTurn prefix: the second question.",
+                "timestamp": "<timestamp>",
+                "tokensBefore": "<value>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              }
+            ],
+            "leafEntryId": "<id>",
+            "runtimeGeneration": "<id>",
+            "start": 0,
+            "total": 7
+          }
+        }
       }
     ],
-    "items": [
+    "providerRequests": [
       {
-        "id": "<present>",
-        "kind": "modelChange",
-        "modelRef": {
-          "id": "<present>",
-          "provider": "<LOCK>"
-        },
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "kind": "thinkingChange",
-        "level": "off",
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [
+        "sessionShape": "chat",
+        "messages": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "first question",
-            "type": "text"
+            "role": "user",
+            "text": "first question"
           }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
-          "lifecycle": "completed",
-          "operationId": "<present>",
+        ]
+      },
+      {
+        "sessionShape": "chat",
+        "messages": [
+          {
+            "role": "user",
+            "text": "first question"
+          },
+          {
+            "role": "assistant",
+            "text": "First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context "
+          },
+          {
+            "role": "user",
+            "text": "second question"
+          }
+        ]
+      },
+      {
+        "sessionShape": "compactionSummary",
+        "messages": [
+          {
+            "role": "user",
+            "text": "<conversation>\n[User]: first question\n\n[Assistant]: First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context \n</conversation>\n\nThe messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.\n\nUse this EXACT format:\n\n## Goal\n[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]\n\n## Constraints & Preferences\n- [Any constraints, preferences, or requirements mentioned by user]\n- [Or \"(none)\" if none were mentioned]\n\n## Progress\n### Done\n- [x] [Completed tasks/changes]\n\n### In Progress\n- [ ] [Current work]\n\n### Blocked\n- [Issues preventing progress, if any]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n## Next Steps\n1. [Ordered list of what should happen next]\n\n## Critical Context\n- [Any data, examples, or references needed to continue]\n- [Or \"(none)\" if not applicable]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages."
+          }
+        ]
+      },
+      {
+        "sessionShape": "compactionSummary",
+        "messages": [
+          {
+            "role": "user",
+            "text": "# Conversation\n[User]: second question\n\n# Instructions\nThe messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.\n\nCreate a concise checkpoint of the user's request and the progress shown above. This checkpoint will be placed before the later messages so the conversation can continue with the necessary context.\n\n## Original Request\n[What did the user ask for?]\n\n## Progress So Far\n- [Key decisions and work completed in these messages]\n\n## Context Needed to Continue\n- [Information from these messages needed to understand the later work]\n\nOnly summarize information explicitly present above. Do not infer or recreate later messages."
+          }
+        ]
+      }
+    ],
+    "canonicalJsonl": [
+      {
+        "cwd": "<tmp>/workspace",
+        "id": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "session",
+        "version": 3
+      },
+      {
+        "id": "<id>",
+        "modelId": "faux-1",
+        "parentId": "<id>",
+        "provider": "tron-lock-run-compaction",
+        "timestamp": "<timestamp>",
+        "type": "model_change"
+      },
+      {
+        "id": "<id>",
+        "parentId": "<id>",
+        "thinkingLevel": "off",
+        "timestamp": "<timestamp>",
+        "type": "thinking_level_change"
+      },
+      {
+        "customType": "tron.context-window.v1",
+        "data": {
+          "contextWindow": 128000,
+          "modelId": "faux-1",
+          "provider": "tron-lock-run-compaction",
+          "version": 1
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-compaction/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-compaction"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-compaction/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {},
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-compaction/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-compaction"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-compaction/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {
+            "context.images.block": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": false
+            }
+          },
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
           "origin": {
             "confidence": "boundary",
             "kind": "user"
           },
-          "sequence": "<present>",
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
           "version": 1,
-          "visibility": "visible"
+          "writer": "gateway"
         },
-        "timestamp": "<present>"
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       },
       {
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
           "version": 1,
-          "visibility": "visible"
+          "writer": "gateway"
         },
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       },
       {
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "second question",
-            "type": "text"
+        "id": "<id>",
+        "message": {
+          "content": "",
+          "role": "system",
+          "timestamp": "<timestamp>",
+          "sections": {
+            "cwd": "<cwd>\n<tmp>/workspace\n</cwd>",
+            "sessionShape": "chat#0"
           }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "first question",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-compaction",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
           "lifecycle": "completed",
-          "operationId": "<present>",
+          "operationId": "<id>",
           "origin": {
             "confidence": "boundary",
             "kind": "user"
           },
-          "sequence": "<present>",
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
           "version": 1,
-          "visibility": "visible"
+          "writer": "gateway"
         },
-        "timestamp": "<present>"
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       },
       {
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "Second answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
           "origin": {
             "confidence": "boundary",
-            "kind": "assistant"
+            "kind": "user"
           },
-          "sequence": "<present>",
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
           "version": 1,
-          "visibility": "visible"
+          "writer": "gateway"
         },
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "second question",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "Second answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-compaction",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       },
       {
         "details": {
           "modifiedFiles": [],
           "readFiles": []
         },
+        "firstKeptEntryId": "<id>",
         "fromHook": false,
-        "id": "<present>",
-        "kind": "compaction",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
+        "id": "<id>",
+        "parentId": "<id>",
         "summary": "Summary: two answered turns about the lock context.\n\n---\n\n**Turn Context (split turn):**\n\nTurn prefix: the second question.",
-        "timestamp": "<present>",
+        "systemMessage": {
+          "contentChars": 0,
+          "sectionNames": [
+            "cwd",
+            "docs",
+            "preamble",
+            "rules",
+            "tools"
+          ],
+          "toolsAdded": [
+            "read",
+            "bash",
+            "edit",
+            "write",
+            "jev",
+            "web_search",
+            "settings",
+            "projects",
+            "ask_user",
+            "display",
+            "swift_app",
+            "computer"
+          ]
+        },
+        "timestamp": "<timestamp>",
         "tokensBefore": "<value>",
-        "usage": "<present>"
+        "type": "compaction",
+        "usage": {
+          "cacheRead": "<value>",
+          "cacheWrite": "<value>",
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>",
+            "total": "<value>"
+          },
+          "input": "<value>",
+          "output": "<value>",
+          "totalTokens": "<value>"
+        }
       }
     ],
-    "window": {
-      "end": 7,
-      "leafEntryId": "<present>",
-      "runtimeGeneration": "<present>",
-      "start": 0,
-      "total": 7
-    },
-    "messages": [
-      {
-        "content": [
+    "transcript": {
+      "error": null,
+      "ok": true,
+      "result": {
+        "end": 7,
+        "items": [
           {
-            "text": "first question",
-            "type": "text"
+            "id": "<id>",
+            "kind": "modelChange",
+            "modelRef": {
+              "id": "<id>",
+              "provider": "tron-lock-run-compaction"
+            },
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "id": "<id>",
+            "kind": "thinkingChange",
+            "level": "off",
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "first question",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "completed",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-compaction",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "stop",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "second question",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "completed",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "Second answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-compaction",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "stop",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          },
+          {
+            "details": {
+              "modifiedFiles": [],
+              "readFiles": []
+            },
+            "fromHook": false,
+            "id": "<id>",
+            "kind": "compaction",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "summary": "Summary: two answered turns about the lock context.\n\n---\n\n**Turn Context (split turn):**\n\nTurn prefix: the second question.",
+            "timestamp": "<timestamp>",
+            "tokensBefore": "<value>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
           }
         ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "text": "First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "content": [
-          {
-            "text": "second question",
-            "type": "text"
-          }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "text": "Second answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context ",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        "leafEntryId": "<id>",
+        "runtimeGeneration": "<id>",
+        "start": 0,
+        "total": 7
       }
-    ],
-    "types": [
-      "session",
-      "model_change",
-      "thinking_level_change",
-      "custom:tron.context-window.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:system",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1",
-      "compaction"
-    ],
-    "receipts": [
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      }
-    ],
-    "envelopes": [
-      {
-        "id": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      }
-    ],
-    "sessionEntries": [
-      {
-        "cwd": "<tmp>/workspace",
-        "id": "<present>",
-        "timestamp": "<present>",
-        "type": "session",
-        "version": 3
-      },
-      {
-        "id": "<present>",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "provider": "<LOCK>",
-        "timestamp": "<present>",
-        "type": "model_change"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "type": "thinking_level_change"
-      }
-    ],
-    "providers": [
-      [
-        {
-          "role": "user",
-          "text": "first question"
-        }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "first question"
-        },
-        {
-          "role": "assistant",
-          "text": "First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context "
-        },
-        {
-          "role": "user",
-          "text": "second question"
-        }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "<conversation>\n[User]: first question\n\n[Assistant]: First answer. lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context lock context \n</conversation>\n\nThe messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.\n\nUse this EXACT format:\n\n## Goal\n[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]\n\n## Constraints & Preferences\n- [Any constraints, preferences, or requirements mentioned by user]\n- [Or \"(none)\" if none were mentioned]\n\n## Progress\n### Done\n- [x] [Completed tasks/changes]\n\n### In Progress\n- [ ] [Current work]\n\n### Blocked\n- [Issues preventing progress, if any]\n\n## Key Decisions\n- **[Decision]**: [Brief rationale]\n\n## Next Steps\n1. [Ordered list of what should happen next]\n\n## Critical Context\n- [Any data, examples, or references needed to continue]\n- [Or \"(none)\" if not applicable]\n\nKeep each section concise. Preserve exact file paths, function names, and error messages."
-        }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "# Conversation\n[User]: second question\n\n# Instructions\nThe messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.\n\nCreate a concise checkpoint of the user's request and the progress shown above. This checkpoint will be placed before the later messages so the conversation can continue with the necessary context.\n\n## Original Request\n[What did the user ask for?]\n\n## Progress So Far\n- [Key decisions and work completed in these messages]\n\n## Context Needed to Continue\n- [Information from these messages needed to understand the later work]\n\nOnly summarize information explicitly present above. Do not infer or recreate later messages."
-        }
-      ]
-    ],
-    "extra": {}
+    }
   },
   "run-extension-ui": {
+    "lock": "run-extension-ui",
     "exchanges": [
       {
+        "client": "phone",
         "method": "session.create",
         "params": {
           "commandId": "lock-command-0001",
@@ -3224,14 +5373,15 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
           "error": null,
           "ok": true,
           "result": {
-            "sessionId": "<present>"
+            "sessionId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.open",
         "params": {
-          "sessionId": "<present>"
+          "sessionId": "<id>"
         },
         "response": {
           "error": null,
@@ -3257,8 +5407,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                   "instructions": "",
                   "keepRecentTokens": 120,
                   "model": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-extension-ui"
                   },
                   "requestedThinkingLevel": "off",
                   "reserveTokens": 2048,
@@ -3285,8 +5435,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "maximum": 128000,
                 "minimum": 3192,
                 "model": {
-                  "id": "<present>",
-                  "provider": "<LOCK>"
+                  "id": "<id>",
+                  "provider": "tron-lock-run-extension-ui"
                 },
                 "override": 128000,
                 "source": "session",
@@ -3294,8 +5444,8 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               },
               "cwd": "<tmp>/workspace",
               "diagnostics": [],
-              "eventSequence": "<present>",
-              "extensionActivityAsOf": "<present>",
+              "eventSequence": "<n>",
+              "extensionActivityAsOf": "<timestamp>",
               "extensionPresentation": {
                 "capabilities": [
                   "semantic.dialogs",
@@ -3324,9 +5474,9 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                     "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
                   }
                 ],
-                "hostEpoch": "<present>",
+                "hostEpoch": "<id>",
                 "pendingInteractions": [],
-                "revision": "<present>",
+                "revision": "<n>",
                 "semanticState": {
                   "editorRevision": 0,
                   "editorText": "",
@@ -3345,27 +5495,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                 "surfaces": [],
                 "version": 3
               },
-              "leafEntryId": "<present>",
+              "leafEntryId": "<id>",
               "liveActivityRevision": 0,
               "model": {
-                "id": "<present>",
-                "provider": "<LOCK>"
+                "id": "<id>",
+                "provider": "tron-lock-run-extension-ui"
               },
               "phase": "idle",
               "processOverview": {
                 "activeCount": 0,
-                "asOf": "<present>",
+                "asOf": "<timestamp>",
                 "problemCount": 0,
                 "recentCount": 0,
-                "revision": "<present>",
+                "revision": "<n>",
                 "version": 1,
                 "visibility": "hidden"
               },
               "queueRevision": 0,
               "queuedItems": [],
-              "revision": "<present>",
-              "runtimeGeneration": "<present>",
-              "sessionId": "<present>",
+              "revision": "<n>",
+              "runtimeGeneration": "<id>",
+              "sessionId": "<id>",
               "stats": {
                 "assistantMessages": "<value>",
                 "cost": "<value>",
@@ -3385,13 +5535,13 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
               "toolExecutions": [],
               "transcript": [
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "modelChange",
                   "modelRef": {
-                    "id": "<present>",
-                    "provider": "<LOCK>"
+                    "id": "<id>",
+                    "provider": "tron-lock-run-extension-ui"
                   },
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -3401,17 +5551,17 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 },
                 {
-                  "id": "<present>",
+                  "id": "<id>",
                   "kind": "thinkingChange",
                   "level": "off",
-                  "parentId": "<present>",
+                  "parentId": "<id>",
                   "semantic": {
                     "contextEffect": "none",
                     "delivery": "stored",
@@ -3421,26 +5571,27 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
                       "confidence": "boundary",
                       "kind": "gateway"
                     },
-                    "sequence": "<present>",
+                    "sequence": "<n>",
                     "version": 1,
                     "visibility": "visible"
                   },
-                  "timestamp": "<present>"
+                  "timestamp": "<timestamp>"
                 }
               ],
               "transcriptStart": 0,
               "transcriptTotal": 2
             },
-            "subscriptionToken": "<present>",
-            "syncToken": "<present>"
+            "subscriptionToken": "<id>",
+            "syncToken": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "session.sync",
         "params": {
-          "sessionId": "<present>",
-          "syncToken": "<present>"
+          "sessionId": "<id>",
+          "syncToken": "<id>"
         },
         "response": {
           "error": null,
@@ -3451,28 +5602,30 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
         }
       },
       {
+        "client": "phone",
         "method": "session.prompt",
         "params": {
           "commandId": "lock-command-0002",
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "text": "ask me which path"
         },
         "response": {
           "error": null,
           "ok": true,
           "result": {
-            "operationId": "<present>"
+            "operationId": "<id>"
           }
         }
       },
       {
+        "client": "phone",
         "method": "extension.respond",
         "params": {
           "commandId": "lock-command-0003",
-          "hostEpoch": "<present>",
+          "hostEpoch": "<id>",
           "interactionId": "<id>",
           "presentationRevision": 1,
-          "sessionId": "<present>",
+          "sessionId": "<id>",
           "value": "Keep"
         },
         "response": {
@@ -3482,472 +5635,957 @@ const EXPECTED: Record<string, SessionLockExpectation & { extra: Record<string, 
             "answered": true
           }
         }
+      },
+      {
+        "client": "phone",
+        "method": "session.transcript",
+        "params": {
+          "sessionId": "<id>"
+        },
+        "response": {
+          "error": null,
+          "ok": true,
+          "result": {
+            "end": 6,
+            "items": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-extension-ui"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "ask me which path",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "arguments": {},
+                    "groupCount": 1,
+                    "groupFinalized": true,
+                    "groupId": "<id>",
+                    "groupIndex": 0,
+                    "id": "<id>",
+                    "label": "Lock select",
+                    "name": "lock_select",
+                    "ordinal": 0,
+                    "toolCallId": "<id>",
+                    "toolSegmentId": "<id>",
+                    "type": "toolCall"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-extension-ui",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "toolUse",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              },
+              {
+                "completedAt": "<timestamp>",
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "chosen: Keep",
+                    "type": "text"
+                  }
+                ],
+                "details": {
+                  "answer": "Keep"
+                },
+                "durationMs": "<duration>",
+                "extensionOrigin": {
+                  "owner": {
+                    "id": "<id>",
+                    "kind": "extension",
+                    "source": "auto",
+                    "title": "Lock Select"
+                  },
+                  "source": "auto"
+                },
+                "groupCount": 1,
+                "groupFinalized": true,
+                "groupId": "<id>",
+                "groupIndex": 0,
+                "id": "<id>",
+                "isError": false,
+                "kind": "message",
+                "lastProgressAt": "<timestamp>",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "progressSequence": "<n>",
+                "role": "toolResult",
+                "semantic": {
+                  "contextEffect": "toolResult",
+                  "delivery": "toolResult",
+                  "direction": "agentInvocation",
+                  "kind": "tool",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "startedAt": "<timestamp>",
+                "timestamp": "<timestamp>",
+                "toolCallId": "<id>",
+                "toolLabel": "Lock select",
+                "toolName": "lock_select",
+                "toolSegmentId": "<id>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "Keeping the lock path.",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-extension-ui",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              }
+            ],
+            "leafEntryId": "<id>",
+            "runtimeGeneration": "<id>",
+            "start": 0,
+            "total": 6
+          }
+        }
       }
     ],
-    "items": [
+    "providerRequests": [
       {
-        "id": "<present>",
-        "kind": "modelChange",
-        "modelRef": {
-          "id": "<present>",
-          "provider": "<LOCK>"
-        },
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "kind": "thinkingChange",
-        "level": "off",
-        "parentId": "<present>",
-        "semantic": {
-          "contextEffect": "none",
-          "delivery": "stored",
-          "direction": "ambientStatus",
-          "kind": "status",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "gateway"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
-      },
-      {
-        "content": [
+        "sessionShape": "chatWithExtensionSelect",
+        "messages": [
           {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "ask me which path",
-            "type": "text"
+            "role": "user",
+            "text": "ask me which path"
           }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "role": "user",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "inboundContext",
-          "invocationId": "<present>",
-          "kind": "resourcePrompt",
-          "lifecycle": "completed",
-          "operationId": "<present>",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "user"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "timestamp": "<present>"
+        ]
       },
       {
-        "content": [
+        "sessionShape": "chatWithExtensionSelect",
+        "messages": [
           {
-            "arguments": {},
-            "groupCount": 1,
-            "groupFinalized": true,
-            "groupId": "<present>",
-            "groupIndex": 0,
-            "id": "<present>",
-            "label": "Lock select",
-            "name": "lock_select",
-            "ordinal": 0,
-            "toolCallId": "<present>",
-            "toolSegmentId": "<present>",
-            "type": "toolCall"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
+            "role": "user",
+            "text": "ask me which path"
           },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "toolUse",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "completedAt": "<present>",
-        "content": [
           {
-            "id": "<present>",
-            "ordinal": 0,
+            "role": "assistant",
+            "text": "",
+            "toolCalls": [
+              "lock_select"
+            ]
+          },
+          {
+            "role": "toolResult",
             "text": "chosen: Keep",
-            "type": "text"
+            "toolName": "lock_select"
           }
-        ],
-        "details": {
-          "answer": "Keep"
-        },
-        "durationMs": "<present>",
-        "extensionOrigin": {
-          "owner": {
-            "id": "<present>",
-            "kind": "extension",
-            "source": "auto",
-            "title": "Lock Select"
-          },
-          "source": "auto"
-        },
-        "groupCount": 1,
-        "groupFinalized": true,
-        "groupId": "<present>",
-        "groupIndex": 0,
-        "id": "<present>",
-        "isError": false,
-        "kind": "message",
-        "lastProgressAt": "<present>",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "progressSequence": "<present>",
-        "role": "toolResult",
-        "semantic": {
-          "contextEffect": "toolResult",
-          "delivery": "toolResult",
-          "direction": "agentInvocation",
-          "kind": "tool",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "startedAt": "<present>",
-        "timestamp": "<present>",
-        "toolCallId": "<present>",
-        "toolLabel": "Lock select",
-        "toolName": "lock_select",
-        "toolSegmentId": "<present>"
-      },
-      {
-        "content": [
-          {
-            "id": "<present>",
-            "ordinal": 0,
-            "text": "Keeping the lock path.",
-            "type": "text"
-          }
-        ],
-        "id": "<present>",
-        "kind": "message",
-        "modelId": "faux-1",
-        "parentId": "<present>",
-        "presentationId": "<present>",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "semantic": {
-          "contextEffect": "modelInput",
-          "delivery": "stored",
-          "direction": "agentOutput",
-          "kind": "prompt",
-          "origin": {
-            "confidence": "boundary",
-            "kind": "assistant"
-          },
-          "sequence": "<present>",
-          "version": 1,
-          "visibility": "visible"
-        },
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
+        ]
       }
     ],
-    "window": {
-      "end": 6,
-      "leafEntryId": "<present>",
-      "runtimeGeneration": "<present>",
-      "start": 0,
-      "total": 6
-    },
-    "messages": [
-      {
-        "content": [
-          {
-            "text": "ask me which path",
-            "type": "text"
-          }
-        ],
-        "role": "user",
-        "timestamp": "<present>"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "arguments": {},
-            "id": "<present>",
-            "name": "lock_select",
-            "type": "toolCall"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "toolUse",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      },
-      {
-        "content": [
-          {
-            "text": "chosen: Keep",
-            "type": "text"
-          }
-        ],
-        "details": {
-          "answer": "Keep"
-        },
-        "durationMs": "<present>",
-        "isError": false,
-        "role": "toolResult",
-        "timestamp": "<present>",
-        "toolCallId": "<present>",
-        "toolName": "lock_select"
-      },
-      {
-        "api": "<present>",
-        "content": [
-          {
-            "text": "Keeping the lock path.",
-            "type": "text"
-          }
-        ],
-        "durationMs": "<present>",
-        "model": "faux-1",
-        "provider": "<LOCK>",
-        "role": "assistant",
-        "stopReason": "stop",
-        "thinkingLevel": "off",
-        "timestamp": "<present>",
-        "usage": "<present>"
-      }
-    ],
-    "types": [
-      "session",
-      "model_change",
-      "thinking_level_change",
-      "custom:tron.context-window.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.settings.v1",
-      "custom:tron.chat-invocation.v1",
-      "custom:tron.chat-invocation.v1",
-      "message:system",
-      "message:user",
-      "custom:tron.chat-invocation.v1",
-      "message:assistant",
-      "message:toolResult",
-      "message:assistant",
-      "custom:tron.chat-invocation.v1"
-    ],
-    "receipts": [
-      {
-        "receiptKind": "start",
-        "lifecycle": "staged",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "transition",
-        "lifecycle": "accepted",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "binding",
-        "source": "plain"
-      },
-      {
-        "receiptKind": "terminal",
-        "lifecycle": "completed",
-        "source": "plain"
-      }
-    ],
-    "envelopes": [
-      {
-        "id": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      },
-      {
-        "id": "<present>",
-        "parentId": "<present>",
-        "timestamp": "<present>"
-      }
-    ],
-    "sessionEntries": [
+    "canonicalJsonl": [
       {
         "cwd": "<tmp>/workspace",
-        "id": "<present>",
-        "timestamp": "<present>",
+        "id": "<id>",
+        "timestamp": "<timestamp>",
         "type": "session",
         "version": 3
       },
       {
-        "id": "<present>",
+        "id": "<id>",
         "modelId": "faux-1",
-        "parentId": "<present>",
-        "provider": "<LOCK>",
-        "timestamp": "<present>",
+        "parentId": "<id>",
+        "provider": "tron-lock-run-extension-ui",
+        "timestamp": "<timestamp>",
         "type": "model_change"
       },
       {
-        "id": "<present>",
-        "parentId": "<present>",
+        "id": "<id>",
+        "parentId": "<id>",
         "thinkingLevel": "off",
-        "timestamp": "<present>",
+        "timestamp": "<timestamp>",
         "type": "thinking_level_change"
-      }
-    ],
-    "providers": [
-      [
-        {
-          "role": "user",
-          "text": "ask me which path"
-        }
-      ],
-      [
-        {
-          "role": "user",
-          "text": "ask me which path"
+      },
+      {
+        "customType": "tron.context-window.v1",
+        "data": {
+          "contextWindow": 128000,
+          "modelId": "faux-1",
+          "provider": "tron-lock-run-extension-ui",
+          "version": 1
         },
-        {
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-extension-ui/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-extension-ui"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-extension-ui/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "lock_select",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {},
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.settings.v1",
+        "data": {
+          "fixed": {
+            "context.images.autoResize": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": true
+            },
+            "model.contextWindow": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-extension-ui/faux-1"
+              },
+              "ref": "<id>",
+              "value": 128000
+            },
+            "model.ref[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": {
+                "id": "<id>",
+                "provider": "tron-lock-run-extension-ui"
+              }
+            },
+            "model.thinking[role=chat]": {
+              "at": "<timestamp>",
+              "from": "global",
+              "qualifiers": {
+                "model": "tron-lock-run-extension-ui/faux-1",
+                "role": "chat"
+              },
+              "ref": "<id>",
+              "value": "off"
+            },
+            "tools.active": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "lock_select",
+                "jev",
+                "web_search",
+                "settings",
+                "projects",
+                "ask_user",
+                "display",
+                "swift_app",
+                "computer"
+              ]
+            }
+          },
+          "receiptId": "<id>",
+          "requestPins": {
+            "context.images.block": {
+              "at": "<timestamp>",
+              "from": "global",
+              "ref": "<id>",
+              "value": false
+            }
+          },
+          "settings": {}
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "staged",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "start",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "accepted",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "transition",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": "",
+          "role": "system",
+          "timestamp": "<timestamp>",
+          "sections": {
+            "cwd": "<cwd>\n<tmp>/workspace\n</cwd>",
+            "sessionShape": "chatWithExtensionSelect#0"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "ask me which path",
+              "type": "text"
+            }
+          ],
+          "role": "user",
+          "timestamp": "<timestamp>"
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "canonicalEntryId": "<id>",
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "operationId": "<id>",
+          "receiptId": "<id>",
+          "receiptKind": "binding",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "arguments": {},
+              "id": "<id>",
+              "name": "lock_select",
+              "type": "toolCall"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-extension-ui",
           "role": "assistant",
-          "text": "",
-          "toolCalls": [
-            "lock_select"
-          ]
+          "stopReason": "toolUse",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
         },
-        {
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "content": [
+            {
+              "text": "chosen: Keep",
+              "type": "text"
+            }
+          ],
+          "details": {
+            "answer": "Keep"
+          },
+          "durationMs": "<duration>",
+          "isError": false,
           "role": "toolResult",
-          "text": "chosen: Keep",
+          "timestamp": "<timestamp>",
+          "toolCallId": "<id>",
           "toolName": "lock_select"
-        }
-      ]
-    ],
-    "extra": {
-      "observed": {
-        "hostEpoch": "<present>",
-        "id": "<present>",
-        "invocationId": "<present>",
-        "method": "select",
-        "operationId": "<present>",
-        "options": [
-          "Keep",
-          "Change"
-        ],
-        "owner": {
-          "id": "<present>",
-          "kind": "extension",
-          "source": "auto",
-          "title": "Lock Select"
         },
-        "presentationRevision": 1,
-        "title": "Choose a lock path"
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "id": "<id>",
+        "message": {
+          "api": "<api>",
+          "content": [
+            {
+              "text": "Keeping the lock path.",
+              "type": "text"
+            }
+          ],
+          "durationMs": "<duration>",
+          "model": "faux-1",
+          "provider": "tron-lock-run-extension-ui",
+          "role": "assistant",
+          "stopReason": "stop",
+          "thinkingLevel": "off",
+          "timestamp": "<timestamp>",
+          "usage": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "cost": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "input": "<value>",
+              "output": "<value>",
+              "total": "<value>"
+            },
+            "input": "<value>",
+            "output": "<value>",
+            "totalTokens": "<value>"
+          }
+        },
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "message"
+      },
+      {
+        "customType": "tron.chat-invocation.v1",
+        "data": {
+          "createdAt": "<timestamp>",
+          "invocationId": "<id>",
+          "lifecycle": "completed",
+          "operationId": "<id>",
+          "origin": {
+            "confidence": "boundary",
+            "kind": "user"
+          },
+          "receiptId": "<id>",
+          "receiptKind": "terminal",
+          "sequence": "<n>",
+          "sessionId": "<id>",
+          "source": "plain",
+          "version": 1,
+          "writer": "gateway"
+        },
+        "id": "<id>",
+        "parentId": "<id>",
+        "timestamp": "<timestamp>",
+        "type": "custom"
       }
+    ],
+    "transcript": {
+      "error": null,
+      "ok": true,
+      "result": {
+        "end": 6,
+        "items": [
+          {
+            "id": "<id>",
+            "kind": "modelChange",
+            "modelRef": {
+              "id": "<id>",
+              "provider": "tron-lock-run-extension-ui"
+            },
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "id": "<id>",
+            "kind": "thinkingChange",
+            "level": "off",
+            "parentId": "<id>",
+            "semantic": {
+              "contextEffect": "none",
+              "delivery": "stored",
+              "direction": "ambientStatus",
+              "kind": "status",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "gateway"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "ask me which path",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "role": "user",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "inboundContext",
+              "invocationId": "<id>",
+              "kind": "resourcePrompt",
+              "lifecycle": "completed",
+              "operationId": "<id>",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "user"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "timestamp": "<timestamp>"
+          },
+          {
+            "content": [
+              {
+                "arguments": {},
+                "groupCount": 1,
+                "groupFinalized": true,
+                "groupId": "<id>",
+                "groupIndex": 0,
+                "id": "<id>",
+                "label": "Lock select",
+                "name": "lock_select",
+                "ordinal": 0,
+                "toolCallId": "<id>",
+                "toolSegmentId": "<id>",
+                "type": "toolCall"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-extension-ui",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "toolUse",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          },
+          {
+            "completedAt": "<timestamp>",
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "chosen: Keep",
+                "type": "text"
+              }
+            ],
+            "details": {
+              "answer": "Keep"
+            },
+            "durationMs": "<duration>",
+            "extensionOrigin": {
+              "owner": {
+                "id": "<id>",
+                "kind": "extension",
+                "source": "auto",
+                "title": "Lock Select"
+              },
+              "source": "auto"
+            },
+            "groupCount": 1,
+            "groupFinalized": true,
+            "groupId": "<id>",
+            "groupIndex": 0,
+            "id": "<id>",
+            "isError": false,
+            "kind": "message",
+            "lastProgressAt": "<timestamp>",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "progressSequence": "<n>",
+            "role": "toolResult",
+            "semantic": {
+              "contextEffect": "toolResult",
+              "delivery": "toolResult",
+              "direction": "agentInvocation",
+              "kind": "tool",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "startedAt": "<timestamp>",
+            "timestamp": "<timestamp>",
+            "toolCallId": "<id>",
+            "toolLabel": "Lock select",
+            "toolName": "lock_select",
+            "toolSegmentId": "<id>"
+          },
+          {
+            "content": [
+              {
+                "id": "<id>",
+                "ordinal": 0,
+                "text": "Keeping the lock path.",
+                "type": "text"
+              }
+            ],
+            "id": "<id>",
+            "kind": "message",
+            "modelId": "faux-1",
+            "parentId": "<id>",
+            "presentationId": "<id>",
+            "provider": "tron-lock-run-extension-ui",
+            "role": "assistant",
+            "semantic": {
+              "contextEffect": "modelInput",
+              "delivery": "stored",
+              "direction": "agentOutput",
+              "kind": "prompt",
+              "origin": {
+                "confidence": "boundary",
+                "kind": "assistant"
+              },
+              "sequence": "<n>",
+              "version": 1,
+              "visibility": "visible"
+            },
+            "stopReason": "stop",
+            "thinkingLevel": "off",
+            "timestamp": "<timestamp>",
+            "usage": {
+              "cacheRead": "<value>",
+              "cacheWrite": "<value>",
+              "cost": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "input": "<value>",
+              "output": "<value>",
+              "totalTokens": "<value>"
+            }
+          }
+        ],
+        "leafEntryId": "<id>",
+        "runtimeGeneration": "<id>",
+        "start": 0,
+        "total": 6
+      }
+    },
+    "observed": {
+      "hostEpoch": "<id>",
+      "id": "<id>",
+      "invocationId": "<id>",
+      "method": "select",
+      "operationId": "<id>",
+      "options": [
+        "Keep",
+        "Change"
+      ],
+      "owner": {
+        "id": "<id>",
+        "kind": "extension",
+        "source": "auto",
+        "title": "Lock Select"
+      },
+      "presentationRevision": 1,
+      "title": "Choose a lock path"
     }
   },
 };
