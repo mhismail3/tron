@@ -685,6 +685,53 @@ describe("episodic memory end to end", () => {
     expect(pressure.status.view.unbuilt).toBe(0);
   }, 300_000);
 
+  it("summarizes each node from its own stretch, so an edit revokes only that leaf's dependents", async () => {
+    // The first message's status reaches only requests whose stretch holds it:
+    // earlier view lines never reach the model beside a later node.
+    const fx = await fixture("stretch-only", { viewBytes: 2_048, jobs: 2, retryMs: 0 });
+    for (let index = 0; index < 12; index += 1) {
+      fx.manager.appendMessage(userMessage(`${index === 0 ? "D1-D10 await Mohsin" : `later work ${index}`} ${"s".repeat(700)}`));
+    }
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+    } finally { await memory.dispose(); }
+    const requests = fx.compactor.prompts;
+    expect(requests.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
+    for (const prompt of requests) {
+      expect(prompt).not.toContain("<chat>");
+      // A size-repair call repeats the step after it; only the step is read.
+      const [step] = prompt.split("\n</stretch>");
+      expect(step).toMatch(/^(?:Compress this message|Merge these two lines) into one[^\n]*\n<stretch>\n/u);
+      if (step!.includes("D1-D10 await Mohsin")) expect(step!.split("<stretch>\n")[1]).toContain("D1-D10 await Mohsin");
+    }
+    expect(requests.filter(prompt => prompt.split("<stretch>\n")[1]?.includes("D1-D10 await Mohsin")).length).toBeGreaterThan(1);
+    const durable = readJsonlSafe(fx.nodesPath).filter(record => typeof record.nodes !== "string");
+    expect(durable.filter(record => record.kind === "summary").length).toBeGreaterThan(12);
+    expect(durable.every(record => Array.isArray(record.contextRuns) && record.contextRuns.length === 0)).toBe(true);
+
+    // A summary stored with the view's context (the newest leaf, which has no
+    // parent yet) stays readable, and its stored runs still make it a dependent.
+    const newest = durable.filter(record => record.level === 0 && record.index === 12).at(-1)!;
+    const stored = { ...newest, revision: Math.max(...readJsonlSafe(fx.nodesPath).map(record => record.revision as number)) + 1, contextRuns: [[0, 12]] };
+    await writeFile(fx.nodesPath, `${await readFile(fx.nodesPath, "utf8")}${JSON.stringify(stored)}\n`);
+    const reopened = await openMemory(fx);
+    try {
+      await reopened.entriesCommitted(fx.sessionId);
+      expect(reopened.status().blocked).toBeNull();
+      // Editing message 1 revokes leaf 1, the merges above it and the stored
+      // dependent, not the later leaves built from their own stretch.
+      const before = liveNodes(fx);
+      expect(before.get(address(0, 12))!.contextRuns).toEqual([[0, 12]]);
+      const target = fx.manager.getBranch().filter(entry => entry.type === "message")[1]!;
+      fx.manager.appendContextEdit(target.id, { content: `edited ${"e".repeat(700)}` });
+      await reopened.entriesIngested(fx.sessionId);
+      const invalidated = new Set(readJsonlSafe(fx.nodesPath).filter(record => typeof record.nodes === "string")
+        .flatMap(record => decodeCodes(record.nodes as string)));
+      expect(invalidated).toEqual(new Set([...ancestorsOf(before, address(0, 1)), address(0, 12)]));
+    } finally { await reopened.dispose(); }
+  });
+
   it("keeps the newest chapter topics across sparse and merged trees", async () => {
     const fx = await fixture("sparse-chapter-topics", { viewBytes: 8_192 });
     const texts = Array.from({ length: 16 }, (_, index) => `chapter topic ${index}: ${"t".repeat(700)}`);
@@ -870,9 +917,9 @@ describe("episodic memory end to end", () => {
       expect(prompt).not.toContain(THINKING_PREFIX);
       expect(prompt).not.toContain(IMAGE_BASE64);
       expect(prompt).not.toContain(PLANTED_CREDENTIAL);
-      // Every context line is one line: a summary's own newline became a space.
-      const chat = prompt.split("<chat>\n")[1]?.split("\n</chat>")[0] ?? "";
-      expect(chat.split("\n").every(line => !line.startsWith("LINEBREAK-"))).toBe(true);
+      // Every stretch line is one line: a summary's own newline became a space.
+      const stretch = prompt.split("<stretch>\n")[1]?.split("\n</stretch>")[0] ?? "";
+      expect(stretch.split("\n").every(line => !line.startsWith("LINEBREAK-"))).toBe(true);
     }
     expect(fx.compactor.maxConcurrent).toBeLessThanOrEqual(fx.limits.jobs);
     expect(fx.compactor.maxConcurrent).toBeGreaterThan(1);

@@ -56,18 +56,7 @@ export function decodeNodeCode(code: string): string | undefined {
   return nodeAddress(level, start / 2 ** level);
 }
 
-/** The view's lines up to (not including) `end`, as level runs from message 0.
- * The view tiles from 0, so the runs reconstruct every address exactly. */
-function encodeContextRuns(parts: readonly EpisodicViewPart[]): EpisodicContextRun[] {
-  const runs: Array<[number, number]> = [];
-  for (const part of parts) {
-    const last = runs[runs.length - 1];
-    if (last && last[0] === part.level) last[1] += 1;
-    else runs.push([part.level, 1]);
-  }
-  return runs;
-}
-
+/** The addresses of a stored node's recorded context: its level runs from message 0. */
 export function decodeContextRuns(runs: readonly EpisodicContextRun[]): string[] {
   const addresses: string[] = [];
   let cursor = 0;
@@ -243,28 +232,4 @@ export async function foldViewSliced(
     if ((index + 1) % EPISODIC_FOLD_SLICE_MESSAGES === 0) await yieldToEventLoop();
   }
   return parts;
-}
-
-interface EpisodicViewContext {
-  /** One line per part, newlines flattened: the view is one line per part, so a
-   * multi-line summary must not become several lines in the prompt. */
-  lines: string[];
-  /** The same parts as level runs from message 0. */
-  runs: EpisodicContextRun[];
-}
-
-/** The view's lines up to (not including) `end`, bare text, no ids (gist §4.2).
- * Every one of them is a built summary for a node the pump may start. */
-export function viewContext(parts: readonly EpisodicViewPart[], end: number, textOf: (part: EpisodicViewPart) => string | undefined): EpisodicViewContext {
-  const included: EpisodicViewPart[] = [];
-  const lines: string[] = [];
-  for (const part of parts) {
-    if (part.start >= end) break;
-    if (part.start + part.span > end) break;
-    const text = textOf(part);
-    if (text === undefined) break;
-    included.push(part);
-    lines.push(text.replace(/\s*\n\s*/gu, " "));
-  }
-  return { lines, runs: encodeContextRuns(included) };
 }

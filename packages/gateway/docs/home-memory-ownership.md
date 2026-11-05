@@ -16,7 +16,7 @@ the [Home contract](../src/modules/home/README.md) and
 | Model-facing `zoom`, `date`, `memory_search` schemas and results | `modules/home/home-memory-tools.ts`, `home-memory.ts`; `tron-home-extension.ts` registers them | Home |
 | Ordered chapter deltas, source cursors and exact evidence proofs | `episodic/home-source.ts` | `src/episodic/episodic.module.json` |
 | Permanent projected indices, tree, pump, invalidation and view | `episodic/episodic-memory.ts`, `episodic-tree.ts`, `episodic-projection.ts` | Episodic |
-| Summary prompt, size feedback, provider adaptation and cache pieces | `episodic/episodic-compactor.ts`, `cache-layout.ts` | Episodic |
+| Summary prompt, size feedback and provider adaptation; Home view cache layout | `episodic/episodic-compactor.ts`, `cache-layout.ts` | Episodic |
 | Persisted catalog, nodes, cursor, block and spend | `episodic/episodic-store.ts`, `episodic-contract.ts` | Episodic |
 | Browser admission, cursor encoding and display projection | `episodic/home-memory-browser.ts`; `EpisodicMemory` constructs pages | Episodic |
 | Canonical JSONL parsing, branch reads and digests | `kernel/session/canonical-reader.ts` | `src/session-catalog.module.json` |

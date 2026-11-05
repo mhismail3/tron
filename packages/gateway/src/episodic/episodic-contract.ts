@@ -164,8 +164,9 @@ export interface EpisodicNodeRecord {
   text: string;
   /** Revisions of the two children a merge was built from. */
   childRevisions?: readonly [number, number];
-  /** The context runs of this node's compactor call. Empty for a free node,
-   * which made no call. */
+  /** The context runs a node's compactor call was given. Empty for a free node
+   * and for every summary built from its stretch alone; only older summaries,
+   * built with the view's context, hold runs. */
   contextRuns: readonly EpisodicContextRun[];
   textDigest: string;
   /** sha256 of the child texts (merge) or the source message text (leaf). */
@@ -274,9 +275,6 @@ export interface EpisodicCompactorRequest {
   /** Alternating turns: the step, the reply, the size feedback, the reply. */
   turns: Array<{ role: "user" | "assistant"; text: string }>;
   signal: AbortSignal;
-  /** The start of the first turn that consecutive calls share: the context
-   * block (gist §8, "the compactor calls share their <chat> prefix"). */
-  cachePrefix: string;
   /** Stable for one memory, so a provider routes its calls to one cache. */
   cacheKey: string;
 }

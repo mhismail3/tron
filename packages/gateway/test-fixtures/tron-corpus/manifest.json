@@ -164,7 +164,7 @@
     "workspace/state/apps/corpus-counter/data.sqlite": "06830f3af7a47da455fa657b008c82199beccd56729bb6f012f3f8fdc0fba20e",
     "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/catalog.jsonl": "cf4ec05dd26749ddbf42ca5bbeeda10d8852824a9b3c69768370a7c28479bd78",
     "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/initialized.json": "4b05a6021d8d518264e43cb798678e4e513c9a2d24ebc27b73f710bd6e9de82c",
-    "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/nodes.jsonl": "3b41f1ea80bbba7ba8c2ac734f22168a4167bb6068bed1259b0493263b866762",
-    "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/state.json": "5ba4748ab6dd5d5556cca6c66711fd473a44d34280fb564f739c769cf1b150d4"
+    "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/nodes.jsonl": "fa3767c1d8e6c16a88f2be8d05b30019d0b46075ea448fdcc9a20b6a14a1fb6b",
+    "workspace/state/episodic/01a00000-0000-7000-8000-00000000c0a1/state.json": "98ac610973cb313ad19928293108036b9d0c0708720eb9793b6eeb166a0a36a2"
   }
 }

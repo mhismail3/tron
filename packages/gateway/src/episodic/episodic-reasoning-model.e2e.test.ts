@@ -150,8 +150,7 @@ describe("the episodic summarizer on a reasoning model", () => {
   it("asks each model for the least reasoning it supports, and a plain model for none", async () => {
     trackCase(0);
     const f = await fixture(() => "line");
-    const request = compactorRequest(EPISODIC_COMPACT_PROMPT, "<chat>\nuser: earlier\n</chat>", "Compress this message.",
-      new AbortController().signal, "tron-episodic:test");
+    const request = compactorRequest(EPISODIC_COMPACT_PROMPT, "Compress this message.", new AbortController().signal, "tron-episodic:test");
     const reasoned = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "reasoner" })(request);
     const always = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "always-reasons" })(request);
     const plain = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" })(request);

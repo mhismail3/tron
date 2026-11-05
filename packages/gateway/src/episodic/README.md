@@ -66,8 +66,10 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   `unsupported-part`) and a required `timestamp`.
 - **Tree and view** (gist §3–5). Node `(l, i)` covers `[i·2^l, (i+1)·2^l)`,
   addressed `start+n`. Free nodes (fit in `NODE` bytes) need no model. The compactor
-  makes one call per node with the view's preceding lines in `<chat>` and the step,
-  then up to `TRIES` size repairs. Replies are flattened across Unicode whitespace;
+  makes one call per node with the step alone (the message, or the two child lines,
+  in `<stretch>`), then up to `TRIES` size repairs. No view line reaches the
+  model: a line restates only its own stretch, so status from elsewhere in the
+  chat cannot enter it. Replies are flattened across Unicode whitespace;
   the shortest reply is retained. If it still exceeds `NODE`, whole whitespace-
   delimited tokens fit within the budget with a visible `…` (a `.` for budgets
   below three bytes); an oversized unbroken token leaves only that marker. Repairs
@@ -75,31 +77,34 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   children remain available by zoom. The view is left alone
   within `VIEW` bytes and, once over, fits down to seven eighths by merging built
   pairs by largest `due` (batched so cached heads stay stable, #491). The pump builds
-  a node only when unbuilt, its children built and its context summarized; up to
+  a node only when unbuilt, its children built and every view part before its end
+  built (leaves in order); up to
   `JOBS` at once, refilled per completion; paid merges only while the view exceeds
   `VIEW`. Chapter topics are a newest-first non-overlapping cover of built nodes and
   never start work. Browser lines report exact live-view membership and mark
   the oldest leaf of its contiguous single-message tail when older summaries exist;
   chapter-filtered or zoomed children are not falsely marked as view lines. These
   facts share the browser revision and never reconstruct a past activation.
-- **Departures.** Context sent as cache pieces then the step; contexts stored as level
-  runs; the view refolds from message 0 only at load (yielding every 2,000
-  messages); revoked merged parts expand to leaves; invalidation carries ancestors and
-  is written ancestor-first in chunks of ≤ 2,048 nodes (`open` repairs crashed
-  chunks); blocked is persisted with bounded retries; every record has a revision;
-  null edits and navigation are both `[omitted]`; the prompt names Tron's four kinds;
-  context lines are flattened to one line.
+- **Departures.** No `<chat>` context: the recipe's context imported stale status
+  and identifiers into new lines, so the step is sent alone. New nodes store empty
+  `contextRuns`; older nodes keep theirs and invalidation still honours them. The
+  view refolds from message 0 only at load (yielding every 2,000 messages); revoked
+  merged parts expand to leaves; invalidation carries ancestors and is written
+  ancestor-first in chunks of ≤ 2,048 nodes (`open` repairs crashed chunks); blocked
+  is persisted with bounded retries; every record has a revision; null edits and
+  navigation are both `[omitted]`; the prompt names Tron's four kinds; merge
+  children are flattened to one line each.
 - **Instructions.** One agent-first summary per node preserves concrete identifiers,
-  maintainer decisions/wording, outcomes and uncertainty in plain sentences. A
-  delimited stretch is the only subject; context only resolves references. Merges
+  maintainer decisions/wording, outcomes and uncertainty in plain sentences. The
+  delimited stretch is the only input. Merges
   keep distinct items and compress tool chatter first. Prompt changes do **not**
   invalidate existing nodes: neither the prompt nor model identity is in their
   source digest. Only missing or source-invalidated nodes use new instructions;
   rebuilding old nodes is a separate maintainer decision, never automatic.
-- **Invalidation.** A changed leaf invalidates its ancestors, every node whose context
-  includes an invalidated node, and their ancestors, to closure; `generation`
-  increments and the pump rebuilds. An early edit in a long history invalidates
-  nearly the whole tree. `open` also invalidates leaves whose `sourceDigest` no
+- **Invalidation.** A changed leaf invalidates its ancestors, every node whose stored
+  context includes an invalidated node, and their ancestors, to closure; `generation`
+  increments and the pump rebuilds. New nodes store no context, so for them an edit
+  revokes only the leaf and its ancestors. `open` also invalidates leaves whose `sourceDigest` no
   longer matches the catalog (a crash between catalog and invalidation writes).
   Resume performs the same dependency/catalog reconciliation before replay, so
   a failed ingest cannot leave an edited catalog under a stale summary. Failed
@@ -116,9 +121,8 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   reasoning `off` (clamped) with an 8,192-token output ceiling; prefer background
   models that can disable reasoning. Spend (`usage.totalTokens`, else every billed
   bucket) is recorded, never capped: nodes build only when missing or invalidated.
-- **Caching.** Context first, cut at 50,000, 80,000 and 100,000 characters
-  (`cache-layout.ts`), `long` retention, Anthropic marks within four, and
-  `sessionId` `tron-episodic:<source session id>` as the cache key.
+- **Caching.** pi-ai's own marks on the system prompt and the step, `long`
+  retention, and `sessionId` `tron-episodic:<source session id>` as the cache key.
 
 ## Invariants
 

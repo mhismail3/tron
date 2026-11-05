@@ -7,7 +7,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { EpisodicMemoryError } from "../errors.js";
 import { EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT, EPISODIC_PLACEHOLDER, EPISODIC_SEARCH_HITS, EPISODIC_SEARCH_QUERY_CHARS, EPISODIC_SEARCH_SNIPPET_CHARS, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, EPISODIC_TRIES, resolveLimits, type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic, type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus, type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState, type EpisodicSummarizer, type EpisodicUsage, type EpisodicViewPartStatus } from "./episodic-contract.js";
 import {
-  EPISODIC_COMPACT_PROMPT, boundedSummary, classifyReply, classifyThrown, compactorRequest, contextBlock,
+  EPISODIC_COMPACT_PROMPT, boundedSummary, classifyReply, classifyThrown, compactorRequest,
   emptyReplyDetail, leafStep, mergeStep, sizeFeedback, summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import { EpisodicSourceChangedError, episodicDigest } from "../kernel/session/canonical-reader.js";
@@ -15,7 +15,7 @@ import { type EpisodicSourceDelta } from "./episodic-projection.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
   EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress, rebalanceView,
-  parseNodeAddress, placeholderBytes, snippetAround, utf8Bytes, viewContext,
+  parseNodeAddress, placeholderBytes, snippetAround, utf8Bytes,
   type EpisodicViewPart,
 } from "./episodic-tree.js";
 
@@ -985,8 +985,8 @@ export class EpisodicMemory {
     }
   }
 
-  /** Rule 3 of gist §4.1: a node builds only when its whole context is
-   * summarized (`end <= first(view)`), which is what keeps leaves in order. */
+  /** Rule 3 of gist §4.1: a node builds only once every view part before its
+   * end is built (`end <= first(view)`), so leaves are summarized in order. */
   private nextStartable(): { level: number; index: number } | undefined {
     const count = this.messages.size;
     const first = this.firstUnbuilt();
@@ -1082,7 +1082,6 @@ export class EpisodicMemory {
   }
 
   private async composeNode(level: number, index: number, stamp: BuildStamp): Promise<Draft<EpisodicNodeRecord> | undefined> {
-    const span = 2 ** level;
     if (level === 0) {
       const message = this.messages.get(index);
       if (!message) return undefined;
@@ -1094,9 +1093,8 @@ export class EpisodicMemory {
       }
       const free = freeNodeText(message.kind, message.text, this.limits.nodeBytes);
       if (free) return this.freeNode(level, index, free, episodicDigest(source));
-      const context = this.context(index);
-      const text = await this.compact(context.lines, leafStep(message.kind, message.text, this.limits.nodeBytes), stamp);
-      return this.summaryNode(level, index, text, context.runs, episodicDigest(source));
+      const text = await this.compact(leafStep(message.kind, message.text, this.limits.nodeBytes), stamp);
+      return this.summaryNode(level, index, text, episodicDigest(source));
     }
     const childA = this.nodes.get(nodeAddress(level - 1, index * 2));
     const childB = this.nodes.get(nodeAddress(level - 1, index * 2 + 1));
@@ -1105,30 +1103,22 @@ export class EpisodicMemory {
     const childRevisions: [number, number] = [childA.revision, childB.revision];
     const free = mergedFreeText(childA.text, childB.text, this.limits.nodeBytes);
     if (free) return { ...this.freeNode(level, index, free, episodicDigest(source)), childRevisions };
-    const context = this.context((index + 1) * span);
-    const text = await this.compact(context.lines, mergeStep(childA.text, childB.text, this.limits.nodeBytes), stamp);
-    return { ...this.summaryNode(level, index, text, context.runs, episodicDigest(source)), childRevisions };
+    const text = await this.compact(mergeStep(childA.text, childB.text, this.limits.nodeBytes), stamp);
+    return { ...this.summaryNode(level, index, text, episodicDigest(source)), childRevisions };
   }
 
   private freeNode(level: number, index: number, text: string, sourceDigest: string): Draft<EpisodicNodeRecord> {
     return { level, index, kind: "free", text, contextRuns: [], textDigest: episodicDigest(text), sourceDigest };
   }
 
-  private summaryNode(level: number, index: number, text: string, runs: EpisodicNodeRecord["contextRuns"], sourceDigest: string): Draft<EpisodicNodeRecord> {
-    return { level, index, kind: "summary", text, contextRuns: runs, textDigest: episodicDigest(text), sourceDigest };
-  }
-
-  /** The context block's lines and level runs: the view up to the node's end,
-   * bare, no ids, one line per part. */
-  private context(end: number): { lines: string[]; runs: EpisodicNodeRecord["contextRuns"] } {
-    return viewContext(this.view, end, part => this.nodes.get(nodeAddress(part.level, part.index))?.text);
+  private summaryNode(level: number, index: number, text: string, sourceDigest: string): Draft<EpisodicNodeRecord> {
+    return { level, index, kind: "summary", text, contextRuns: [], textDigest: episodicDigest(text), sourceDigest };
   }
 
   // ---- one compactor call, the size loop and retries -----------------------------
 
-  private async compact(lines: readonly string[], step: string, stamp: BuildStamp): Promise<string> {
-    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, contextBlock(lines), step, this.abort.signal,
-      `tron-episodic:${this.dependencies.sessionId}`);
+  private async compact(step: string, stamp: BuildStamp): Promise<string> {
+    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, step, this.abort.signal, `tron-episodic:${this.dependencies.sessionId}`);
     const tries: string[] = [];
     for (let attempt = 0; attempt < EPISODIC_TRIES; attempt += 1) {
       // The reply's wording is never a reason to stop memory (#1279): attribution
