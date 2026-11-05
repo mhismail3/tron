@@ -52,16 +52,14 @@ Usage:
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
-  TRON_IOS_SCHEME          Install compatibility input; defaults to Tron Device
-  TRON_IOS_CONFIGURATION   Install compatibility input; defaults to LocalDevice
+  TRON_IOS_SCHEME          Install scheme; only Tron Device is accepted (the default)
+  TRON_IOS_CONFIGURATION   Install configuration; only LocalDevice is accepted (the default)
   --fast-debug              Use the separate unoptimized UI-iteration build (both modes compile incrementally)
 
 Install and share build fetched origin/main in a disposable worktree, not a
 check receipt or the caller\'s branch. compile remains worktree-local for validation.
-The canonical install pair is Tron Device + LocalDevice. The exact legacy
-Tron Fast + ProdDebug pair remains accepted only for the untouched Codex
-compatibility environment. Release and DevicePerformance are never ordinary
-install targets.
+The only install pair is Tron Device + LocalDevice. Release and
+DevicePerformance are never ordinary install targets.
   TRON_IOS_REQUIRED_SDK_MAJOR
                            Fail before building unless iphoneos uses this SDK major
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
@@ -137,12 +135,6 @@ xcodegen_command() {
 
 validate_install_pair() {
     if [[ "$SCHEME" == "Tron Device" && "$CONFIG" == "LocalDevice" ]]; then
-        return
-    fi
-    if [[ "$SCHEME" == "Tron Fast" && "$CONFIG" == "ProdDebug" ]]; then
-        echo "warning: using the temporary legacy Tron Fast + ProdDebug compatibility pair (mapped to Tron Device + LocalDevice)" >&2
-        SCHEME="Tron Device"
-        CONFIG="LocalDevice"
         return
     fi
     if [[ "$SCHEME" == "Tron Release" || "$CONFIG" == "Release" ]]; then
@@ -726,9 +718,7 @@ launch_installed_app() {
     device_id="$(resolve_device_id)"
     [ -n "$device_id" ] || die "could not resolve a physical iOS device"
 
-    # Launching an installed app is independent of build configuration. This
-    # keeps retained external-harness launch actions working after the matrix
-    # rename without preserving obsolete Xcode schemes.
+    # Launching an installed app is independent of build configuration.
     launch_app_for_device "$device_id" "$PHYSICAL_BUNDLE_ID"
 }
 

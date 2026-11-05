@@ -198,9 +198,8 @@ reclaim simulators yourself.
   emitted artifact metadata and entitlements.
 - Never install iOS before its target Gateway contract is verified. A protocol
   bump is Mac-first; do not widen the advertised minimum as a migration shortcut.
-- Never use retired build names. A narrowly bounded compatibility adapter
-  exists only for the untouched external-harness environment; agents must use
-  the canonical `Tron Device` + `LocalDevice` pair.
+- Never use retired build names; use the canonical `Tron Device` + `LocalDevice`
+  pair, the only one the device helper accepts.
 - Never shut down, delete or erase a simulator by hand, and never touch one a
   live lease, another session or the Development helper owns. Release one you
   booted outside the test tooling with its owning helper
@@ -217,5 +216,3 @@ reclaim simulators yourself.
 - Never install a production Release artifact through the ordinary device
   helper or automate signing, archive delivery, upload, or deployment. The
   user-requested development `share` is not a release path.
-- Never modify `.codex/environments/environment.toml`; old names may appear only
-  there and in the bounded compatibility branch above.
