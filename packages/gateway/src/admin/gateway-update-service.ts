@@ -1,9 +1,10 @@
-import { lstat, readFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, readFile, mkdir } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { isAbsolute, join, parse } from "node:path";
 import { GatewayError } from "../errors.js";
+import { durableAtomicWriteText } from "../foundation/durable-json.js";
 import type { JsonValue } from "../protocol/types.js";
 import {
   COMMAND_ID,
@@ -184,18 +185,6 @@ function updaterFailureProgress(
   };
 }
 
-/** Write one compact JSON document through a temp file in its own directory, so
- * a reader observes either the previous document or the complete new one. `wx`
- * refuses a pre-created temp path, and 0600 keeps update state owner-only. */
-async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
-  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  await writeFile(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: "wx" });
-  try { await rename(temporary, path); } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-}
-
 async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChannel, commandId: string, error: unknown): Promise<void> {
   if (!isAbsolute(tronHome)) return;
   const directory = join(tronHome, "gateway", "payloads", channel);
@@ -215,7 +204,7 @@ async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChan
     const uid = process.getuid?.();
     if (!info?.isDirectory() || info.isSymbolicLink() || uid !== undefined && info.uid !== uid) return;
   }
-  await writeJsonAtomic(join(directory, "update-progress.json"), updaterFailureProgress(channel, commandId, error));
+  await durableAtomicWriteText(join(directory, "update-progress.json"), `${JSON.stringify(updaterFailureProgress(channel, commandId, error))}\n`);
 }
 
 function launchAgentUpdater(environment: NodeJS.ProcessEnv = process.env, tronHome = environment.TRON_DATA_DIR ?? ""): GatewayUpdateCallback | undefined {
@@ -394,7 +383,7 @@ export class GatewayUpdateService {
       ...(artifactRoot === undefined ? {} : { artifactRoot }), updatedAt: new Date().toISOString(),
     };
     await mkdir(join(this.options.tronHome, "gateway"), { recursive: true, mode: 0o700 });
-    await writeJsonAtomic(this.configPath(), config);
+    await durableAtomicWriteText(this.configPath(), `${JSON.stringify(config)}\n`);
     return config;
   }
 
