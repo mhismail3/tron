@@ -138,13 +138,29 @@ def remove_tree(path: Path) -> None:
         print(f"probe: could not remove {path}; remove it by hand", file=sys.stderr)
 
 
+GRACE = 30  # seconds a stopped test's runner gets to remove what it made (tools/verify/gateway.py)
+
+
+def signal_group(process: subprocess.Popen, signum: int) -> None:
+    try:
+        os.killpg(process.pid, signum)
+    except OSError:  # gone already; macOS reports a reaped group as EPERM
+        pass
+
+
 def stop_running() -> None:
+    """SIGTERM every running test's group, so its runner cleans up, then SIGKILL what outlives GRACE.
+    Each test's worker thread reaps its own process; this only watches for that."""
     STOPPING.set()
-    for process in list(RUNNING):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except OSError:  # gone already; macOS reports a reaped group as EPERM
-            pass
+    running = list(RUNNING)
+    for process in running:
+        signal_group(process, signal.SIGTERM)
+    deadline = time.monotonic() + GRACE
+    while any(process.returncode is None for process in running) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    for process in running:
+        if process.returncode is None:
+            signal_group(process, signal.SIGKILL)
 
 
 def checkout(commit: str, dependencies: Path | None) -> Path:
@@ -210,16 +226,17 @@ def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Pa
                     output, _ = process.communicate(timeout=timeout)
                     code = process.returncode
                 except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    output, _ = process.communicate()
+                    signal_group(process, signal.SIGTERM)
+                    try:
+                        output, _ = process.communicate(timeout=GRACE)
+                    except subprocess.TimeoutExpired:
+                        signal_group(process, signal.SIGKILL)
+                        output, _ = process.communicate()
                     output, code = f"{output}\nprobe: timed out after {timeout}s", 124
         finally:
             if process is not None:
                 RUNNING.discard(process)
-                try:  # a test's own descendants belong to its group, also after a clean exit
-                    os.killpg(process.pid, signal.SIGKILL)
-                except OSError:  # gone already; macOS reports a reaped group as EPERM
-                    pass
+                signal_group(process, signal.SIGKILL)  # its descendants, which outlive their runner's cleanup
             if private is not None:
                 remove_tree(private)
             if scratch is not None:
