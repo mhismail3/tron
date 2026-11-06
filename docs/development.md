@@ -134,7 +134,8 @@ supervisor require the signed launcher from
 `start`/`restart` build and stage an immutable candidate and refuse an unknown
 owner already listening on 9848; the supervisor preserves accepted-run shutdown
 draining and waits for truthful exact health identity. After testing, only the
-maintainer may run `scripts/tron dev handoff --tailscale`; it performs authenticated
+maintainer may run `scripts/tron dev handoff --tailscale`, from a terminal (it refuses an
+agent shell, which has none and carries `PI_SESSION_ID`); it performs authenticated
 pre/post identity checks and copies the exact payload into Stable as an inactive
 candidate only after pre/post authenticated identity proof. Stable is always a
 known commit: handoff refuses the selected candidate unless its runtime epoch's
