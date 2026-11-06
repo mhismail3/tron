@@ -287,7 +287,7 @@ Each slice is small and reversible, and lands with its own evidence.
 | 3 | The contract check covers the profiling driver's protocol copy (done) | Planted drift: the old checker passes; the new one names it |
 | 4 | Dropped: shared Python helpers (section 5) | — |
 | 5 | Agent-policy existence asserts for files its catalog check already reads (`.agents/README.md`, the iOS skill) (done) | A planted removal still fails the agent policy |
-| 5b | Retire `docs/design/causal-auto-revert.md`, the design for closed #2194; `tools/verify/batch.md` owns what was built | No inbound link; documentation policy |
+| 5b | Retire the causal auto-revert design doc (the design for closed #2194); `tools/verify/batch.md` owns what was built (done) | No inbound link; documentation policy |
 | 5c | Delete Gateway exports that nothing names (each name occurs only at its declaration) | Typecheck and lint pass after removal |
 | 5d | `scripts/tron mutate` runs through the Gateway test runner under the host lock | Its new case saw the caller's HOME before the fix |
 | 6 | Gateway inline JSON writers: move only durable state that lacks fsync; disposable projections keep their light writer | Per site: a crash-ordering test that fails first, plus byte-identical output |
