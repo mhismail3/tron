@@ -33,8 +33,10 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   and drains the pump; `ingestForRead` refreshes only catalog and cursor (no model
   spend; Home's browser uses it with `withBrowserRead`). The memory never opens or
   subscribes to a session file: Home's source streams chapter deltas and a compact
-  ID/parent index for exact cuts. A delta continues from the chapter cursor (dev/ino,
-  size, complete offset, last line digest, complete-prefix digest), verifying only an
+  ID/parent index for exact cuts. A delta continues from the chapter cursor (inode,
+  size, times, complete offset, last line digest, complete-prefix digest; it records
+  `dev` but never compares it, because macOS renumbers a volume across reboots and
+  OS updates under unchanged files), verifying only an
   8 KiB window (a same-length rewrite outside it can go unseen); navigation, context
   edits or a new identity re-read the chapter. A parse failure on a changing file
   leaves the cursor for retry; a stable malformed file blocks `source-unavailable`.
