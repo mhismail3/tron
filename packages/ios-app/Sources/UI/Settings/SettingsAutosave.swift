@@ -18,7 +18,9 @@ enum SettingsAutosave {
         let profile = model.profileRevision
         let inputGeneration = model.configurationAutosave.inputGeneration
         let scopeGeneration = store.wrappedValue.scopeGeneration
-        return Binding(get: { draft.wrappedValue }, set: { next in
+        // The setter holds `model` strongly; the submitted work closures hold it
+        // weakly so the autosave queue the model owns never retains its owner.
+        return Binding(get: { draft.wrappedValue }, set: { [model] next in
             guard let target, admits(), model.profileRevision == profile,
                   model.configurationAutosave.inputGeneration == inputGeneration,
                   store.wrappedValue.scopeGeneration == scopeGeneration,
