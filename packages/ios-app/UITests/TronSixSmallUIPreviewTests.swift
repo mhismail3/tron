@@ -22,7 +22,7 @@ import XCTest
             if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
             app.launch()
             XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
-            if surface == "home" { XCTAssertTrue(app.buttons["Models"].firstMatch.waitForExistence(timeout: 8), app.debugDescription) }
+            if surface == "home" { XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.queue_role_worker_"].firstMatch.waitForExistence(timeout: 8), app.debugDescription) }
             if surface == "session" { XCTAssertTrue(app.buttons["Project Trust"].firstMatch.waitForExistence(timeout: 8), app.debugDescription) }
             if surface == "workspace" { XCTAssertTrue(app.staticTexts["Clean"].firstMatch.waitForExistence(timeout: 8), app.debugDescription) }
             if surface == "toast" { XCTAssertTrue(app.staticTexts["in-app-notice-card"].firstMatch.waitForExistence(timeout: 8), app.debugDescription) }

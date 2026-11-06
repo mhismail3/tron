@@ -10,12 +10,13 @@ import XCTest
     private func capture(theme: String, dark: Bool) {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-memory-redesign", "-dashboard-view-home", "-themeColor", theme]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-memory-redesign", "-dashboard-view-home", "-themeColor", theme]
             + (dark ? ["-home-dark"] : [])
         app.launch()
         XCTAssertTrue(element(app, "home-usage-card").waitForExistence(timeout: 15))
         shot("usage")
-        app.buttons["home-pinned-row"].tap()
+        // The dashboard view has no pinned row; its Home entry is the dashboard menu button.
+        app.buttons["dashboard.menu"].tap()
         XCTAssertTrue(app.buttons["session-context-button"].waitForExistence(timeout: 10))
         shot("composer-context")
         app.buttons["session-context-button"].tap()

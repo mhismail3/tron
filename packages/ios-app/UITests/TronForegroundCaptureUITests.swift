@@ -62,7 +62,9 @@ final class TronForegroundCaptureUITests: XCTestCase {
         XCTAssertTrue(olderPage.isHittable, "Foreground preserves the current page, not merely a cached first page")
         let item = app.descendants(matching: .any)["home-memory-row-34"].firstMatch
         // Back toward the newest rows, clear of the title bar.
-        for _ in 0..<12 where !(item.isHittable && item.frame.minY > 140) { app.swipeDown() }
+        // Scroll the feed itself: a swipe at the screen centre misses a medium-detent sheet's list.
+        let viewport = app.descendants(matching: .any)["home-memory-viewport"].firstMatch
+        for _ in 0..<12 where !(item.isHittable && item.frame.minY > 140) { viewport.swipeDown(velocity: .slow) }
         reveal(item, in: app)
         try capture(app, name: "memory-viewport-\(dark ? "dark" : "light")", reads: ["home.memory.view": 1],
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.status", "home.taskList"])
@@ -73,8 +75,10 @@ final class TronForegroundCaptureUITests: XCTestCase {
                         ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList", "home.memory.view"])
         app.buttons["home-sheet-done-memory-item"].tap(); app.buttons["home-sheet-done-memory"].tap()
         try capture(app, name: "manage-revealed-\(dark ? "dark" : "light")",
-                    reads: ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1, "home.taskList": 1],
-                    forbidden: ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.memory.view"])
+                    reads: ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1, "home.taskList": 1,
+                            // The on-screen Manage Home model card is a foremost SettingsRendererView: one read.
+                            "settings.resolve": 1],
+                    forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.memory.view"])
         app.buttons["home-sheet-done-manage"].tap(); app.buttons["Back"].tap()
         try finish(app, initial: initial, name: "memory-stack-retired")
     }

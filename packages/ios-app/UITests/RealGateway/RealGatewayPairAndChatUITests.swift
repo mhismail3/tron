@@ -1427,7 +1427,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             globalSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        // Global embeds Model, Workers & delegation, Compaction, Agent changes and
+        // Global embeds Model, Workers & delegation, Compaction and
         // Connection in Agent Behavior; only scoped surfaces have More Settings.
         openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 0,
                                              "Global embeds its former More Settings groups in Agent Behavior")

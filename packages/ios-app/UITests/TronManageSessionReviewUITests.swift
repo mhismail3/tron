@@ -13,9 +13,8 @@ final class TronManageSessionReviewUITests: XCTestCase {
     // MARK: Behavior
 
     /// Manage Session: the usage line sits under the headline with Compact Now
-    /// trailing and centered on both; no separate Compact row or toolbar
-    /// Terminal; Terminal leads the export card; the renamed rows; no Project
-    /// Settings row.
+    /// trailing and centered on both; no separate Compact row; the renamed rows;
+    /// no Project Settings row.
     @MainActor func testManageSessionLayout() {
         let app = launch(dark: false); defer { app.terminate() }
         let card = element(app, "session-usage-summary")
@@ -38,14 +37,9 @@ final class TronManageSessionReviewUITests: XCTestCase {
             XCTAssertTrue(labels(app, containing: gone).isEmpty, "\(gone) is renamed")
         }
         XCTAssertFalse(app.buttons["project-settings-link"].exists, "Project Settings lives in Session Settings")
-        let terminal = app.buttons["manage-session-terminal"], html = app.buttons["session-export-html"]
-        XCTAssertEqual(app.buttons.matching(identifier: "manage-session-terminal").count, 1)
-        XCTAssertGreaterThan(terminal.frame.minY, card.frame.maxY, "Terminal is a row below the usage card, not a toolbar button")
+        let html = app.buttons["session-export-html"]
         for _ in 0..<4 where !html.isHittable { app.swipeUp() }
-        XCTAssertTrue(terminal.isHittable && html.isHittable, app.debugDescription)
-        XCTAssertEqual(terminal.frame.minX, html.frame.minX, accuracy: 1, "Terminal is a row of the export card")
-        XCTAssertLessThanOrEqual(terminal.frame.maxY, html.frame.minY + 1, "Terminal is directly above Export as HTML")
-        XCTAssertLessThan(html.frame.minY - terminal.frame.maxY, 4, "no other row between Terminal and Export as HTML")
+        XCTAssertTrue(html.isHittable, app.debugDescription)
     }
 
     /// Session Settings ends with the project's section: trust, the ignored
@@ -126,25 +120,25 @@ final class TronManageSessionReviewUITests: XCTestCase {
         for _ in 0..<3 { app.swipeUp() }
         Thread.sleep(forTimeInterval: 0.6)
         shot("manage-session-bottom-\(mode)")
+        // The Models step is Manage Session's Switch Model on the model card. Back to
+        // the top: a row under the top bar still reads as hittable, and a pull past
+        // the top would collapse the sheet.
+        let switchModel = app.buttons["manage-model-switch"]
+        for _ in 0..<6 where !(switchModel.exists && switchModel.frame.minY > 140) { app.swipeDown() }
+        Thread.sleep(forTimeInterval: 0.6)
+        switchModel.tap()
+        expandSheet(app, title: "Models")
+        shot("session-models-\(mode)")
+        app.navigationBars.containing(.staticText, identifier: "Models").buttons["Done"].firstMatch.tap()
+        _ = waitFor(switchModel, "hittable == true", timeout: 5)
         let link = app.buttons["chat-settings-link"]
         for _ in 0..<12 where !link.isHittable { app.swipeDown() }
         link.tap()
         expandSheet(app, title: "Session Settings")
-        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 8), app.debugDescription)
         shot("session-settings-top-\(mode)")
         for _ in 0..<3 { app.swipeUp() }
         Thread.sleep(forTimeInterval: 0.6)
         shot("session-settings-bottom-\(mode)")
-        let models = app.buttons["settings-section-model-open"]
-        // Back to the top: a row under the top bar still reads as hittable, and
-        // a pull past the top would collapse the sheet.
-        for _ in 0..<6 where !(models.exists && models.frame.minY > 140) { app.swipeDown() }
-        Thread.sleep(forTimeInterval: 0.6)
-        models.tap()
-        expandSheet(app, title: "Models")
-        shot("session-models-\(mode)")
-        app.navigationBars.containing(.staticText, identifier: "Models").buttons["Done"].firstMatch.tap()
-        _ = waitFor(models, "hittable == true", timeout: 5)
         app.navigationBars.containing(.staticText, identifier: "Session Settings").buttons["Done"].firstMatch.tap()
         // The base build's separate Project Settings sheet, when it still exists.
         let project = app.buttons["project-settings-link"]

@@ -76,10 +76,11 @@ test is not equivalent to their source metadata.
 
 ## Comparison and settling
 
-Each call explicitly selects `assertUILock(app, name, accessibility: Bool)`.
-Pixels are always compared. Only the four shared-chrome calls select AX; a
-missing selected golden fails instead of silently dropping the contract.
-AX equality uses `UILockTree`: type, identifier, label, value, placeholder,
+Each call explicitly passes `assertUILock(app, name, accessibility: String?)`.
+Pixels are always compared. Only the four shared-chrome calls pass an AX
+expectation: the exact `UILockTree` text, inline in `TronUILockTests`
+(`homeSettingsTree`, `memorySearchToolSheetTree`; light and dark share each).
+AX equality uses `UILockTree`: element order, nesting, type, identifier, label, value, placeholder,
 traits, disabled/focused state and whole-point frames. Anonymous structural
 containers are elided, fixture probes and XCTest's universal trait bit33 dropped.
 
@@ -106,12 +107,13 @@ The module's manifest/consumer graph selects these native tests for affected
 verification. Count executed methods; an unmatched selector is no evidence.
 Captures are retained under `test-results/ui-locks/`; a failure includes AX
 line diff or highlighted pixel diff/count/bounds and the actual beside it.
-The selected source golden is always required, including recorder mode.
+The PNG golden is always required, including recorder mode. An AX change
+prints its line diff; the rendered actual is in `test-results/ui-locks/`.
 
 ## Record and storage
 
 `TRON_UPDATE_LOCKS` names owning modules (or `all`); Xcode uses its
-`TEST_RUNNER_` prefix. These witnesses belong to `ios-app/ui-tests`.
+`TEST_RUNNER_` prefix. It rewrites PNG goldens only. These witnesses belong to `ios-app/ui-tests`.
 
 ```bash
 TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run \
@@ -124,7 +126,7 @@ design, taste or intended visible changes, not unchanged behavior or duplicate
 metadata. Never rerecord an unexplained red. Keep any witness without a faithful
 successor; native semantic checks are not lossless incidental pixel/tree parity.
 
-PNG files use Git LFS; AX witnesses are ordinary text. A remaining LFS pointer
+PNG files use Git LFS; AX expectations are Swift literals. A remaining LFS pointer
 fails with the `git lfs pull` hint. Rebuild after golden edits because they are
 source resources. New witnesses need a bounded risk, known-bad activation and
 repeatability evidence, not automatic theme/size expansion. Still images do not

@@ -248,7 +248,7 @@ the settings kernel owns only its audit/stripe seam.
 
 Words and values come from the schema and resolver; iOS decides only layout.
 `settings.resolve` serves sections (Model, Workers & delegation, Compaction, Tools,
-Agent changes, Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
+Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
 (Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
 `settings.change`). Controls: `toggle`, `choice`, `text`, `secret`, `list`,
 `checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared

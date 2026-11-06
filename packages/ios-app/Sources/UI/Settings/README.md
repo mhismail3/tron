@@ -30,8 +30,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
   Emerald uses `ThemeColor.emerald.ink`; System uses `tronSteel`, not the neutral `tronSlate` role.
-  Agent Behavior opens one emerald-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects,
-  Agent changes and Connection groups in place, not another level of section links. Each
+  Agent Behavior opens one emerald-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects
+  and Connection groups in place, not another level of section links. Each
   group keeps its shared section heading, without section-description text. Trusted Projects
   uses the shared settings row so its icon inherits the same sheet tint; known settings use
   semantic glyphs in the shared renderer, with control-kind glyphs for unknown keys. The
@@ -47,7 +47,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   Automatic compaction and Summary thinking are excluded by the shared iPhone row selection even
   when saved; canonical Gateway values, scope rules and writers are unchanged. Other Compaction
   values appear only while retained values need inspection or Revert. Scoped More Settings contains
-  Agent changes and the HTTP proxy; Global embeds those groups directly. There is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
+  the Connection group (HTTP proxy); Global embeds that group directly. There is no Advanced section. Trusted Projects and the server's Mac Terminal section consume their declared
   groups without duplicating them in More Settings.
   Notifications and Changes sit in the toolbar; no Value & Source sheet. Dashboard Settings
   exposes only Global: editable keys plus explicit read-only values with Reset and Project inspection.

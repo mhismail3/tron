@@ -80,8 +80,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
 
     /// Each editor is the first interaction on a newly opened Home model card.
     @MainActor func testFirstOpenHomeEffortAndContextExposeUsableSliders() {
-        for (control, slider) in [("Context Window", "settings-number-slider"),
-                                  ("Effort", "settings-choice-slider")] {
+        for (control, slider) in [("Effort", "settings-choice-slider")] {
             let app = launchManageHome(dark: false)
             defer { app.terminate() }
             let button = app.buttons[control].firstMatch

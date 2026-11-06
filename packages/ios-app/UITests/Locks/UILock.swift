@@ -2,19 +2,20 @@ import UIKit
 import XCTest
 
 /// UI locks (README.md beside this file). A lock pins one
-/// hosted-fixture screen state with explicit pixel and optional AX witnesses in `Goldens/`:
+/// hosted-fixture screen state with a pixel witness in `Goldens/` and an optional
+/// accessibility witness given by the caller:
 ///
-/// - `<name>.a11y.txt`: the app's accessibility hierarchy as normalized text
-///   (type, identifier, label, value, traits, frame in whole points), compared
-///   exactly;
+/// - the accessibility witness: the app's hierarchy as normalized text
+///   (`UILockTree`: type, identifier, label, value, traits, frame in whole points,
+///   nesting by indentation, in order), compared exactly with the caller's literal;
 /// - `<name>.png`: a screenshot on the pinned simulator (`config/ci-toolchain.env`),
 ///   status bar and home indicator masked, compared within
 ///   `UILock.channelTolerance` per channel and at most
 ///   `UILock.maxDifferingPixels` differing pixels. PNG goldens are committed
-///   in Git LFS (#1466); the text goldens are committed as ordinary files.
+///   in Git LFS (#1466).
 ///
 /// `TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests` (the `--update-locks` mode)
-/// rewrites the goldens instead of comparing; a missing golden fails. Every run
+/// rewrites the PNG goldens instead of comparing; a missing golden fails. Every run
 /// writes its captures under `test-results/ui-locks/`; a failure adds a diff
 /// there and puts the text diff in its message.
 enum UILock {
@@ -56,12 +57,13 @@ enum UILock {
 
 extension XCTestCase {
     /// Locks the app's current state as `name`: waits until the explicitly
-    /// selected witnesses stop changing. The caller owns the contract explicitly;
-    /// a missing selected golden still fails, never silently downgrades coverage.
+    /// selected witnesses stop changing. `accessibility` is the exact expected
+    /// `UILockTree` text, or nil when the state has only a pixel witness; a
+    /// missing PNG golden still fails, never silently downgrades coverage.
     @MainActor
-    func assertUILock(_ app: XCUIApplication, _ name: String, accessibility: Bool, file: StaticString = #filePath, line: UInt = #line) {
+    func assertUILock(_ app: XCUIApplication, _ name: String, accessibility expectedTree: String?, file: StaticString = #filePath, line: UInt = #line) {
         let tree: String?
-        if accessibility {
+        if expectedTree != nil {
             guard let settled = settledTree(app, name, file: file, line: line) else { return }
             tree = settled
         } else { tree = nil }
@@ -73,7 +75,7 @@ extension XCTestCase {
                            + "\(UILock.pinnedPixels.width)×\(UILock.pinnedPixels.height) px of iPhone 17 Pro "
                            + "(config/ci-toolchain.env); use scripts/tron-ios-test", file: file, line: line)
         }
-        if let tree { checkTree(tree, name, file: file, line: line) }
+        if let tree, let expectedTree { checkTree(tree, expected: expectedTree, name, file: file, line: line) }
         checkScreenshot(shot, name, file: file, line: line)
     }
 
@@ -126,19 +128,13 @@ extension XCTestCase {
 
     /// Every run leaves its captures under `test-results/ui-locks/`, so two runs
     /// can be compared byte for byte and a failure has its actual beside the golden.
-    private func checkTree(_ tree: String, _ name: String, file: StaticString, line: UInt) {
-        let golden = UILock.goldens.appending(path: "\(name).a11y.txt")
+    private func checkTree(_ tree: String, expected: String, _ name: String, file: StaticString, line: UInt) {
         let actual = UILock.results.appending(path: "\(name).a11y.txt")
         write(Data(tree.utf8), to: actual, name, file: file, line: line)
-        if UILock.updating { return write(Data(tree.utf8), to: golden, name, file: file, line: line) }
-        guard let expected = try? String(contentsOf: golden, encoding: .utf8) else {
-            return XCTFail("\(name): no accessibility golden at \(golden.path); \(UILock.recordHint)", file: file, line: line)
-        }
         guard expected != tree else { return }
         attach(Data(tree.utf8), "\(name).a11y.txt", "public.plain-text")
-        XCTFail("\(name): the accessibility hierarchy changed (- golden, + actual). Full diff: "
-                + "git diff --no-index \(golden.path) \(actual.path)\n" + UILockDiff.lines(expected, tree),
-                file: file, line: line)
+        XCTFail("\(name): the accessibility hierarchy changed (- expected, + actual; actual at \(actual.path)):\n"
+                + UILockDiff.lines(expected, tree), file: file, line: line)
     }
 
     private func checkScreenshot(_ shot: UILockImage, _ name: String, file: StaticString, line: UInt) {
