@@ -11,7 +11,7 @@ set -euo pipefail
 # Gateway's PI_SESSION_ID; both are checked before anything else, in either environment.
 if [[ "${1:-}" == handoff ]]; then
   if [[ -n "${PI_SESSION_ID:-}" ]]; then
-    echo "scripts/tron dev handoff is maintainer-only and refused an agent session (PI_SESSION_ID is set); ask the maintainer to run it in Terminal" >&2
+    echo "scripts/tron dev handoff is maintainer-only and refused a Pi session shell (PI_SESSION_ID is set): agents never run it; the maintainer runs it in Terminal" >&2
     exit 77
   fi
   if [[ ! -t 0 ]]; then
