@@ -27,12 +27,12 @@ The end state is a clean, organized repository with nothing lost in fidelity and
   - changes to persisted formats or bytes;
   - changes to wire output;
   - changes to user-visible capabilities;
-  - changes to the manifest or card convention;
+  - replacing the manifest system, or changing what its manifests or cards must declare;
   - repository-wide convention changes;
   - removing a gate the charter requires.
 
   A slice that turns out to need one of these stops and adds a row. Everything else that is reversible
-  and preserves behavior is decided and done here.
+  and preserves behavior is decided and done here. Deleting an option no manifest sets is one of those.
 - A move updates its consumers in the same change (AGENTS.md "No unrequested compatibility").
 - These slices are post-checkpoint work. They never gate #2173 (PRINCIPLES P9).
 
@@ -48,8 +48,8 @@ The end state is a clean, organized repository with nothing lost in fidelity and
 
 ## Current state
 
-The figures come from `scripts/tron metrics` (sizes, cards, references), `scripts/tron budgets` (docs) and
-`scripts/tron ownership` (modules); rerun them for current values.
+Measured at `73545949a` with `scripts/tron metrics 73545949a` (sizes, cards, references),
+`scripts/tron budgets 73545949a` (docs) and `scripts/tron ownership` (modules).
 
 - **Size.** 488,623 hand-written lines (production 247,689, tests 183,567, tooling 40,514, docs 16,853).
   219 files are over 500 lines.
@@ -137,18 +137,19 @@ changes a repository-wide convention.
 **Regression guard:** `scripts/check-documentation-policy.py` (links and paths), `scripts/tron budgets`,
 and `check-agent-policy.sh` asserts for each new `AGENTS.md`.
 
-**Dangling references.** Gateway lock tests, test-support, `scenario-locks.md` and the ownership README
-cite "plan §4.1, §6.1, §6.4, §6.5 and §6.6", and that plan no longer exists. Repoint each citation to
-its current owner:
+**Dangling references.** Gateway lock tests, test-support, `scenario-locks.md`, the Gateway README and the
+ownership README cite sections §4.1, §5.6, §6.1, §6.4, §6.5 and §6.6 of a plan that no longer exists.
+Repoint each citation to its current owner:
 
 | Old citation | New owner |
 |---|---|
 | §6.4 scenario locks | `scenario-locks.md#locks` |
 | Lock framework | `scenario-locks.md#framework` |
-| §6.5 V4 store locks | `scenario-locks.md#persisted-stores-v4` |
+| §6.5 V4 store locks and §6.6 store mutation paths | `scenario-locks.md#persisted-stores-v4` |
 | §6.5 V7 wire lock | `scenario-locks.md#wire-contract-v7` |
-| §4.1 B4 lockstep | the charter's "Architecture invariants" |
-| §6.1 kernel ports | deleted (no such port exists) |
+| §4.1 B3 (no silent migration on open), §4.1 B4 lockstep | the charter's "Architecture invariants" |
+| §5.6 module README shape | the section list stated in place in `packages/gateway/README.md` |
+| §6.1 "kernel ports are accepted once K-0 defines them" (ownership README) | Removed. Ports exist in code (for example `LineageRuntimePort`), but `ownership.py` never accepted a port name in `dependsOn`; the clause described a feature that does not exist. |
 
 This needs no decision. `packages/ios-app/UITests/Locks/TronUILockTests.swift` (§6.6) waits for #2279.
 
@@ -209,9 +210,9 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 |---|---|---|---|
 | Gateway RPC | Module `RpcHandler` (`kernel/host/module-host.ts`) plus 168 `case`s in `transport/gateway-service.ts` | Module handlers. Move one method family per slice and extend the duplicate-method guard to the switch. | After the card and manifest slices; each slice has its RPC tests as guard |
 | Gateway errors | 517 raw `throw new Error` in 113 files (`git grep -c 'throw new Error(' -- 'packages/gateway/src/*.ts' ':!*.test.ts'`); `publicError` turns each into code `internal` on the wire | `GatewayError(code)` on request paths | A converted site changes wire output: [decision W1](#decisions-for-mohsin) |
-| JSON writes | `foundation/durable-json.ts` (30 non-test importers) plus about 14 inline temp→rename writers | `durableAtomicWriteJson` | One site per slice, keeping each site's fsync order and its exact bytes (byte-identical fixture), with a fail-before test. A byte change stops the slice and becomes a persisted-format decision row. |
+| JSON writes | `foundation/durable-json.ts` (30 non-test importers) plus about 14 inline temp→rename writers | `durableAtomicWriteJson` for durable state only | Per site: first decide whether the file is durable state or a disposable projection. The model-queue projection, for example, is serialized by its owner and rewritten on demand, so it keeps its light writer. Durable sites move one per slice, keeping their exact bytes; a byte change stops the slice and becomes a persisted-format decision row. |
 | Logging | `GatewayLogger` plus 42 console/stdio sites | Logger, except CLI entry points | Per-file review |
-| Python git and process helpers | `def git(` in 11 non-test files under `scripts/` and `tools/` (12 with `packages/ios-app/scripts/write-build-identity.py`); `start_new_session` process-group runners at 10 sites | One `git()` and one runner in a shared tools module | Low risk, one slice |
+| Python git and process helpers | `def git(` in 11 non-test files under `scripts/` and `tools/` (12 with `packages/ios-app/scripts/write-build-identity.py`); `start_new_session` process-group runners at 14 sites in `scripts/` and `tools/` | Keep. Each wrapper is 4 to 6 lines and raises its own tool's error. Sharing them would add a cross-module edge to every tool and change no behavior. | — |
 | iOS sheet, row and loading | `Tron*` primitives exist, but `SettingsRendererRow`, `ListRow` and three loading states overlap | The `Tron*` owners in `presentation-parity.md` | After #2285 and #2282 |
 
 ## 6. Gates and tests
@@ -220,7 +221,7 @@ Every gate is local; there is no hosted CI. `.github` holds only Dependabot.
 
 - **Static verify steps.** Ownership, residue, budgets, documentation policy, generated docs, agent
   policy, privacy, diff check, Gateway typecheck, lint and layers. Each costs under 2 s
-  (`test-results/verify/*.json` step timings).
+  (each run's step timings are in `test-results/verify/<sha>.json`).
 - **Test lanes.** These dominate the cost: Gateway vitest runs minutes per selection, and the iOS build
   takes longer.
 - **Rule for a gate or test.** It is removed only when another gate demonstrably catches the same break.
@@ -261,7 +262,7 @@ Candidates:
 | Hygiene | Weekly `tidy --prune` automation exists (a168d0f1) | Keep |
 | Residue | Agents run `scripts/tron tidy --here` before reporting; verify refuses untracked files and ignored files with no named writer | Keep |
 | Backlog | 78 open issues: 39 bugs, 17 tooling | Not in scope here |
-| Verify speed | Static steps total under 10 s. Gateway tests dominate. | Keep selection; no new gate |
+| Verify speed | Test lanes dominate; static steps take seconds (`test-results/verify/<sha>.json`). | Keep selection; no new gate |
 
 ## Decisions for Mohsin
 
@@ -279,13 +280,12 @@ Each slice is small and reversible, and lands with its own evidence.
 
 | # | Slice | Evidence |
 |---|---|---|
-| 1 | Fold the four restructure docs into this file | Documentation policy and budgets |
+| 1 | Fold the four restructure docs into this file (this change) | Documentation policy and budgets |
 | 1b | Repoint the citations of the retired plan (table in section 2) | Comment- and doc-only diff; the lock tests that verify selects pass |
 | 2 | Delete the never-set manifest key `capabilities` (validator, README and tests) | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
 | 3 | The contract check covers the profiling driver's protocol copy | Planted drift: the old checker passes; the new one names it |
-| 4 | One Python `git()` and one process-group runner for tools | Existing tool suites; interrupt tests |
 | 5 | Agent-policy file-existence asserts that the documentation policy already makes | The break is caught by the documentation policy |
-| 6 | Gateway inline JSON writers, one site per slice | Byte-identical output plus a durability test per site |
+| 6 | Gateway inline JSON writers: move only durable state that lacks fsync; disposable projections keep their light writer | Per site: a crash-ordering test that fails first, plus byte-identical output |
 | 7 | Gateway RPC switch to module handlers, one method family per slice | RPC tests plus the duplicate-route guard |
 | 8 | After W1: error codes on request paths | Wire golden updated per path with reviewer ACCEPT; iOS handling checked |
 | 9 | After M1: trivial manifests and card simplification | Byte-identical ledger |
