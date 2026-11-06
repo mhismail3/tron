@@ -12,6 +12,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestRegistry, displayOwnerOf } from "../../../test-support/gateway-registry.js";
+import { catalogOwner, settleCatalog } from "../../../test-support/runtime-registry-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { execFileSyncWithStallCapture } from "../../../test-support/native-exec-stall-capture.js";
 import { TrustService } from "../../kernel/resources/trust-service.js";
@@ -103,7 +104,10 @@ async function tool(f: Fixture, args: Record<string, unknown>, contents = source
   if (details.display?.artifact?.id) f.displayReference = { sessionId: slot.id, artifactId: details.display.artifact.id };
   return details;
 }
-async function rpc(f: Pick<Fixture, "service"> & Partial<Pick<Fixture, "displayReference">>, method: string, params: Record<string, unknown> = {}) {
+async function rpc(f: Pick<Fixture, "service" | "registry"> & Partial<Pick<Fixture, "displayReference">>, method: string, params: Record<string, unknown> = {}) {
+  // Listing prunes offers only on a complete membership cut; a file the last reconcile could not
+  // prove leaves the cut incomplete (retryable busy) until the owner reads again. Read again now.
+  if (method === "apps.pending" || method === "apps.list") await settleCatalog(f.registry);
   const admitted = method === "apps.review" && params.sourceSha256 ? f.displayReference ?? params : params;
   return await f.service.invoke(phone, method, admitted) as Record<string, any>;
 }
@@ -135,6 +139,17 @@ function publish(f: Fixture, title: string): void {
 }
 
 describe("reviewed Swift app lifecycle through the Gateway", () => {
+  it("lists pending offers once a session file the last reconcile could not prove is gone", async () => {
+    const f = await fixture();
+    await tool(f, offerArgs(["ios-builds"]));
+    const sessions = join(f.root, "agent/sessions");
+    const transient = join(sessions, (await readdir(sessions))[0]!, "2026-01-01T00-00-00-000Z_00000000-0000-4000-8000-000000000000.jsonl");
+    await writeFile(transient, "{}\n");
+    await chmod(transient, 0o000);
+    await catalogOwner(f.registry).reconcile(); // unknown membership: an incomplete cut
+    await rm(transient);
+    expect((await rpc(f, "apps.pending")).offers).toHaveLength(1);
+  });
   it("lists only valid uninstalled offers with a live canonical session/artifact, then moves an installed offer out of pending", async () => {
     const f = await fixture();
     await tool(f, offerArgs(["ios-builds"]));
