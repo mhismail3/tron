@@ -130,7 +130,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             // Automations, Knowledge and Apps are sheets over the Sessions dashboard,
             // which is the only dashboard.
             groups.append(UIMenu(options: .displayInline, children: [
-                sheetAction("Automations", symbol: "clock.badge.checkmark", accent: .tronAutomation, perform: parent.onOpenAutomations),
+                sheetAction("Automations", symbol: "clock.badge.checkmark", accent: .tronPrimary, perform: parent.onOpenAutomations),
                 sheetAction("Apps", symbol: "square.grid.2x2", accent: .tronPrimary, perform: parent.onOpenApps),
             ]))
             groups.append(UIMenu(options: .displayInline, children: actions.creation.map(action)))
