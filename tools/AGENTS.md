@@ -1,7 +1,7 @@
 # Repository tooling guide
 
 Read this before editing `scripts/` or `tools/`, with the [root charter](../AGENTS.md), which binds
-everywhere. `scripts/tron --help` lists every command; each `tools/<tool>/` keeps its own README, and
+everywhere. `scripts/tron --help` lists every command; each `tools/<tool>/` keeps its own README except `tools/budgets`, folded below, and
 `scripts/tron ownership --card <path>` prints a tool's purpose, users and guardians.
 
 ## Doc budgets (`tools/budgets`)
