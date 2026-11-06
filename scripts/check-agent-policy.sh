@@ -3,7 +3,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "agent policy: $*" >&2; exit 1; }
-# These files' existence is the documentation policy's: each is a link target it checks.
+# The catalog and iOS skill checks below fail if .agents/README.md or the iOS skill is missing; the
+# notice, which nothing below reads, keeps its own check.
+[[ -f "$ROOT/.agents/skills/NOTICE.md" ]] || fail "missing skill adaptation notice"
 python3 - "$ROOT" <<'PY' || fail "skill catalog contract"
 from pathlib import Path
 import re
