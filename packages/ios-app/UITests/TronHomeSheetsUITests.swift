@@ -651,7 +651,14 @@ final class TronHomeSheetsUITests: XCTestCase {
 
         // Each sub-sheet's title takes the tint of the Manage Home row that opened it
         // (#925), through the shared settings theme: Manage Home's emerald (#1680).
-        let rowTint = ink(app, element(app, "home-manage-memory-browser"), leading: 56)
+        // The sample needs the row on screen: drag the list up until it clears the bottom edge,
+        // as the Manage Home medium-detent smoke test does.
+        let memoryRow = element(app, "home-manage-memory-browser"), window = app.windows.firstMatch
+        for _ in 0..<3 where memoryRow.frame.maxY > window.frame.height - 60 {
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+                .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        }
+        let rowTint = ink(app, memoryRow, leading: 56)
         let manageTint = ink(app, app.navigationBars.staticTexts["Manage Home"].firstMatch)
 
         // Memory: the recent messages and the summaries Home sees, without raw kind prefixes.

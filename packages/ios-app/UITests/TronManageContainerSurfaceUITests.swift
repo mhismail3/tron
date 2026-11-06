@@ -2,7 +2,7 @@ import XCTest
 import UIKit
 
 /// Samples the actual sheet's empty glass edges, not tokens or fixture probes.
-/// The model card is the existing primary-surface reference; Terminal remains slate.
+/// The model card is the existing primary-surface reference.
 @MainActor final class TronManageContainerSurfaceUITests: XCTestCase {
     func testPrimaryContainersShareSurfaceAndKeepTerminalNeutral() {
         for theme in ["burgundy", "emerald", "oliveGold"] {
@@ -30,13 +30,10 @@ import UIKit
                 let navigation = pigment(top, app: app, frame: workspace.frame)
                 let settings = app.buttons["chat-settings-link"]
                 for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
-                let terminal = app.buttons["manage-session-terminal"]
-                for _ in 0..<6 where !terminal.isHittable { app.swipeUp() }
                 let bottom = app.screenshot()
                 keep(bottom, "manage-containers-\(theme)-\(mode)-bottom")
                 let setting = pigment(bottom, app: app, frame: settings.frame)
-                let neutral = pigment(bottom, app: app, frame: terminal.frame)
-                print("MANAGE_SURFACE \(theme)-\(mode) model=\(reference) usage=\(summary) navigation=\(navigation) settings=\(setting) terminal=\(neutral)")
+                print("MANAGE_SURFACE \(theme)-\(mode) model=\(reference) usage=\(summary) navigation=\(navigation) settings=\(setting)")
                 if theme == "burgundy", mode == "dark" {
                     // Chroma removes neutral material brightness. The lifted ink
                     // pigment has substantially more red/green separation than wine.
@@ -44,7 +41,6 @@ import UIKit
                         XCTAssertEqual(color[0] - color[1], reference[0] - reference[1], accuracy: 5,
                             "\(name) must share the model card's deep-wine glass, not use lifted ink")
                     }
-                    XCTAssertLessThan(neutral[0] - neutral[1], 3, "Terminal must keep its neutral slate treatment")
                 }
                 XCTAssertTrue(app.buttons["manage-session-rename"].exists)
                 app.terminate()

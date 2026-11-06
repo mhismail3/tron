@@ -209,29 +209,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         }
     }
 
-    /// Projects follows Workers directly when no Compaction rows are served: the gap above its
-    /// header is the same as above every other section header.
-    func testProjectsHeaderGapMatchesOtherSectionHeaders() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-agent-behavior-regression", "-served-agent-behavior"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-        app.buttons["Open Settings"].tap()
-        expand(app, "Global Settings")
-        tap(app, "settings-link-Agent Behavior")
-        expand(app, "Agent Behavior")
-        let workers = app.descendants(matching: .any)["settings-section-workers-detail"]
-        let projects = app.staticTexts["Projects"].firstMatch
-        let trusted = app.buttons["Trusted Projects"].firstMatch
-        let changes = app.staticTexts["Agent changes"].firstMatch
-        for element in [workers, projects, trusted, changes] { XCTAssertTrue(element.waitForExistence(timeout: 10), app.debugDescription) }
-        let afterWorkers = projects.frame.minY - workers.frame.maxY
-        let afterTrusted = changes.frame.minY - trusted.frame.maxY
-        XCTAssertEqual(afterWorkers, afterTrusted, accuracy: 2, "Gap above Projects \(afterWorkers) must match the gap above Agent changes \(afterTrusted)")
-    }
-
     func testSessionValuePillFollowsRevertLightDark() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {

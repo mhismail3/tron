@@ -1040,7 +1040,10 @@ private actor HostedHomeShellGateway {
         var thinkingPresentation = thinkingKey["presentation"]!.objectValue!
         thinkingPresentation["valueKind"] = .string("orderedChoice")
         thinkingKey["presentation"] = .object(thinkingPresentation)
-        let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, .object(thinkingKey),
+        // The shared Home model card requests Context window with Model and Effort (ManageModelConfigurationCard).
+        let contextWindowKey = HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
+            qualifiers: ["model": "anthropic/\(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")"])
+        let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, .object(thinkingKey), contextWindowKey,
             HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "session")
         ] + homeKeys
         let presented = profileKeys.map { value -> JSONValue in

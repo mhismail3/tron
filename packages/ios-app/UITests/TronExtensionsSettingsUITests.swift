@@ -106,7 +106,8 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         let tools = app.buttons["settings-section-tools-open"]
         reveal(tools, in: app)
         tools.tap()
-        XCTAssertTrue(app.staticTexts["Default Tools"].waitForExistence(timeout: 10), app.debugDescription)
+        // The lone Default Tools heading is hidden on purpose (#1764); its group detail is the rendered anchor.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Tools the agent has in every new session")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
     }
 
