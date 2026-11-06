@@ -188,6 +188,8 @@ def main() -> int:
     # The scratch root never derives from the caller's TMPDIR: fixture paths, socket paths and
     # path-length-bounded fixtures must not change with who runs the suite (#2260: a Home task
     # worker's 108-character TMPDIR left a realistic catalog fixture short of rows).
+    # SIGTERM unwinds from here on, so the root below is removed even before Vitest starts.
+    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-", dir="/tmp") as temporary:
         root = Path(temporary)
         home, scratch = root / "home", root / "tmp"

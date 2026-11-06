@@ -262,7 +262,7 @@ Candidates:
 | Versioning | `VERSION.env` → `scripts/version/tron-version sync` writes every mirror; `check` and its test guard them | Keep |
 | Data directories (`~/.tron`, `~/.tron-dev`, `~/Library/Developer/Tron`) | Owned by the Gateway, `tron-dev` and the iOS lane respectively | Keep. Path literals in scripts consolidate with the ports work (#2296 item 18). |
 | Hygiene | Weekly `tidy --prune` automation exists (a168d0f1) | Keep |
-| Gateway test scratch | Leaked `/tmp/tron-gateway-tests-*` roots came from stop paths that sent SIGKILL. Measured with the runner: a group SIGTERM at 1, 8 and 20 s into a run removed its root within 0.06 s; only SIGKILL left one. | Every stop path sends SIGTERM first; no reaper. An outside SIGKILL can still leave one empty root. |
+| Gateway test scratch | Leaked `/tmp/tron-gateway-tests-*` roots came from stop paths that sent SIGKILL. Measured with the runner: a group SIGTERM at 1, 8 and 20 s into a run removed its root within 0.06 s; only SIGKILL left one. | Every stop path sends SIGTERM first; no reaper. An outside SIGKILL, or a Vitest still tearing down when the grace ends, can still leave one root. |
 | Residue | Agents run `scripts/tron tidy --here` before reporting; verify refuses untracked files and ignored files with no named writer | Keep |
 | Backlog | 78 open issues: 39 bugs, 17 tooling | Not in scope here |
 | Verify speed | Test lanes dominate; static steps take seconds (`test-results/verify/<sha>.json`). | Keep selection; no new gate |

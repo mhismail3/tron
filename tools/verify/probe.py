@@ -222,6 +222,8 @@ def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Pa
                 output, code = f"probe: cannot start {' '.join(argv)} in {cwd}: {error}", 127
             else:
                 RUNNING.add(process)
+                if STOPPING.is_set():  # started after stop_running signaled the others
+                    signal_group(process, signal.SIGTERM)
                 try:
                     output, _ = process.communicate(timeout=timeout)
                     code = process.returncode

@@ -45,8 +45,8 @@ one test process its own temporary HOME, TMPDIR, Tron data directory and agent
 resource directory, under `/tmp` rather than the caller's TMPDIR, so fixture and socket path
 lengths do not depend on who runs the suite. It waits for Vitest before removing those directories, also
 forwarding cancellation to the owned child. Every tool that stops it (verify, batch, probe, mutate) sends
-SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so only an outside SIGKILL
-leaves a root behind.
+SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so a root is left behind
+only by an outside SIGKILL or by a Vitest still tearing down when the grace ends.
 It never installs this checkout's missing packages.
 One test fixture is the exception: when the selection can include
 `browser-fork-receipts.integration.test.ts` (the default config with no file filter, or one it
