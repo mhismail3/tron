@@ -6,7 +6,7 @@ import { normalizeStoreValue } from "./tron-store-corpus.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceNormalization, type TraceValue } from "./scenario-lock.js";
 
 /**
- * A store mutation-path lock (restructure plan §6.5 V4, §6.6): drive one persisted
+ * A store mutation-path lock (packages/gateway/docs/scenario-locks.md#persisted-stores-v4, packages/gateway/docs/scenario-locks.md#locks): drive one persisted
  * store's real owner through every write path, against a real home directory, and pin
  * each step's result (or refusal) plus the exact persisted bytes after it. The store
  * locks in `tron-store-corpus.ts` prove the committed corpus reads back; these prove
