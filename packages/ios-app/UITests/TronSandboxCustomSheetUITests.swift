@@ -178,12 +178,11 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 3.0)
         // Catch the dismissal and pull it back: it presents again from where it was caught.
         at(window.frame.midX, 140).tap()
-        Thread.sleep(forTimeInterval: 0.5)
-        at(window.frame.midX, bottom - 120).press(forDuration: 0.05, thenDragTo: at(window.frame.midX, bottom - 420),
-                                                   withVelocity: .fast, thenHoldForDuration: 0)
-        Thread.sleep(forTimeInterval: 3.5)
-        at(done.midX, done.midY).tap()
+        at(window.frame.midX, bottom - 40).press(forDuration: 0.05, thenDragTo: at(window.frame.midX, bottom - 380),
+                                                  withVelocity: .fast, thenHoldForDuration: 0)
         Thread.sleep(forTimeInterval: 3.0)
+        at(done.midX, done.midY).tap()
+        Thread.sleep(forTimeInterval: 2.5)
         slowSwitch.tap()
         Thread.sleep(forTimeInterval: 0.6)
 
