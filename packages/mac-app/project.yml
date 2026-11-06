@@ -195,6 +195,14 @@ targets:
             if [ -n "${CODESIGNING_FOLDER_PATH:-}" ] \
               && [ -d "$CODESIGNING_FOLDER_PATH" ] \
               && [ ! -d "$CODESIGNING_FOLDER_PATH/Contents/PlugIns" ]; then
+              # Debug builds link the app body and the preview stub as nested
+              # dylibs. Xcode 27 signs them only in its final signing step, after
+              # this phase, and the outer seal refuses unsigned nested code.
+              for DEBUG_DYLIB in "${EXECUTABLE_DEBUG_DYLIB_PATH:-}" "${EXECUTABLE_BLANK_INJECTION_DYLIB_PATH:-}"; do
+                if [ -n "$DEBUG_DYLIB" ] && [ -f "$TARGET_BUILD_DIR/$DEBUG_DYLIB" ]; then
+                  codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$TARGET_BUILD_DIR/$DEBUG_DYLIB"
+                fi
+              done
               ENTITLEMENTS_PATH=""
               if [ -f "$TARGET_TEMP_DIR/$PRODUCT_NAME.app.xcent" ]; then
                 ENTITLEMENTS_PATH="$TARGET_TEMP_DIR/$PRODUCT_NAME.app.xcent"

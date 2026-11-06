@@ -12,7 +12,7 @@ private final class NativePermissionService: NSObject, NativeHostPermissionServi
     private let retirement: NativeHostServiceRetirement
     init(captures: NativeCaptureSlot, cua: CuaProcessOwner) {
         retirement = NativeHostServiceRetirement(captures: captures, retireAutomation: { await cua.retire() }) {
-            Task { @MainActor in RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) } }
+            Task { @MainActor in RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { NSApp.terminate(nil) } } }
         }
     }
     func prepareForServiceRetirement(withReply reply: @escaping @Sendable (Bool) -> Void) {
