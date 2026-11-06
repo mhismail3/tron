@@ -7,12 +7,6 @@ export const PROFILE_NOTE_SCHEMA_VERSION = 1 as const;
 export type ProfileNoteScope = "personal" | "research";
 export type ProfileNoteRecordKind = "note";
 
-export interface ProfileNoteObjectRef {
-  hash: string;
-  mediaType: string;
-  bytes: number;
-}
-
 export interface ProfileNoteSessionEntryCitation {
   sessionId: string;
   branchId?: string;
@@ -132,11 +126,6 @@ export interface ProfileNoteListResponse {
 export interface ProfileNoteNoteMutationRequest {
   commandId: string; record: ProfileNoteRecordDraft; confirmedByUser?: boolean;
 }
-export type ProfileNoteAction =
-  | { operation: "profile-note.list"; request: ProfileNoteListRequest }
-  | { operation: "profile-note.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean } }
-  | { operation: "profile-note.note.create"; request: ProfileNoteNoteMutationRequest }
-  | { operation: "profile-note.note.update"; request: ProfileNoteNoteMutationRequest & { recordId: string; expectedRevision: string } };
 
 const ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const REVISION = /^[0-9a-f-]{16,80}$/;
