@@ -87,9 +87,9 @@ struct HostedAutomationFixtureView: View {
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        // The inventory orders Automations by lifecycle: the paused and the
-        // enabled-but-idle rows sort ahead of the drafts by name alone, so only
-        // the lifecycle grouping puts the idle enabled one above the paused one.
+        // The inventory orders Automations by lifecycle. "A paused digest" sorts
+        // first by name and "Zeta enabled check" last, so only the lifecycle
+        // grouping puts the idle enabled row above the paused one.
         let base = try! [
             AutomationPresentationFixture.record(),
             AutomationPresentationFixture.record(last: false, notification: true),
@@ -189,7 +189,7 @@ struct HostedAutomationFixtureView: View {
     }
 }
 
-/// Avoid native animated scrolling through a lazy Liquid Glass form in the
+/// Avoid native animated scrolling through a long Liquid Glass form in the
 /// visual harness. The real editor and controls are unchanged; jump its real
 /// scroll view to the schedule before asking AX to inspect or tap those fields.
 private struct AutomationDateControlsViewport: UIViewRepresentable {

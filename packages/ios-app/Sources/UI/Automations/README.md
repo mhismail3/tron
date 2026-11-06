@@ -21,7 +21,7 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   advertising `automations.v2` contributes rows (others are absent, never a warning). Active
   Automations list first, then paused, drafts and finished ones (attention, running, next
   occurrence, name, ID within each group). `AutomationInventory` projects every row's strings once
-  per catalog or filter change; an equatable lazy list draws them as shared `TronListRow` feed cards
+  per sheet body evaluation, never while rows scroll; an equatable lazy list draws them as shared `TronListRow` feed cards
   (action icon, name with one status pill, cadence, Gateway tag, last run). Toolbar New Automation; a floating Filter opens the filter sheet, which owns
   status, action and Gateway choices, persisted with the shell's preferences by
   `AutomationDashboardPreferencesOwner`. No search. Opening a session from an Automation, or a push

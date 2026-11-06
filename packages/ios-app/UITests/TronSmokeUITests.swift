@@ -3759,6 +3759,7 @@ final class TronSmokeUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "\(bar.frame)")
         for card in [enabled, paused] + drafts { XCTAssertTrue(card.exists, app.debugDescription) }
+        XCTAssertLessThan(running.frame.minY, enabled.frame.minY, "Running first among active")
         XCTAssertLessThan(running.frame.minY, paused.frame.minY, "Active before paused")
         XCTAssertLessThan(enabled.frame.minY, paused.frame.minY, "Active before paused")
         for draft in drafts {
