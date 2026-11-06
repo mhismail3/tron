@@ -102,6 +102,7 @@ import {
   type CatalogSessionInfo,
   type DelegatedSessionTopology,
 } from "../../sessions/catalog-discovery.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 /** A read-only child observer may page only canonical sessions that fit this
  * explicit parse budget. The parser needs the selected branch graph, so it
@@ -713,7 +714,7 @@ export class RuntimeRegistry implements SessionOperations {
     this.delegation = new DelegationOperations(this,
       (slot, by, before) => interruptToolCalls(slot.runtime.session, new ToolCallInterrupt(by), before), options);
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
-    this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
+    this.blobs = new BlobStore(undefined, Date.now, tronHomePath(options.tronHome, "gateway/blobs"));
     const workspace = options.modules.policy("resourceRoot")?.();
     if (!workspace) throw new Error("Kernel resource root is not installed");
     this.workspace = workspace;
@@ -724,11 +725,11 @@ export class RuntimeRegistry implements SessionOperations {
       maximumReaders: SESSION_EXPORT_MAX_READERS,
       maximumFileProductions: SESSION_EXPORT_MAX_PRODUCTIONS,
       minimumFreeBytes: SESSION_EXPORT_MINIMUM_FREE_BYTES,
-    }, Date.now, join(options.tronHome, "gateway", "exports"));
+    }, Date.now, tronHomePath(options.tronHome, "gateway/exports"));
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
     this.archive = new SessionArchiveStore(options.tronHome);
-    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure, options.catalogIndexPressure);
+    this.catalogMetadataIndex = new CatalogMetadataIndex(tronHomePath(options.tronHome, "gateway"), options.catalogIndexFailure, options.catalogIndexPressure);
     this.sessionCatalog = new SessionCatalog({
       catalogRoot: () => this.catalogDirectory(),
       index: this.catalogMetadataIndex,

@@ -10,6 +10,7 @@ import { durableAtomicWriteText, durableRemove } from "../foundation/durable-jso
 import { readTailscaleStatus, runBoundedCommand } from "../platform/tailscale-status.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { MacTerminalKeys } from "./mac-terminal.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 export const MAC_TERMINAL_PORT = 44222;
 export interface MacTerminalStatus {
@@ -51,7 +52,7 @@ export class MacTerminalService {
   private readonly username = userInfo().username;
 
   constructor(tronHome: string, options: { port?: number; launchAgentDirectory?: string } = {}) {
-    this.root = join(realpathSync(tronHome), "mac-terminal");
+    this.root = tronHomePath(realpathSync(tronHome), "mac-terminal");
     if (/[\x00-\x1f]/u.test(this.root) || this.root.trim() !== this.root) throw new GatewayError("invalid_request", "Invalid SSH home path");
     this.port = options.port ?? MAC_TERMINAL_PORT;
     if (!Number.isInteger(this.port) || this.port < 1024 || this.port > 65535) throw new GatewayError("invalid_request", "Mac Terminal requires a high port");

@@ -19,6 +19,7 @@ import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 export interface SettingsModelDependencies {
   schema: SettingsSchema;
@@ -74,13 +75,13 @@ export class SettingsStoreAdapter {
   get macTerminalKeys(): SettingsModelDependencies["macTerminalKeys"] { return this.dependencies.macTerminalKeys; }
 
   get profilePath(): string {
-    return join(this.dependencies.tronHome, "gateway", "home", "profile.json");
+    return tronHomePath(this.dependencies.tronHome, "gateway/home/profile.json");
   }
 
 
   /** Gateway-owned keys no pi file holds (Binding `gateway`); only the change path writes it. */
   get gatewaySettingsPath(): string {
-    return join(this.dependencies.tronHome, "gateway", "settings", "gateway.json");
+    return tronHomePath(this.dependencies.tronHome, "gateway/settings/gateway.json");
   }
 
   resolveOptions(runtime: ModelRuntime): Pick<ResolveOptions, "format" | "options"> {

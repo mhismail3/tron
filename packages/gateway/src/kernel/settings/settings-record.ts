@@ -6,6 +6,7 @@ import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { createHash, randomUUID } from "node:crypto";
 import { durableAtomicWriteText, durablePublishBoundedJson, syncDurably } from "../../foundation/durable-json.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 /**
  * The settings change record (docs/settings-model.md 5.2, foundation F2).
@@ -88,7 +89,7 @@ export class SettingsChangeRecord {
   private readonly directory: string;
 
   constructor(tronHome: string, private readonly segmentEntries = SEGMENT_ENTRIES) {
-    this.directory = join(tronHome, "gateway", "settings", "changes");
+    this.directory = tronHomePath(tronHome, "gateway/settings/changes");
   }
 
   get path(): string { return this.directory; }

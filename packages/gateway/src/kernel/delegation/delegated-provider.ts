@@ -7,6 +7,7 @@ import { piHostPackageRoot } from "../pi/packages.js";
 import type { ExtensionToolOrigin } from "../../protocol/types.js";
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
 import { attributedToolOwner } from "../host/extension-registration.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 /**
  * The delegated-work provider boundary.
@@ -49,7 +50,7 @@ export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
 const PI_HOST_PACKAGE_ROOT = piHostPackageRoot();
 
 export function delegatedArtifactRoot(tronHome: string): string {
-  return join(resolve(tronHome), "internal", "subagents");
+  return tronHomePath(resolve(tronHome), "internal/subagents");
 }
 
 /**

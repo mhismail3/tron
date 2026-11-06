@@ -1,9 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
 import aliases from "./model-release-date-aliases.json" with { type: "json" };
 import baseline from "./model-release-dates.json" with { type: "json" };
 import { RELEASE_DATE_SOURCE, releaseDatesFromCatalog } from "./release-date-normalization.mjs";
 import { durablePublishBoundedJson } from "../foundation/durable-json.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 const MAXIMUM_AGE_MS = 12 * 60 * 60 * 1000;
@@ -43,7 +43,7 @@ export class ModelReleaseDateCatalog {
     broadcast?: () => void;
     workRegistry?: { runtimeEpoch: string; begin(input: { kind: string; hostEpoch: string; cancellation?: () => void }): { settle(): void } };
   }) {
-    this.path = join(options.tronHome, "gateway", "model-release-dates.json");
+    this.path = tronHomePath(options.tronHome, "gateway/model-release-dates.json");
     this.aliases = options.aliases ?? aliases;
     for (const [key, date] of Object.entries(options.baseline ?? baseline)) this.baselineDates.set(key, date);
   }

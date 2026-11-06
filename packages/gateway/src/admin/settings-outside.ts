@@ -14,6 +14,7 @@ import { recordSubject, type SettingsSchema, type Binding, type KeyDeclaration }
 import { readPath } from "../kernel/settings/settings-resolver.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 /**
  * Outside changes (docs/settings-model.md 5.6, foundation F2).
  *
@@ -165,7 +166,7 @@ export class OutsideChanges {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  get path(): string { return join(this.tronHome, "gateway", "settings", "observed.json"); }
+  get path(): string { return tronHomePath(this.tronHome, "gateway/settings/observed.json"); }
 
   observe(observer: OutsideObserver): void {
     if (this.observer && this.observer !== observer) throw new Error("Outside changes already have an observer");

@@ -14,6 +14,7 @@ import type { DisplayOwner } from "../../display/display-modules.js";
 import { readSwiftDisplaySource } from "./swift-app-display.js";
 import { admitDigest, admitFeeds, digest, MANIFEST_BYTES, offerIdentity, referenceKey, readSwiftAppManifest, readSwiftAppOffer,
   type SwiftAppActor, type SwiftAppDisplayReference, type SwiftAppManifest, type SwiftAppOffer, type SwiftAppRevision } from "./swift-app-format.js";
+import { tronWorkspacePath } from "../../foundation/tron-home-layout.js";
 export type { SwiftAppManifest } from "./swift-app-format.js";
 
 /** Installed single-file Swift apps (#1156). One owner for
@@ -162,8 +163,8 @@ export class SwiftAppStore {
   private async appsRoot(create: boolean): Promise<string | undefined> {
     const descriptor = await this.workspace.describe();
     if (!descriptor.available) throw new GatewayError("conflict", "Tron internal workspace is unavailable; installed apps cannot be read");
-    const state = join(descriptor.root, "state");
-    const apps = join(state, "apps");
+    const state = tronWorkspacePath(descriptor.root, "state");
+    const apps = tronWorkspacePath(descriptor.root, "state/apps");
     const initialized = await this.workspace.featureInitialized("apps")
       .catch(() => { throw new GatewayError("conflict", "The installed-apps initialization record is unreadable; it was left unchanged"); });
     if (!create) {

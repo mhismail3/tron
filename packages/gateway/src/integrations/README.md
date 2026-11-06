@@ -8,7 +8,7 @@ observations. This owner does not hold credentials or run provider operations.
 ## Owns
 
 `ConnectionOwner` serializes mutations and publishes
-`<tronHome>/state/integrations/connections.json`. The [pure L1 contract](../modules/integrations/contract.ts)
+`<tronHome>/gateway/integrations/connections.json`. The [pure L1 contract](../modules/integrations/contract.ts)
 owns schema/public/private values, the shared credential-service identifier and
 the existing peer operations consumed by tools, RPCs and connector adapters.
 `connection-contract.ts` retains hashing and runtime validation; `ConnectionOwner`

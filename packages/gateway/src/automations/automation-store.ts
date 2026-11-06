@@ -22,6 +22,7 @@ import type {
   AutomationSummary,
   AutomationUpdateInput,
 } from "./types.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const canonicalName = /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/iu;
 const ownedTemporaryName = /^[0-9a-f-]{36}\.json\.\d+\.[0-9a-f]{12}\.tmp$/iu;
@@ -169,7 +170,7 @@ export class AutomationStore {
   private catalogRevision = 0;
 
   constructor(tronHome: string, options: AutomationStoreOptions = {}) {
-    this.directory = join(tronHome, "gateway", "automations");
+    this.directory = tronHomePath(tronHome, "gateway/automations");
     this.changed = options.changed ?? (() => {});
   }
 

@@ -47,6 +47,7 @@ import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js"
 import { admitHomeTaskToolRequest, homeSystemPrompt } from "./tron-home-extension.js";
 import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
 import type { ProfileStore } from "./profile-store.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
 const MAXIMUM_RECORD_BYTES = 16 * 1_024 * 1_024;
@@ -148,7 +149,7 @@ export interface HomeOwnerOptions {
 /** Tron Home's neutral workspace. It is never part of a Project, so project
  * trust treats it as its own root (`TrustServiceOptions.standaloneDirectories`). */
 export function homeWorkspaceDirectory(tronHome: string): string {
-  return join(tronHome, "gateway", "home", "workspace");
+  return tronHomePath(tronHome, "gateway/home/workspace");
 }
 
 /**
@@ -205,7 +206,7 @@ export class HomeOwner {
   private lastWakeDelivered = false;
 
   constructor(private readonly options: HomeOwnerOptions) {
-    this.directory = join(options.tronHome, "gateway", "home");
+    this.directory = tronHomePath(options.tronHome, "gateway/home");
     this.recordPath = join(this.directory, "home.json");
     this.workspacePath = homeWorkspaceDirectory(options.tronHome);
     const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
