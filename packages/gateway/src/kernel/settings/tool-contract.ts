@@ -161,13 +161,6 @@ export interface ChangeResult {
   failure?: string;
 }
 
-/** A typed owner plans irreversible work; the same shared card reviews its exact state. */
-export interface ChangeActionPreview {
-  title: string;
-  items: ChangeReview["items"];
-  target: SettingsTarget;
-}
-
 /** Only trusted native host code supplies this callback. Approval executes inside
  * the paired-native answer's canonical receipt, never after its acknowledgement. */
 export type ConfirmChange = <T>(review: ChangeReview, apply: (acceptance: NativeChangeAcceptance) => Promise<T>) => Promise<T | undefined>;
