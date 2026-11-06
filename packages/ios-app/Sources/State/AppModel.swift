@@ -4465,6 +4465,8 @@ extension AppModel {
         case .task(let id):
             let status = try await readTaskStatus()
             return .task(status.admitsTaskReads ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
+        case .status:
+            return .status(try await readTaskStatus())
         case .permissions:
             let status = try await readTaskStatus()
             return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
