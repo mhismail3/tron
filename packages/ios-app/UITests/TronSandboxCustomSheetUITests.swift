@@ -267,10 +267,12 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
 
     private func settle() { Thread.sleep(forTimeInterval: 0.9) }
 
-    /// Waits until the springs have come to rest: two consecutive reads, 150 ms
-    /// apart, of every element's frame agree. Fails after 5 s rather than
-    /// reading a frame mid-motion.
-    @MainActor private func settle(_ elements: XCUIElement...) {
+    /// Waits until the springs have come to rest: after a 0.45 s floor (so a
+    /// motion that starts late is not read as rest), two consecutive reads,
+    /// 150 ms apart, of every element's frame agree. Fails after 5 s rather
+    /// than reading a frame mid-motion.
+    @MainActor private func settle(_ elements: XCUIElement..., file: StaticString = #filePath, line: UInt = #line) {
+        Thread.sleep(forTimeInterval: 0.45)
         var previous = elements.map(\.frame)
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
@@ -279,7 +281,7 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
             if current == previous { return }
             previous = current
         }
-        XCTFail("Frames still moving after 5 s: \(previous)")
+        XCTFail("Frames still moving after 5 s: \(previous)", file: file, line: line)
     }
 
     @MainActor private func waitForAbsence(_ element: XCUIElement) -> Bool {
