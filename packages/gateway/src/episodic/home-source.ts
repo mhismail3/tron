@@ -18,8 +18,13 @@ interface CompactEntry {
   edit?: { targetId: string; projected: EpisodicProjectedMessage };
 }
 
+// A persisted cursor outlives the mount it was taken on, and macOS renumbers a
+// volume's st_dev across reboots and OS updates under byte-identical files.
+// Comparisons with a persisted cursor therefore use inode, size and times (and
+// the content digests the readers prove); `dev` is compared only within one
+// process (one read's stats, or the in-process proof cache).
 function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
-  return info.dev === cursor.dev && info.ino === cursor.ino && info.size === cursor.size
+  return info.ino === cursor.ino && info.size === cursor.size
     && info.mtimeMs === cursor.mtimeMs && info.ctimeMs === cursor.ctimeMs;
 }
 function fail(message: string): never { throw new EpisodicMemoryError("source", message); }
@@ -72,7 +77,7 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
   try {
     const start = await handle.stat();
     if (!start.isFile()) fail("Home canonical source is not a regular file");
-    if (previous && (start.dev !== previous.dev || start.ino !== previous.ino || start.size < previous.completeBytes)) {
+    if (previous && (start.ino !== previous.ino || start.size < previous.completeBytes)) {
       if (chapter.sealed) fail("Home canonical source no longer matches its cursor");
       previous = undefined;
     }
@@ -294,7 +299,7 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
   try {
     const start = await handle.stat();
     if (!start.isFile()) fail("Home canonical source is not a regular file");
-    if (start.dev !== admitted.dev || start.ino !== admitted.ino || start.size < admitted.completeBytes) fail("Home canonical source no longer matches its cursor");
+    if (start.ino !== admitted.ino || start.size < admitted.completeBytes) fail("Home canonical source no longer matches its cursor");
     if (cached && sameStat(cached.stat, start) && provenAt(cached, admitted)) return cached;
     // Only an appended active chapter extends; a sealed one must be unchanged.
     const base = cached && !chapter.sealed && cached.stat.dev === start.dev && cached.stat.ino === start.ino
