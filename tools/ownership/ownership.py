@@ -16,7 +16,7 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass", "layout",
+FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "riskClass", "layout",
           "interfaces", "uses"}
 ROOT_MANIFEST = "root.module.json"
 EDGE_FIELDS = {"to", "kind", "via", "why"}
@@ -300,7 +300,6 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
                 problems.append(f"dynamicEdges via {edge['via']!r} is not a tracked repo-relative path")
             if "why" in edge and not (isinstance(edge["why"], str) and edge["why"].strip()):
                 problems.append("dynamicEdges why must be a non-empty string")
-        strings(data.get("capabilities", []), "capabilities", problems)
         for command in strings(data.get("verify", []), "verify", problems):
             if not command.startswith("scripts/tron "):
                 problems.append(f"verify {command!r} must be a 'scripts/tron …' command")
