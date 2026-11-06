@@ -1,0 +1,17 @@
+{
+  "layer": "L5",
+  "purpose": "The one writer and checker of the version mirrors VERSION.env names (scripts/tron version).",
+  "owns": [
+    "**"
+  ],
+  "interfaces": [
+    {
+      "name": "scripts/version/tron-version",
+      "kind": "exec",
+      "consumers": [
+        "repo/cli"
+      ],
+      "external": "maintainer bumps and checks versions (docs/development.md)"
+    }
+  ]
+}

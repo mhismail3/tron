@@ -106,7 +106,6 @@
       "scripts/tron-profile-ios",
       "scripts/tron-profile-relay.mjs",
       "scripts/tron-triage",
-      "scripts/tron-version",
       "scripts/tron-xcodebuild",
       "scripts/tron_checkpoint.py",
       "scripts/tron_mac_reinstall.py",

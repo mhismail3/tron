@@ -212,6 +212,15 @@ class InputAdmission(ReportFixture):
         self.assertIn(f"-> {foreign.resolve()}\n", there.stdout)
 
 
+class DeviceCapture(unittest.TestCase):
+    def test_the_device_capture_refuses_without_an_explicit_attached_device(self) -> None:
+        # Attach-only: without the named device, the running process and the template, nothing is recorded.
+        result = subprocess.run([str(FRONT_DOOR), "device"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("scripts/tron-profile device: error: the following arguments are required: --attach, --device",
+                      result.stderr)
+
+
 def load_gateway_profiler():
     sys.path.insert(0, str(ROOT / "scripts"))
     loader = SourceFileLoader("tron_profile_gateway", str(GATEWAY_PROFILER))
