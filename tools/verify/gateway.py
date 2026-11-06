@@ -17,6 +17,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_lock import HELD_BY_CALLER, wait_for_full_gateway_lock  # noqa: E402  (the one host lock owner)
 
 
+# Each run's scratch root lives here and holds an flock on OWNER_LOCK for as long as the runner
+# (or the Vitest child it hands the descriptor to) lives. The kernel drops that lock when they die,
+# even by SIGKILL, so a later run removes a root whose lock it can take: it was abandoned. A root
+# without the lock file (a runner from before this rule) is left alone; nothing proves it is dead.
+SCRATCH_PARENT = '/tmp'
+SCRATCH_PREFIX = 'tron-gateway-tests-'
+OWNER_LOCK = 'owner.lock'
+
+
+def reap_abandoned_scratch() -> list[str]:
+    """Remove scratch roots of runs that died without cleaning up; returns what was removed."""
+    removed = []
+    for root in sorted(Path(SCRATCH_PARENT).glob(SCRATCH_PREFIX + '*')):
+        try:
+            if root.is_symlink() or not root.is_dir() or root.stat().st_uid != os.getuid():
+                continue
+            handle = os.open(root / OWNER_LOCK, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            continue  # a live run owns it
+        finally:
+            os.close(handle)
+        shutil.rmtree(root, ignore_errors=True)
+        if root.exists():
+            print(f'gateway tests: could not remove abandoned scratch {root}', file=sys.stderr, flush=True)
+        else:
+            removed.append(str(root))
+    return removed
+
+
 def hold_full_gateway_lock():
     """The open, exclusively locked lock file, after waiting its turn behind any holder and earlier waiters; None when the caller holds it."""
     if os.environ.get(HELD_BY_CALLER) == '1':
@@ -184,20 +217,28 @@ def main() -> int:
         # Its native case runs `which agent-browser`: the fork's declared engine comes first.
         path = [str(provision_browser_engine(copy)), *filter(None, os.environ.get('PATH', '').split(os.pathsep))]
         fork = {BROWSER_FORK_COPY: str(copy), 'PATH': os.pathsep.join(path)}
+    for removed in reap_abandoned_scratch():
+        print(f'gateway tests: removed abandoned scratch {removed}', file=sys.stderr, flush=True)
     lock = hold_full_gateway_lock()
     # The scratch root never derives from the caller's TMPDIR: fixture paths, socket paths and
     # path-length-bounded fixtures must not change with who runs the suite (#2260: a Home task
     # worker's 108-character TMPDIR left a realistic catalog fixture short of rows).
-    with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-", dir="/tmp") as temporary:
+    with tempfile.TemporaryDirectory(prefix=SCRATCH_PREFIX, dir=SCRATCH_PARENT) as temporary:
         root = Path(temporary)
+        # Locked under another name, then renamed into place, so a reaper never finds it unlocked.
+        partial = root / (OWNER_LOCK + '.partial')
+        owner = os.open(partial, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(owner, fcntl.LOCK_EX)
+        os.rename(partial, root / OWNER_LOCK)
         home, scratch = root / "home", root / "tmp"
         home.mkdir(); scratch.mkdir()
         environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node}
         # The existing Tron-home preflight remains authoritative for inherited
         # selectors/resource paths. Do not clear selectors or add an override
         # that would bypass its refusal; clean defaults now derive from HOME.
+        # Vitest inherits the owner lock, so the root stays owned while it runs even if this runner dies.
         with subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", str(vitest), "run", *sys.argv[1:]],
-                              cwd=ROOT / "packages/gateway", env=environment) as child:
+                              cwd=ROOT / "packages/gateway", env=environment, pass_fds=(owner,)) as child:
             # Keep the environment alive until Vitest has joined its own work.
             # No second timeout or descendant controller: the caller owns the
             # step group, while this launcher forwards direct signals and waits.
@@ -212,6 +253,7 @@ def main() -> int:
                     signal.signal(sig, handler)
                 if lock:
                     lock.close()
+                os.close(owner)
 
 
 if __name__ == "__main__":
