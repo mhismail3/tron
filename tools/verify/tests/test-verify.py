@@ -310,6 +310,7 @@ class GatewayFailureTests(VerifyCase):
         (r.path / "scripts/tron-node").chmod(0o755)
         manifest = json.loads((r.path / "tooling.module.json").read_text())
         manifest["owns"].append("scripts/tron-node")
+        manifest["owns"].remove("packages/gateway/src/foundation/tron-home-layout.json")  # the sample Gateway module owns packages/gateway/**
         r.write("tooling.module.json", json.dumps(manifest))
         # The spawned producer writes the actual runner's reporting protocol. It always
         # executes; verify classifies its output, never suppresses the invocation.
