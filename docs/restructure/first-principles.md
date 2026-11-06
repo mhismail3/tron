@@ -1,8 +1,6 @@
 # First-principles structure plan (#2297)
 
-This is the single structure plan. It replaces the structure plan (#2276), the ground-up charter, the
-cleanup 5-whys and the scorecard. Their still-current rules are restated below. Each prevention from the
-5-whys already has its owner: branch end-of-life in `.agents/skills/tron-work/SKILL.md`, epic closure in
+This is the single structure plan. Each standing residue rule has its own owner: branch end-of-life in `.agents/skills/tron-work/SKILL.md`, epic closure in
 `tools/work/README.md`, Mac rollback retention in `packages/mac-app/docs/development.md`, and scratch and
 evidence aging in `tools/ownership/tidy.py`.
 
@@ -18,16 +16,24 @@ The order is Musk's, applied at every step:
 
 The end state is a clean, organized repository with nothing lost in fidelity and no regressions.
 
-- A move, merge or deletion lands only with fail-before/pass-after or behavior-preservation evidence, a
-  fresh reviewer's ACCEPT and a green non-iOS `scripts/tron verify --changed`.
+- Each slice of this program lands only with all three of:
+  - fail-before/pass-after or behavior-preservation evidence;
+  - a fresh reviewer's ACCEPT;
+  - a green non-iOS `scripts/tron verify --changed`.
 - No golden, timeout or tolerance edit may turn a red green. No waivers. Never remove the only guard of a
   behavior.
 - iOS and Xcode work waits for #2285. Paths owned by #2279 and #2282 are off limits until those land.
-- Persisted formats and bytes, wire output, user-visible capabilities, the manifest convention,
-  repository-wide conventions and gates required by the charter are listed under
-  [Decisions for Mohsin](#decisions-for-mohsin). Everything else that is reversible and preserves behavior
-  is decided and done here.
-- No symlinks, aliases or compatibility copies: a move updates its consumers in the same change.
+- The following are Mohsin's call and go under [Decisions for Mohsin](#decisions-for-mohsin):
+  - changes to persisted formats or bytes;
+  - changes to wire output;
+  - changes to user-visible capabilities;
+  - changes to the manifest or card convention;
+  - repository-wide convention changes;
+  - removing a gate the charter requires.
+
+  A slice that turns out to need one of these stops and adds a row. Everything else that is reversible
+  and preserves behavior is decided and done here.
+- A move updates its consumers in the same change (AGENTS.md "No unrequested compatibility").
 - These slices are post-checkpoint work. They never gate #2173 (PRINCIPLES P9).
 
 ### Per-slice method
@@ -42,8 +48,8 @@ The end state is a clean, organized repository with nothing lost in fidelity and
 
 ## Current state
 
-Numbers below are taken from main `73545949a`. To re-measure, run `scripts/tron metrics` (sizes, cards,
-references), `scripts/tron budgets` (docs) and `scripts/tron ownership` (modules).
+The figures come from `scripts/tron metrics` (sizes, cards, references), `scripts/tron budgets` (docs) and
+`scripts/tron ownership` (modules); rerun them for current values.
 
 - **Size.** 488,623 hand-written lines (production 247,689, tests 183,567, tooling 40,514, docs 16,853).
   219 files are over 500 lines.
@@ -53,8 +59,8 @@ references), `scripts/tron budgets` (docs) and `scripts/tron ownership` (modules
 - **Layers.** The Gateway layer baseline is empty. The iOS baseline has 12 two-way and 7 upward pairs.
 - **Docs.** 125 Markdown files (61 READMEs). 22 docs are over budget; none is over twice its budget.
 
-#2297 so far has added more mapping and tooling than it removed. Carding every module the current way
-would add about 4,500 lines of hand-kept, mostly derivable mapping. The plan below cuts mapping first.
+A card today averages about 45 manifest lines. Carding every module the same way would mean about 4,500
+lines of hand-kept, mostly derivable mapping. The plan below cuts mapping first.
 
 ## 1. Manifests
 
@@ -69,8 +75,9 @@ would add about 4,500 lines of hand-kept, mostly derivable mapping. The plan bel
 | `riskClass` | 5 | verify selection |
 | `verify` | 6 | verify selection |
 
-`capabilities` had no users and is removed by its own slice. Readers: ownership (`ownership.py`), cards (`cards.py`), layout (`layout.py`),
-verify selection, layers, generated docs, metrics and the work tool.
+Programs that read manifests: ownership (`ownership.py`), cards (`cards.py`), layout (`layout.py`), verify
+selection, layers, generated docs, metrics and the work tool. The optional `capabilities` key was
+validated only by `ownership.py` and set by no manifest; its own slice removes it.
 
 **What each guarantee needs.**
 
@@ -85,8 +92,9 @@ verify selection, layers, generated docs, metrics and the work tool.
 delete the 35 trivial manifests. Replace per-file consumer lists with module-level `dependsOn`, which the
 reference scanner checks for every carded module, and keep per-file `interfaces` only for external entry
 points. This is [decision M1](#decisions-for-mohsin): it changes the ownership and card conventions,
-including the current rule of one manifest per module directory. Deleting the never-used
-`capabilities` key is not part of M1. That is an unused field, not a convention.
+including the current rule of one manifest per module directory. Removing `capabilities` is not part of
+M1: no manifest sets it, so removing it changes no manifest, no owner and no check result. It is the
+reversible deletion of an unused option. If Mohsin wants the reserved field back, the slice reverts.
 
 **Regression guard.** The ownership ledger (`--ledger`) must be byte-identical in path→module before and
 after. Each card-check rule keeps its case in `tools/ownership/tests/test-cards.py`. The layer fixtures
@@ -99,11 +107,10 @@ files.
 
 - Several READMEs are module cards: what the module is, its interfaces and its invariants.
 - Package `docs/` hold contracts and runbooks.
-- Some files are history or evidence ledgers, which the charter forbids:
-  - the four `docs/restructure/*` files, folded into this one;
-  - `.pi/prompts/test-suite-audit.md`;
-  - `.agents/skills/tron-home-audit/report.md`;
-  - `packages/ios-app/docs/performance-baseline.md`.
+- `packages/ios-app/docs/performance-baseline.md` records measured numbers, which makes it evidence.
+  It waits for #2285 with the iOS work.
+- `.pi/prompts/test-suite-audit.md` and `.agents/skills/tron-home-audit/report.md` look like audits but
+  are a prompt and a report template. They stay.
 
 **Recommendation.** Add a localized `AGENTS.md`, at most 150 lines, at each place an agent starts work:
 
@@ -123,25 +130,35 @@ The superseded README sections are deleted in the same slice. Its contents:
 
 Folder READMEs under 40 lines fold into their package `AGENTS.md`. Contract docs (`settings-contract.md`,
 `connection-resilience.md`, `presentation-parity.md`, `architecture.md`) stay, as the targets their tests
-cite. The ledgers listed above are deleted after their owners confirm nothing reads them. The root charter
+cite. The root charter
 stays the one place for rules that apply everywhere. This is [decision M2](#decisions-for-mohsin): it
 changes a repository-wide convention.
 
 **Regression guard:** `scripts/check-documentation-policy.py` (links and paths), `scripts/tron budgets`,
 and `check-agent-policy.sh` asserts for each new `AGENTS.md`.
 
-**Dangling references.** 32 Gateway lock tests and test-support files cite "restructure plan §6.4, §6.5,
-§6.6" in their opening comment. That plan no longer exists. Its content now lives in
-`packages/gateway/docs/scenario-locks.md` (Framework, Persisted stores (V4), Wire contract (V7)) and in
-mutation sampling in `tools/verify/README.md`. Repoint the comments; this needs no decision.
+**Dangling references.** Gateway lock tests, test-support, `scenario-locks.md` and the ownership README
+cite "plan §4.1, §6.1, §6.4, §6.5 and §6.6", and that plan no longer exists. Repoint each citation to
+its current owner:
+
+| Old citation | New owner |
+|---|---|
+| §6.4 scenario locks | `scenario-locks.md#locks` |
+| Lock framework | `scenario-locks.md#framework` |
+| §6.5 V4 store locks | `scenario-locks.md#persisted-stores-v4` |
+| §6.5 V7 wire lock | `scenario-locks.md#wire-contract-v7` |
+| §4.1 B4 lockstep | the charter's "Architecture invariants" |
+| §6.1 kernel ports | deleted (no such port exists) |
+
+This needs no decision. `packages/ios-app/UITests/Locks/TronUILockTests.swift` (§6.6) waits for #2279.
 
 ## 3. Layout and naming
 
 **Root (15 entries).** Every entry has an owner and a reader. Keep the frozen root list in
 `root.module.json`.
 
-**`scripts/` and `tools/`.** Folding `tools/` into `scripts/` was considered on Nov 4 and rejected (S3'):
-it rewrites about 96 referencing files for no agent gain, because `scripts/tron` is the front door.
+**`scripts/` and `tools/`.** Do not fold `tools/` into `scripts/`. It would rewrite about 96 referencing
+files for no agent gain, because `scripts/tron` is the front door.
 
 - Keep `tools/<tool>/` as one directory per tool, with its tests and manifest.
 - `scripts/` has 92 top-level files.
@@ -182,7 +199,7 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 | Value | Today | Fix |
 |---|---|---|
 | Protocol version | `config/GatewayProtocol.json` is the contract. The Gateway, deploy helper, launcher, iOS and Mac copies are lockstep consumers checked by `scripts/gateway_protocol_contract.py`; the profiling driver's copy was not checked. | The contract check covers the driver too |
-| Debug/Stable ports 9848/9847 | 39 non-test, non-doc files | #2296 item 18 |
+| Debug/Stable ports 9848/9847 | 39 files (`git grep -l '9848\|9847'`, excluding tests, `*Tests.swift`, Markdown and goldens; about 20 of them are iOS hosted fixtures) | #2296 item 18 |
 | Host lock path | `host_lock.py`, plus documentary copies | Keep `host_lock.py` |
 | `TRON_UI_LOCK_RENDERING` | read in shipped iOS code | #2296 item 16, after #2285 |
 
@@ -191,10 +208,10 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 | Area | Duplicates | One pattern | When |
 |---|---|---|---|
 | Gateway RPC | Module `RpcHandler` (`kernel/host/module-host.ts`) plus 168 `case`s in `transport/gateway-service.ts` | Module handlers. Move one method family per slice and extend the duplicate-method guard to the switch. | After the card and manifest slices; each slice has its RPC tests as guard |
-| Gateway errors | 517 raw `throw new Error` in 113 non-test `src` files; `publicError` turns each into code `internal` on the wire | `GatewayError(code)` on request paths | A converted site changes wire output: [decision W1](#decisions-for-mohsin) |
-| JSON writes | `foundation/durable-json.ts` (30 non-test importers) plus about 14 inline temp→rename writers | `durableAtomicWriteJson` | One site per slice, keeping each site's fsync order and its exact bytes (byte-identical fixture), with a fail-before test. A byte change is a persisted-format decision. |
+| Gateway errors | 517 raw `throw new Error` in 113 files (`git grep -c 'throw new Error(' -- 'packages/gateway/src/*.ts' ':!*.test.ts'`); `publicError` turns each into code `internal` on the wire | `GatewayError(code)` on request paths | A converted site changes wire output: [decision W1](#decisions-for-mohsin) |
+| JSON writes | `foundation/durable-json.ts` (30 non-test importers) plus about 14 inline temp→rename writers | `durableAtomicWriteJson` | One site per slice, keeping each site's fsync order and its exact bytes (byte-identical fixture), with a fail-before test. A byte change stops the slice and becomes a persisted-format decision row. |
 | Logging | `GatewayLogger` plus 42 console/stdio sites | Logger, except CLI entry points | Per-file review |
-| Python git and process helpers | `git()` defined in 11 non-test scripts/tools files; `killpg` process-group runners in 10 | One `git()` and one runner in a shared tools module | Low risk, one slice |
+| Python git and process helpers | `def git(` in 11 non-test files under `scripts/` and `tools/` (12 with `packages/ios-app/scripts/write-build-identity.py`); `start_new_session` process-group runners at 10 sites | One `git()` and one runner in a shared tools module | Low risk, one slice |
 | iOS sheet, row and loading | `Tron*` primitives exist, but `SettingsRendererRow`, `ListRow` and three loading states overlap | The `Tron*` owners in `presentation-parity.md` | After #2285 and #2282 |
 
 ## 6. Gates and tests
@@ -202,9 +219,10 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 Every gate is local; there is no hosted CI. `.github` holds only Dependabot.
 
 - **Static verify steps.** Ownership, residue, budgets, documentation policy, generated docs, agent
-  policy, privacy, diff check, Gateway typecheck, lint and layers. Each costs under 2 s (median over 22
-  reports), and each has caught a red in recorded runs or history.
-- **Test lanes.** Gateway vitest has a median of 156 s. The iOS build has a median of 495 s.
+  policy, privacy, diff check, Gateway typecheck, lint and layers. Each costs under 2 s
+  (`test-results/verify/*.json` step timings).
+- **Test lanes.** These dominate the cost: Gateway vitest runs minutes per selection, and the iOS build
+  takes longer.
 - **Rule for a gate or test.** It is removed only when another gate demonstrably catches the same break.
   The proof is a planted break that the survivor catches, plus reviewer ACCEPT.
 
@@ -252,8 +270,8 @@ Candidates:
 | M1 | Manifest and card convention | (a) As now: per-file consumer lists on every module, about 4,500 lines when complete. (b) Ownership inherits from the nearest ancestor; delete 35 trivial manifests; module-level `dependsOn` checked against found references for every module; per-file `interfaces` only for external entry points. (c) Derive everything and declare nothing (fails "a new edge must be declared"). | **(b)** |
 | M2 | Localized `AGENTS.md` | (a) None; READMEs stay. (b) Five: four packages plus `scripts/` (covering `tools/`), with folder READMEs under 40 lines folded in. (c) One per module (about 100 files). | **(b)** |
 | G1 | `scripts/tron mutate` if one run shows little value | Keep on demand, or delete it with its test | Decide after the measurement |
-| W1 | Wire error codes on request paths | (a) Keep raw throws, which go out as `internal`. (b) Convert them to typed `GatewayError` codes, which changes what clients see (code and message), path by path. | **(b)**, one path per slice, with the client (iOS) handling checked |
-| C1 | Hosted CI | None today (removed in `279ee16c7`); every gate is local | Keep none, per P2 |
+| W1 | Wire error codes on request paths | (a) Keep raw throws, which go out as `internal`. (b) Convert them to typed `GatewayError` codes, which changes what clients see (code and message), path by path. | **(b)**, one path per slice. Each is a lockstep wire change (AGENTS.md "Architecture invariants"): it updates the wire golden, and iOS handling ships together; if clients would misread the old protocol, the protocol version rises. |
+| C1 | Hosted CI | None today; every gate is local | Keep none, per P2 |
 
 ## Execution order
 
@@ -262,11 +280,11 @@ Each slice is small and reversible, and lands with its own evidence.
 | # | Slice | Evidence |
 |---|---|---|
 | 1 | Fold the four restructure docs into this file | Documentation policy and budgets |
-| 1b | Repoint the 32 comments that cite the retired "restructure plan §6" to `scenario-locks.md` | Comment-only diff; the lock tests that verify selects pass |
-| 2 | Delete the never-used manifest key `capabilities` (readers: `ownership.py`, its README and tests) | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
+| 1b | Repoint the citations of the retired plan (table in section 2) | Comment- and doc-only diff; the lock tests that verify selects pass |
+| 2 | Delete the never-set manifest key `capabilities` (validator, README and tests) | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
 | 3 | The contract check covers the profiling driver's protocol copy | Planted drift: the old checker passes; the new one names it |
 | 4 | One Python `git()` and one process-group runner for tools | Existing tool suites; interrupt tests |
-| 5 | Agent-policy path asserts, if the planted break proves the overlap | The break is caught by the documentation policy |
+| 5 | Agent-policy file-existence asserts that the documentation policy already makes | The break is caught by the documentation policy |
 | 6 | Gateway inline JSON writers, one site per slice | Byte-identical output plus a durability test per site |
 | 7 | Gateway RPC switch to module handlers, one method family per slice | RPC tests plus the duplicate-route guard |
 | 8 | After W1: error codes on request paths | Wire golden updated per path with reviewer ACCEPT; iOS handling checked |
