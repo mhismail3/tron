@@ -204,18 +204,42 @@ extension ChatTranscriptOrientation {
 /// Read obstructions in the unflipped space, but propose the entire viewport to
 /// the transformed scroll view. Merely ignoring safe areas on the flip can still
 /// shrink its native clip when keyboard + accessories cross the viewport center.
+///
+/// Obstructions follow the active scene only. iOS 27 lays the hierarchy out
+/// while the app leaves and re-enters the foreground and dismisses, then
+/// re-presents, the keyboard in between. Followed live, that transient
+/// clearance shrinks the transcript below its viewport, the native offset
+/// clamps to the newest end and a detached reader is lost. Outside `.active`
+/// the transcript keeps the last active scene's obstructions; a change that
+/// survives reactivation then applies as an ordinary active-scene layout.
 struct ChatTranscriptViewport<Content: View>: View {
     @ViewBuilder let content: (EdgeInsets) -> Content
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var activeSceneInsets: EdgeInsets?
 
     @ViewBuilder var body: some View {
         GeometryReader { insets in
             GeometryReader { viewport in
-                content(insets.safeAreaInsets)
+                content(obstructions(live: insets.safeAreaInsets))
                     .frame(width: viewport.size.width, height: viewport.size.height)
             }
             .ignoresSafeArea(.all, edges: .vertical)
+            .onChange(of: ActiveSceneInsets(active: scenePhase == .active, insets: insets.safeAreaInsets),
+                      initial: true) { _, current in
+                if current.active { activeSceneInsets = current.insets }
+            }
         }
     }
+
+    private func obstructions(live: EdgeInsets) -> EdgeInsets {
+        guard scenePhase != .active, let activeSceneInsets else { return live }
+        return activeSceneInsets
+    }
+}
+
+private struct ActiveSceneInsets: Equatable {
+    let active: Bool
+    let insets: EdgeInsets
 }
 
 /// Clearance belongs INSIDE the lazy stack: newest first, oldest last. Native
