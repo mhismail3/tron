@@ -214,7 +214,7 @@ class InputAdmission(ReportFixture):
 
 class DeviceCapture(unittest.TestCase):
     def test_the_device_capture_refuses_without_an_explicit_attached_device(self) -> None:
-        # Attach-only: without the named device, the running process and the template, nothing is recorded.
+        # Attach-only: without --attach and --device, nothing is recorded.
         result = subprocess.run([str(FRONT_DOOR), "device"], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("scripts/tron-profile device: error: the following arguments are required: --attach, --device",

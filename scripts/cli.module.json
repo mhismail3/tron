@@ -1,6 +1,6 @@
 {
   "layer": "L5",
-  "purpose": "The scripts/tron front door and the pinned toolchain it resolves: Node (tron-node), CI tools, XcodeGen projects, version mirrors and main-source runs.",
+  "purpose": "The scripts/tron front door and the pinned toolchain it resolves: Node (tron-node), CI tools, XcodeGen projects and main-source runs.",
   "owns": [
     "cli.module.json",
     "generate-xcode-project",

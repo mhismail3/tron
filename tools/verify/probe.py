@@ -108,6 +108,9 @@ def command(scratch: Path, test: str, runner: str) -> tuple[list[str], Path]:
 
 RUNNING: set = set()  # test process groups this probe started; stopped on interrupt or SIGTERM
 STOPPING = threading.Event()
+# `git worktree add` and `remove` edit the repository's shared worktree list; guardians run in
+# parallel threads, so these edits take turns rather than race for its lock.
+WORKTREES = threading.Lock()
 
 
 def writable(path: Path) -> None:
@@ -135,7 +138,7 @@ def stop_running() -> None:
     for process in list(RUNNING):
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except OSError:  # gone already; macOS reports a reaped group as EPERM
             pass
 
 
@@ -145,7 +148,8 @@ def checkout(commit: str, dependencies: Path | None) -> Path:
     may reach another checkout or a guardian running beside it."""
     tree = Path(tempfile.mkdtemp(prefix="tron-probe-")) / "tree"
     try:
-        git(verify.ROOT, "worktree", "add", "--detach", "-q", str(tree), commit)
+        with WORKTREES:
+            git(verify.ROOT, "worktree", "add", "--detach", "-q", str(tree), commit)
         if dependencies:
             (tree / verify.GATEWAY).mkdir(parents=True, exist_ok=True)
             subprocess.run(["cp", "-c", "-R", str(dependencies), str(tree / verify.GATEWAY / "node_modules")], check=True)
@@ -159,8 +163,10 @@ def discard(tree: Path) -> None:
     """Remove one of this probe's worktrees; other checkouts' worktree entries are not touched."""
     if tree.exists():
         writable(tree)
-    git(verify.ROOT, "worktree", "remove", "--force", str(tree), check=False)
-    if str(tree.resolve()) in git(verify.ROOT, "worktree", "list", "--porcelain"):
+    with WORKTREES:
+        git(verify.ROOT, "worktree", "remove", "--force", str(tree), check=False)
+        listed = git(verify.ROOT, "worktree", "list", "--porcelain")
+    if str(tree.resolve()) in listed:
         print(f"probe: could not unregister worktree {tree}; run `git worktree remove --force {tree}`", file=sys.stderr)
     remove_tree(tree.parent)
 
@@ -183,6 +189,8 @@ def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Pa
         started, scratch, private, process = time.time(), None, None, None
         try:
             scratch = checkout(commit, dependencies)
+            if STOPPING.is_set():
+                return test, {"outcome": "not-run", "why": "the probe was stopped"}
             argv, cwd = command(scratch, test, runner)
             private = Path(tempfile.mkdtemp(prefix="probe-test-"))
             try:
@@ -205,7 +213,7 @@ def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Pa
                 RUNNING.discard(process)
                 try:  # a test's own descendants belong to its group, also after a clean exit
                     os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
+                except OSError:  # gone already; macOS reports a reaped group as EPERM
                     pass
             if private is not None:
                 remove_tree(private)

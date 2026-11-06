@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Guards scripts/tron version on the real tree: the mirrors VERSION.env names are in sync, and the
-helper's own self-test (field derivation, asset names, refused aliases and invalid versions) passes.
-
-A removal probe found tron-version silent: its self-test existed but nothing ran it.
-"""
+helper's own self-test (field derivation, asset names, the refused sync alias) passes."""
 import subprocess
 import unittest
 from pathlib import Path
