@@ -133,14 +133,26 @@ def available(value: dict[str, Any]) -> bool:
     return value.get("isAvailable", True) is not False and not value.get("availabilityError")
 
 
-def exact_runtime(document: dict[str, Any], version: str) -> dict[str, Any]:
+def exact_runtime(document: dict[str, Any], version: str, device_type: dict[str, Any]) -> dict[str, Any]:
+    """The one available iOS runtime of `version` that can host `device_type`.
+
+    Xcode can install a hardware-specific runtime beside the general one with the
+    same version (iOS-27-2-iPhone19-4 beside iOS-27-2); it supports only its own
+    device types, so it is not a candidate for the pinned simulator.
+    """
     matches = [
         runtime
         for runtime in document.get("runtimes", [])
         if runtime.get("platform") == "iOS" and runtime.get("version") == version and available(runtime)
+        and any(
+            supported.get("identifier") == device_type.get("identifier")
+            for supported in runtime.get("supportedDeviceTypes", [])
+        )
     ]
     if len(matches) != 1:
-        raise DestinationError(f"expected one available iOS {version} runtime, found {len(matches)}")
+        raise DestinationError(
+            f"expected one available iOS {version} runtime supporting {device_type.get('name')!r}, found {len(matches)}"
+        )
     return matches[0]
 
 
@@ -1522,8 +1534,8 @@ def stamp_lane_use(arguments: argparse.Namespace, marker: dict[str, Any]) -> dic
 def provision(arguments: argparse.Namespace) -> dict[str, Any]:
     lane_repository()
     document = inventory()
-    runtime = exact_runtime(document, arguments.runtime)
     device_type = exact_device_type(document, arguments.device_type)
+    runtime = exact_runtime(document, arguments.runtime, device_type)
     dev_udid = development_udid(arguments)
     marker = load_marker(arguments.marker)
 
@@ -1731,8 +1743,8 @@ def main() -> int:
             details = provision(arguments)
         else:
             document = inventory()
-            runtime = exact_runtime(document, arguments.runtime)
             device_type = exact_device_type(document, arguments.device_type)
+            runtime = exact_runtime(document, arguments.runtime, device_type)
             marker = load_marker(arguments.marker)
             if marker is None:
                 if arguments.command == "status":

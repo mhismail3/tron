@@ -40,14 +40,17 @@ XCTESTRUN_FIXTURE_KEYS = [
 ]
 DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
 NODE_VERSION = (ROOT / ".node-version").read_text().strip()
-XCODEGEN_VERSION = re.search(
-    r"^TRON_CI_XCODEGEN_VERSION=(\S+)$", (ROOT / "config/ci-toolchain.env").read_text(), re.M,
-).group(1)
+CI_TOOLCHAIN = dict(re.findall(r"^(TRON_\w+)=(\S+)$", (ROOT / "config/ci-toolchain.env").read_text(), re.M))
+XCODEGEN_VERSION = CI_TOOLCHAIN["TRON_CI_XCODEGEN_VERSION"]
+# The real runner scripts verify the repository pin, so their synthetic Mac reports it.
+XCODE_VERSION = CI_TOOLCHAIN["TRON_CI_XCODE_VERSION"]
+RUNNER_RUNTIME_VERSION = CI_TOOLCHAIN["TRON_CI_IOS_RUNTIME_VERSION"]
 RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
 TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
-# The runner fixture's synthetic Mac pins its own runtime/device type.
-RUNNER_RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+RUNNER_RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-" + RUNNER_RUNTIME_VERSION.replace(".", "-")
 RUNNER_TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
+# `simctl list --json` names each runtime's hostable device types.
+SUPPORTS_IPHONE_17_PRO = [{"identifier": TYPE_ID, "name": "iPhone 17 Pro"}]
 UDID_A = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
 UDID_B = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
 UDID_C = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"
@@ -589,6 +592,7 @@ raise SystemExit(2)
             "runtimes": runtimes if runtimes is not None else [{
                 "identifier": RUNTIME_ID, "name": "iOS 26.2", "platform": "iOS",
                 "version": "26.2", "buildversion": "23C54", "isAvailable": True,
+                "supportedDeviceTypes": SUPPORTS_IPHONE_17_PRO,
             }],
             "devicetypes": [{"identifier": TYPE_ID, "name": "iPhone 17 Pro", "isAvailable": True}],
             "devices": devices if devices is not None else {RUNTIME_ID: []},
@@ -785,6 +789,29 @@ class SimulatorFixture(SimulatorHarness, unittest.TestCase):
         self.assertFalse(self.marker.exists())
         self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [unrelated])
 
+    def test_a_hardware_specific_runtime_of_the_pinned_version_is_not_a_candidate(self) -> None:
+        """Xcode installs iOS-27-2-iPhone19-4 beside iOS-27-2: same version, other device types only."""
+        hardware_runtime = RUNTIME_ID + "-iPhone19-4"
+        self.write_inventory(
+            runtimes=[
+                {"identifier": hardware_runtime, "name": "iOS 26.2", "platform": "iOS", "version": "26.2",
+                 "buildversion": "23C9101", "isAvailable": True,
+                 "supportedDeviceTypes": [{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-19-4"}]},
+                {"identifier": RUNTIME_ID, "name": "iOS 26.2", "platform": "iOS", "version": "26.2",
+                 "buildversion": "23C54", "isAvailable": True, "supportedDeviceTypes": SUPPORTS_IPHONE_17_PRO},
+            ],
+            devices={hardware_runtime: [], RUNTIME_ID: []},
+        )
+        provision = self.invoke("provision")
+        self.assertEqual(provision.returncode, 0, provision.stderr)
+        marker = json.loads(self.marker.read_text())
+        self.assertEqual(marker["runtime_identifier"], RUNTIME_ID)
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][hardware_runtime], [])
+
+        status = self.invoke("status")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertEqual(self.invoke("delete").returncode, 0)
+
     def test_unavailable_or_unowned_destination_fails_before_mutation(self) -> None:
         with self.subTest("missing pinned runtime"):
             self.write_inventory(runtimes=[])
@@ -954,7 +981,7 @@ doc = json.loads(inventory_path.read_text()) if inventory_path.exists() else {'d
 if args[:2] == ['simctl', 'list'] and args[2:] == ['--json']:
     print(json.dumps(doc)); raise SystemExit(0)
 if args[:2] == ['simctl', 'list']:
-    print('== Runtimes ==\\niOS 26.5 - com.apple.CoreSimulator.SimRuntime.iOS-26-5'); raise SystemExit(0)
+    print('== Runtimes ==\\niOS """ + RUNNER_RUNTIME_VERSION + """ - """ + RUNNER_RUNTIME_ID + """'); raise SystemExit(0)
 if args[:1] == ['simctl'] and args[1:2] == ['create']:
     _, name, device_type, runtime = args[1:]
     udid = 'AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA'
@@ -982,7 +1009,8 @@ print('unexpected xcrun arguments', args, file=sys.stderr); raise SystemExit(2)
 """)
         self.simulator_inventory = self.root / "simulator-inventory.json"
         self.simulator_inventory.write_text(json.dumps({
-            "runtimes": [{"identifier": RUNNER_RUNTIME_ID, "version": "26.5", "platform": "iOS", "buildversion": "23C54", "isAvailable": True}],
+            "runtimes": [{"identifier": RUNNER_RUNTIME_ID, "version": RUNNER_RUNTIME_VERSION, "platform": "iOS", "buildversion": "23C54", "isAvailable": True,
+                          "supportedDeviceTypes": SUPPORTS_IPHONE_17_PRO}],
             "devicetypes": [{"identifier": RUNNER_TYPE_ID, "name": "iPhone 17 Pro", "isAvailable": True}],
             "devices": {RUNNER_RUNTIME_ID: []},
         }))
@@ -990,7 +1018,7 @@ print('unexpected xcrun arguments', args, file=sys.stderr); raise SystemExit(2)
         xcodebuild = self.bin / "xcodebuild"
         xcodebuild.write_text("""#!/usr/bin/env bash
 set -euo pipefail
-if [[ \"${1:-}\" == -version ]]; then echo 'Xcode 26.6'; exit 0; fi
+if [[ \"${1:-}\" == -version ]]; then echo 'Xcode """ + XCODE_VERSION + """'; exit 0; fi
 if [[ -n \"${FAKE_BUILD_RESOURCE_LOG:-}\" ]]; then
   python3 -c 'import json, os, sys; from pathlib import Path; Path(os.environ["FAKE_BUILD_RESOURCE_LOG"]).write_text(json.dumps({"args": sys.argv[1:], "nice": os.getpriority(os.PRIO_PROCESS, 0)}))' \"$@\"
 fi
@@ -1174,7 +1202,7 @@ shutil.copytree(source, clone)
         lane.mkdir(parents=True, exist_ok=True)
         marker: dict[str, object] = {
             "schema": "tron.ios-test-simulator.v1", "owner": "tron-ios-test", "udid": udid,
-            "name": name, "runtime_identifier": RUNNER_RUNTIME_ID, "runtime_version": "26.5",
+            "name": name, "runtime_identifier": RUNNER_RUNTIME_ID, "runtime_version": RUNNER_RUNTIME_VERSION,
             "runtime_build": "23C54", "device_type_identifier": RUNNER_TYPE_ID,
             "device_type_name": "iPhone 17 Pro",
         }
@@ -2364,11 +2392,12 @@ raise SystemExit(2)
             "runtimes": [
                 {
                     "identifier": RUNTIME_ID, "name": "iOS 26.2", "platform": "iOS", "version": "26.2",
-                    "buildversion": "23C54", "isAvailable": True,
+                    "buildversion": "23C54", "isAvailable": True, "supportedDeviceTypes": SUPPORTS_IPHONE_17_PRO,
                 },
                 {
-                    "identifier": RUNNER_RUNTIME_ID, "name": "iOS 26.5", "platform": "iOS", "version": "26.5",
-                    "buildversion": "23C54", "isAvailable": True,
+                    "identifier": RUNNER_RUNTIME_ID, "name": "iOS " + RUNNER_RUNTIME_VERSION, "platform": "iOS",
+                    "version": RUNNER_RUNTIME_VERSION,
+                    "buildversion": "23C54", "isAvailable": True, "supportedDeviceTypes": SUPPORTS_IPHONE_17_PRO,
                 },
             ],
             "devicetypes": [{"identifier": TYPE_ID, "name": "iPhone 17 Pro", "isAvailable": True}],
@@ -3767,7 +3796,7 @@ exec "{real_node}" "$@"
 import json, plistlib
 arguments = sys.argv[1:]
 if arguments[:1] == ["-version"]:
-    print("Xcode 26.6"); raise SystemExit(0)
+    print("Xcode ''' + XCODE_VERSION + '''"); raise SystemExit(0)
 log = os.environ.get("FAKE_XCODEBUILD_LOG")
 def record(value):
     if log:
@@ -6192,7 +6221,7 @@ raise SystemExit(2)
 ''',
     "xcodebuild": '''arguments = sys.argv[1:]
 if arguments[:1] == ["-version"]:
-    print("Xcode 26.6"); raise SystemExit(0)
+    print("Xcode ''' + XCODE_VERSION + '''"); raise SystemExit(0)
 
 
 def value(flag):
