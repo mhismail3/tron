@@ -48,13 +48,18 @@ stay unavailable. Completed retained verifier test-step seconds become partial t
 minutes per publication; attempt IDs deduplicate copies. Overwritten attempts, direct
 suite logs and unjoined lanes are not inferred. `--all` means locks, not all Gateway tests.
 It emits JSON and atomically retains `test-results/health/aggregate-<run>.json`.
+SIGINT or SIGTERM keeps an `interrupted` aggregate with the partial collection (exit 130, not a
+pass); it never stops foreign work.
 Unavailable measurements are null, not zero; denominators and partial coverage remain visible.
 Registry-expired/invalid invocations retain failed source reports; `--plan` stays read-only.
 Case digests and config/attempt identities come from the executed verifier, not inferred test names.
 
 Optional `--owner-summary <json>` reads an explicit `system.logs` aggregate export
 (`records`): `home.response-timing`, `home.task.history-summary`, `capability.usage`.
-Only approved scalars/names survive. This bounded tail is **partial**, not a complete
+Only approved scalars and names survive. For `capability.usage` that means the capability name,
+counts, status (`ok`, `error`, `refused`, `unknown`) and latency bucket (`lt100ms`, `lt1s`, `lt10s`,
+`gte10s`, `unknown`). It never keeps queries, bodies, file paths, prompts, credentials or raw tool
+arguments. This bounded tail is **partial**, not a complete
 30-day census. Root hashes deduplicate history pages; incomplete roots are excluded.
 `--mac-identity <json>` reads the selected payload manifest identified by `mac verify`;
 `--iphone-identity <json>` reads existing iPhone log-capture metadata. The script does not
@@ -126,8 +131,8 @@ no-build/no-restart design task. Its request latency is NOT Home round-trip or
 Gateway cold-start latency. See [profile ownership](../../scripts/tron-profile-gateway.md).
 There is no existing single CLI for end-to-end Home latency, cold-start timing,
 installed iPhone identity, approval timestamps or a complete seven-day flake ledger.
-Do not invent commands or infer those values from a fast status RPC. Proposed
-collection below must expose missing data before any implementation is accepted.
+Do not invent commands or infer those values from a fast status RPC. The proposed
+collection is undecided and not implemented.
 
 ## One owner, reuse first
 
