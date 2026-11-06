@@ -239,7 +239,9 @@ are in [batch.md](batch.md).
 `scripts/tron mutate <packages/gateway/src file> [--count 30] [--seed 1465] [--timeout 300]`
 measures lock sensitivity, never per-slice eligibility. It samples seeded single-operator
 flips (`===`/`!==`, `&&`/`||`, booleans, comparisons, `±1`) and runs the locks selected
-for that source once per mutant, not the module's ordinary journeys. Unmutated locks
+for that source once per mutant, not the module's ordinary journeys. Each run goes through the Gateway
+test runner (`gateway.py`: temporary HOME and scratch), and `mutate` holds the host's full-Gateway lock
+for the whole sampling. Unmutated locks
 must pass first. A failing test/suite in the Vitest report or a timed-out process is a
 kill; timeout stops the whole owned group (default 300 s, including infinite loops).
 Missing reports are harness errors, excluded from the rate, and exit 1. Source is

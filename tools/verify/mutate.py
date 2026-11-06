@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verify  # noqa: E402  (selection and runners)
+from host_lock import HELD_BY_CALLER, wait_for_full_gateway_lock  # noqa: E402  (the one host lock owner)
 
 OPERATORS = [(r"===", "!=="), (r"!==", "==="), (r" && ", " || "), (r" \|\| ", " && "), (r"\btrue\b", "false"),
              (r"\bfalse\b", "true"), (r" < ", " >= "), (r" > ", " <= "), (r" <= ", " > "), (r" >= ", " < "),
@@ -61,15 +62,20 @@ def main(argv: list[str]) -> int:
         parser.error(f"no Gateway vitest lock is selected for {args.file}")
     report_path = verify.ROOT / "test-results" / "mutate" / "vitest.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [str(verify.ROOT / "scripts" / "tron-node"), "exec", "npx", "vitest", "run", "--reporter=json",
+    # The Gateway test runner owns each run's temporary HOME and scratch; this command holds the host's
+    # full-Gateway lock for the whole sampling, so no mutant's time is spent waiting for it.
+    command = ["python3", str(verify.ROOT / "tools/verify/gateway.py"), "--reporter=json",
                f"--outputFile={report_path}", *[test[len(verify.GATEWAY) + 1:] for test in tests]]
+    held = wait_for_full_gateway_lock({"pid": os.getpid(), "worktree": str(verify.ROOT), "purpose": f"mutate {args.file}"},
+                                      None, lambda line: print(f"mutate: {line}", file=sys.stderr, flush=True))
 
     def run_locks(timeout: float | None) -> dict | str | None:
         """The run's vitest summary, "timeout", or None when no readable report proves the tests ran."""
         report_path.unlink(missing_ok=True)
         # Its own process group, so a hung run is stopped with every vitest worker it started.
         process = subprocess.Popen(command, cwd=verify.ROOT / verify.GATEWAY, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, start_new_session=True)
+                                   stderr=subprocess.DEVNULL, start_new_session=True,
+                                   env={**os.environ, HELD_BY_CALLER: "1"})
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

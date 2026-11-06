@@ -67,6 +67,10 @@ class Repo:
         for relative in COPIED:
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.path / relative)
+        # The host's full-Gateway lock belongs to real Gateway runs, not fixtures.
+        self.lock = base / "full-gateway.lock"
+        host_lock = self.path / "tools/verify/host_lock.py"
+        host_lock.write_text(host_lock.read_text().replace("'/tmp/tron-full-gateway.lock'", repr(str(self.lock))))
         self.write(".gitignore", "test-results/\n")
         self.write("README.md", "# Fixture\n")
         self.write("AGENTS.md", AGENTS)
@@ -894,8 +898,10 @@ class IosLaneTests(VerifyCase):
 # The Gateway runner `mutate` drives, faked at `scripts/tron-node`: a flipped comparison
 # fails the lock, a flipped flag hangs it (with a child the timeout must also stop).
 FAKE_RUNNER = """#!/usr/bin/env python3
-import json, pathlib, subprocess, sys, time
+import json, os, pathlib, subprocess, sys, time
 out = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--outputFile="))
+with open("runs.jsonl", "a") as runs:
+    runs.write(json.dumps({"home": os.environ["HOME"], "held": os.environ.get("TRON_FULL_GATEWAY_LOCK_HELD")}) + "\\n")
 source = pathlib.Path("src/store/store.ts").read_text()
 if "hang = false" in source:
     child = subprocess.Popen(["sleep", "300"])
@@ -911,12 +917,16 @@ class MutateTests(VerifyCase):
     def setUp(self) -> None:
         super().setUp()
         r = self.repo
-        r.write("scripts/tron-node", FAKE_RUNNER)
+        # Pinned Node is the identity; the Gateway runner execs Vitest, here the fake.
+        r.write("scripts/tron-node", '#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
         (r.path / "scripts/tron-node").chmod(0o755)
+        r.write("packages/gateway/node_modules/.bin/vitest", FAKE_RUNNER)
+        (r.path / "packages/gateway/node_modules/.bin/vitest").chmod(0o755)
         r.write("packages/gateway/src/store/store.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
         r.write("packages/gateway/src/store/store.ts", SOURCE)
         r.write("packages/gateway/src/store/store.lock.integration.test.ts", "// faked by scripts/tron-node\n")
-        r.write(".gitignore", "test-results/\npackages/gateway/hung.pid\n")
+        r.write(".gitignore", "test-results/\npackages/gateway/hung.pid\npackages/gateway/runs.jsonl\n"
+                "packages/gateway/node_modules/\n")
         manifest = json.loads((r.path / "tooling.module.json").read_text())
         manifest["owns"].append("scripts/tron-node")
         r.write("tooling.module.json", json.dumps(manifest))
@@ -969,6 +979,22 @@ class MutateTests(VerifyCase):
         report = self.report()
         self.assertEqual(([(m["line"], m["outcome"]) for m in report["mutants"]], report["complete"]), ([(1, "killed")], False))
         self.assert_hung_child_stopped()
+
+    def test_mutants_run_through_the_gateway_runner_under_the_host_lock(self) -> None:
+        import fcntl
+        process = self.mutate("--count", "1", "--timeout", "60")
+        output, _ = process.communicate(timeout=120)
+        self.assertEqual(process.returncode, 0, output)
+        runs = [json.loads(line) for line in (self.repo.path / "packages/gateway/runs.jsonl").read_text().splitlines()]
+        self.assertEqual(len(runs), 2, output)  # the unmutated baseline and one mutant
+        for run in runs:
+            # The runner's own temporary HOME, never the caller's, and the lock already held for it.
+            self.assertNotEqual(run["home"], self.repo.env["HOME"])
+            self.assertTrue(run["home"].startswith("/tmp/tron-gateway-tests-"), run)
+            self.assertEqual(run["held"], "1")
+        self.assertIn(f'"purpose": "mutate packages/gateway/src/store/store.ts"', self.repo.lock.read_text())
+        with self.repo.lock.open() as lock:  # released when mutate exits
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 if __name__ == "__main__":
