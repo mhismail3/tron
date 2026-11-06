@@ -382,7 +382,7 @@ private struct TronFluidSheetCard<Header: View, Content: View, Footer: View>: Vi
 
     var body: some View {
         let shape = ConcentricRectangle(corners: .concentric(minimum: .fixed(34)), isUniform: true)
-        TronFluidSheetLayout(maxHeight: maxHeight) {
+        TronFluidSheetLayout(maxHeight: maxHeight, bottomInset: bottomInset) {
             header()
             ScrollView(.vertical) {
                 content()
@@ -390,7 +390,6 @@ private struct TronFluidSheetCard<Header: View, Content: View, Footer: View>: Vi
             .scrollBounceBehavior(.basedOnSize, axes: .vertical)
             .scrollEdgeEffectStyle(.soft, for: .vertical)
             footer()
-                .padding(.bottom, bottomInset)
         }
         .clipShape(shape)
         // A light wash under the content keeps the cards legible over a busy
@@ -402,27 +401,34 @@ private struct TronFluidSheetCard<Header: View, Content: View, Footer: View>: Vi
 }
 
 /// Header and footer at their ideal heights; the body takes its ideal (content)
-/// height up to what the cap leaves. One layout pass decides the card height,
-/// so an animated content change animates the card with it.
+/// height up to what the cap leaves, and the bottom inset clears the home
+/// indicator. One layout pass decides the card height, so an animated content
+/// change animates the card with it. An `EmptyView` footer is no subview at
+/// all, so the footer is optional.
 struct TronFluidSheetLayout: Layout {
     let maxHeight: CGFloat
+    var bottomInset: CGFloat = 0
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? 390
         let limit = min(maxHeight, proposal.height ?? .infinity)
-        return CGSize(width: width, height: min(idealHeights(width: width, subviews: subviews).reduce(0, +), limit))
+        let ideal = idealHeights(width: width, subviews: subviews).reduce(0, +) + bottomInset
+        return CGSize(width: width, height: min(ideal, limit))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count == 3 else { return }
+        guard subviews.count >= 2 else { return }
         let heights = idealHeights(width: bounds.width, subviews: subviews)
-        let body = max(bounds.height - heights[0] - heights[2], 0)
+        let footer = subviews.count > 2 ? heights[2] : 0
+        let body = max(bounds.height - heights[0] - footer - bottomInset, 0)
         subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
                           proposal: ProposedViewSize(width: bounds.width, height: heights[0]))
         subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + heights[0]), anchor: .topLeading,
                           proposal: ProposedViewSize(width: bounds.width, height: body))
-        subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.maxY), anchor: .bottomLeading,
-                          proposal: ProposedViewSize(width: bounds.width, height: heights[2]))
+        if subviews.count > 2 {
+            subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.maxY - bottomInset), anchor: .bottomLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: footer))
+        }
     }
 
     private func idealHeights(width: CGFloat, subviews: Subviews) -> [CGFloat] {

@@ -21,8 +21,9 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   `ProjectResourcesView`, `TrustSettingsView`.
 - This iPhone and diagnostics: `AppearanceSettingsView`, `AppLocalBehaviorSettings`,
   `PushNotificationsSettingsView`, `NotificationInboxView`, `GatewayLogsSettingsView`.
-- Sandbox (`Sandbox/`): `SandboxSettingsView`, the custom-sheet stage, `TronFluidSheet` and the
-  fake-data `SandboxManageHome`.
+- Sandbox (`Sandbox/`): `SandboxSettingsView`, the custom-sheet stage, `TronFluidSheet`, the
+  fake-data `SandboxManageHome`, the design-language primitives `SandboxDesign` and the
+  `Chat/` prototype.
 
 ## Contract
 
@@ -243,6 +244,15 @@ full-screen stage, beside the same content in the stock medium/large sheet:
 - The playground bar adds and removes rows and sections; Slow motion stretches every spring 4x.
   The frame meter counts main-thread display frames missed in the 4 s after a present.
   `CADisableMinimumFrameDurationOnPhone` lets app animations reach 120 Hz on ProMotion iPhones.
+
+**Chat · prototype** is a new chat interface in the [design language](../../../docs/design-language.md)
+draft, using fake data. Its transcript owns its scroll. The header is a safe-area bar, so
+content scrolling under it gets the system edge effect. The composer row is a safe-area
+inset, so the keyboard moves it. The row holds the composer, the feedback cluster and the
+liquid action menu. The menu is one progress value on a spring; its circles share a
+`GlassEffectContainer`. A context inset panel, an updates `TronFluidSheet` and a nested sheet
+complete the layers. `TronSandboxChatPrototypeUITests` checks that only the top layer takes
+input and that each overlay returns it. It also records the review captures and a motion take.
 
 `TronSandboxCustomSheetUITests` opens the playground from Settings and checks content sizing,
 growth to the cap, and dismissal by Done, a fling and the dim; it also records the frame-meter

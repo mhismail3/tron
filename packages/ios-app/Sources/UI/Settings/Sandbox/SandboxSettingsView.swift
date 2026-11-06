@@ -5,6 +5,7 @@ import SwiftUI
 /// experiment shows fake data and performs no Gateway read or action.
 struct SandboxSettingsView: View {
     @State private var showsCustomSheetStage = false
+    @State private var showsChatPrototype = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -17,6 +18,14 @@ struct SandboxSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("sandbox-experiment-custom-sheet")
+                    TronSettingsDivider()
+                    Button { showsChatPrototype = true } label: {
+                        TronSettingsRow(icon: "bubble.left.and.text.bubble.right", title: "Chat · prototype",
+                                        subtitle: "A new chat interface in the Sandbox design language")
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("sandbox-experiment-chat")
                 }
                 .tronSettingsCaption("Playground for custom components. Fake data only: nothing here reads or changes your Macs.")
             }
@@ -26,6 +35,10 @@ struct SandboxSettingsView: View {
         .tronNavigationTitle("Sandbox")
         .fullScreenCover(isPresented: $showsCustomSheetStage) {
             SandboxCustomSheetStage()
+                .tronPresentation()
+        }
+        .fullScreenCover(isPresented: $showsChatPrototype) {
+            SandboxChatView()
                 .tronPresentation()
         }
     }

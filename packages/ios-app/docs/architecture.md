@@ -32,7 +32,8 @@ Cross-module contracts:
 - [Presentation parity](presentation-parity.md): the shared UI contract, presentation-scoped
   state and presentation activity.
 - Feature specifications: [onboarding](onboarding.md), [Swift apps](swift-apps.md),
-  [display artifacts](display-artifacts.md), [knowledge sources](knowledge-sources.md).
+  [display artifacts](display-artifacts.md), [knowledge sources](knowledge-sources.md),
+  [design language](design-language.md) (Sandbox draft).
 
 ## Modules
 
