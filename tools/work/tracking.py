@@ -13,7 +13,7 @@ from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ownership"))
-from ownership import STEM, SUFFIX, module_id
+from ownership import STEM, SUFFIX, directory_modules, module_id
 
 import bootstrap
 import comments
@@ -379,10 +379,17 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
             ).stdout.split("\0")
         except (subprocess.CalledProcessError, OSError) as error:
             raise TrackingError("could not read tracked module manifests") from error
-        module_parent = epic.get("title") in {
-            f"Module: {module_id(path)}" for path in manifests
-            if path and STEM.fullmatch(Path(path).name[:-len(SUFFIX)])
-        }
+        ids = set()
+        for path in manifests:
+            if path and STEM.fullmatch(Path(path).name[:-len(SUFFIX)]):
+                ids.add(module_id(path))
+                try:
+                    data = json.loads((repo / path).read_text())
+                except (OSError, ValueError):
+                    continue
+                if isinstance(data, dict):
+                    ids |= {own_id for own_id, _, _ in directory_modules(path, data, []).values()}
+        module_parent = epic.get("title") in {f"Module: {own_id}" for own_id in ids}
     # Phase and area epics retain their links; module issues remain maintenance.
     if child_number == epic_number or not (
         config["issues"]["epicLabel"] in epic_labels or module_parent
