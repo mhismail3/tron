@@ -54,7 +54,7 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `owns` | yes | non-empty list of unique patterns, relative to the manifest's directory |
   | `purpose` | no | one line; `--ledger` shows it for owned files that state none themselves |
   | `layout` | no | only in `root.module.json`; see [Layout](#layout) |
-  | `dependsOn` | no | other module ids; kernel ports (plan §6.1) are accepted once K-0 defines them |
+  | `dependsOn` | no | other module ids |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
   | `capabilities` | no | non-empty strings (the catalog does not exist yet) |
   | `verify` | no | `scripts/tron …` commands |

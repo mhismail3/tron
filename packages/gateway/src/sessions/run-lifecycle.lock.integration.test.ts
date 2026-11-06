@@ -6,7 +6,7 @@ import { expectScenario } from "../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /**
- * Lifecycle RPC lock (packages/gateway/docs/scenario-locks.md; K-0 §7, guarding E5's abort
+ * Lifecycle RPC lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5's abort
  * and E7's drain) for the `gateway/run` module: the restart and stop RPCs a
  * phone sends, through the real Gateway (`gateway-lock-harness.ts`, option
  * `lifecycleRequests`: the real terminal owner, and `gateway-main`'s process

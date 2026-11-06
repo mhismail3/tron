@@ -19,7 +19,7 @@ import { waitFor } from "../../test-support/wait-for.js";
  * and of its response or error. Values that vary per run are not shapes, so the
  * golden is stable. Shared tool declaration schemas belong to the full Home
  * schema oracle; other renamed, removed, added or retyped fields fail this lock.
- * A wire change updates both ends in a lockstep slice (plan §4.1 B4).
+ * A wire change updates both ends in a lockstep slice (AGENTS.md "Architecture invariants").
  */
 
 const MODULE = "gateway/protocol";

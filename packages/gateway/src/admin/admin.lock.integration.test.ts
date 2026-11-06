@@ -4,7 +4,7 @@ import { startLockGateway, type LockGateway } from "../../test-support/gateway-l
 import { expectScenario } from "../../test-support/lock-projections.js";
 
 /**
- * Kernel settings-change lock (packages/gateway/docs/scenario-locks.md) for the `gateway/admin`
+ * Kernel settings-change lock (packages/gateway/docs/scenario-locks.md#locks) for the `gateway/admin`
  * module: the one settings change path (`settings.change`, docs/settings-model.md)
  * through the real Gateway over a loopback WebSocket, as the iPhone uses it.
  *

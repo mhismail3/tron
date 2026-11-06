@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 /**
- * The scenario-lock framework (packages/gateway/docs/scenario-locks.md).
+ * The scenario-lock framework (packages/gateway/docs/scenario-locks.md#framework).
  *
  * A lock is a *normalized* recording of what one deterministic scenario makes
  * the real Gateway and the pinned Pi SDK emit, persist and send, compared
