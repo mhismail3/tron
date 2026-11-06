@@ -58,7 +58,7 @@ the identity/capability-fenced RPC. Both belong to `Sources/state.module.json` (
 
 `HomeSheets.swift`, `HomePagedListSheet.swift`, `HomeMemorySheets.swift` and
 `HomeChapterSheets.swift` own native routes, the disposable page feed and rendering
-under `Sources/UI/Chat/chat.module.json`. They do not maintain a memory corpus.
+in the `ios-app/chat` module (`Sources/UI/Chat`). They do not maintain a memory corpus.
 `HomeToolDetailPresentation.swift` belongs to the same Chat owner but renders the
 recorded tool invocation's text/details. It does not fetch browser evidence.
 The two consumers deliberately have different contracts; a browser projection
