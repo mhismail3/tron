@@ -259,6 +259,12 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("probe: could not prepare a checkout", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_a_move_under_a_tracked_file_is_an_error_not_a_crash(self) -> None:
+        result, _ = self.repo.probe("tools/tool/tool.sh", "--move", "tools/caller/caller.sh/tool.sh")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("probe: could not prepare a checkout", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_a_guardian_that_reinstalls_dependencies_leaves_the_checkouts_copy_alone(self) -> None:
         r = self.repo
         r.write(".gitignore", "test-results/\nnode_modules/\n")
