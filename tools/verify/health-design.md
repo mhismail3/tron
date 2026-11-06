@@ -1,7 +1,7 @@
 # Lightweight health reporting
 
 [P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship) owns red/green policy:
-legacy verifier verdicts below are diagnostics, never permission for exemptions or qualified green.
+legacy verifier verdicts are diagnostics, never permission for exemptions or qualified green.
 
 The implemented scope is the on-demand `scripts/tron health` scorecard and approved
 content-free Home response/capability completion diagnostics (#2135). Approval timestamp
@@ -49,7 +49,7 @@ minutes per publication; attempt IDs deduplicate copies. Overwritten attempts, d
 suite logs and unjoined lanes are not inferred. `--all` means locks, not all Gateway tests.
 It emits JSON and atomically retains `test-results/health/aggregate-<run>.json`.
 SIGINT or SIGTERM keeps an `interrupted` aggregate with the partial collection (exit 130, not a
-pass); it never stops foreign work.
+pass); it stops only its own batch-owned child group, never foreign work.
 Unavailable measurements are null, not zero; denominators and partial coverage remain visible.
 Registry-expired/invalid invocations retain failed source reports; `--plan` stays read-only.
 Case digests and config/attempt identities come from the executed verifier, not inferred test names.
