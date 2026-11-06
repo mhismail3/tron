@@ -232,7 +232,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.taskHistory", "home.stopTask", "home.memory.view", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.taskHistory", "home.taskPermissions", "home.stopTask", "home.memory.view", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
