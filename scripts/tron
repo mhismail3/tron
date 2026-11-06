@@ -151,7 +151,7 @@ case "$cmd" in
     if (($# == 0)); then
       awk -F= '/^TRON_VERSION=/{gsub(/"/,"",$2); print $2}' "$ROOT/VERSION.env"
     else
-      exec "$ROOT/scripts/tron-version" "$@"
+      exec "$ROOT/scripts/version/tron-version" "$@"
     fi
     ;;
   __dev-supervise|dev)

@@ -1,6 +1,6 @@
 {
   "layer": "L5",
-  "purpose": "The scripts/tron front door and the pinned toolchain it resolves: Node (tron-node), CI tools, XcodeGen projects, version mirrors and main-source runs.",
+  "purpose": "The scripts/tron front door and the pinned toolchain it resolves: Node (tron-node), CI tools, XcodeGen projects and main-source runs.",
   "owns": [
     "cli.module.json",
     "generate-xcode-project",
@@ -15,7 +15,6 @@
     "test-verify-ci-toolchain.py",
     "tron",
     "tron-node",
-    "tron-version",
     "update-model-release-dates.mjs",
     "verify-ci-toolchain.sh"
   ],
@@ -96,6 +95,7 @@
         "repo/ownership",
         "repo/root",
         "repo/verify",
+        "repo/version",
         "repo/work"
       ],
       "external": "maintainer and agents in Terminal (AGENTS.md, docs/development.md)"
@@ -113,7 +113,8 @@
         "repo/mac",
         "repo/profile",
         "repo/root",
-        "repo/verify"
+        "repo/verify",
+        "repo/version"
       ],
       "external": "maintainer pins and installs Node (docs/development.md)"
     },
@@ -128,7 +129,8 @@
       "consumers": [
         "repo/ios",
         "repo/profile",
-        "repo/root"
+        "repo/root",
+        "repo/version"
       ],
       "external": "maintainer before an iOS release (`release`, packages/ios-app/docs/development.md)"
     }

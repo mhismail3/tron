@@ -54,8 +54,8 @@ for tool in "$@"; do
         || { echo "release Xcode first-launch tasks or license acceptance are incomplete" >&2; exit 1; }
       [[ "$TRON_RELEASE_IOS_MIN_FREE_GB" =~ ^[1-9][0-9]*$ ]] \
         || { echo "TRON_RELEASE_IOS_MIN_FREE_GB must be a whole number of GB" >&2; exit 1; }
-      free_kb="$(df -Pk "$ROOT" | awk 'NR == 2 { print $4 }')"
-      [[ "$free_kb" =~ ^[0-9]+$ ]] || { echo "could not determine free capacity beside the checkout" >&2; exit 1; }
+      free_kb="$(df -Pk "$ROOT" | awk 'NR == 2 { print $4 }')" && [[ "$free_kb" =~ ^[0-9]+$ ]] \
+        || { echo "could not determine free capacity beside the checkout" >&2; exit 1; }
       (( free_kb >= TRON_RELEASE_IOS_MIN_FREE_GB * 1024 * 1024 )) \
         || { echo "a release needs ${TRON_RELEASE_IOS_MIN_FREE_GB}GB free beside the checkout" >&2; exit 1; }
       ;;

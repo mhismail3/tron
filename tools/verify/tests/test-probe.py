@@ -12,14 +12,16 @@ helper verify imports into a disposable Git repository and probes one unit as a 
    which names the tool.
 5. A guardian already red at HEAD is left out and reported; with no green guardian left the probe
    stops with exit 1 before any change.
-6. SIGTERM stops every running test's process group and removes the scratch worktree.
+6. SIGTERM stops every running test's process group and removes every scratch worktree, also
+   when the stopped group is already reaped (macOS then reports EPERM).
 7. A guardian that seals a tree read-only leaves no scratch behind, and guardians running side by
    side each get their own checkout: one writing into its tree never dirties another's.
 8. A short unit name ("tron") that also occurs in scratch paths does not count as naming the unit,
    so a vague failure is still a cascade.
 9. Deleting a guardian's own runner (scripts/tron-node) is a failure that names it, not a crash;
    a relay test is listed as not run, never run as a shell script.
-10. A checkout that cannot be prepared (unreadable dependencies) is a `probe:` error, exit 2.
+10. A checkout that cannot be prepared (unreadable dependencies, or a move under a tracked file)
+    is a `probe:` error, exit 2.
 11. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
    checkout's (bundle-gateway.sh runs `npm ci`).
 
@@ -113,8 +115,9 @@ class ProbeTests(unittest.TestCase):
         self.repo = Repo(Path(self.temp.name).resolve())
 
     def tearDown(self) -> None:
-        worktrees = self.repo.git("worktree", "list", "--porcelain").count("worktree ")
-        self.assertEqual(worktrees, 1, "the probe left a scratch worktree registered")
+        listed = self.repo.git("worktree", "list", "--porcelain")
+        self.assertEqual(listed.count("worktree "), 1, f"the probe left a scratch worktree registered:\n{listed}\n"
+                                                       f"{getattr(self, 'last_output', '')}")
         self.temp.cleanup()
 
     def test_deleting_a_guarded_tool_is_precise(self) -> None:
@@ -190,6 +193,7 @@ class ProbeTests(unittest.TestCase):
                          "the slow guardian never started")
         process.send_signal(signal.SIGTERM)
         output, _ = process.communicate(timeout=30)
+        self.last_output = output
         self.assertNotEqual(process.returncode, 0, output)
         self.assertEqual(subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode, 1,
                          "a guardian's process outlived the probe")
@@ -255,6 +259,12 @@ class ProbeTests(unittest.TestCase):
             result, _ = r.probe("tools/caller/caller.sh")
         finally:
             unreadable.chmod(0o644)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("probe: could not prepare a checkout", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_a_move_under_a_tracked_file_is_an_error_not_a_crash(self) -> None:
+        result, _ = self.repo.probe("tools/tool/tool.sh", "--move", "tools/caller/caller.sh/tool.sh")
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("probe: could not prepare a checkout", result.stderr)
         self.assertNotIn("Traceback", result.stderr)

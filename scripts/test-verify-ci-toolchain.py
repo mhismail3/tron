@@ -133,7 +133,9 @@ class ReleaseXcodeAdmissionTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 1, completed.stderr)
                 self.assertIn(message, completed.stderr)
 
-    def test_each_missing_release_tool_is_named(self):
+    def test_each_missing_system_tool_and_free_space_reading_is_named(self):
+        """python3, security and codesign by PATH; xcodebuild and xcrun are this fixture's own shims, and
+        PlistBuddy is an absolute path, so their absence is not staged here."""
         for tool in ("python3", "security", "codesign"):
             with self.subTest(tool=tool):
                 shutil.rmtree(self.root / "system", ignore_errors=True)
@@ -141,6 +143,12 @@ class ReleaseXcodeAdmissionTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 1, completed.stderr)
                 self.assertIn(f"release needs {tool}", completed.stderr)
         shutil.rmtree(self.root / "system", ignore_errors=True)
+        (self.root / "bin/df").write_text("#!/bin/bash\nexit 1\n")
+        (self.root / "bin/df").chmod(0o700)
+        unreadable = self.admit(self.developer)
+        self.assertEqual(unreadable.returncode, 1, unreadable.stderr)
+        self.assertIn("could not determine free capacity beside the checkout", unreadable.stderr)
+        (self.root / "bin/df").unlink()
         completed = self.admit(self.developer, path=self.path_without(None))
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
