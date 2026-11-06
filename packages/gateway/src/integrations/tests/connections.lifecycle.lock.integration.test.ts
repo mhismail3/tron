@@ -78,7 +78,7 @@ async function start(root: string, historicalDefinitions = false) {
     const display = displayOwnerOf(registry);
     const service = new GatewayService({
       config: { machineId: "connections-lock", machineGroupID: "lock", machineName: "Lock", tronHome, agentDir },
-      sessions: registry, display, modules: registry.moduleHost, devices, connections, receipts, modelRuntime, auth, uploads,
+      sessions: registry, display, devices, connections, receipts, modelRuntime, auth, uploads,
       broadcast: () => {},
     } as unknown as GatewayServiceDependencies);
     server = new GatewayServer({
