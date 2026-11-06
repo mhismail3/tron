@@ -27,7 +27,7 @@ enum TronListLeading: Equatable {
     case ordinal(Int)
 }
 
-struct TronListRowContent {
+struct TronListRowContent: Equatable {
     var leading: TronListLeading?
     let title: String
     /// Content rows show up to three regular lines instead of a two-line title.

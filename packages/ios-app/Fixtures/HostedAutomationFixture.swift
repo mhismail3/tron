@@ -86,20 +86,30 @@ struct HostedAutomationFixtureView: View {
     @State private var activity = PresentationActivityCoordinator()
 
     init() {
-        let records = try! [
+        let arguments = ProcessInfo.processInfo.arguments
+        // The inventory orders Automations by lifecycle: the paused and the
+        // enabled-but-idle rows sort ahead of the drafts by name alone, so only
+        // the lifecycle grouping puts the idle enabled one above the paused one.
+        let base = try! [
             AutomationPresentationFixture.record(),
             AutomationPresentationFixture.record(last: false, notification: true),
             AutomationPresentationFixture.record(activation: "enabled", current: true),
-        ].enumerated().map { index, record in
+            AutomationPresentationFixture.record(activation: "paused"),
+            AutomationPresentationFixture.record(activation: "enabled"),
+        ]
+        let names = ["Daily workspace review", "Daily reminder", "Project report", "A paused digest", "Zeta enabled check"]
+        // A measurement catalog: many Automations across every lifecycle.
+        let large = arguments.contains("-automation-large")
+        let records = try! (large ? (0..<400).map { base[$0 % base.count] } : base).enumerated().map { index, record in
             var fields = try JSONValue.encode(record).objectValue!
-            if index == 0, ProcessInfo.processInfo.arguments.contains("-automation-expiry") {
+            if index == 0, arguments.contains("-automation-expiry") {
                 fields["activation"] = .string("expired")
                 fields["provenance"] = .object(["kind": .string("assistant"), "sessionId": .string("home-fixture"), "sourceId": .string("fixture-call"), "expiresAt": .string("2026-09-20T12:00:00Z")])
                 fields["nextOccurrenceAt"] = .null
                 fields["lastRun"] = .null
             }
             fields["id"] = .string("automation-\(index)")
-            fields["name"] = .string(["Daily workspace review", "Daily reminder", "Project report"][index])
+            fields["name"] = .string(large ? "\(names[index % names.count]) \(index)" : names[index])
             return try JSONValue.object(fields).decode(GatewayAutomationRecord.self)
         }
         dateControlsSelection = AutomationSummarySelection(profileID: profile.id,
@@ -232,13 +242,17 @@ private actor HostedAutomationSocket: GatewaySocketConnection {
         case "automation.status":
             result = .object(["ready": .bool(true), "degraded": .bool(false), "automationCount": .number(Double(records.count)), "aggregateBytes": .number(1_024), "malformedRecordCount": .number(0), "catalogRevision": .number(1)])
         case "automation.list":
-            let summaries = try records.map { record -> JSONValue in
+            // Pages of at most 100, as the Gateway serves them.
+            let offset = frame["params"]?.objectValue?["cursor"]?.stringValue.flatMap(Int.init) ?? 0
+            let page = records[offset..<min(records.count, offset + 100)]
+            let summaries = try page.map { record -> JSONValue in
                 var fields = try JSONValue.encode(AutomationPresentationFixture.summary(record)).objectValue!
                 // The record read has a newer update timestamp than inventory.
                 fields["updatedAt"] = .string("2026-09-01T08:00:00Z")
                 return .object(fields)
             }
-            result = .object(["catalogRevision": .number(1), "items": .array(summaries), "nextCursor": .null])
+            let next: JSONValue = offset + 100 < records.count ? .string(String(offset + 100)) : .null
+            result = .object(["catalogRevision": .number(1), "items": .array(summaries), "nextCursor": next])
         case "automation.get":
             guard let record else { throw CancellationError() }
             result = try JSONValue.encode(record)

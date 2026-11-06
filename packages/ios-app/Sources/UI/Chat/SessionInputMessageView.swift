@@ -75,17 +75,17 @@ struct AutomationPromptMessageView: View {
                 Text(AutomationPromptPresentationPolicy.originTitle.uppercased())
                     .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .bold))
             }
-            .foregroundStyle(Color.tronAutomation)
+            .foregroundStyle(Color.tronPrimary)
 
             CanonicalResourceChips(owner: item.id, resources: item.semantic?.resourceInvocations ?? [])
             if let promptText {
-                PromptTextPreview(text: promptText, tone: .automation)
+                PromptTextPreview(text: promptText, tone: .user)
             }
         }
         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
         .padding(.top, ChatPromptContainerStyle.topPadding)
         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-        .modifier(UserPromptGlassModifier(accent: .tronAutomation))
+        .modifier(UserPromptGlassModifier())
         .modifier(ChatMessageCopyMenu(text: promptText ?? ""))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
