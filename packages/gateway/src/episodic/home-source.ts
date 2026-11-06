@@ -22,7 +22,7 @@ interface CompactEntry {
 // volume's st_dev across reboots and OS updates under byte-identical files.
 // Comparisons with a persisted cursor therefore use inode, size and times (and
 // the content digests the readers prove); `dev` is compared only within one
-// process, between stats of the same open.
+// process (one read's stats, or the in-process proof cache).
 function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
   return info.ino === cursor.ino && info.size === cursor.size
     && info.mtimeMs === cursor.mtimeMs && info.ctimeMs === cursor.ctimeMs;

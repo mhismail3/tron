@@ -208,6 +208,9 @@ it("keeps memory running when a restart remounts its volume under a new device n
   await writeFile(statePath, JSON.stringify(state) + "\n");
   const restarted = await fx.open();
   await appendFile(fx.chapters[1]!.path, entry("e", "d", "after the remount teal fact"));
+  // The open chapter seals before its first post-remount ingestion, so its last
+  // writes continue from the old mount's cursor rather than a fresh read.
+  fx.chapters[1]!.sealed = true;
   await restarted.entriesCommitted("home");
   expect(restarted.status().blocked ?? null).toBeNull();
   expect(restarted.status().messages).toBe(3);
