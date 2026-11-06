@@ -81,7 +81,7 @@ write; `server-blob.integration.test.ts` checks HTTP exception/typed/domain proj
 
 Tailscale silence lookup owns its address filter, in-flight read and reuse/deadline
 bounds in `tailscale-peer.ts`. Shared OS status/command facts and classification
-come from [platform](../platform/README.md), also used by diagnostics and Mac Terminal.
+come from [platform](../../AGENTS.md#gatewayplatform), also used by diagnostics and Mac Terminal.
 
 ## Entry points
 

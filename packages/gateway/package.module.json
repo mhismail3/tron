@@ -2,6 +2,7 @@
   "layer": "L5",
   "owns": [
     ".oxlintrc.json",
+    "AGENTS.md",
     "README.md",
     "layer-baseline.json",
     "package-lock.json",

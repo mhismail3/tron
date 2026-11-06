@@ -299,5 +299,5 @@ Each slice is small and reversible, and lands with its own evidence.
 | 7 | Gateway RPC switch to module handlers, one method family per slice | RPC tests plus the duplicate-route guard |
 | 8 | After W1: error codes on request paths | Wire golden updated per path with reviewer ACCEPT; iOS handling checked |
 | 9 | After M1: trivial manifests and card simplification | Byte-identical ledger |
-| 10 | After M2: localized `AGENTS.md`, folding READMEs | Link and budget checks |
+| 10 | After M2: localized `AGENTS.md`, folding READMEs, one package per slice. Gateway done: its guide points to `scripts/tron docs modules` rather than inlining the 44-line generated map, and folds only `gateway/platform`, since the other five READMEs under 40 lines (receipts, automations-contract, session, runtime, projection) would take it past 150 lines; they stay. Mac, push relay and `scripts/` follow; iOS waits for #2285. | Link and budget checks |
 | 11 | After #2285 and #2282: #2296 Phase B, iOS duplicates, then the largest files by owner | Each with its lane |

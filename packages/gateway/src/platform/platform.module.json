@@ -2,7 +2,6 @@
   "layer": "L0",
   "owns": [
     "platform.module.json",
-    "README.md",
     "tailscale-status.ts"
   ]
 }

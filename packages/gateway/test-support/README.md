@@ -157,4 +157,4 @@ cd packages/gateway && npx vitest run --config vitest.nested.config.ts <file>
 ## Not here
 
 Test policy (no unit tests, real boundaries): the charter, `AGENTS.md`. Runner
-commands: [Gateway README](../README.md#development).
+commands: [Gateway agent guide](../AGENTS.md#test-lanes).
