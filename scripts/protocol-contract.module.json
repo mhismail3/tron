@@ -16,7 +16,8 @@
       "consumers": [
         "mac-app/gateway-payload",
         "repo/dev",
-        "repo/ios"
+        "repo/ios",
+        "repo/profile"
       ]
     },
     {

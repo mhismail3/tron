@@ -111,7 +111,7 @@ class ValidLayoutTests(OwnershipCase):
                    {"layer": "L2", "owns": ["run*.ts", "fixtures/**", "run.module.json"],
                     "dependsOn": ["gw/catalog"], "riskClass": ["kernel"], "verify": ["scripts/tron test gateway"],
                     "dynamicEdges": [{"to": "gw/home", "kind": "registration", "via": "packages/gw/src/home/a.ts",
-                                      "why": "registered at startup"}], "capabilities": ["runs.prompt"]})
+                                      "why": "registered at startup"}]})
         r.manifest("packages/gw/src/sessions/catalog.module.json",
                    {"layer": "L2", "owns": ["catalog.ts", "catalog.module.json"]})
         # Lowest common directory: one file two levels down plus its own manifest.
@@ -223,14 +223,13 @@ class SchemaTests(OwnershipCase):
             "dependsOn": ["p/c", "p/nope", "p/x", "p/x", 7],
             "dynamicEdges": [{"to": "p/gone", "kind": "magic", "via": "nowhere.ts", "why": " ", "extra": 1},
                              {"to": "p/x"}, "edge"],
-            "capabilities": [""], "verify": ["npm test"], "riskClass": ["scary"],
+            "capabilities": ["runs.prompt"], "verify": ["npm test"], "riskClass": ["scary"],
             # Budgets read no manifest exceptions, so the field is not part of the schema.
             "exceptions": [{"path": "f.ts", "budget": "lines", "reason": "r", "exit": "e"}],
         })
         m = "packages/p/c/c.module.json: "
         self.assertReported([
             "duplicate module id p/x: packages/p/a/x.module.json, packages/p/b/x.module.json",
-            m + "capabilities entries must be non-empty strings",
             m + "dependsOn 'p/c' is not another module id",
             m + "dependsOn 'p/nope' is not another module id",
             m + 'dependsOn repeats "p/x"',
@@ -244,6 +243,7 @@ class SchemaTests(OwnershipCase):
             m + "dynamicEdges via 'nowhere.ts' is not a tracked repo-relative path",
             m + "dynamicEdges why must be a non-empty string",
             m + "riskClass 'scary' must be one of contracts, ios-ui, kernel, lifecycle, mac-installer, persistence, security",
+            m + "unknown key 'capabilities'",
             m + "unknown key 'exceptions'",
             m + "verify 'npm test' must be a 'scripts/tron …' command",
         ])

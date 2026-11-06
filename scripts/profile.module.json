@@ -36,6 +36,13 @@
       ]
     },
     {
+      "name": "scripts/tron-profile-gateway-driver.mjs",
+      "kind": "read",
+      "consumers": [
+        "repo/protocol-contract"
+      ]
+    },
+    {
       "name": "scripts/tron-profile-ios",
       "kind": "exec",
       "consumers": [
