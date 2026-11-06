@@ -284,7 +284,7 @@ Each slice is small and reversible, and lands with its own evidence.
 | 1b | Repoint the citations of the retired plan (table in section 2) | Comment- and doc-only diff; the lock tests that verify selects pass |
 | 2 | Delete the never-set manifest key `capabilities` (validator, README and tests) | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
 | 3 | The contract check covers the profiling driver's protocol copy | Planted drift: the old checker passes; the new one names it |
-| 5 | Agent-policy file-existence asserts that the documentation policy already makes | The break is caught by the documentation policy |
+| 5 | Agent-policy existence asserts for files its catalog check already reads (`.agents/README.md`, the iOS skill) | A planted removal still fails the agent policy |
 | 6 | Gateway inline JSON writers: move only durable state that lacks fsync; disposable projections keep their light writer | Per site: a crash-ordering test that fails first, plus byte-identical output |
 | 7 | Gateway RPC switch to module handlers, one method family per slice | RPC tests plus the duplicate-route guard |
 | 8 | After W1: error codes on request paths | Wire golden updated per path with reviewer ACCEPT; iOS handling checked |
