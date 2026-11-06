@@ -32,7 +32,8 @@ The end state is a clean, organized repository with nothing lost in fidelity and
   - removing a gate the charter requires.
 
   A slice that turns out to need one of these stops and adds a row. Everything else that is reversible
-  and preserves behavior is decided and done here. Deleting an option no manifest sets is one of those.
+  and preserves behavior is decided and done here, for example deleting a manifest option that no
+  manifest sets.
 - A move updates its consumers in the same change (AGENTS.md "No unrequested compatibility").
 - These slices are post-checkpoint work. They never gate #2173 (PRINCIPLES P9).
 
@@ -212,7 +213,7 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 | Gateway errors | 517 raw `throw new Error` in 113 files (`git grep -c 'throw new Error(' -- 'packages/gateway/src/*.ts' ':!*.test.ts'`); `publicError` turns each into code `internal` on the wire | `GatewayError(code)` on request paths | A converted site changes wire output: [decision W1](#decisions-for-mohsin) |
 | JSON writes | `foundation/durable-json.ts` (30 non-test importers) plus about 14 inline temp→rename writers | `durableAtomicWriteJson` for durable state only | Per site: first decide whether the file is durable state or a disposable projection. The model-queue projection, for example, is serialized by its owner and rewritten on demand, so it keeps its light writer. Durable sites move one per slice, keeping their exact bytes; a byte change stops the slice and becomes a persisted-format decision row. |
 | Logging | `GatewayLogger` plus 42 console/stdio sites | Logger, except CLI entry points | Per-file review |
-| Python git and process helpers | `def git(` in 11 non-test files under `scripts/` and `tools/` (12 with `packages/ios-app/scripts/write-build-identity.py`); `start_new_session` process-group runners at 14 sites in `scripts/` and `tools/` | Keep. Each wrapper is 4 to 6 lines and raises its own tool's error. Sharing them would add a cross-module edge to every tool and change no behavior. | — |
+| Python git and process helpers | `def git(` in 11 non-test files under `scripts/` and `tools/` (12 with `packages/ios-app/scripts/write-build-identity.py`); `start_new_session` process-group runners at 14 non-test sites in `scripts/` and `tools/` | Keep. Each wrapper is 4 to 6 lines and raises its own tool's error. Sharing them would add a cross-module edge to every tool for no gain, and their Git options differ. | — |
 | iOS sheet, row and loading | `Tron*` primitives exist, but `SettingsRendererRow`, `ListRow` and three loading states overlap | The `Tron*` owners in `presentation-parity.md` | After #2285 and #2282 |
 
 ## 6. Gates and tests
@@ -220,7 +221,7 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 Every gate is local; there is no hosted CI. `.github` holds only Dependabot.
 
 - **Static verify steps.** Ownership, residue, budgets, documentation policy, generated docs, agent
-  policy, privacy, diff check, Gateway typecheck, lint and layers. Each costs under 2 s
+  policy, privacy, diff check, Gateway typecheck, lint and layers. Each takes seconds
   (each run's step timings are in `test-results/verify/<sha>.json`).
 - **Test lanes.** These dominate the cost: Gateway vitest runs minutes per selection, and the iOS build
   takes longer.
@@ -232,7 +233,7 @@ Candidates:
 | Gate | Finding | Next step |
 |---|---|---|
 | `check-agent-policy.sh` | Its path asserts may duplicate the documentation policy; its safety-phrase asserts are charter-mandated | Plant a broken skill path. If the documentation policy catches it, drop only the duplicated asserts. |
-| `scripts/tron mutate` | Never measured since it landed (no `test-results/mutate`) | Run it once on one lock-guarded file. Keep it if it kills mutants; otherwise [decision G1](#decisions-for-mohsin). |
+| `scripts/tron mutate` | Never measured. The first attempt found that it bypassed the Gateway test runner (caller's HOME, no host lock), which slice 5d fixes. | After 5d, run it once on one lock-guarded file. Keep it if it kills mutants; otherwise [decision G1](#decisions-for-mohsin). |
 | `scripts/tron health` | Consumer is Home's improvement loop (`improvement-loop.md`), on demand | Keep. |
 | `scripts/tron probe` | It found real defects, but costs minutes to hours per unit | Keep it on demand. Never schedule it. |
 | Pre-commit privacy hook | Same script as the verify step, earlier (staged) | Keep both: verify covers commits made without the hook. |
@@ -272,7 +273,7 @@ Candidates:
 | M2 | Localized `AGENTS.md` | (a) None; READMEs stay. (b) Five: four packages plus `scripts/` (covering `tools/`), with folder READMEs under 40 lines folded in. (c) One per module (about 100 files). | **(b)** |
 | G1 | `scripts/tron mutate` if one run shows little value | Keep on demand, or delete it with its test | Decide after the measurement |
 | W1 | Wire error codes on request paths | (a) Keep raw throws, which go out as `internal`. (b) Convert them to typed `GatewayError` codes, which changes what clients see (code and message), path by path. | **(b)**, one path per slice. Each is a lockstep wire change (AGENTS.md "Architecture invariants"): it updates the wire golden, and iOS handling ships together; if clients would misread the old protocol, the protocol version rises. |
-| C1 | Hosted CI | None today; every gate is local | Keep none, per P2 |
+| C1 | Hosted CI | None today; every gate is local | Keep none. The pre-merge check and the post-land batch already run every gate locally. |
 
 ## Execution order
 
@@ -280,11 +281,15 @@ Each slice is small and reversible, and lands with its own evidence.
 
 | # | Slice | Evidence |
 |---|---|---|
-| 1 | Fold the four restructure docs into this file (this change) | Documentation policy and budgets |
-| 1b | Repoint the citations of the retired plan (table in section 2) | Comment- and doc-only diff; the lock tests that verify selects pass |
-| 2 | Delete the never-set manifest key `capabilities` (validator, README and tests) | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
-| 3 | The contract check covers the profiling driver's protocol copy | Planted drift: the old checker passes; the new one names it |
-| 5 | Agent-policy existence asserts for files its catalog check already reads (`.agents/README.md`, the iOS skill) | A planted removal still fails the agent policy |
+| 1 | Fold the four restructure docs into this file (done) | Documentation policy and budgets |
+| 1b | Repoint the citations of the retired plan (table in section 2) (done) | Comment- and doc-only diff; the lock tests that verify selects pass |
+| 2 | Delete the never-set manifest key `capabilities` (validator, README and tests) (done) | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
+| 3 | The contract check covers the profiling driver's protocol copy (done) | Planted drift: the old checker passes; the new one names it |
+| 4 | Dropped: shared Python helpers (section 5) | — |
+| 5 | Agent-policy existence asserts for files its catalog check already reads (`.agents/README.md`, the iOS skill) (done) | A planted removal still fails the agent policy |
+| 5b | Retire `docs/design/causal-auto-revert.md`, the design for closed #2194; `tools/verify/batch.md` owns what was built | No inbound link; documentation policy |
+| 5c | Delete Gateway exports that nothing names (each name occurs only at its declaration) | Typecheck and lint pass after removal |
+| 5d | `scripts/tron mutate` runs through the Gateway test runner under the host lock | Its new case saw the caller's HOME before the fix |
 | 6 | Gateway inline JSON writers: move only durable state that lacks fsync; disposable projections keep their light writer | Per site: a crash-ordering test that fails first, plus byte-identical output |
 | 7 | Gateway RPC switch to module handlers, one method family per slice | RPC tests plus the duplicate-route guard |
 | 8 | After W1: error codes on request paths | Wire golden updated per path with reviewer ACCEPT; iOS handling checked |
