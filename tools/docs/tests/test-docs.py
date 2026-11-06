@@ -63,7 +63,12 @@ class RealRepositoryTests(unittest.TestCase):
         manifests = subprocess.run(["git", "ls-files", "*.module.json"], cwd=ROOT, text=True,
                                    stdout=subprocess.PIPE, check=True).stdout.split()
         expected = set()
+        declared = list(manifests)  # each manifest, and each whole directory it declares
         for path in manifests:
+            base = path.rpartition("/")[0]
+            for directory, entry in json.loads((ROOT / path).read_text()).get("directories", {}).items():
+                declared.append(f"{base + '/' if base else ''}{directory}/{entry['name']}.module.json")
+        for path in declared:
             parts = path.split("/")
             expected.add(f"{parts[1] if parts[0] == 'packages' and len(parts) > 2 else 'repo'}/{parts[-1][:-12]}")
         self.assertEqual({cell.strip("`") for cell in first_cells(self.generate("modules"))}, expected)

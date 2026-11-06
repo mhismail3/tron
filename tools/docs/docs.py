@@ -67,9 +67,9 @@ def modules(under: str | None = None) -> str:
     prefix = under.strip("/") + "/" if under else ""
     rows = []
     for key, module in module_map().items():
-        if not module["manifest"].startswith(prefix):
+        folder = module["folder"]
+        if not ("" if folder == "." else folder + "/").startswith(prefix):
             continue
-        folder = str(PurePosixPath(module["manifest"]).parent)
         readme = "README.md" if folder == "." else f"{folder}/README.md"
         rows.append(f"| `{key}` | {module['layer']} | {len(module['owned'])} | `{module['manifest']}` | "
                     f"{f'`{readme}`' if readme in module['owned'] else '—'} |")

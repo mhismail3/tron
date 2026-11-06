@@ -60,6 +60,7 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
   | `interfaces` | card | inbound contracts; see [Purpose cards](#purpose-cards) |
   | `uses` | no | outside contracts the module depends on: `{name, kind, why?}`; `name` must occur in an owned file |
+  | `directories` | no | whole-directory modules below this manifest: `{"<dir>": {"name", "layer"}}`; see [Directory modules](#directory-modules) |
 
   Lists must not repeat an entry.
 
@@ -80,10 +81,20 @@ narrow the glob or list the files. Manifests are tracked paths like any other,
 and each must be owned by itself. An entry that matches no tracked path is
 stale and reported, so manifests move with their code.
 
+## Directory modules
+
+A module that is a whole directory with only a layer has no file of its own. Its package's
+`package.module.json` (outside a package, `root.module.json`) declares it under `directories`:
+`"src/util": {"name": "util", "layer": "L0"}` is exactly the module a
+`src/util/util.module.json` of `{"layer": "L0", "owns": ["**"]}` would be: the same id, layer and
+owned paths. `--modules` names it `<manifest>#<dir>`. A module that needs any other key (a card,
+`dependsOn`, `riskClass`, `verify`) or a split directory keeps its own manifest file.
+
 ## As-is modules
 
 The current manifests describe today's owners, not the target tree. The
-default owner is one manifest per directory with `"owns": ["**"]`. Mixed
+default owner is a whole directory: a [directory module](#directory-modules), or one manifest
+in it with `"owns": ["**"]` when the module declares more than its layer. Mixed
 directories are split by explicit lists, and cross-directory owners sit at the
 common parent. A repo tool keeps its code, `tests/` and configuration in
 `tools/<tool>/` beside its one manifest (for example `tools/work/work.module.json`).
