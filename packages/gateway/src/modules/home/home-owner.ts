@@ -113,15 +113,6 @@ export interface HomeSessionPort {
   wakeHome(sessionId: string): () => Promise<{ delivered: boolean }>;
 }
 
-/** What the session runtime reports to Home's memory. Narrow on purpose: the
- * runtime knows that canonical entries changed; the memory owns what it reads,
- * how long it waits and how much it spends. */
-export interface HomeMemoryPort {
-  /** Canonical entries were committed. Fire and forget, never awaited inside
-   * admission or a slot lane. */
-  entriesCommitted(sessionId: string): void;
-}
-
 export interface HomeOwnerOptions {
   tronHome: string;
   /** Pi's agent directory, whose global resources Home's chapter reloads on change. */
