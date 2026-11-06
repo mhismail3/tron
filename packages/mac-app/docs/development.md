@@ -77,7 +77,9 @@ pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
 (`GatewayLauncherArgvTests`), the native host in a demand-launched Mach service
 (`NativeHostRetirementTests`), real files (`WizardProgressFilesystemTests`,
 `TronLogFilesystemTests`, `GatewayNetworkCacheFilesystemTests` for numeric version-1
-admission, Boolean refusal and owner-only writer round trips), and `MacQuitGatewayTests`, which runs the Quit coordinator against
+admission, Boolean refusal and owner-only writer round trips), the cross-language payload format
+file `packages/mac-app/scripts/gateway-payload-contract.json` that the C launcher, bundler and deploy tests also
+read (`GatewayPayloadContractTests`), and `MacQuitGatewayTests`, which runs the Quit coordinator against
 the signed bundled Gateway in a disposable launchd job with the shipped `KeepAlive` and
 `ExitTimeOut` (clean exit, a held model request past 20 s, caller cancellation, stall recovery
 without relaunch, missing or stale receipts, retry, restart-75). Then run
