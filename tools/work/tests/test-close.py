@@ -527,6 +527,14 @@ def run() -> None:
             reset(**{**module, "issue_titles": {"53": "Module: fixture/run"}})
             state, _ = parent("package module identity admitted", True, 52, 53)
             assert state["writes"] == ["sub-issue"]
+            nested.write_text('{"layer":"L3","owns":["**"],"directories":{"util":{"name":"util","layer":"L0"}}}\n')
+            git("add", "packages/fixture/src/run.module.json")
+            reset(**{**module, "issue_titles": {"53": "Module: fixture/util"}})
+            state, _ = parent("directory module identity admitted", True, 52, 53)
+            assert state["writes"] == ["sub-issue"]
+            reset(**{**module, "issue_titles": {"53": "Module: fixture/other"}})
+            state, _ = parent("undeclared directory module refused", False, 52, 53)
+            assert not state["writes"]
             invalid = repo / "Bad.module.json"
             invalid.write_text('{"layer":"L5","owns":["**"]}\n')
             git("add", "Bad.module.json")

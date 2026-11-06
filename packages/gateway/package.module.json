@@ -16,5 +16,11 @@
     "vitest.config.ts",
     "vitest.mac-terminal.config.ts",
     "vitest.nested.config.ts"
-  ]
+  ],
+  "directories": {
+    "docs": {"name": "docs", "layer": "L5"},
+    "src/lifecycle": {"name": "lifecycle", "layer": "L0"},
+    "src/security": {"name": "security", "layer": "L3"},
+    "src/util": {"name": "util", "layer": "L0"}
+  }
 }

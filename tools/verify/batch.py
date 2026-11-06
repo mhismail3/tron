@@ -615,8 +615,7 @@ def irreversible(paths: list[str], revisions: tuple[str, str]) -> list[str]:
     for revision in revisions:
         result, _ = verify.ownership.check(revision)
         for module in result['modules'].values():
-            manifest = json.loads(verify.git('show', f"{revision}:{module['manifest']}"))
-            if set(manifest.get('riskClass', [])) & IRREVERSIBLE_RISK:
+            if set(module['riskClass']) & IRREVERSIBLE_RISK:
                 found |= set(module['owned']) & set(paths)
     return sorted(found)
 
