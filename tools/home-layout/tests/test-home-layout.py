@@ -195,7 +195,7 @@ class HomeLayoutTests(unittest.TestCase):
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual((fixture.home / "workspace/files/Profile.json").read_text(), "profile-v2")
         self.assertFalse(moved.exists())
-        self.assertFalse(moved.parent.exists(), "rollback leaves no empty destination directory")
+        self.assertTrue(moved.parent.is_dir(), "rollback never removes a registered directory, even an emptied one")
 
 
 if __name__ == "__main__":

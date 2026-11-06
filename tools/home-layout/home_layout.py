@@ -238,9 +238,14 @@ def hold_runtime_lock(agent_dir: Path) -> Path:
     try:
         lock.mkdir()
     except FileExistsError:
-        if time.time() - lock.stat().st_mtime < LOCK_STALE_SECONDS:
+        try:
+            fresh = time.time() - lock.stat().st_mtime < LOCK_STALE_SECONDS
+        except FileNotFoundError:
+            fresh = False
+        if fresh:
             raise LayoutError(f"a Gateway holds {agent_dir}; stop Tron before migrating") from None
-        lock.rmdir()
+        if lock.exists():
+            lock.rmdir()
         lock.mkdir()
     return lock
 
@@ -287,7 +292,7 @@ def migrate_locked(home: Path, registry: dict, rollback: bool) -> list[str]:
                 raise LayoutError(f"cannot roll back {move['to']}: {move['from']} exists again")
             source.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.replace(destination, source)
-            prune_empty(destination.parent, home)
+            prune_empty(destination.parent, home, registry["paths"])
             journal["moves"][move["from"]] = "rolled-back"
             log.append(f"restored {move['from']}")
         elif not source.exists():
@@ -306,7 +311,7 @@ def migrate_locked(home: Path, registry: dict, rollback: bool) -> list[str]:
             journal["moves"][move["from"]] = "moved"
             log.append(f"moved {move['from']} -> {move['to']}")
         write_journal(journal_path, journal)
-        prune_empty(source.parent, home)
+        prune_empty(source.parent, home, registry["paths"])
     return log
 
 
@@ -318,9 +323,9 @@ def write_journal(path: Path, journal: dict) -> None:
     os.replace(temporary, path)
 
 
-def prune_empty(directory: Path, home: Path) -> None:
-    """Remove a migration source's now-empty parents, never a registered root."""
-    while directory != home and directory.is_dir() and not any(directory.iterdir()):
+def prune_empty(directory: Path, home: Path, paths: dict) -> None:
+    """Remove a moved file's now-empty parents, never a registered directory."""
+    while directory != home and str(directory.relative_to(home)) not in paths and directory.is_dir() and not any(directory.iterdir()):
         directory.rmdir()
         directory = directory.parent
 
