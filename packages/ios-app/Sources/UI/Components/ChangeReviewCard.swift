@@ -67,8 +67,10 @@ struct ChangeReviewCard: View {
                     if let undo { Button("Undo", action: undo).buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronPrimary)) }
                     if let approve {
                         Button(action: approve) {
-                            if submitting { ProgressView() } else { Text("Approve") }
+                            if submitting { TronPulseLoadingIndicator(size: 18) } else { Text("Approve") }
                         }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronPrimary))
+                            // The pulse is hidden from VoiceOver, so the button keeps its name while submitting.
+                            .accessibilityLabel("Approve")
                             .accessibilityIdentifier("change-review-approve")
                     }
                 }.disabled(submitting)

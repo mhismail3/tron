@@ -382,11 +382,7 @@ struct TronFeedStateRow: View {
         case .idle: Color.clear.frame(height: 1).accessibilityHidden(true)
         case .loading:
             TronFeedCard {
-                HStack(spacing: 10) {
-                    ProgressView().tint(.tronPrimary)
-                    Text("Loading more…").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 52)
+                TronLoadingState(label: "Loading more…").frame(minHeight: 52)
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("feed-loading")
