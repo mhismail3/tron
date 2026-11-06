@@ -3797,6 +3797,42 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// The inventory lists active Automations first, then paused ones, then
+    /// drafts and the rest. The fixture names the paused row so that a name or
+    /// next-occurrence order alone would put it above the idle enabled row.
+    @MainActor
+    func testAutomationsListActiveBeforePaused() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-automation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 8), app.debugDescription)
+        menu.tap()
+        app.buttons["Automations"].tap()
+        let running = app.buttons["automation-card.automation-2"]
+        let enabled = app.buttons["automation-card.automation-4"]
+        let paused = app.buttons["automation-card.automation-3"]
+        let drafts = [app.buttons["automation-card.automation-0"], app.buttons["automation-card.automation-1"]]
+        XCTAssertTrue(running.waitForExistence(timeout: 8), app.debugDescription)
+        // The large detent shows the whole fixture inventory at once.
+        let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+            forDuration: 0.1,
+            thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
+        )
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            MainActor.assumeIsolated { bar.frame.minY < app.frame.height * 0.2 }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "\(bar.frame)")
+        for card in [enabled, paused] + drafts { XCTAssertTrue(card.exists, app.debugDescription) }
+        XCTAssertLessThan(running.frame.minY, enabled.frame.minY, "Running first among active")
+        XCTAssertLessThan(running.frame.minY, paused.frame.minY, "Active before paused")
+        XCTAssertLessThan(enabled.frame.minY, paused.frame.minY, "Active before paused")
+        for draft in drafts {
+            XCTAssertLessThan(paused.frame.minY, draft.frame.minY, "Paused before drafts")
+        }
+    }
+
     @MainActor
     func testAutomationsSheetFromTronMenu() {
         let app = XCUIApplication()
@@ -3848,26 +3884,25 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
         }
         XCTAssertTrue(app.buttons["automation-card.automation-1"].label.contains("No runs yet"))
-        // One compact dashboard list row per Automation, at the dashboard's row rhythm.
+        // One shared list card per Automation, at the list standard's feed rhythm.
         let next = app.buttons["automation-card.automation-1"]
-        XCTAssertLessThan(card.frame.height, 60, "An Automation is one compact dashboard row: \(card.frame)")
         XCTAssertEqual(card.frame.height, next.frame.height, accuracy: 1)
-        XCTAssertEqual(abs(card.frame.minY - next.frame.minY) - card.frame.height, 4, accuracy: 1)
+        XCTAssertEqual(abs(card.frame.minY - next.frame.minY) - card.frame.height, 8, accuracy: 1)
         keepScreenshot(named: "automation-inventory-summary-cards")
         card.tap()
         let summary = app.otherElements["automation-detail-summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(summary.staticTexts["Daily workspace review"].exists, app.debugDescription)
         let detail = app.scrollViews.containing(.other, identifier: "automation-detail-summary").firstMatch
-        let updated = summary.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Updated")).firstMatch
+        let updated = detail.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Updated")).firstMatch
         XCTAssertTrue(updated.exists, app.debugDescription)
         XCTAssertTrue(updated.label.contains("Sep 20, 2026"), "Detail must use the newer record, not the selected catalog summary: \(updated.label)")
-        XCTAssertEqual(detail.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Server,")).count, 1)
+        XCTAssertEqual(detail.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Gateway,")).count, 1)
         let promptLabel = "Prompt, Review the workspace and summarize changes since the previous run. Do not modify files."
         XCTAssertTrue(app.staticTexts[promptLabel].exists, app.debugDescription)
         XCTAssertFalse(app.buttons[promptLabel].exists)
         keepScreenshot(named: "automation-detail-expanded-summary-and-tables")
-        let recent = app.staticTexts["RECENT RUNS"]
+        let recent = app.staticTexts["Recent Runs"]
         for _ in 0..<6 where !recent.isHittable { app.swipeUp() }
         XCTAssertTrue(recent.isHittable, app.debugDescription)
         let delete = app.buttons["Delete"]

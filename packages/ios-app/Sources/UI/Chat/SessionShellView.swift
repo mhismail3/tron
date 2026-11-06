@@ -1415,7 +1415,7 @@ struct HistoricalSessionRow: View {
                 if session.isAutomationCreated {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(Color.tronAutomation)
+                        .foregroundStyle(Color.tronPrimary)
                         .accessibilityHidden(true)
                 }
                 if session.isFork {

@@ -16,17 +16,41 @@ struct AutomationSummaryPresentation {
     let failureCount: Int
     let blockedReason: String?
 
-    var status: String {
-        currentState.map { "\(activation.label) · \($0.label)" } ?? activation.label
-    }
     var needsAttention: Bool {
         activation == .blocked || currentState == .outcomeUnknown || failureCount > 0
     }
+
+    /// The one status word: a state worth reading first (blocked, unresolved,
+    /// in flight), otherwise the lifecycle.
+    var status: String {
+        if activation == .blocked { return activation.label }
+        if let currentState, currentState == .outcomeUnknown || currentState.isInFlight { return currentState.label }
+        return activation.label
+    }
+
+    @MainActor var statusColor: Color {
+        needsAttention ? .tronError : AutomationStatusPresentation.color(activation, run: currentState)
+    }
+
     var accessibilityLabel: String {
-        var text = "\(name), \(actionKind?.label ?? "Action"), \(status), \(cadence), Server, \(server), Last run, \(lastRunAt.map { AutomationDateFormatting.date($0) } ?? "No runs yet"), Updated, \(AutomationDateFormatting.date(updatedAt))"
+        let state = currentState.map { "\(activation.label) · \($0.label)" } ?? activation.label
+        var text = "\(name), \(actionKind?.label ?? "Action"), \(state), \(cadence), Server, \(server), Last run, \(lastRunAt.map { AutomationDateFormatting.date($0) } ?? "No runs yet"), Updated, \(AutomationDateFormatting.date(updatedAt))"
         if failureCount > 0 { text += ", \(failureCount) consecutive failures" }
         if let blockedReason { text += ", \(blockedReason)" }
         return text
+    }
+
+    /// The inventory row in the shared list anatomy: kind icon, name with its
+    /// status pill, cadence, the Gateway tag and when it last ran.
+    @MainActor func listContent(now: Date) -> TronListRowContent {
+        TronListRowContent(
+            leading: .icon(icon, needsAttention ? .tronError : .tronPrimary),
+            title: name,
+            status: TronListStatus(text: status, tone: statusColor, live: currentState?.isInFlight == true),
+            subtext: cadence,
+            tags: [TronListTag(text: server)],
+            timestamp: TronListTime.short(iso: lastRunAt, now: now) ?? "No runs yet"
+        )
     }
 }
 
@@ -58,206 +82,241 @@ extension AutomationSummaryPresentation {
     }
 }
 
-/// One Automation in the inventory, drawn through the dashboard's shared list
-/// row: its action icon in the status colour, the name, schedule · server, and
-/// a trailing state or last-run time.
-struct AutomationSummaryRow: View {
-    let presentation: AutomationSummaryPresentation
-
-    var body: some View {
-        DashboardListRow(
-            title: presentation.name,
-            subtitle: "\(presentation.cadence) · \(presentation.server)",
-            accent: presentation.needsAttention ? .tronError : .tronAutomation
-        ) {
-            Image(systemName: presentation.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                .foregroundStyle(presentation.statusColor)
-        } trailing: {
-            SessionRowRelativeTime(text: presentation.trailingStatus, isWaiting: presentation.needsAttention)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(presentation.accessibilityLabel)
-    }
+extension AutomationRunState {
+    var isInFlight: Bool { [.queued, .waiting, .admitting, .running, .cancelling].contains(self) }
 }
 
-extension AutomationSummaryPresentation {
-    var statusColor: Color {
-        needsAttention ? .tronError : AutomationStatusPresentation.color(activation, run: currentState)
-    }
-
-    /// A state worth reading first (blocked, unresolved, in flight, not
-    /// active), otherwise when it last ran.
-    var trailingStatus: String {
-        if activation == .blocked { return activation.label }
-        if let currentState, [.queued, .waiting, .admitting, .running, .cancelling, .outcomeUnknown].contains(currentState) {
-            return currentState.label
-        }
-        if activation != .enabled { return activation.label }
-        return lastRunAt.map { AutomationDateFormatting.relative($0) } ?? "No runs yet"
-    }
+/// One inventory row, projected once per catalog or filter change: every
+/// string a row draws or speaks is computed here, never while it scrolls.
+struct AutomationInventoryRow: Identifiable, Equatable {
+    let selection: AutomationSummarySelection
+    let content: TronListRowContent
+    let accessibilityLabel: String
+    var id: String { selection.id }
 }
 
-/// The expanded summary at the top of an Automation's detail.
-/// The caller supplies the appropriate glass surface.
-struct AutomationSummaryCard: View {
-    let presentation: AutomationSummaryPresentation
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    var body: some View {
-        expandedContent
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+enum AutomationInventory {
+    /// Active Automations first, then paused, then drafts, then finished ones.
+    static func lifecycleRank(_ activation: AutomationActivation) -> Int {
+        switch activation {
+        case .enabled, .blocked: 0
+        case .paused: 1
+        case .draft: 2
+        case .completed, .expired: 3
+        }
     }
 
-    private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: presentation.icon)
-                    .font(TronTypography.sans(size: 22, weight: .medium))
-                    .foregroundStyle(Color.tronAutomation)
-                    .frame(width: 28)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(presentation.name)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            status.fixedSize()
-                            Text("·").foregroundStyle(Color.tronTextMuted)
-                            cadence.fixedSize()
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            status
-                            cadence
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
+    /// Within a lifecycle group: needing attention, then running, then the
+    /// soonest next occurrence, then name and identity for a stable order.
+    static func precedes(_ left: GatewayAutomationSummary, _ right: GatewayAutomationSummary) -> Bool {
+        func key(_ summary: GatewayAutomationSummary) -> (Int, Int, Int, String, String, String) {
+            (lifecycleRank(summary.activation), summary.isAttentionRequired ? 0 : 1,
+             summary.currentRun?.state == .running ? 0 : 1, summary.nextOccurrenceAt ?? "9999",
+             summary.name, summary.id)
+        }
+        return key(left) < key(right)
+    }
+
+    @MainActor static func rows(
+        buckets: [AutomationProfileCatalog],
+        eligibleProfileIDs: Set<String>,
+        profileID: String?,
+        filter: AutomationInventoryFilter,
+        action: AutomationActionKind?,
+        now: Date = .now
+    ) -> [AutomationInventoryRow] {
+        buckets.filter { eligibleProfileIDs.contains($0.id) && (profileID == nil || profileID == $0.id) }
+            .flatMap { bucket in
+                bucket.summaries
+                    .filter { filter.matches($0) && (action == nil || $0.typedActionKind == action) }
+                    .map { (bucket.profile, $0) }
             }
-            Divider().overlay(Color.tronAutomation.opacity(0.18))
-                .padding(.vertical, 1)
-            server
-
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
-                : AnyLayout(HStackLayout(alignment: .top, spacing: 16))
-            layout {
-                metric("Last run", value: presentation.lastRunAt.map(timestamp) ?? "No runs yet")
-                metric("Updated", value: timestamp(presentation.updatedAt))
+            .sorted { precedes($0.1, $1.1) }
+            .map { profile, summary in
+                let presentation = AutomationSummaryPresentation(summary: summary, server: profile.label)
+                return AutomationInventoryRow(
+                    selection: AutomationSummarySelection(profileID: profile.id, summary: summary),
+                    content: presentation.listContent(now: now),
+                    accessibilityLabel: presentation.accessibilityLabel
+                )
             }
-            attentionReason
-        }
-    }
-
-    private var server: some View {
-        Label {
-            Text(presentation.server).fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: "server.rack").accessibilityHidden(true)
-        }
-        .font(TronTypography.secondaryDescription)
-        .foregroundStyle(Color.tronTextSecondary)
-        .accessibilityLabel("Server, \(presentation.server)")
-    }
-
-    @ViewBuilder private var attentionReason: some View {
-        if let reason = presentation.blockedReason {
-            Text(reason)
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronError)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var status: some View {
-        Text(presentation.status)
-            .font(TronTypography.secondaryDescription)
-            .foregroundStyle(presentation.statusColor)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var cadence: some View {
-        Text(presentation.cadence)
-            .font(TronTypography.secondaryDescription)
-            .foregroundStyle(Color.tronTextSecondary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func timestamp(_ value: String) -> String {
-        AutomationDateFormatting.date(value)
-    }
-
-    private func metric(_ title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextMuted)
-            Text(value)
-                .font(TronTypography.secondaryCodeDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 }
 
-/// Only facts not already carried by the summary belong in the detail tables.
-struct AutomationDetailMetadata: Identifiable {
+/// The header of an Automation or run detail: its name, one status pill and a
+/// line of context, as Home's task detail opens.
+struct AutomationHeaderCard: View {
     let title: String
-    let rows: [TronMetadataTableRow]
-    var id: String { title }
+    let status: String
+    let statusColor: Color
+    let detail: String?
+    var note: String?
 
-    static func sections(record: GatewayAutomationRecord, targetLabel: String) -> [Self] {
-        func row(_ title: String, _ value: String) -> TronMetadataTableRow {
-            TronMetadataTableRow(id: title, title: title, value: value)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(title)
+                    .font(SessionSummaryTypography.headline)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                TronStatusPill(text: status, accent: statusColor)
+            }
+            if let detail {
+                Text(detail)
+                    .font(SessionSummaryTypography.detail)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let note {
+                Text(note)
+                    .font(SessionSummaryTypography.detail)
+                    .foregroundStyle(Color.tronError)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        var sections: [Self] = []
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.14)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// One fact of a detail sheet, read title over value.
+struct AutomationFact: Identifiable {
+    let icon: String
+    let title: String
+    let value: String
+    /// IDs and paths read in mono; everything else in the row's body type.
+    var isIdentifier = false
+    var id: String { title }
+}
+
+struct AutomationFactSection: Identifiable {
+    let title: String
+    let facts: [AutomationFact]
+    var id: String { title }
+}
+
+/// A titled settings group of title-over-value rows, the reading layout of
+/// every Home and Settings detail.
+struct AutomationFactsGroup<Footer: View>: View {
+    let section: AutomationFactSection
+    @ViewBuilder var footer: () -> Footer
+
+    init(_ section: AutomationFactSection, @ViewBuilder footer: @escaping () -> Footer) {
+        self.section = section
+        self.footer = footer
+    }
+
+    var body: some View {
+        TronSettingsGroup(section.title) {
+            VStack(spacing: 0) {
+                ForEach(Array(section.facts.enumerated()), id: \.element.id) { index, fact in
+                    if index > 0 { TronSettingsDivider() }
+                    TronSettingsRow(
+                        icon: fact.icon, title: fact.title, subtitle: fact.value, subtitleLineLimit: nil,
+                        subtitleFont: fact.isIdentifier ? TronTypography.code(size: TronTypography.sizeBodySM) : TronTypography.subheadline
+                    )
+                    .textSelection(.enabled)
+                }
+                footer()
+            }
+        }
+    }
+}
+
+extension AutomationFactsGroup where Footer == EmptyView {
+    init(_ section: AutomationFactSection) { self.init(section) { EmptyView() } }
+}
+
+/// One action of a detail's Controls group: a standard row that performs it,
+/// red when destructive, as Manage Home's controls read.
+struct AutomationActionRow: View {
+    let icon: String
+    let title: String
+    var subtitle: String?
+    var destructive = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle,
+                            accent: destructive ? .tronError : .tronPrimary,
+                            titleColor: destructive ? .tronError : .tronTextPrimary,
+                            subtitleColor: destructive ? .tronError : .tronTextPrimary)
+                .tronSettingsVisualTheme(accent: destructive ? .tronError : .tronPrimary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+}
+
+extension AutomationFactSection {
+    /// Facts the header does not carry, grouped as the editor's sections are.
+    static func detail(record: GatewayAutomationRecord, server: String, targetLabel: String) -> [Self] {
+        var basics: [AutomationFact] = []
         if let description = record.description, !description.isEmpty {
-            sections.append(Self(title: "Description", rows: [row("Description", description)]))
+            basics.append(AutomationFact(icon: "text.alignleft", title: "Description", value: description))
         }
-        var action = [row(record.action.typedKind == .notification ? "Message" : "Prompt",
-                          record.action.content.isEmpty ? "No action content returned." : record.action.content)]
+        basics.append(AutomationFact(icon: "desktopcomputer", title: "Gateway", value: server))
+
+        let kind = record.action.typedKind ?? .sessionPrompt
+        var action = [AutomationFact(icon: kind.icon, title: kind == .notification ? "Message" : "Prompt",
+                                     value: record.action.content.isEmpty ? "No action content returned." : record.action.content)]
         if let invocation = record.action.resourceInvocation {
-            action.append(TronMetadataTableRow(
-                id: "resource", title: invocation.source == .prompt ? "Prompt template" : invocation.source.rawValue.capitalized,
-                value: invocation.name
-            ))
+            action.append(AutomationFact(icon: "sparkles",
+                                         title: invocation.source == .prompt ? "Prompt template" : invocation.source.rawValue.capitalized,
+                                         value: invocation.name))
         }
-        sections.append(Self(title: "Action", rows: action))
+
+        var target = [AutomationFact(icon: "arrow.turn.down.right", title: "Destination", value: targetLabel)]
+        if case let .workspace(cwd, _) = record.target {
+            target.append(AutomationFact(icon: "folder", title: "Workspace", value: cwd, isIdentifier: true))
+        }
+
         var schedule = [
-            row("Series", record.trigger.kind == "once" ? "One time" : "Repeating"),
-            row("Timezone", record.trigger.timezone ?? TimeZone.current.identifier),
-            row("After downtime", record.misfirePolicy == "latest" ? "Run latest missed occurrence" : "Skip missed occurrences"),
-            row("While running", record.overlapPolicy == "queueLatest" ? "Queue latest occurrence" : "Skip overlapping occurrences"),
-            row("Deadline", "\(record.executionDeadlineSeconds / 60) minutes"),
+            AutomationFact(icon: "repeat", title: "Repeats", value: record.trigger.summary),
+            AutomationFact(icon: "globe", title: "Timezone", value: record.trigger.timezone ?? TimeZone.current.identifier),
         ]
-        if let next = record.nextOccurrenceAt { schedule.append(row("Next", AutomationDateFormatting.date(next))) }
-        sections.append(Self(title: "Schedule", rows: schedule))
-        var target = [row("Session", targetLabel)]
-        if case let .workspace(cwd, _) = record.target { target.append(row("Workspace", cwd)) }
-        sections.append(Self(title: "Target", rows: target))
+        if let next = record.nextOccurrenceAt {
+            schedule.append(AutomationFact(icon: "calendar.badge.clock", title: "Next", value: AutomationDateFormatting.date(next)))
+        }
         if let run = record.currentRun {
-            sections.append(Self(title: "Current run", rows: [row("Scheduled", AutomationDateFormatting.date(run.scheduledFor))]))
+            schedule.append(AutomationFact(icon: "play.circle", title: "Current run", value: AutomationDateFormatting.date(run.scheduledFor)))
         }
-        let creator: String
-        switch record.provenance.kind {
-        case "mobile": creator = "iPhone"
-        case "local": creator = "Mac"
-        case "assistant": creator = "Tron assistant"
-        case "home": creator = "Tron Home"
-        default: creator = record.provenance.kind
+        let lastRun = record.currentRun?.startedAt ?? record.lastRun?.startedAt ?? record.lastRun?.terminalAt ?? record.lastRun?.scheduledFor
+        schedule.append(AutomationFact(icon: "clock.arrow.circlepath", title: "Last run",
+                                       value: lastRun.map { AutomationDateFormatting.date($0) } ?? "No runs yet"))
+
+        let behavior = [
+            AutomationFact(icon: "clock.arrow.circlepath", title: "After downtime",
+                           value: record.misfirePolicy == "latest" ? "Run latest missed occurrence" : "Skip missed occurrences"),
+            AutomationFact(icon: "rectangle.stack.badge.play", title: "While running",
+                           value: record.overlapPolicy == "queueLatest" ? "Queue latest occurrence" : "Skip overlapping occurrences"),
+            AutomationFact(icon: "timer", title: "Deadline", value: "\(record.executionDeadlineSeconds / 60) minutes"),
+        ]
+
+        let creator = switch record.provenance.kind {
+        case "mobile": "iPhone"
+        case "local": "Mac"
+        case "assistant": "Tron assistant"
+        case "home": "Tron Home"
+        default: record.provenance.kind
         }
-        sections.append(Self(title: "About", rows: [
-            row("Created", AutomationDateFormatting.date(record.createdAt)),
-            row("Created by", creator), row("Revision", "\(record.revision)"),
-        ]))
+        var about = [
+            AutomationFact(icon: "calendar", title: "Created", value: AutomationDateFormatting.date(record.createdAt)),
+            AutomationFact(icon: "pencil", title: "Updated", value: AutomationDateFormatting.date(record.updatedAt)),
+            AutomationFact(icon: "person", title: "Created by", value: creator),
+            AutomationFact(icon: "number", title: "Revision", value: "\(record.revision)"),
+        ]
         if let expiresAt = record.provenance.expiresAt {
-            sections.append(Self(title: "Expiry", rows: [row("Expires", AutomationDateFormatting.date(expiresAt))]))
+            about.append(AutomationFact(icon: "hourglass", title: "Expires", value: AutomationDateFormatting.date(expiresAt)))
         }
-        return sections
+        return [
+            Self(title: "Basics", facts: basics), Self(title: "Action", facts: action),
+            Self(title: "Target", facts: target), Self(title: "Schedule", facts: schedule),
+            Self(title: "Behavior", facts: behavior), Self(title: "About", facts: about),
+        ]
     }
 }

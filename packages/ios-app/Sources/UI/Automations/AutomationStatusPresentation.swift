@@ -1,40 +1,42 @@
 import SwiftUI
 import TronMobileCore
 
+/// Automations follow the user's primary theme; only attention and failure
+/// read in the error colour, a success in the success colour, and an idle
+/// lifecycle in slate.
 enum AutomationStatusPresentation {
-    static func color(_ activation: AutomationActivation, run: AutomationRunState? = nil) -> Color {
-        if run == .outcomeUnknown || activation == .blocked { return .tronError }
-        if run == .failed { return .tronError }
-        if run == .succeeded { return .tronTeal }
-        if run == .running || run == .admitting || run == .queued || run == .waiting || run == .cancelling { return .tronAutomation }
+    @MainActor static func color(_ activation: AutomationActivation, run: AutomationRunState? = nil) -> Color {
+        if run == .outcomeUnknown || run == .failed || activation == .blocked { return .tronError }
+        if run == .succeeded { return .tronSuccess }
+        if run?.isInFlight == true { return .tronPrimary }
         switch activation {
-        case .enabled: return .tronAutomation
-        case .paused, .draft, .completed, .expired: return .tronTextMuted
+        case .enabled: return .tronPrimary
+        case .paused, .draft, .completed, .expired: return .tronSlate
         case .blocked: return .tronError
         }
     }
-    static func icon(_ activation: AutomationActivation, run: AutomationRunState? = nil) -> String {
-        if run == .outcomeUnknown || activation == .blocked { return "exclamationmark.triangle.fill" }
-        if run == .running { return "play.circle.fill" }
-        if run == .queued || run == .waiting || run == .admitting { return "hourglass.circle.fill" }
-        if run == .cancelling { return "xmark.circle" }
-        if run == .succeeded { return "checkmark.circle.fill" }
-        if run == .failed { return "xmark.circle.fill" }
-        if run == .cancelled { return "slash.circle" }
-        if run == .skipped { return "arrow.right.circle" }
-        switch activation { case .enabled: return "checkmark.circle.fill"; case .paused: return "pause.circle.fill"; case .draft: return "pencil.circle"; case .completed: return "checkmark.seal"; case .expired: return "clock.badge.xmark"; case .blocked: return "exclamationmark.triangle.fill" }
+
+    static func icon(_ run: AutomationRunState) -> String {
+        switch run {
+        case .outcomeUnknown: "exclamationmark.triangle.fill"
+        case .running: "play.circle.fill"
+        case .queued, .waiting, .admitting: "hourglass.circle.fill"
+        case .cancelling: "xmark.circle"
+        case .succeeded: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        case .cancelled: "slash.circle"
+        case .skipped: "arrow.right.circle"
+        }
     }
 }
-struct AutomationDateFormatting {
-    static func date(_ value: String?, style: DateFormatter.Style = .medium) -> String {
+
+enum AutomationDateFormatting {
+    /// Format styles are values, so every row reuses one instead of building a
+    /// formatter per call.
+    private static let style = Date.FormatStyle(date: .abbreviated, time: .shortened)
+
+    static func date(_ value: String?) -> String {
         guard let value, let date = GatewayTimestamp.parse(value) else { return value ?? "—" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = style
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-    static func relative(_ value: String?) -> String {
-        guard let value, let date = GatewayTimestamp.parse(value) else { return value ?? "—" }
-        return GatewayTimestamp.relativeDescription(GatewayTimestamp.string(from: date), relativeTo: .now)
+        return date.formatted(style)
     }
 }
