@@ -1269,12 +1269,26 @@ final class TronSmokeUITests: XCTestCase {
         for row in ["home-manage-profile", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
-        XCTAssertTrue(app.descendants(matching: .any)["home-manage-pause"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["home-manage-disable"].exists)
         XCTAssertFalse(app.staticTexts["Stop response"].exists, "Stop is the composer's control, not a Manage Home row")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-stop"].exists)
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Home · ")).firstMatch.exists, "The state is a pill, not a row")
+        // Pause and Disable live only at the bottom of Home Settings.
+        for _ in 0..<4 where !app.descendants(matching: .any)["home-manage-settings"].isHittable { app.swipeUp() }
+        for row in ["home-manage-pause", "home-manage-resume", "home-manage-disable", "home-settings-controls"] {
+            XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) is not a Manage Home row")
+        }
         keepScreenshot(named: "manage-home-sheet")
+        openHomeControls(app)
+        let content = app.descendants(matching: .any)["home-settings-content"]
+        let controls = app.descendants(matching: .any)["home-settings-controls"]
+        let pause = app.descendants(matching: .any)["home-manage-pause"]
+        let disable = app.descendants(matching: .any)["home-manage-disable"]
+        let connection = content.staticTexts["Connection"].firstMatch
+        XCTAssertTrue(pause.exists && disable.exists && connection.exists, app.debugDescription)
+        XCTAssertLessThan(pause.frame.maxY, disable.frame.minY + 1, "Pause sits above Disable")
+        XCTAssertGreaterThan(controls.frame.minY, connection.frame.maxY, "The controls sit below Connection")
+        XCTAssertEqual(controls.frame.maxY, content.frame.maxY, accuracy: 1, "The controls are Home Settings' last section")
+        keepScreenshot(named: "home-settings-controls")
     }
 
 
@@ -1325,7 +1339,6 @@ final class TronSmokeUITests: XCTestCase {
                 openManageHome(app)
                 let state = app.descendants(matching: .any)["home-manage-state"]
                 XCTAssertTrue(state.label.contains("Paused"), state.label)
-                XCTAssertTrue(app.descendants(matching: .any)["home-manage-resume"].exists)
                 XCTAssertFalse(app.descendants(matching: .any)["home-manage-stop"].exists)
                 keepScreenshot(named: "manage-home-\(appearance)-\(type)")
                 for sheet in sheets {
@@ -1342,6 +1355,9 @@ final class TronSmokeUITests: XCTestCase {
                     app.buttons["home-sheet-done-\(sheet.doneID)"].tap()
                     XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
                 }
+                openHomeControls(app)
+                XCTAssertTrue(app.descendants(matching: .any)["home-manage-resume"].exists)
+                keepScreenshot(named: "home-settings-controls-\(appearance)-\(type)")
                 app.terminate()
             }
         }
@@ -1403,7 +1419,10 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(state.label.contains(label), state.label)
             keepScreenshot(named: "manage-home-\(phase)")
             if phase == "active" {
+                openHomeControls(app)
                 tapManageRow(app, "home-manage-pause")
+                XCTAssertTrue(app.descendants(matching: .any)["home-manage-resume"].waitForExistence(timeout: 5), app.debugDescription)
+                closeHomeSettings(app)
                 // Pause leaves the accepted response running: the phase, not the memory, owns the pill.
                 XCTAssertTrue(waitForLabel(state, containing: "Working", timeout: 5))
                 app.buttons["home-sheet-done-manage"].tap()
@@ -1425,16 +1444,20 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
+        openHomeControls(app)
         tapManageRow(app, "home-manage-disable")
         confirmHomeAction(app)
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 8),
                       "An unresolved disable must offer only the completion check")
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-disable"].exists)
+        closeHomeSettings(app)
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
         // Authoritative disable does not resolve an unknown command receipt: the
         // ring still manages Home, and the fresh read shows Disabled.
         openManageHome(app)
         XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Disabled", timeout: 8))
+        openHomeControls(app)
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].exists)
         keepScreenshot(named: "manage-home-unresolved-disable")
         app.terminate()
@@ -1451,18 +1474,29 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
+        openHomeControls(app)
         tapManageRow(app, "home-manage-pause")
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-resume"].waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "home-settings-paused")
+        closeHomeSettings(app)
         XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 5))
         keepScreenshot(named: "manage-home-paused")
+        openHomeControls(app)
         tapManageRow(app, "home-manage-resume")
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-pause"].waitForExistence(timeout: 5), app.debugDescription)
+        closeHomeSettings(app)
         XCTAssertTrue(waitForLabel(state, containing: "Ready", timeout: 5))
         // Disable is destructive: a cancelled confirmation keeps Home enabled.
+        openHomeControls(app)
         tapManageRow(app, "home-manage-disable")
         XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
         app.buttons["confirmation-cancel"].tap()
+        closeHomeSettings(app)
         XCTAssertTrue(waitForLabel(state, containing: "Ready", timeout: 3))
+        openHomeControls(app)
         tapManageRow(app, "home-manage-disable")
         confirmHomeAction(app)
+        closeHomeSettings(app)
         XCTAssertTrue(waitForLabel(state, containing: "Disabled", timeout: 5))
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
@@ -1533,9 +1567,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed, "Manage Home must drag to its large detent")
         keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
-        for row in ["home-manage-memory-browser", "home-manage-tasks",
-                    "home-manage-pause", "home-manage-disable"] {
+        for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-settings"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
+        }
+        for row in ["home-manage-pause", "home-manage-disable"] {
+            XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) lives in Home Settings")
         }
         // A child surface keeps its own sheet lifetime above Manage Home and returns to it.
         tapManageRow(app, "home-manage-memory-browser")
@@ -1665,9 +1701,11 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
-        // Mounting Manage Home installs the retained action; the stale invocation
-        // after the profile switch must be refused by the sheet's identity fences.
+        // Mounting Home Settings' controls installs the retained action; the stale
+        // invocation after the profile switch must be refused by their identity fences.
         openManageHome(app)
+        openHomeControls(app)
+        closeHomeSettings(app)
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.buttons["fixture.invoke-stale-home-action"].waitForExistence(timeout: 5))
         app.buttons["fixture.invoke-stale-home-action"].tap()
@@ -1687,6 +1725,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
+        openHomeControls(app)
         tapManageRow(app, "home-manage-pause")
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 3))
         XCTAssertTrue(app.staticTexts["fixture.home-command-state"].label.contains("running"))
@@ -1695,12 +1734,14 @@ final class TronSmokeUITests: XCTestCase {
         // The fixture resolves after six seconds, while presentation is retired.
         Thread.sleep(forTimeInterval: 7)
         app.activate()
-        let state = app.descendants(matching: .any)["home-manage-state"]
-        XCTAssertTrue(state.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].waitForExistence(timeout: 10), app.debugDescription)
         if app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 2) {
             app.descendants(matching: .any)["home-manage-check-completion"].tap()
         }
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-command-state"], containing: "idle", timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-resume"].waitForExistence(timeout: 8), app.debugDescription)
+        closeHomeSettings(app)
+        let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 8))
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"))
         keepScreenshot(named: "manage-home-background-accepted-paused")
@@ -1753,7 +1794,10 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
+        openHomeControls(app)
         tapManageRow(app, "home-manage-pause")
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 8), app.debugDescription)
+        closeHomeSettings(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
         // The unresolved command is the Memory row's subtitle; the state pill keeps the Home phase.
         let memoryRow = app.descendants(matching: .any)["home-manage-memory-browser"]
@@ -1763,11 +1807,15 @@ final class TronSmokeUITests: XCTestCase {
         app.activate()
         XCTAssertTrue(state.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 5))
+        openHomeControls(app)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-pause"].exists)
         tapManageRow(app, "home-manage-check-completion")
+        closeHomeSettings(app)
         // The first check finds the receipt still pending and must not claim completion.
         XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 5))
+        openHomeControls(app)
         tapManageRow(app, "home-manage-check-completion")
+        closeHomeSettings(app)
         XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
         keepScreenshot(named: "manage-home-reconnected-paused")
@@ -1790,6 +1838,24 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(ring, timeout: 10), app.debugDescription)
         ring.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// Opens Home Settings from Manage Home and scrolls to its last section, the
+    /// pause/disable controls.
+    @MainActor
+    private func openHomeControls(_ app: XCUIApplication) {
+        tapManageRow(app, "home-manage-settings")
+        XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].waitForExistence(timeout: 8), app.debugDescription)
+        let last = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
+            ["home-manage-disable", "home-manage-check-completion"])).firstMatch
+        reveal(last, in: app)
+        XCTAssertTrue(last.isHittable, app.debugDescription)
+    }
+
+    @MainActor
+    private func closeHomeSettings(_ app: XCUIApplication) {
+        closeTopSheet(app)
+        XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].waitForNonExistence(timeout: 5), app.debugDescription)
     }
 
     @MainActor

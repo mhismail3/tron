@@ -130,9 +130,6 @@ struct HomeSheet: View {
     @Environment(\.tronPresentationActivity) var activity
     @PresentationState var owner = HomeSheetReadOwner()
     @PresentationState var request: HomeSheetRequest
-    #if HOSTED_TEST
-    @Environment(\.hostedHomeActionProbe) private var hostedActionProbe
-    #endif
     /// Rows present an existing Home sheet as a managed child, so each child keeps
     /// its own read owner and lifetime.
     @PresentationState var childDestination: HomeSheetDestination?
@@ -143,9 +140,6 @@ struct HomeSheet: View {
     /// Manage Home's open child only reads (Context, Memory, Chapters), so its return
     /// keeps the installed page instead of re-reading every row.
     @PresentationState private var returnsFromBrowsing = false
-    @PresentationState var mutationFailure: String?
-    @PresentationState var confirmingDisable = false
-    @PresentationState var disableAdmission: HomeControlAdmission?
     @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
     /// The learned-profile edit state of a Profile or item sheet (HomeProfileSheets.swift).
     @PresentationState var profileEdit = HomeProfileEditState()
@@ -204,9 +198,6 @@ struct HomeSheet: View {
                 ScrollView {
                     TronSettingsSections(alignment: .leading, spacing: 18) {
                         content
-                        if let mutationFailure {
-                            TronPlaceholderState(title: "Home change", detail: mutationFailure, icon: "exclamationmark.triangle")
-                        }
                     }
                     .padding(18)
                 }
@@ -284,11 +275,6 @@ struct HomeSheet: View {
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
             HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent, surfaceAccent: visualTheme?.surfaceAccent ?? .tronPrimarySurface)
         }
-        #if HOSTED_TEST
-        // Retains the mounted pause action so hosted journeys can invoke it after
-        // a route replacement; the identity fences inside `perform` must refuse it.
-        .onAppear { if case .manage = destination { hostedActionProbe?.pause = { perform(.pauseMemory) } } }
-        #endif
     }
 
     @ViewBuilder private var content: some View {
@@ -301,9 +287,8 @@ struct HomeSheet: View {
         }
     }
 
-    /// The current read's profile when it holds no items and no change failed.
+    /// The current read's profile when it holds no items.
     private var emptyProfileList: HomeProfileListDTO? {
-        guard mutationFailure == nil else { return nil }
         switch owner.state {
         case .loaded(let read, .profile(let list)), .loading(let read, .some(.profile(let list))):
             return read.identity.profileID == profileID && read.identity.surfaceToken == token && list.items.isEmpty ? list : nil
@@ -327,7 +312,7 @@ struct HomeSheet: View {
                 case .memory(let view): memory(view)
                 case .evidence(let page):
                     evidenceSheet(page)
-                case .tasks, .task, .taskHistory, .permissions: EmptyView()
+                case .status, .tasks, .task, .taskHistory, .permissions: EmptyView()
                 }
             } else {
                 TronSheetLoadingState(label: "Waiting for Home…", accent: accent)
@@ -360,53 +345,6 @@ struct HomeSheet: View {
     /// Reloads the destination's own read after a mutation changed it.
     func refreshAfterMutation() {
         request = HomeSheetRequest(query: destination.initialQuery)
-    }
-
-    /// Accepted domain commands keep the chat's authority rules: acquire once
-    /// for the mounted profile, then let the coordinator own receipt resolution.
-    func admitControl() -> HomeControlAdmission? {
-        guard let identity, let coordinator, active,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return nil }
-        return HomeControlAdmission(identity: identity, coordinator: coordinator, authority: authority)
-    }
-
-    func perform(_ command: HomeMutationCoordinator.Command) {
-        guard let admission = admitControl() else { return }
-        run(command, admission)
-    }
-
-    func run(_ command: HomeMutationCoordinator.Command, _ admission: HomeControlAdmission) {
-        Task { @MainActor in
-            do {
-                try await model.performHomeControl(command, authority: admission.authority)
-                guard self.identity == admission.identity,
-                      admission.coordinator.activity(for: admission.identity.surfaceToken).allowsDataPublication else { return }
-                mutationFailure = nil
-                refreshAfterMutation()
-            } catch {
-                guard self.identity == admission.identity,
-                      admission.coordinator.activity(for: admission.identity.surfaceToken).allowsDataPublication,
-                      !(error is CancellationError) else { return }
-                mutationFailure = error.localizedDescription
-            }
-        }
-    }
-
-    func checkCompletion() {
-        guard let identity, let coordinator, active,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
-        Task { @MainActor in
-            do {
-                try await model.checkHomeControlCompletion(authority: authority)
-                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication else { return }
-                mutationFailure = nil
-                refreshAfterMutation()
-            } catch {
-                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication,
-                      !(error is CancellationError) else { return }
-                mutationFailure = error.localizedDescription
-            }
-        }
     }
 }
 

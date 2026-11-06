@@ -101,7 +101,8 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
   same writes, approvals and Revert path; changing the card changes no scope semantics. The model
   header is one line with a leading CPU glyph and no provider subtitle; model cards omit Overridden.
   Home Settings embeds the former Models, Tools and More Settings sections directly under logical
-  headers, keeping its introductory caption. Only that first level is flattened: shared row editors,
+  headers, keeping its introductory caption, and ends with Home's pause/disable controls
+  (`HomeControlsSection`). Only that first level is flattened: shared row editors,
   pickers, source inspection and Revert stay unchanged. Worker settings render independently of
   delegation permission reads; an uninitialized task namespace must not hide saved profile editors.
   Session Settings has one untitled container (Compaction, Tools, Project Trust, More Settings),

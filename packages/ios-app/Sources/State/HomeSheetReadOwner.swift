@@ -467,6 +467,8 @@ struct HomeSheetReadIdentity: Hashable {
 
 enum HomeSheetReadQuery: Hashable, Sendable {
     case manage
+    /// Home Settings' pause and disable controls read only the status.
+    case status
     case tasks(String?, filter: HomeTaskFilter = .open), task(String), permissions
     case taskHistory(String, cursor: String?)
     case chapters
@@ -480,6 +482,7 @@ enum HomeSheetReadQuery: Hashable, Sendable {
 
 enum HomeSheetContent {
     case manage(HomeManageDTO)
+    case status(HomeStatusDTO)
     case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
     case taskHistory(HomeTaskHistoryPageDTO)
     case chapters(HomeChapterListDTO)

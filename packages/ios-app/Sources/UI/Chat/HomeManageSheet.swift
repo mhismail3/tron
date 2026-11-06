@@ -1,8 +1,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// Manage Home's context ring, state and workers, its sub-sheet destinations,
-/// consolidated settings, and pause/disable controls.
+/// Manage Home's context ring, state and workers, its sub-sheet destinations and
+/// consolidated settings. Pause and disable live at the bottom of Home Settings.
 extension HomeSheet {
     /// The state pill's accent: a working or ready Home reads as success, a blocked
     /// or recovering one as an error, and a paused or disabled one as idle.
@@ -16,13 +16,11 @@ extension HomeSheet {
 
     func manageSheet(_ read: HomeManageDTO) -> some View {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
-        let mutating = model.homeMutations.isRunning(profileID: profileID)
         return TronSettingsSections(alignment: .leading, spacing: 18) {
             usageHeader(read)
             if let sessionID { ManageModelConfigurationCard(sessionID: sessionID, home: true) }
             manageRows(read, unresolved: unresolved)
             settingsRow
-            manageControls(read.status, unresolved: unresolved, mutating: mutating)
         }
     }
 
@@ -97,70 +95,6 @@ extension HomeSheet {
         }
     }
 
-    /// Pause, resume and disable, in the bottom container Manage Session uses for
-    /// its export and archive rows. Disable needs confirmation; an unresolved
-    /// command leaves only the completion check.
-    func manageControls(_ status: HomeStatusDTO, unresolved: Bool, mutating: Bool) -> some View {
-        TronGlassCard(accent: .tronSlate) {
-            VStack(spacing: 0) {
-                if !unresolved {
-                    if status.memory.paused == true || status.memory.blocked != nil {
-                        Button { perform(.resumeMemory) } label: {
-                            TronSettingsRow(icon: "play.fill", title: "Resume memory", accent: .tronSlate)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(mutating)
-                        .accessibilityIdentifier("home-manage-resume")
-                        divider(accent: .tronSlate)
-                    }
-                    if status.memory.paused != true {
-                        Button { perform(.pauseMemory) } label: {
-                            TronSettingsRow(icon: "pause.fill", title: "Pause memory",
-                                            subtitle: "New responses are blocked while paused", accent: .tronSlate)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(mutating || !status.memory.configured)
-                        .accessibilityIdentifier("home-manage-pause")
-                        divider(accent: .tronSlate)
-                    }
-                }
-                if unresolved {
-                    Button { checkCompletion() } label: {
-                        TronSettingsRow(icon: "arrow.clockwise", title: "Check completion",
-                                        subtitle: "Resolve the pending Home change first", accent: .tronSlate)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(mutating)
-                    .accessibilityIdentifier("home-manage-check-completion")
-                } else {
-                    Button {
-                        guard let admission = admitControl() else { return }
-                        disableAdmission = admission
-                        confirmingDisable = true
-                    } label: {
-                        TronSettingsRow(icon: "house.slash", title: "Disable Home",
-                                        subtitle: "Stops activations; history is preserved",
-                                        accent: .tronError, titleColor: .tronError, subtitleColor: .tronError)
-                            .tronSettingsVisualTheme(accent: .tronError)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(mutating)
-                    .accessibilityIdentifier("home-manage-disable")
-                }
-            }
-        }
-        .tronManagedSheet(isPresented: $confirmingDisable, identity: "home.\(profileID).disable-confirmation") {
-            TronConfirmationSheet(
-                title: "Disable Home?",
-                message: "Activations stop. Home's history is preserved.",
-                confirmTitle: "Disable Home",
-                destructive: true,
-                icon: "house.slash",
-                onConfirm: { if let disableAdmission { run(.disable, disableAdmission) } }
-            )
-        }
-    }
-
     /// A row that presents a managed child sheet, labeled with that sheet's title.
     func navigationRow(icon: String, subtitle: String? = nil,
                        destination: HomeSheetDestination, id: String) -> some View {
@@ -171,7 +105,7 @@ extension HomeSheet {
         .accessibilityIdentifier(id)
     }
 
-    func divider(accent: Color? = nil) -> some View {
-        TronSettingsDivider(accent: accent ?? self.accent)
+    func divider() -> some View {
+        TronSettingsDivider(accent: accent)
     }
 }
