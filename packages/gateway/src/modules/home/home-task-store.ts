@@ -11,6 +11,7 @@ import type { HomeWakeEvent } from "./home-wake-inbox.js";
 import { homeTaskPromptTokens } from "./home-task-spend.js";
 import { HOME_TASK_CHECKIN_LIMIT, parseHomeTaskCheckin } from "../../kernel/delegation/task-checkin.js";
 import { currentHomeTask, homeTaskLineages, homeTaskNeedsAttention } from "./home-task-lineage.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
@@ -136,7 +137,7 @@ export class HomeTaskStore {
   }
 
   constructor(private readonly tronHome: string, private readonly workspace: TronWorkspace, private readonly options: Options = {}) {
-    this.home = join(tronHome, "gateway", "home");
+    this.home = tronHomePath(tronHome, "gateway/home");
     this.directory = join(this.home, "tasks");
     this.authorizationPath = join(this.directory, "authorization.json");
     this.authorization = {
@@ -175,7 +176,7 @@ export class HomeTaskStore {
       await this.publish(this.authorizationPath, { version: 1, revision: 1, scopes: [], requests: [], decisions: [], grants: [] }, AUTHORIZATION_BYTES);
       // The init marker must not outlive a directory entry still in a volatile
       // parent cache, including the newly created Home directory.
-      for (const path of [this.home, join(this.tronHome, "gateway")]) {
+      for (const path of [this.home, tronHomePath(this.tronHome, "gateway")]) {
         const handle = await open(path, "r");
         try { await syncDurably(handle); } finally { await handle.close(); }
       }
@@ -361,8 +362,8 @@ export class HomeTaskStore {
   private async assertNamespace(): Promise<boolean> {
     if (!(await this.workspace.describe()).available) throw new HomeTaskStoreError("unsafe-state");
     await assertDirectory(this.tronHome);
-    await assertDirectory(join(this.tronHome, "gateway"));
-    await assertDirectory(join(this.tronHome, "gateway", "workspace-state"));
+    await assertDirectory(tronHomePath(this.tronHome, "gateway"));
+    await assertDirectory(tronHomePath(this.tronHome, "gateway/workspace-state"));
     const initialized = await this.workspace.featureInitialized("home-tasks").catch(() => { throw new HomeTaskStoreError("invalid-record"); });
     const homePresent = await directoryPresent(this.home);
     const present = homePresent && await directoryPresent(this.directory);

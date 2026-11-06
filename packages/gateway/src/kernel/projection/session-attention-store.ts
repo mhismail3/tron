@@ -1,7 +1,7 @@
-import { join } from "node:path";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import { durablePublishBoundedJson } from "../../foundation/durable-json.js";
 import { boundedString, boundedTimestamp, cloneDictionary, ownRecord, readJsonDocument } from "../../foundation/json.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 2 * 1_048_576;
@@ -54,7 +54,7 @@ export class SessionAttentionStore {
   private document: SessionAttentionDocument | undefined;
 
   constructor(tronHome: string, options: SessionAttentionStoreOptions = {}) {
-    this.path = join(tronHome, "gateway", "session-attention.json");
+    this.path = tronHomePath(tronHome, "gateway/session-attention.json");
     this.write = options.write;
     this.now = options.now ?? (() => new Date());
   }

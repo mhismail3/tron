@@ -124,9 +124,9 @@ it("keeps setup, policy fences, redaction and receipts across a loopback Gateway
   const instanceId = "lock-raindrop";
   try {
     gateway = await start(root, true);
-    const statePath = join(gateway.tronHome, "state", "integrations", "connections.json");
+    const statePath = join(gateway.tronHome, "gateway", "integrations", "connections.json");
     expect((await gateway.snapshot()).instances).toEqual([]);
-    await expect(stat(join(gateway.tronHome, "state", "integrations"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(gateway.tronHome, "gateway", "integrations"))).rejects.toMatchObject({ code: "ENOENT" });
     const begin = { commandId: "lock-begin-first", instanceId, definitionId: "knowledge.raindrop", method: "token" };
     const begun = await gateway.request("connections.setup.begin", begin);
     expect(begun.ok).toBe(true);
@@ -211,7 +211,7 @@ it("does not advertise retired vendor RPC consumers or alter their stored creden
     const original = new ConnectionOwner(home, HISTORICAL_TEST_DEFINITIONS);
     const begun = await original.execute({ kind: "setup.begin", commandId: "retired-begin", instanceId: "retired-source", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
     await original.execute({ kind: "setup.complete", commandId: "retired-complete", instanceId: "retired-source", operationId: begun.operationId, providerAccountId: "fixture-account", credentialRef: "connector:raindrop:preserved-only-reference", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
-    const state = join(home, "state/integrations/connections.json");
+    const state = join(home, "gateway/integrations/connections.json");
     const before = await readFile(state, "utf8");
     gateway = await start(root);
     const snapshot = await gateway.snapshot();

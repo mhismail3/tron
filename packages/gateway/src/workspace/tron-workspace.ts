@@ -5,6 +5,7 @@ import { GatewayError } from "../errors.js";
 import type { TronWorkspaceDescriptor } from "../kernel/resources/resource-root.js";
 import { readSecureJson } from "../foundation/secure-json.js";
 import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 /** The capabilities that record their namespace's initialization beside the
  * workspace root. Adding one here is what lets a missing namespace be reported
@@ -36,7 +37,7 @@ export class TronWorkspace {
 
   constructor(tronHome: string, private readonly options: { unavailable?: (cause: TronWorkspaceUnavailableCause) => void } = {}) {
     this.home = resolve(tronHome);
-    this.root = join(this.home, "workspace");
+    this.root = tronHomePath(this.home, "workspace");
   }
 
   private unavailable(cause: TronWorkspaceUnavailableCause): void {
@@ -79,10 +80,10 @@ export class TronWorkspace {
     try {
       await this.directory(this.home, true);
       this.home = await realpath(this.home);
-      this.root = join(this.home, "workspace");
-      const gateway = join(this.home, "gateway");
+      this.root = tronHomePath(this.home, "workspace");
+      const gateway = tronHomePath(this.home, "gateway");
       await this.directory(gateway, true);
-      const state = join(gateway, "workspace-state");
+      const state = tronHomePath(this.home, "gateway/workspace-state");
       await this.directory(state, true);
       try {
         this.release = await lockfile.lock(state, {
@@ -150,7 +151,7 @@ export class TronWorkspace {
   /** Offline readers share the canonical marker admission without acquiring
    * ownership, initializing directories, or starting an automatic writer. */
   static async featureInitializedExisting(home: string, feature: TronWorkspaceFeature): Promise<boolean> {
-    const marker = join(home, "gateway", "workspace-state", `${feature}-initialized.json`);
+    const marker = tronHomePath(home, "gateway/workspace-state", `${feature}-initialized.json`);
     try {
       const read = await readSecureJson<unknown>(marker, 128);
       if (!read.present) return false;
@@ -162,7 +163,7 @@ export class TronWorkspace {
   }
 
   private featureMarker(feature: TronWorkspaceFeature): string {
-    return join(this.home, "gateway", "workspace-state", `${feature}-initialized.json`);
+    return tronHomePath(this.home, "gateway/workspace-state", `${feature}-initialized.json`);
   }
 
   async markFeatureInitialized(feature: TronWorkspaceFeature): Promise<void> {

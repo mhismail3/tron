@@ -8,6 +8,7 @@ import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { count, stage, wait } from "../util/request-span.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const COMMAND_RECEIPT_MAX_BYTES = 1_048_576 + 4 * 1_024;
 // High-frequency revisioned UI updates are still idempotent mutations. Keep a
@@ -149,7 +150,7 @@ export class CommandReceiptStore {
     private readonly writeReceipt: (path: string, value: unknown, mode?: number) => Promise<void> = durableAtomicWriteJson,
     capacity: CommandReceiptCapacity = {},
   ) {
-    this.directory = join(tronHome, "gateway", "command-receipts");
+    this.directory = tronHomePath(tronHome, "gateway/command-receipts");
     this.maximumEntries = capacity.maximumEntries ?? COMMAND_RECEIPT_MAX_ENTRIES;
     this.maximumAggregateBytes = capacity.maximumAggregateBytes ?? COMMAND_RECEIPT_MAX_AGGREGATE_BYTES;
     this.maximumAgeMs = capacity.maximumAgeMs ?? COMMAND_RECEIPT_MAX_AGE_MS;

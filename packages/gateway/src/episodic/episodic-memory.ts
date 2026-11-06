@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import type { HomeMemoryEvidence, HomeMemoryView, HomeMemoryViewLine } from "../protocol/types.js";
 import { HOME_MEMORY_PAGE_BYTES, HOME_MEMORY_DISPLAY_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "./home-memory-browser.js";
@@ -18,6 +17,7 @@ import {
   parseNodeAddress, placeholderBytes, snippetAround, utf8Bytes,
   type EpisodicViewPart,
 } from "./episodic-tree.js";
+import { tronWorkspacePath } from "../foundation/tron-home-layout.js";
 
 /*
  * The owner of one source session's memory: the projected catalog, the binary
@@ -175,7 +175,7 @@ export class EpisodicMemory {
     const limits = resolveLimits(dependencies.limits);
     const descriptor = await dependencies.workspace.describe();
     if (!descriptor.available) throw new EpisodicMemoryError("unsafe-store", "Tron internal workspace is unavailable; episodic memory cannot be opened");
-    const storeKey = join(descriptor.root, "state", "episodic", dependencies.sessionId);
+    const storeKey = tronWorkspacePath(descriptor.root, "state/episodic", dependencies.sessionId);
     if (EpisodicMemory.openStores.has(storeKey)) {
       throw new EpisodicMemoryError("already-open", `Episodic memory for session ${dependencies.sessionId} is already open in this process`);
     }

@@ -19,6 +19,7 @@ import {
   boundedFailureText,
   type FailureLine,
 } from "./document-admission.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 export const IOS_DEVICE_INSTALL_CAPABILITY = "ios-device-install.v3";
 const CONFIG_KIND = "tron-ios-device-install-config";
@@ -247,7 +248,7 @@ async function readDocument(path: string): Promise<unknown | undefined> {
 }
 
 function installRoot(tronHome: string): string {
-  return join(tronHome, "gateway", "ios-device-installs");
+  return tronHomePath(tronHome, "gateway/ios-device-installs");
 }
 
 function configPath(tronHome: string, deviceId: string): string {

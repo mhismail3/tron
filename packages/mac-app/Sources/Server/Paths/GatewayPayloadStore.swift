@@ -525,9 +525,9 @@ enum GatewayPayloadValidator {
     }
 
     private static func realPath(_ path: String) -> String? {
-        var buffer = [Int8](repeating: 0, count: Int(PATH_MAX))
-        guard Darwin.realpath(path, &buffer) != nil else { return nil }
-        return String(cString: buffer)
+        guard let resolved = Darwin.realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     private static func npmRuntimeTreeDigest(_ root: URL, fileManager: FileManager) -> String? {
