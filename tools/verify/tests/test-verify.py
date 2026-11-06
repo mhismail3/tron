@@ -964,6 +964,9 @@ class MutateTests(VerifyCase):
         self.assertIn("TIMEOUT", output)
         self.assertEqual((self.repo.path / "packages/gateway/src/store/store.ts").read_text(), SOURCE)
         self.assert_hung_child_stopped()
+        # Every run's temporary HOME is removed, the timed-out one included.
+        runs = [json.loads(line) for line in (self.repo.path / "packages/gateway/runs.jsonl").read_text().splitlines()]
+        self.assertEqual([run["home"] for run in runs if Path(run["home"]).exists()], [])
 
     def test_an_interrupted_run_restores_the_source_and_keeps_finished_mutants(self) -> None:
         process = self.mutate("--timeout", "120")
