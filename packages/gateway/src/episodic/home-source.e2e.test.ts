@@ -197,6 +197,26 @@ it.each(["changed", "missing"])("blocks %s sealed evidence without changing prio
   expect(memory.searchMessages("orange", 0, 10)?.matches).toBe(0);
 });
 
+it("keeps memory running when a restart remounts its volume under a new device number", async () => {
+  // macOS assigns st_dev when a volume mounts; an OS update or reboot renumbers it
+  // under byte-identical files (#2311). The persisted cursor holds the old mount's.
+  const fx = await fixture(); const memory = await fx.open(); await memory.entriesCommitted("home");
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+  const statePath = join(fx.root, "home/workspace/state/episodic/home/state.json");
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  for (const chapter of state.cursor.home.chapters) chapter.dev += 1;
+  await writeFile(statePath, JSON.stringify(state) + "\n");
+  const restarted = await fx.open();
+  await appendFile(fx.chapters[1]!.path, entry("e", "d", "after the remount teal fact"));
+  await restarted.entriesCommitted("home");
+  expect(restarted.status().blocked ?? null).toBeNull();
+  expect(restarted.status().messages).toBe(3);
+  expect(restarted.searchMessages("teal", 0, 10)?.matches).toBe(1);
+  // Frozen cuts prove every admitted chapter against its persisted cursor.
+  expect(await restarted.cutAtEntry("b")).toBe(1);
+  expect(await restarted.cutAtEntry("e")).toBe(3);
+});
+
 it("keeps the next delta incremental when the chapter's last line is longer than the cursor's prefix window", async () => {
   // The cursor proves the previous prefix by its last line. A line longer than the
   // proof window must still be proven whole, or every later delta rereads the chapter.
