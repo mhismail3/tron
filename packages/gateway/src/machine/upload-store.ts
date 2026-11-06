@@ -13,6 +13,7 @@ import { readJson } from "../foundation/json.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { PromptAttachmentState } from "../protocol/types.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const MAXIMUM_ATTACHMENT_READERS = 32;
 const UPLOAD_METADATA_MAX_BYTES = 64 * 1_024;
@@ -177,10 +178,10 @@ export class UploadStore {
     private readonly maximumBytes: number,
     options: UploadStoreOptions = {},
   ) {
-    this.directory = join(tronHome, "gateway", "uploads");
-    this.bodyDirectory = join(tronHome, "gateway", "upload-bodies");
-    this.importDirectory = join(tronHome, "gateway", "upload-imports");
-    this.objectDirectory = join(tronHome, "gateway", "upload-objects");
+    this.directory = tronHomePath(tronHome, "gateway/uploads");
+    this.bodyDirectory = tronHomePath(tronHome, "gateway/upload-bodies");
+    this.importDirectory = tronHomePath(tronHome, "gateway/upload-imports");
+    this.objectDirectory = tronHomePath(tronHome, "gateway/upload-objects");
     // Staging is bounded independently from canonical session ownership. Old
     // conversations can consume retained storage but can never starve a new
     // draft while the filesystem still has its configured safety floor.

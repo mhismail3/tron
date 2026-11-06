@@ -2,7 +2,6 @@ import { workspaceModule } from "./workspace/workspace-module.js";
 import { MacTerminalService } from "./security/mac-terminal-service.js";
 import { ManagedSubagents } from "./kernel/delegation/managed-subagents.js";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { SettingsManager } from "./kernel/pi/coding-agent.js";
 import { piCliBundle } from "./kernel/pi/packages.js";
@@ -80,6 +79,7 @@ import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./kernel/delegation/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./kernel/delegation/delegated-root-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
+import { tronHomePath } from "./foundation/tron-home-layout.js";
 
 // Time since process start when this module's import graph finished loading
 // (performance.now() counts from the process time origin).
@@ -116,7 +116,7 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-const gatewayLogPath = join(config.tronHome, "logs", "gateway.jsonl");
+const gatewayLogPath = tronHomePath(config.tronHome, "logs", "gateway.jsonl");
 const logger = new GatewayLogger(gatewayLogPath, {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
@@ -496,7 +496,7 @@ const searchHelperCandidate = developmentHelperOverride ?? (bundledSearchHelper 
 let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
-  sessionSearchIndex = await SessionSearchIndex.open(join(config.tronHome, "gateway", "session-search.sqlite"));
+  sessionSearchIndex = await SessionSearchIndex.open(tronHomePath(config.tronHome, "gateway/session-search.sqlite"));
   // Home's session_search research tool is this owner's only reader, through the composition.
   sessionSearch = new SessionSearchService(sessions, sessionSearchIndex);
 } catch (error) {
@@ -639,7 +639,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
       // One atomic receipt survives transport retirement and log rotation. The
       // accepted drain UUID plus Mac's captured PID/start identity exclude stale
       // processes/attempts; this is completion, never permission to SIGKILL exit 0.
-      const path = join(config.tronHome, "gateway", "stop-completed.json");
+      const path = tronHomePath(config.tronHome, "gateway/stop-completed.json");
       const temporary = `${path}.${process.pid}.tmp`;
       try {
         writeFileSync(temporary, JSON.stringify({ version: 1, pid: process.pid, drainId: stopDrainId }), { mode: 0o600 });

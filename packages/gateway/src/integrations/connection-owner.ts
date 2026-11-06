@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
@@ -32,17 +31,17 @@ import {
   validateConnectionState,
   validateIntegrationDefinition,
 } from "./connection-contract.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const MAX_RECEIPTS = 256;
 const STATE_MAX_BYTES = 4 * 1_048_576;
-const CONNECTION_STATE_RELATIVE_PATH = ["state", "integrations", "connections.json"] as const;
 
 function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
 function conflict(message: string): GatewayError { return new GatewayError("conflict", message); }
 function unsupported(message: string): GatewayError { return new GatewayError("unsupported", message); }
 function now(): string { return new Date().toISOString(); }
 function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTION_STATE_SCHEMA_VERSION, stateRevision: 0, instances: {}, setupOperations: {}, receipts: {} }; }
-function statePath(tronHome: string): string { return join(tronHome, ...CONNECTION_STATE_RELATIVE_PATH); }
+function statePath(tronHome: string): string { return tronHomePath(tronHome, "state/integrations", "connections.json"); }
 function copy<T>(value: T): T { return structuredClone(value); }
 
 /** The presentation projection omits credential references, so an unadmitted
@@ -335,8 +334,8 @@ export class ConnectionOwner implements ConnectionAccess {
   }
 
   private async save(state: ConnectionOwnerState): Promise<void> {
-    const stateRoot = join(this.tronHome, "state");
-    const root = join(stateRoot, "integrations");
+    const stateRoot = tronHomePath(this.tronHome, "state");
+    const root = tronHomePath(this.tronHome, "state/integrations");
     for (const path of [stateRoot, root]) {
       try {
         const info = await lstat(path);

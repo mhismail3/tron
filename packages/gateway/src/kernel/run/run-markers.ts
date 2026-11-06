@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { readJson, removeIfExists } from "../../foundation/json.js";
 import { syncDurably } from "../../foundation/durable-json.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 export interface RunMarkerEvidence {
   operationId: string;
@@ -61,7 +62,7 @@ export class RunMarkerStore {
   private readonly fileSystem: RunMarkerFileSystem;
 
   constructor(tronHome: string, options: RunMarkerStoreOptions = {}) {
-    this.directory = join(tronHome, "gateway", "runtime-markers");
+    this.directory = tronHomePath(tronHome, "gateway/runtime-markers");
     this.fileSystem = options.fileSystem ?? productionFileSystem;
   }
 

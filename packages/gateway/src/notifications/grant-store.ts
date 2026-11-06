@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 export type NotificationKind = "explicit" | "ask" | "agent_finished" | "waiting";
 export type DeliveryOutcome = "pending" | "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "expired";
@@ -220,7 +221,7 @@ export class NotificationGrantStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
   private migratedLegacyKinds: NotificationKind[] = [];
-  constructor(tronHome: string, path = join(tronHome, "gateway", "notifications.json")) { this.path = path; }
+  constructor(tronHome: string, path = tronHomePath(tronHome, "gateway/notifications.json")) { this.path = path; }
 
   takeMigratedLegacyKinds(): NotificationKind[] {
     const kinds = this.migratedLegacyKinds;

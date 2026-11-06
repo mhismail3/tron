@@ -11,6 +11,7 @@ import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.
 import { readJson } from "../foundation/json.js";
 import type { BlobByteRange, BlobLease } from "../sessions/blob-store.js";
 import { DISPLAY_ARTIFACT_KINDS, type DisplayArtifactDescriptor, type DisplayArtifactKind } from "../modules/display/contract.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const METADATA_MAX_BYTES = 64 * 1_024;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -184,7 +185,7 @@ export class DisplayArtifactStore {
   private initialized = false;
 
   constructor(tronHome: string, options: DisplayArtifactStoreOptions = {}) {
-    this.root = join(tronHome, "gateway", "display-artifacts");
+    this.root = tronHomePath(tronHome, "gateway/display-artifacts");
     this.artifactDirectory = join(this.root, "artifacts");
     this.objectDirectory = join(this.root, "objects");
     this.stagingDirectory = join(this.root, "staging");

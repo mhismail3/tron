@@ -46,7 +46,7 @@ ARTIFACTS = ROOT / "test-results" / "verify-cli"
 HEALTH_ARTIFACTS = ROOT / "test-results" / "health-cli"
 COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", "tools/work/work.json",
-          *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs")
+          *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
             for p in (ROOT / d).glob("*.py")]]
 PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\nunittest.main()\n"
 AGENTS = "# Charter\n\nNever SIGSTOP Gateway-owned work. Never bypass simulator leases via XcodeBuildMCP.\n"
@@ -72,6 +72,7 @@ class Repo:
         host_lock = self.path / "tools/verify/host_lock.py"
         host_lock.write_text(host_lock.read_text().replace("'/tmp/tron-full-gateway.lock'", repr(str(self.lock))))
         self.write(".gitignore", "test-results/\n")
+        self.write("packages/gateway/src/foundation/tron-home-layout.json", '{"version": 1, "retired": [], "paths": {}}\n')
         self.write("README.md", "# Fixture\n")
         self.write("AGENTS.md", AGENTS)
         # The least guidance the real agent policy accepts: a catalog naming the iOS skill it reads.
@@ -83,6 +84,7 @@ class Repo:
         self.write("tooling.module.json", json.dumps({"layer": "L5", "owns": [
             "scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
             "scripts/ios-test-build-identity.py", ".agents/**", "tools/**", "README.md", "AGENTS.md", ".gitignore",
+            "packages/gateway/src/foundation/tron-home-layout.json",
             "tooling.module.json"]}))
         for name, layer in (("alpha", "L3"), ("beta", "L3"), ("core", "L1"), ("untested", "L5")):
             self.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": layer, "owns": ["**"]}))
@@ -533,9 +535,9 @@ class SelectionTests(VerifyCase):
         self.assertEqual(report["selection"]["modules"], ["repo/alpha"])
         self.assertEqual(report["selection"]["tests"], ["mods/alpha/test-alpha.py"])
         self.assertEqual(report["verdict"], "passed")
-        self.assertEqual([step["name"] for step in report["steps"]][:8],
+        self.assertEqual([step["name"] for step in report["steps"]][:9],
                          ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy",
-                          "privacy guard", "git diff --check"])
+                          "home layout", "privacy guard", "git diff --check"])
         self.assertIn("[1/", passed.stdout)
         r.write("mods/alpha/test-alpha.py", FAILING)
         r.commit("break alpha")

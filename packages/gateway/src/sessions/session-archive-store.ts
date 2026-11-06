@@ -1,7 +1,7 @@
-import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durablePublishBoundedJson } from "../foundation/durable-json.js";
 import { boundedString, boundedTimestamp, cloneDictionary, ownRecord, readJsonDocument } from "../foundation/json.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 2 * 1_048_576;
@@ -45,7 +45,7 @@ export class SessionArchiveStore {
   private changeRevision = 0;
 
   constructor(tronHome: string, options: SessionArchiveStoreOptions = {}) {
-    this.path = join(tronHome, "gateway", "session-archive.json");
+    this.path = tronHomePath(tronHome, "gateway/session-archive.json");
     this.now = options.now ?? (() => new Date());
   }
 

@@ -12,6 +12,7 @@ import {
   exhaustedText, isUsageLimitError, isUsageLimitReason, usageLimitReason,
   type ModelQueueRole, type ModelQueueSource, type QueueModelState,
 } from "./model-queue-extension.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 /**
  * The Gateway's model fallback queues (settings-model.md 6.3). One owner per
@@ -34,7 +35,7 @@ const PROJECTED_USAGE_MS = 10 * 60_000;
 const PROJECTION_BYTES = 64 * 1024;
 
 /** The children's projection, in the Gateway's own state directory. */
-export function modelQueueProjectionPath(tronHome: string): string { return join(tronHome, "gateway", "model-queue.json"); }
+export function modelQueueProjectionPath(tronHome: string): string { return tronHomePath(tronHome, "gateway/model-queue.json"); }
 
 function modelQueueSessionProjectionPath(base: string, sessionId: string): string {
   return join(dirname(base), "model-queue-sessions", `${createHash("sha256").update(sessionId).digest("hex")}.json`);

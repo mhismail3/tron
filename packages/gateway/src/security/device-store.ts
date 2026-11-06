@@ -1,12 +1,12 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain } from "../foundation/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 /** The wrapper credential document written by the credential store and read by
  * the terminal client. One shape rule decides which of these documents is valid. */
@@ -178,10 +178,10 @@ export class DeviceStore {
     private readonly machineId: string,
     options: { maximumDevices?: number } = {},
   ) {
-    this.gatewayDir = join(tronHome, "gateway");
-    this.authPath = join(this.gatewayDir, "local-auth.json");
-    this.devicePath = join(this.gatewayDir, "devices.json");
-    this.enrollmentPath = join(this.gatewayDir, "enrollment.json");
+    this.gatewayDir = tronHomePath(tronHome, "gateway");
+    this.authPath = tronHomePath(tronHome, "gateway/local-auth.json");
+    this.devicePath = tronHomePath(tronHome, "gateway/devices.json");
+    this.enrollmentPath = tronHomePath(tronHome, "gateway/enrollment.json");
     this.maximumDevices = options.maximumDevices ?? MAXIMUM_PAIRED_DEVICES;
     if (typeof machineId !== "string" || Buffer.byteLength(machineId) < 1 || Buffer.byteLength(machineId) > 256) {
       throw new Error("Machine identity is invalid");

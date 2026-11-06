@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { redact } from "../util/credential-redaction.js";
 import { classifyPeer, readTailscaleStatus, runBoundedCommand, type TailscalePeer, type BoundedCommand, type BoundedCommandResult } from "../platform/tailscale-status.js";
 import { resolveTronHome } from "../tron-home.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 /**
  * Read-only diagnostic bundle for one incident. It collects the log streams in
@@ -242,7 +243,7 @@ async function payloadSelectionSection(payloadsDirectory: string): Promise<Secti
  * processes under the Tron home (agents) are excluded: their arguments can
  * carry prompt text. */
 function isTronProcess(command: string, tronHome: string): boolean {
-  return command.includes(`${join(tronHome, "gateway", "payloads")}/`) || command.includes("/Applications/Tron.app") || command.includes("TronNativeHost");
+  return command.includes(`${tronHomePath(tronHome, "gateway/payloads")}/`) || command.includes("/Applications/Tron.app") || command.includes("TronNativeHost");
 }
 
 async function processesSection(tronHome: string, runCommand: BoundedCommand): Promise<{ section: Section; gateway: GatewayProcess | undefined }> {
@@ -297,7 +298,7 @@ function matchPeer(peers: readonly TailscalePeer[], names: readonly string[]): T
 }
 
 async function pairedDevices(tronHome: string): Promise<PairedDevice[]> {
-  const content = await readFile(join(tronHome, "gateway", "devices.json"), "utf8").catch(() => undefined);
+  const content = await readFile(tronHomePath(tronHome, "gateway/devices.json"), "utf8").catch(() => undefined);
   if (content === undefined) return [];
   try {
     const parsed: unknown = JSON.parse(content);
@@ -395,10 +396,10 @@ async function collectDiagnosticBundle(options: DiagnosticBundleOptions = {}): P
   const tronHome = options.tronHome ?? resolveTronHome();
   const runCommand = options.runCommand ?? runBoundedCommand;
   const readHealth = options.readHealth ?? readHealthBounded;
-  const logsDirectory = join(tronHome, "logs");
+  const logsDirectory = tronHomePath(tronHome, "logs");
   const logs = await logsSection(logsDirectory, windowStartMs);
   const deviceExports = await deviceExportsSection(logsDirectory);
-  const payloadSelection = await payloadSelectionSection(join(tronHome, "gateway", "payloads"));
+  const payloadSelection = await payloadSelectionSection(tronHomePath(tronHome, "gateway/payloads"));
   const processes = await processesSection(tronHome, runCommand);
   const launchd = await launchdSection(since, runCommand);
   const tailscale = await tailscaleSection(tronHome, since, runCommand);

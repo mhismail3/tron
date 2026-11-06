@@ -14,6 +14,7 @@ import { managedProducerAPI, type ManagedInternalWake } from "./managed-producer
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { producerIdentity } from "../host/extension-registration.js";
 import { withExtensionOwner } from "../host/extension-execution-context.js";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
@@ -201,7 +202,7 @@ export class ManagedSubagents {
       missing.unshift(relative(dirname(ancestor), ancestor));
       ancestor = dirname(ancestor);
     }
-    this.root = join(realpathSync(ancestor), ...missing, "internal", "pi-subagents", pin.version);
+    this.root = tronHomePath(join(realpathSync(ancestor), ...missing), "internal/pi-subagents", pin.version);
   }
 
   /** Startup returns a selection only after its immutable build is usable.
@@ -486,7 +487,7 @@ export class ManagedSubagents {
    * copied SDK or shared temporary directory participates in factory execution. */
   private jitiOptions(): { jitiUrl: string; jiti: JitiOptions } {
     const require = createRequire(join(this.root, "package.json"));
-    const fsCache = join(dirname(dirname(this.root)), "pi-subagents-transform-cache", basename(this.root));
+    const fsCache = tronHomePath(dirname(dirname(dirname(this.root))), "internal/pi-subagents-transform-cache", basename(this.root));
     privateDirectory(fsCache);
     return { jitiUrl: pathToFileURL(require.resolve("jiti")).href, jiti: { moduleCache: false, alias: piExtensionAliases(), fsCache } };
   }

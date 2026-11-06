@@ -7,6 +7,7 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemoryError } from "../errors.js";
 import { HOME_MAX_CHAPTERS, EPISODIC_STORE_VERSION, EPISODIC_HOME_CURSOR_MAX_BYTES, EPISODIC_STATE_MAX_BYTES, type EpisodicContextRun, type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState } from "./episodic-contract.js";
 import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
+import { tronWorkspacePath } from "../foundation/tron-home-layout.js";
 
 /*
  * The memory persists under the Tron internal workspace's capability state,
@@ -81,7 +82,7 @@ export class EpisodicStore {
   private async workspaceStateRoot(): Promise<string> {
     const descriptor = await this.workspace.describe();
     if (!descriptor.available) throw new EpisodicMemoryError("unsafe-store", "Tron internal workspace is unavailable; episodic memory cannot be persisted");
-    return join(descriptor.root, "state");
+    return tronWorkspacePath(descriptor.root, "state");
   }
 
   async readState(): Promise<EpisodicStoreState | undefined> {

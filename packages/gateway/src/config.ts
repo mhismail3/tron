@@ -10,6 +10,7 @@ import { durableAtomicWriteJson } from "./foundation/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "./foundation/secure-json.js";
 import { GatewayError } from "./errors.js";
 import { resolveTronHome } from "./tron-home.js";
+import { tronHomePath } from "./foundation/tron-home-layout.js";
 
 export interface GatewayConfig {
   readonly host: string;
@@ -42,7 +43,6 @@ export interface GatewayConfig {
 const GATEWAY_CONFIG_MAX_BYTES = 16 * 1_024;
 const MACHINE_GROUP_MAX_BYTES = 256;
 const LEGACY_MACHINE_GROUP_FILE = ".tron-machine-group-id";
-const MACHINE_GROUP_RELATIVE_PATH = ["internal", "machine-group-id"] as const;
 
 interface StoredGatewayConfig {
   version: 1;
@@ -333,7 +333,7 @@ function machineGroupIdentityPaths(
   if (override && !isAbsolute(override)) {
     throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_PATH must be absolute");
   }
-  const canonical = override ?? join(userHome, ".tron", ...MACHINE_GROUP_RELATIVE_PATH);
+  const canonical = override ?? tronHomePath(join(userHome, ".tron"), "internal/machine-group-id");
   return { canonical, legacy: join(userHome, LEGACY_MACHINE_GROUP_FILE) };
 }
 
@@ -419,7 +419,7 @@ export async function loadConfig(
 ): Promise<GatewayConfig> {
   const tronHome = resolveTronHome(environment);
   const machineGroupID = await loadMachineGroupID(environment);
-  const configPath = join(tronHome, "gateway", "gateway.json");
+  const configPath = tronHomePath(tronHome, "gateway/gateway.json");
   const next = await loadOrCreateStoredGatewayConfig(configPath);
   const pushServiceOrigin = await loadProductPushOrigin();
 
@@ -430,7 +430,7 @@ export async function loadConfig(
   if (explicitAgentDir && !isAbsolute(explicitAgentDir)) {
     throw new GatewayError("invalid_request", "PI_CODING_AGENT_DIR must be absolute");
   }
-  const agentDir = resolve(explicitAgentDir ?? join(tronHome, "agent"));
+  const agentDir = resolve(explicitAgentDir ?? tronHomePath(tronHome, "agent"));
   // The LAN default reads the resolved host, so a loopback-bound Gateway is
   // left exactly as it was before E-3a: one loopback listener.
   const host = resolveBindHost(valueAfter(args, "--host") ?? environment.TRON_GATEWAY_HOST);
@@ -455,7 +455,7 @@ export async function loadConfig(
       enabled: parseLanEndpointEnabled(valueAfter(args, "--lan-endpoint") ?? environment.TRON_GATEWAY_LAN_ENDPOINT, host),
       // The Gateway's private state directory. The key and certificate are 0600
       // inside it and are never regenerated under an existing pin (E-3b).
-      stateDirectory: join(tronHome, "gateway", "lan-endpoint"),
+      stateDirectory: tronHomePath(tronHome, "gateway/lan-endpoint"),
     },
     ...(pushServiceOrigin ? { pushServiceOrigin } : {}),
   };

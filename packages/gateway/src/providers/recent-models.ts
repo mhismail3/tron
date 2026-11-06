@@ -1,7 +1,7 @@
-import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { boundedString, boundedTimestamp, readJson } from "../foundation/json.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 64 * 1_024;
@@ -42,7 +42,7 @@ export class RecentModelStore {
   private closed = false;
 
   constructor(tronHome: string) {
-    this.path = join(tronHome, "gateway", "model-recents.json");
+    this.path = tronHomePath(tronHome, "gateway/model-recents.json");
     this.document = emptyDocument();
   }
 

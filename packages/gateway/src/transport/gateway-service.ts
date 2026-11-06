@@ -1,7 +1,6 @@
 import type { MacTerminalService } from "../security/mac-terminal-service.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { offLoop, stage } from "../util/request-span.js";
-import { join } from "node:path";
 import type { AuthType } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
@@ -81,6 +80,7 @@ import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modu
 import type { HomeOwner } from "../modules/home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -784,7 +784,7 @@ export class GatewayService {
             content,
             this.dependencies.logger.debugTail(),
             new Date(),
-            join(tronHome, "logs", "device-exports"),
+            tronHomePath(tronHome, "logs/device-exports"),
             client.identity,
           ));
         });

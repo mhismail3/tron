@@ -216,6 +216,11 @@ owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
 beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
 and `scripts/tron version check` reports drift read-only when requested.
 
+## Tron home
+
+[tron-home.md](tron-home.md) owns the `~/.tron` layout, its path registry, retention
+and layout migrations (`scripts/tron home-layout`).
+
 ## Knowledge files
 
 Source exports under `~/.tron/workspace/files/knowledge-export-*` are ordinary
