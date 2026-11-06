@@ -52,7 +52,6 @@ function assertJSON(value: unknown): void {
 }
 function byteLength(value: unknown): number { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
 function inputCostCents(tokens: number): number { return tokens * JEV_CLASSIFIER.inputUsdPerMillion * 100 / 1_000_000; }
-export const JEV_MAX_ESTIMATED_CHARGE_CENTS = inputCostCents(INPUT_TOKEN_CEILING);
 function boundedString(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
 function validatedContext(request: JevDecisionRequest): ClassifierContext {
   assertJSON(request.state); assertJSON(request.questions);
