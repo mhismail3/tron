@@ -185,6 +185,7 @@ class HomeLayoutTests(unittest.TestCase):
         self.assertEqual(moved.read_text(), "profile-v2")
         self.assertFalse((fixture.home / "workspace/files/Profile.json").exists())
         self.assertEqual(backup.read_text(), "profile-v2")
+        self.assertEqual({oct(path.stat().st_mode & 0o777) for path in (moved.parent, moved.parent.parent)}, {"0o700"})
         again = fixture.run("migrate", "--home", str(fixture.home))
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn("moved", again.stdout)
@@ -194,6 +195,7 @@ class HomeLayoutTests(unittest.TestCase):
         self.assertEqual(back.returncode, 0, back.stderr)
         self.assertEqual((fixture.home / "workspace/files/Profile.json").read_text(), "profile-v2")
         self.assertFalse(moved.exists())
+        self.assertFalse(moved.parent.exists(), "rollback leaves no empty destination directory")
 
 
 if __name__ == "__main__":

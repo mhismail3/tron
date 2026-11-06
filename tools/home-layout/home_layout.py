@@ -287,6 +287,7 @@ def migrate_locked(home: Path, registry: dict, rollback: bool) -> list[str]:
                 raise LayoutError(f"cannot roll back {move['to']}: {move['from']} exists again")
             source.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.replace(destination, source)
+            prune_empty(destination.parent, home)
             journal["moves"][move["from"]] = "rolled-back"
             log.append(f"restored {move['from']}")
         elif not source.exists():
@@ -396,6 +397,7 @@ def main(argv: list[str]) -> int:
             print(f"apply (maintainer): scripts/tron home-layout prune --apply {args.plan} --confirm {plan_digest(plan)}")
             return 0
         agent_dir = (args.agent_dir or home / "agent").expanduser().resolve()
+        os.umask(0o077)  # every directory and file the migration creates is owner-only
         for line in migrate(home, agent_dir, registry, args.rollback):
             print(line)
         print(f"home-layout {'rollback' if args.rollback else 'migrate'} {home}: done")
