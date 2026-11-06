@@ -58,7 +58,7 @@ for path in paths:
 
 PY
 # A localized guide adds local facts only; the root charter stays the one place for shared rules.
-for guide in $(git -C "$ROOT" ls-files '*/AGENTS.md'); do
+for guide in $(git -C "$ROOT" ls-files --cached --others --exclude-standard '*/AGENTS.md'); do
   up=$(dirname "$guide" | sed -E 's|[^/]+|..|g')
   grep -Fq "($up/AGENTS.md)" "$ROOT/$guide" || fail "$guide does not link the root charter"
 done

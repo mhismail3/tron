@@ -40,11 +40,12 @@ Wire-traffic profiling and multi-session qualification:
 
 ## Hazards
 
-- **Host lock and isolation.** `scripts/tron test gateway` takes the host's full-Gateway lock for
-  lock suites and gives each run its own HOME and temporary roots
+- **Host lock and isolation.** `scripts/tron test gateway` takes the host's full-Gateway lock (unless
+  its caller already holds it) and gives each run its own HOME and temporary roots
   ([verify](../../tools/verify/README.md#gateway-test-isolation)); a bare `npx vitest run` has neither.
-- **Nested pass.** Files that spawn a real Gateway or nested Vitest run one at a time in the
-  nested pass ([test-support](test-support/README.md#contract)).
+- **Nested pass.** Files that run nested Vitest or real pi children, or activate the managed
+  pi-subagents install, run one at a time in the nested pass; `vitest.nested.config.ts` lists them
+  ([test-support](test-support/README.md#contract)).
 - **Debug Gateway only.** Agents run `scripts/tron dev` on port 9848; Stable, `~/.tron` and
   `com.tron.server` are the maintainer's ([charter](../../AGENTS.md#safety-boundaries)).
 - **Persisted bytes.** A change to stored JSON or JSONL bytes is a migration decision, not a
