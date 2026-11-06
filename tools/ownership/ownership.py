@@ -17,7 +17,7 @@ LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
 FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "riskClass", "layout",
-          "interfaces", "uses"}
+          "interfaces", "uses", "directories"}
 ROOT_MANIFEST = "root.module.json"
 EDGE_FIELDS = {"to", "kind", "via", "why"}
 FORBIDDEN = set("[]{}\\")
@@ -130,6 +130,28 @@ def module_id(manifest: str) -> str:
     parts = manifest.split("/")
     package = parts[1] if parts[0] == "packages" and len(parts) > 2 else "repo"
     return f"{package}/{parts[-1][:-len(SUFFIX)]}"
+
+
+def directory_modules(manifest: str, data: dict, problems: list[str]) -> dict[str, tuple[str, str, str]]:
+    """The whole-directory modules a manifest declares below its folder, as `"directories": {"<dir>":
+    {"name", "layer"}}`: each is the module a `<name>.module.json` of `{"layer", "owns": ["**"]}` in that
+    directory would be, without the file. Returns {key: (id, folder, layer)}; the key is `<manifest>#<dir>`."""
+    declared = data.get("directories", {})
+    if not isinstance(declared, dict):
+        problems.append("directories must be an object")
+        return {}
+    folder, found = str(PurePosixPath(manifest).parent), {}
+    for directory, entry in declared.items():
+        label = f"directories entry {json.dumps(directory)}"
+        if pattern_problem(directory) or set(directory) & set("*?"):
+            problems.append(f"{label} must be a relative directory path without wildcards")
+        elif not isinstance(entry, dict) or set(entry) != {"name", "layer"} or not isinstance(entry["name"], str) \
+                or not STEM.fullmatch(entry["name"]) or not one_of(entry["layer"], LAYERS):
+            problems.append(f"{label} must be {{\"name\": <lowercase-kebab>, \"layer\": L0..L5}}")
+        else:
+            path = directory if folder == "." else f"{folder}/{directory}"
+            found[f"{manifest}#{directory}"] = (module_id(f"{path}/{entry['name']}{SUFFIX}"), path, entry["layer"])
+    return found
 
 
 def folder_references(paths: list[str], read) -> set[str]:
@@ -246,6 +268,10 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
                 problems.append(f"owns entry {json.dumps(pattern)} {problem}")
             else:
                 patterns.append(pattern)
+        for key, (own_id, path, layer) in directory_modules(manifest, data, problems).items():
+            by_id.setdefault(own_id, []).append(key)
+            modules[key] = {"id": own_id, "folder": path, "data": {"layer": layer, "owns": ["**"]},
+                            "patterns": ["**"], "owned": []}
         errors.extend(f"{manifest}: {p}" for p in problems)
         modules[manifest] = {"id": module_id(manifest), "folder": folder, "data": data,
                              "patterns": patterns, "owned": []}
@@ -321,10 +347,11 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
         value = module["data"].get(key)
         return value if isinstance(value, list) else []
 
-    summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
+    summary = {m["id"]: {"manifest": k, "folder": m["folder"], "layer": m["data"].get("layer"), "owned": m["owned"],
                          "purpose": m["data"].get("purpose") if isinstance(m["data"].get("purpose"), str) else "",
                          "verify": [c for c in listed(m, "verify") if isinstance(c, str)],
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
+                         "riskClass": [r for r in listed(m, "riskClass") if isinstance(r, str)],
                          "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")
                                             if isinstance(e, dict) and isinstance(e.get("to"), str)]}
                for k, m in modules.items()}
@@ -332,7 +359,7 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
 
 
 USAGE = """usage: scripts/tron ownership [<rev>] [--modules | --ledger] | --card <module-id|path> [<rev>]
-Checks every tracked path has exactly one <name>.module.json owner, and the layout root.module.json
+Checks every tracked path has exactly one module owner (tools/ownership/README.md), and the layout root.module.json
 declares, with each module's purpose card (tools/ownership/README.md). --ledger prints path, module, layer
 and purpose per tracked path; --card prints one module's purpose, inbound and outbound edges and guardians.
 Without <rev>: the index's paths with working-tree contents. Exit 0 clean, 1 violations, 2 usage/Git."""
@@ -347,7 +374,7 @@ def show_card(target: str, rev: str | None) -> int:
     modules = {}
     for key, module in result["modules"].items():
         try:
-            data = json.loads(read(module["manifest"]))
+            data = json.loads(read(module["manifest"])) if "#" not in module["manifest"] else {}
         except (OSError, ValueError):
             data = {}
         modules[module["manifest"]] = {"id": key, "data": data if isinstance(data, dict) else {}, "owned": module["owned"]}

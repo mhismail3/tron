@@ -84,7 +84,7 @@ validated only by `ownership.py` and set by no manifest; its own slice removes i
 
 | Guarantee | Smallest thing that keeps it |
 |---|---|
-| Every tracked file has exactly one owner | A module root and its exceptions. A directory without its own manifest belongs to its nearest ancestor's module, which removes the 35 trivial files. Explicit lists stay only where a directory is split. |
+| Every tracked file has exactly one owner | A module root and its exceptions. A whole-directory module with only a layer is declared by its package manifest's `directories` entry instead of its own file, which removes the 35 trivial files and keeps every module id, layer and owner (folding them into the ancestor's module would merge layers). Explicit lists stay only where a directory is split. |
 | Layer direction (Gateway, iOS) | `dependsOn` at module level. It is already the Gateway's declared edge, and `layers` derives the actual edges from the compiler and the Xcode index. |
 | An agent knows what a module is for, who uses it and what breaks | A one-line `purpose`; dependents derived and printed by `scripts/tron ownership --card`; declared edges at module level; per-file interfaces only for entry points outsiders run (CLI, launchd, env, wire). |
 | Test selection widening | Unchanged: `riskClass` and the L0–L2 rule. |
