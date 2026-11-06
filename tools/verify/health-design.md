@@ -24,7 +24,7 @@ remain unavailable. The following existing `fields` are supporting diagnostics.
 |---|---|---|
 | Approval → main | UTC landed timestamp minus explicit intent approval; retain work-start and affected-verdict timestamps. Report median/p90 and execution versus approval/resource/coordination waiting. | Commit author time is not approval or server push time. Missing endpoints mean unavailable; do not guess waiting from chat gaps. |
 | Deploy lag | Main SHA versus installed Mac **and** iPhone source/build/protocol identities, plus age since that main integration. | One missing identity means partial, not zero lag. SHA ancestry is required; build-number subtraction is meaningless. |
-| Main reds | Distinct exact case+signature failures on pinned main, duration first-failure→fix, first-failure→named owner. Separate new reds and harness errors. | Missing lanes remain unavailable. Ownership within one hour is an operational objective, not an auto-revert timer. |
+| Main reds | Distinct exact case+signature failures on pinned main, duration first-failure→fix, first-failure→named owner. Harness errors are counted apart. | Missing lanes remain unavailable. Ownership within one hour is an operational objective, not an auto-revert timer. |
 | Flake rate | Same exact SHA/config/case with both pass and fail ÷ cases with comparable repeated attempts; also show failing-attempt/total-attempt counts. | First failures retained. Different signatures/configs never merge. One attempt gives unknown, not 0%. No retry-to-green. |
 | Resumes/task | Admitted resumed operations ÷ complete root lineages in the window; report median/p90 and denominator. | Use `home.taskHistory` admitted operations, not copied snapshots, task-name suffix guesses or refused admissions. `complete:false` is partial. |
 
@@ -38,20 +38,20 @@ Keep sample count, environment, source SHA and coverage beside every measurement
 `scripts/tron health` reads the locally pinned `origin/main` SHA's existing verify
 report, never runs suites, fetches, deploys or opens sessions. `--sha <main-sha>` pins
 another first-parent main commit. Repeat `--verify-report <json>` for retained attempts
-(including batch-owned `lane-*/verify.json`); the verifier's attempt ID deduplicates copies.
+(including batch-owned `lane-*/verify.json`). Attempt IDs deduplicate copies for flake rate
+and test minutes; verifier outcomes and harness errors count every exact-SHA report given.
 `landedChanges` inspects at most 20 first-parent commits and 1,000 local remote-main
 reflog entries. A successful `update by push` observation plus its preceding ancestor
 tip identifies introduced commits (at most 1,000) and earliest Git author time.
 Their difference is **partial commit→publication-observation time**, not an exact
 request/server-land metric; fetch/reflog absence, invalid clocks or missing ancestry
 stay unavailable. Completed retained verifier test-step seconds become partial test
-minutes per publication; attempt IDs deduplicate copies. Overwritten attempts, direct
+minutes per publication. Overwritten attempts, direct
 suite logs and unjoined lanes are not inferred. `--all` means locks, not all Gateway tests.
 It emits JSON and atomically retains `test-results/health/aggregate-<run>.json`.
 SIGINT or SIGTERM keeps an `interrupted` aggregate with the partial collection (exit 130, not a
 pass); it stops only its own batch-owned child group, never foreign work.
 Unavailable measurements are null, not zero; denominators and partial coverage remain visible.
-Registry-expired/invalid invocations retain failed source reports; `--plan` stays read-only.
 Case digests and config/attempt identities come from the executed verifier, not inferred test names.
 
 Optional `--owner-summary <json>` reads an explicit `system.logs` aggregate export
@@ -62,7 +62,8 @@ counts, status (`ok`, `error`, `refused`, `unknown`) and latency bucket (`lt100m
 arguments. This bounded tail is **partial**, not a complete
 30-day census. Root hashes deduplicate history pages; incomplete roots are excluded.
 `--mac-identity <json>` reads the selected payload manifest identified by `mac verify`;
-`--iphone-identity <json>` reads existing iPhone log-capture metadata. The script does not
+`--iphone-identity <json>` reads a JSON object with `appSourceRevision`, `appBuildIdentity` and
+`protocolVersion`; no app owner writes that file yet. The script does not
 verify installation itself; missing protocol/source/build evidence remains partial.
 Approval/server-landed timestamps remain unavailable pending the settings owner seam.
 `--cleanup` deletes only this schema's expired aggregates in this directory (30 days);
@@ -129,10 +130,10 @@ scripts/tron mac verify
 The profiler builds/starts its own faux-model fixture; do not run it during a
 no-build/no-restart design task. Its request latency is NOT Home round-trip or
 Gateway cold-start latency. See [profile ownership](../../scripts/tron-profile-gateway.md).
-There is no existing single CLI for end-to-end Home latency, cold-start timing,
-installed iPhone identity, approval timestamps or a complete seven-day flake ledger.
-Do not invent commands or infer those values from a fast status RPC. The proposed
-collection is undecided and not implemented.
+Home response timing reaches health only as approved owner-summary scalars (#2135). There is
+no existing CLI for cold-start timing, installed iPhone identity, approval timestamps or a
+complete seven-day flake ledger; their collection is undecided and not implemented. Do not
+invent commands or infer those values from a fast status RPC.
 
 ## One owner, reuse first
 
@@ -147,6 +148,6 @@ Runtime gaps belong to existing owners: `repo/profile` for fixture spawn→verif
 ready monotonic timing; `gateway/home` for accepted maintainer input→first visible
 response and terminal outcome (separate queue/model/tool durations); `gateway/delegation`
 for complete admitted lineage counts; existing Mac/iOS identity projections for
-installed cohort. Never open live canonical sessions in a second client. Proposed
-Home/usage collection exports only approved scalars through the existing logger;
+installed cohort. Never open live canonical sessions in a second client. Home response
+timing and capability usage are exported as approved scalars through the existing logger (#2135);
 health reads an explicit aggregate export, never private stores or canonical sessions.

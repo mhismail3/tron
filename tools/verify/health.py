@@ -333,7 +333,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument('--sha', default='origin/main', help='pinned main commit (default: local origin/main; no fetch)')
     parser.add_argument('--verify-report', type=Path, action='append', default=[], help='retained exact-SHA verifier report; repeat for attempts')
     parser.add_argument('--mac-identity', type=Path, help='selected payload manifest identified by scripts/tron mac verify')
-    parser.add_argument('--iphone-identity', type=Path, help='existing iPhone GatewayLogCaptureMetadata export')
+    parser.add_argument('--iphone-identity', type=Path, help='JSON with appSourceRevision, appBuildIdentity and protocolVersion (no app owner writes it yet)')
     parser.add_argument('--owner-summary', type=Path, help='explicit aggregate records exported by source owners through system.logs')
     parser.add_argument('--cleanup', action='store_true', help='remove only expired health aggregates before reporting')
     args = parser.parse_args(argv)
