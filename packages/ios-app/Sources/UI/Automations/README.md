@@ -18,13 +18,22 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
   presenter.
 - **Automations sheet.** Medium and large detents; every identity-qualified, connected Gateway
-  advertising `automations.v2` contributes rows (others are absent, never a warning). Rows draw
-  through the dashboard's shared `DashboardListRow` (action icon, name, schedule · server, trailing
-  state or last run). Toolbar New Automation; a floating Filter opens the filter sheet, which owns
+  advertising `automations.v2` contributes rows (others are absent, never a warning). Active
+  Automations list first, then paused, drafts and finished ones (attention, running, next
+  occurrence, name, ID within each group). `AutomationInventory` projects every row's strings once
+  per catalog or filter change; an equatable lazy list draws them as shared `TronListRow` feed cards
+  (action icon, name with one status pill, cadence, Gateway tag, last run). Toolbar New Automation; a floating Filter opens the filter sheet, which owns
   status, action and Gateway choices, persisted with the shell's preferences by
   `AutomationDashboardPreferencesOwner`. No search. Opening a session from an Automation, or a push
   route, dismisses the sheet first. No pull-to-refresh: `automation.changed` drives refresh while
   presented.
+- **Styling.** Automations follow the user's primary theme; only attention and failure read
+  red and success green. Detail and run detail open with a header card (name, status pill,
+  context) and read their facts as titled settings groups of title-over-value rows, named as
+  the editor's sections are (Basics, Action, Target, Schedule, Behavior); controls are standard
+  action rows with Delete last and red. The editor uses the same rows, with text entries under
+  their row title. Its sections are not lazy: scrolling a lazy stack of these mixed-height
+  editor cards looped layout on the main thread.
 - **Expiry.** Every automation may have an expiry, displayed in detail. Expired
   automations remain visible but cannot run or enable. Home uses the normal inventory
   and editor; there are no monitor-specific restrictions or controls.
@@ -44,8 +53,8 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
 - **Mutations.** Command IDs through the focused profile's `ConfirmedMutationExecutor`; a background
   Gateway stays read-only until **Use This Gateway**. Run now, enable, cancel, delete and
   uncertain-outcome resolution require confirmation and keep revision fences.
-- **Prompt provenance.** A canonical Automation prompt renders in the Automation-accent container
-  only with the complete Gateway-authored invocation tuple (`automation:<run UUID>`); partial
+- **Prompt provenance.** A canonical Automation prompt renders in the prompt container under an
+  Automation label only with the complete Gateway-authored invocation tuple (`automation:<run UUID>`); partial
   provenance fails closed to the ordinary prompt. Receipt-attributed Home trigger messages
   reuse the inbound context chip as **Automation · name**, opening the full request and
   technical details. They never render as maintainer prompts or approval outcomes.
@@ -72,11 +81,15 @@ None of its own; catalog reads report through the State owners.
 scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronAccessibilityUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
+  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsListActiveBeforePaused \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
   --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates
 ```
 
 `TronAccessibilityUITests` drives the real dashboard destinations and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
+Explicit, non-gating: `TronAutomationsVisualUITests` captures list, detail, run detail and editor
+in light, dark and XXXL for design review; `TronAutomationsListPerformanceUITests` measures app
+CPU and memory while flinging through 400 Automations (`-automation-large`).
 
 ## Not here
 
