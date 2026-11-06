@@ -78,6 +78,7 @@ class CheckpointPlan(unittest.TestCase):
                                  'printf "%s\\n" "${ui_owned_journeys[@]}"', "owned", str(harness)],
                                 capture_output=True, text=True, check=True).stdout.split()
         self.assertGreater(len(listed), 10, f"no ui_owned_journeys list read from {harness}")
+        self.assertTrue(checkpoint.OUTCOMES, "the checkpoint names no outcomes")
         for _name, journeys, gateway_tests in checkpoint.OUTCOMES:
             for journey in journeys:
                 with self.subTest(journey=journey):
