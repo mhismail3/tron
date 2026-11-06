@@ -7,7 +7,7 @@ export const CORPUS_EPOCH = Date.parse("2026-01-01T00:00:00.000Z");
 
 /**
  * Run a corpus recording under a fixed clock and a counted `randomUUID`, so recording
- * the same store twice writes the same bytes (restructure plan §6.5, V4). Owners keep
+ * the same store twice writes the same bytes (packages/gateway/docs/scenario-locks.md#persisted-stores-v4). Owners keep
  * their production id and clock sources: the test replaces the process's `Date` and
  * `crypto.randomUUID` for the recording only. `syncBuiltinESMExports` carries the
  * replacement to every module's named `randomUUID` import, including the Pi SDK's
