@@ -84,7 +84,7 @@ validated only by `ownership.py` and set by no manifest; its own slice removes i
 
 | Guarantee | Smallest thing that keeps it |
 |---|---|
-| Every tracked file has exactly one owner | A module root and its exceptions. A directory without its own manifest belongs to its nearest ancestor's module, which removes the 35 trivial files. Explicit lists stay only where a directory is split. |
+| Every tracked file has exactly one owner | A module root and its exceptions. A whole-directory module with only a layer is declared by its package manifest's `directories` entry instead of its own file, which removes the 35 trivial files and keeps every module id, layer and owner (folding them into the ancestor's module would merge layers). Explicit lists stay only where a directory is split. |
 | Layer direction (Gateway, iOS) | `dependsOn` at module level. It is already the Gateway's declared edge, and `layers` derives the actual edges from the compiler and the Xcode index. |
 | An agent knows what a module is for, who uses it and what breaks | A one-line `purpose`; dependents derived and printed by `scripts/tron ownership --card`; declared edges at module level; per-file interfaces only for entry points outsiders run (CLI, launchd, env, wire). |
 | Test selection widening | Unchanged: `riskClass` and the L0–L2 rule. |
@@ -262,6 +262,7 @@ Candidates:
 | Versioning | `VERSION.env` → `scripts/version/tron-version sync` writes every mirror; `check` and its test guard them | Keep |
 | Data directories (`~/.tron`, `~/.tron-dev`, `~/Library/Developer/Tron`) | Owned by the Gateway, `tron-dev` and the iOS lane respectively | Keep. Path literals in scripts consolidate with the ports work (#2296 item 18). |
 | Hygiene | Weekly `tidy --prune` automation exists (a168d0f1) | Keep |
+| Gateway test scratch | Leaked `/tmp/tron-gateway-tests-*` roots came from stop paths that sent SIGKILL. Measured with the runner: a group SIGTERM at 1, 8 and 20 s into a run removed its root within 0.06 s; only SIGKILL left one. | Every stop path sends SIGTERM first; no reaper. An outside SIGKILL, or a Vitest still tearing down when the grace ends, can still leave one root. |
 | Residue | Agents run `scripts/tron tidy --here` before reporting; verify refuses untracked files and ignored files with no named writer | Keep |
 | Backlog | 78 open issues: 39 bugs, 17 tooling | Not in scope here |
 | Verify speed | Test lanes dominate; static steps take seconds (`test-results/verify/<sha>.json`). | Keep selection; no new gate |
@@ -298,5 +299,5 @@ Each slice is small and reversible, and lands with its own evidence.
 | 7 | Gateway RPC switch to module handlers, one method family per slice | RPC tests plus the duplicate-route guard |
 | 8 | After W1: error codes on request paths | Wire golden updated per path with reviewer ACCEPT; iOS handling checked |
 | 9 | After M1: trivial manifests and card simplification | Byte-identical ledger |
-| 10 | After M2: localized `AGENTS.md`, folding READMEs | Link and budget checks |
+| 10 | After M2: localized `AGENTS.md`, folding READMEs, one package per slice. Gateway done: its guide points to `scripts/tron docs modules` rather than inlining the 44-line generated map, and folds only `gateway/platform`, since the other five READMEs under 40 lines (receipts, automations-contract, session, runtime, projection) would take it past 150 lines; they stay. Mac, push relay and `scripts/` follow; iOS waits for #2285. | Link and budget checks |
 | 11 | After #2285 and #2282: #2296 Phase B, iOS duplicates, then the largest files by owner | Each with its lane |

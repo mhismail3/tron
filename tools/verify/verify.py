@@ -359,7 +359,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                 if module is None:
                     full_reasons.append(f"deleted module {key}")
                     continue
-                risk = json.loads((ROOT / module["manifest"]).read_text()).get("riskClass", [])
+                risk = module["riskClass"]
                 if module["layer"] in WIDENING_LAYERS or key in WIDENING_MODULES or set(risk) - {"ios-ui"}:
                     full_reasons.append(f"{key} ({module['layer']})" + (f" risk={','.join(risk)}" if risk else ""))
             full_reasons += [f"unowned {path}" for path in unowned]

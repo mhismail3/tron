@@ -143,7 +143,7 @@ owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the 
   (verify already refuses untracked and unnamed ignored files). Remove a tool with its tests, card entry and `scripts/tron` arm.
 
 ## Documentation
-- Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,
+- Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, `packages/gateway/README.md` (local lanes and hazards in its `AGENTS.md`), `packages/ios-app/docs/`, `packages/mac-app/docs/`,
   repo runbooks `docs/development.md` and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
 - If docs and code disagree, follow existing code conventions and report each inconsistency.
 - Docs state current behavior: no history, evidence or audit ledgers; indexes are generated; this charter ≤ 150 lines, other docs ≤ 2× budget.

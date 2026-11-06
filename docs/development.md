@@ -4,7 +4,7 @@ Repository-wide development runbooks: the privacy guard, the pinned toolchain,
 the isolated Debug Gateway lifecycle, the development Mac's fseventsd guard, and versions
 and releases. The rules that
 bind every change are in the [charter](../AGENTS.md); package runbooks live with
-their packages ([Gateway](../packages/gateway/README.md#development),
+their packages ([Gateway](../packages/gateway/AGENTS.md#test-lanes),
 [iOS](../packages/ios-app/docs/development.md),
 [Mac](../packages/mac-app/docs/development.md)).
 
@@ -242,7 +242,7 @@ The [metric definitions](../tools/metrics/README.md) own classification.
 ## Module ownership
 
 Every tracked file has exactly one owner, declared by a co-located
-`<name>.module.json` manifest. `scripts/tron ownership` reports unowned or doubly
+`<name>.module.json` manifest or, for a whole directory, an ancestor's `directories` entry. `scripts/tron ownership` reports unowned or doubly
 owned paths and malformed manifests; it never gates. A new or moved file needs
 its manifest updated in the same change. [Ownership rules](../tools/ownership/README.md).
 

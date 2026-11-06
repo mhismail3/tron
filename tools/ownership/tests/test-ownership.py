@@ -14,7 +14,10 @@ fixture manifests and files, and runs the command as a worker would:
    names, duplicate ids and dangling references are each reported.
 4. Placement: a manifest inside an XcodeGen folder reference or inside a
    SwiftPM package's sources is refused.
-5. Discovery is Git-tracked only: untracked manifests and build output are
+5. A manifest's `directories` entry is the module a trivial `{layer, owns: ["**"]}`
+   manifest in that directory was: the same ledger without the file; malformed or
+   colliding entries are reported.
+6. Discovery is Git-tracked only: untracked manifests and build output are
    ignored; `<rev>` reads one commit; bad usage or revisions exit 2.
 
 The last run's output is kept in `test-results/ownership-cli/` for review.
@@ -134,6 +137,28 @@ class ValidLayoutTests(OwnershipCase):
         self.assertEqual(result.stdout.splitlines()[-1],
                          "ownership: 7 modules, 19 tracked paths, every path owned exactly once")
 
+    def test_a_declared_directory_is_the_module_its_trivial_manifest_was(self) -> None:
+        r = self.repo
+        shutil.copy2(ROOT / "tools/ownership/layout.py", r.path / "tools/ownership/layout.py")  # --ledger reads purposes
+        for path in ("packages/gw/src/util/a.ts", "packages/gw/src/util/deep/b.ts", "README.md"):
+            r.write(path)
+        r.manifest("root.module.json", {"layer": "L5", "owns": ["README.md", "root.module.json"]})
+        r.manifest("packages/gw/src/util/util.module.json", {"layer": "L0", "owns": ["**"]})
+        r.track()
+        with_file = r.run("--ledger")
+        self.assertEqual(with_file.returncode, 0, with_file.stdout + with_file.stderr)
+        r.git("rm", "-qf", "packages/gw/src/util/util.module.json")
+        r.manifest("root.module.json", {"layer": "L5", "owns": ["README.md", "root.module.json"],
+                                        "directories": {"packages/gw/src/util": {"name": "util", "layer": "L0"}}})
+        r.track()
+        declared = r.run("--ledger")
+        self.assertEqual(declared.returncode, 0, declared.stdout + declared.stderr)
+        self.assertEqual(declared.stdout, "".join(line for line in with_file.stdout.splitlines(keepends=True)
+                                                  if not line.startswith("packages/gw/src/util/util.module.json")))
+        rows = {line.split("\t")[0]: line.split("\t")[1:] for line in r.run("--modules").stdout.splitlines()[:-1]}
+        self.assertEqual(rows["gw/util"], ["L0", "2", "root.module.json#packages/gw/src/util"])
+
+
 
 class CoverageTests(OwnershipCase):
     def test_unowned_double_stale_and_self_ownership_are_reported(self) -> None:
@@ -211,6 +236,23 @@ class SchemaTests(OwnershipCase):
             m + "layer must be one of L0..L5",
             m + "owns entry 3 must be a non-empty string",
             m + "riskClass ['kernel'] must be one of contracts, ios-ui, kernel, lifecycle, mac-installer, persistence, security",
+        ])
+
+    def test_malformed_or_colliding_directories_are_reported(self) -> None:
+        r = self.repo
+        r.write("a/x.ts")
+        r.write("b/y.ts")
+        r.manifest("a/a.module.json", {"layer": "L3", "owns": ["**"]})
+        r.manifest("root.module.json", {"layer": "L5", "owns": ["root.module.json"], "directories": {
+            "a": {"name": "other", "layer": "L1"}, "b": {"name": "a", "layer": "L1"},
+            "c/*": {"name": "c", "layer": "L1"}, "d": {"name": "D", "layer": "L1"}, "e": {"name": "e"}}})
+        self.assertReported([
+            'duplicate module id repo/a: a/a.module.json, root.module.json#b',
+            'owned more than once: a/a.module.json (a/a.module.json "**"; root.module.json#a "**")',
+            'owned more than once: a/x.ts (a/a.module.json "**"; root.module.json#a "**")',
+            'root.module.json: directories entry "c/*" must be a relative directory path without wildcards',
+            'root.module.json: directories entry "d" must be {"name": <lowercase-kebab>, "layer": L0..L5}',
+            'root.module.json: directories entry "e" must be {"name": <lowercase-kebab>, "layer": L0..L5}',
         ])
 
     def test_duplicate_ids_and_dangling_references_are_reported(self) -> None:

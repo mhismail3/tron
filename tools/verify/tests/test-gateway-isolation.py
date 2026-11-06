@@ -3,8 +3,11 @@
 from pathlib import Path
 import importlib.util
 import os
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -71,6 +74,39 @@ test('HOME resolution and filesystem writes stay outside caller HOME',()=>{
                                             "applies a reversible routine edit"])
             self.assertEqual(result.returncode, 0, result.stdout[-5000:])
             self.assertFalse((root / "caller-home/.tron").exists())
+
+
+class GatewayTestScratchCleanup(unittest.TestCase):
+    def test_a_group_sigterm_mid_run_removes_the_scratch_root(self) -> None:
+        """What verify, batch, probe and mutate send first: the root goes, so nothing needs a reaper."""
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            verify = base / "tools/verify"
+            verify.mkdir(parents=True)
+            (verify / "gateway.py").write_text((ROOT / "tools/verify/gateway.py").read_text())
+            lock = (ROOT / "tools/verify/host_lock.py").read_text()
+            self.assertIn("'/tmp/tron-full-gateway.lock'", lock)
+            (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
+            node = base / "scripts/tron-node"  # a stand-in Node, then a Vitest that records HOME and waits
+            node.parent.mkdir()
+            node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+            vitest = base / "packages/gateway/node_modules/.bin/vitest"
+            vitest.parent.mkdir(parents=True)
+            vitest.write_text(f'#!/bin/bash\necho "$HOME" > {base}/home\nsleep 60 & wait\n')
+            for script in (node, vitest):
+                script.chmod(0o755)
+            env = {key: value for key, value in os.environ.items() if key != GATEWAY.HELD_BY_CALLER}
+            runner = subprocess.Popen([sys.executable, str(verify / "gateway.py"), "x.test.ts"], env=env,
+                                      stderr=subprocess.DEVNULL, start_new_session=True)
+            deadline = time.monotonic() + 30
+            while not (base / "home").exists() or not (base / "home").read_text().strip():
+                self.assertLess(time.monotonic(), deadline, "the runner never started Vitest")
+                time.sleep(0.05)
+            root = Path((base / "home").read_text().strip()).parent
+            self.assertTrue(root.name.startswith("tron-gateway-tests-") and root.is_dir(), root)
+            os.killpg(runner.pid, signal.SIGTERM)
+            runner.wait(timeout=30)
+            self.assertFalse(root.exists(), "a SIGTERMed run left its scratch root")
 
 
 if __name__ == "__main__":

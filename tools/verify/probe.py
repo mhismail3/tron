@@ -138,13 +138,29 @@ def remove_tree(path: Path) -> None:
         print(f"probe: could not remove {path}; remove it by hand", file=sys.stderr)
 
 
+GRACE = 30  # seconds a stopped test's runner gets to remove what it made (tools/verify/gateway.py)
+
+
+def signal_group(process: subprocess.Popen, signum: int) -> None:
+    try:
+        os.killpg(process.pid, signum)
+    except OSError:  # gone already; macOS reports a reaped group as EPERM
+        pass
+
+
 def stop_running() -> None:
+    """SIGTERM every running test's group, so its runner cleans up, then SIGKILL what outlives GRACE.
+    Each test's worker thread reaps its own process; this only watches for that."""
     STOPPING.set()
-    for process in list(RUNNING):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except OSError:  # gone already; macOS reports a reaped group as EPERM
-            pass
+    running = list(RUNNING)
+    for process in running:
+        signal_group(process, signal.SIGTERM)
+    deadline = time.monotonic() + GRACE
+    while any(process.returncode is None for process in running) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    for process in running:
+        if process.returncode is None:
+            signal_group(process, signal.SIGKILL)
 
 
 def checkout(commit: str, dependencies: Path | None) -> Path:
@@ -206,20 +222,23 @@ def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Pa
                 output, code = f"probe: cannot start {' '.join(argv)} in {cwd}: {error}", 127
             else:
                 RUNNING.add(process)
+                if STOPPING.is_set():  # started after stop_running signaled the others
+                    signal_group(process, signal.SIGTERM)
                 try:
                     output, _ = process.communicate(timeout=timeout)
                     code = process.returncode
                 except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    output, _ = process.communicate()
+                    signal_group(process, signal.SIGTERM)
+                    try:
+                        output, _ = process.communicate(timeout=GRACE)
+                    except subprocess.TimeoutExpired:
+                        signal_group(process, signal.SIGKILL)
+                        output, _ = process.communicate()
                     output, code = f"{output}\nprobe: timed out after {timeout}s", 124
         finally:
             if process is not None:
                 RUNNING.discard(process)
-                try:  # a test's own descendants belong to its group, also after a clean exit
-                    os.killpg(process.pid, signal.SIGKILL)
-                except OSError:  # gone already; macOS reports a reaped group as EPERM
-                    pass
+                signal_group(process, signal.SIGKILL)  # its descendants, which outlive their runner's cleanup
             if private is not None:
                 remove_tree(private)
             if scratch is not None:
@@ -248,6 +267,16 @@ def drop_owns(scratch: Path, manifests: list[str], files: list[str], renamed: di
               removed_modules: set[str]) -> None:
     """Keep each manifest true to the tree: an exact owns entry follows its file, a deleted file loses it."""
     for manifest in manifests:
+        if "#" in manifest:  # a directory module: its declaration goes once nothing is left under it
+            host, directory = manifest.split("#", 1)
+            folder = str(Path(host).parent)
+            if not (scratch / ("" if folder == "." else folder) / directory).exists():
+                data = json.loads((scratch / host).read_text())
+                del data["directories"][directory]
+                if not data["directories"]:
+                    del data["directories"]
+                (scratch / host).write_text(json.dumps(data, indent=2) + "\n")
+            continue
         path = scratch / manifest
         if not path.exists():
             continue

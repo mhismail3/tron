@@ -44,10 +44,10 @@ Both `scripts/tron test gateway` and verify's Gateway Vitest groups use
 one test process its own temporary HOME, TMPDIR, Tron data directory and agent
 resource directory, under `/tmp` rather than the caller's TMPDIR, so fixture and socket path
 lengths do not depend on who runs the suite. It waits for Vitest before removing those directories, also
-forwarding cancellation to the owned child. A run that was killed outright cannot clean up, so each
-run first removes each of this user's `/tmp/tron-gateway-tests-*` roots whose `owner.lock` no live
-run holds (the runner and its Vitest child hold it). A root without that file is left alone: an older
-runner's, or one whose runner died before creating it. It never installs this checkout's missing packages.
+forwarding cancellation to the owned child. Every tool that stops it (verify, batch, probe, mutate) sends
+SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so a root is left behind
+only by an outside SIGKILL or by a Vitest still tearing down when the grace ends.
+It never installs this checkout's missing packages.
 One test fixture is the exception: when the selection can include
 `browser-fork-receipts.integration.test.ts` (the default config with no file filter, or one it
 matches), the runner hands Vitest `TRON_P99_17_BROWSER_FORK_COPY`, a checkout of the
@@ -273,7 +273,8 @@ Runners verify drives in their own lanes (iOS, Mac, push relay) are listed, not 
 
 The static `scripts/tron ownership` findings the change adds (a half-done move, a stale card)
 are reported beside the verdict. It measures and never gates; `test-results/probe/<sha>/<unit>/`
-keeps `report.json` and each test's baseline and after logs, and the worktree is always removed.
+keeps `report.json` and each test's baseline and after logs, and the worktree is always removed. A test
+that times out, or runs when the probe is stopped, gets SIGTERM and a 30 s grace to clean up before SIGKILL.
 
 ## Verify
 
