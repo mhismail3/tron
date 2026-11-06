@@ -159,6 +159,9 @@ describe("Home task authorization RPC", () => {
     // own text stays in local diagnostics.
     expect(failure).toEqual({ code: "conflict", message: "Home task permissions refused", retryable: false, details: { reason: "not-initialized" } });
     expect(JSON.stringify(failure)).not.toContain("namespace");
+    // A read like the task list: still answered, not refused busy, once the Gateway drains.
+    f.registry.beginAdministrativeDrain();
+    expect(publicError(await service.invoke(client, "home.taskPermissions", {}).then(() => undefined, error => error))).toEqual(failure);
     evidence.push({ case: "rpc-uninitialized-permissions-typed", failure });
   });
   it("reports no reconfirmation for an active valid scope without changing authority", async () => {
@@ -202,6 +205,10 @@ describe("Home task authorization RPC", () => {
     expect(JSON.parse(card!.review!.items[0]!.exact!)).toEqual({ requestId: modelRequest.id, intentDigest: modelTask.intentDigest });
     expect((await list()).grants).toEqual([]);
     expect(await refused(f, "model-grant-retry", modelTask.intent.text)).toBe(modelRequest.id);
+    // The same permissions are still answered once the Gateway drains.
+    const current = await list();
+    f.registry.beginAdministrativeDrain();
+    expect(await list()).toEqual(current);
     evidence.push({ case: "rpc-scope-revocation", requestId, permissions, modelRefusal, modelRequest });
   });
   it("approves an exact one-use grant on Home's card, runs it once and refuses mismatches and reuse without another card", async () => {
