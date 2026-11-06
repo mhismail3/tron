@@ -1,13 +1,13 @@
 # Lightweight health reporting
 
 [P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship) owns red/green policy:
-legacy verifier verdicts below are diagnostics, never permission for exemptions or qualified green.
+legacy verifier verdicts are diagnostics, never permission for exemptions or qualified green.
 
 The implemented scope is the on-demand `scripts/tron health` scorecard and approved
 content-free Home response/capability completion diagnostics (#2135). Approval timestamp
 recording awaits the settings owner. Scheduling/time remains undecided: no nightly
-batch, dependency report or weekly digest is implemented. The future-output table below
-is design context, not enabled jobs or authority to run them. Use outcomes to test whether deletion reduces waiting at equal/lower regression
+batch, dependency report or weekly digest is implemented, and none runs without separate
+authorization. Use outcomes to test whether deletion reduces waiting at equal/lower regression
 rate. LOC is diagnostic trailing evidence, never a quota or acceptance threshold.
 
 ## Goal outcomes first
@@ -48,13 +48,18 @@ stay unavailable. Completed retained verifier test-step seconds become partial t
 minutes per publication; attempt IDs deduplicate copies. Overwritten attempts, direct
 suite logs and unjoined lanes are not inferred. `--all` means locks, not all Gateway tests.
 It emits JSON and atomically retains `test-results/health/aggregate-<run>.json`.
+SIGINT or SIGTERM keeps an `interrupted` aggregate with the partial collection (exit 130, not a
+pass); it stops only its own batch-owned child group, never foreign work.
 Unavailable measurements are null, not zero; denominators and partial coverage remain visible.
 Registry-expired/invalid invocations retain failed source reports; `--plan` stays read-only.
 Case digests and config/attempt identities come from the executed verifier, not inferred test names.
 
 Optional `--owner-summary <json>` reads an explicit `system.logs` aggregate export
 (`records`): `home.response-timing`, `home.task.history-summary`, `capability.usage`.
-Only approved scalars/names survive. This bounded tail is **partial**, not a complete
+Only approved scalars and names survive. For `capability.usage` that means the capability name,
+counts, status (`ok`, `error`, `refused`, `unknown`) and latency bucket (`lt100ms`, `lt1s`, `lt10s`,
+`gte10s`, `unknown`). It never keeps queries, bodies, file paths, prompts, credentials or raw tool
+arguments. This bounded tail is **partial**, not a complete
 30-day census. Root hashes deduplicate history pages; incomplete roots are excluded.
 `--mac-identity <json>` reads the selected payload manifest identified by `mac verify`;
 `--iphone-identity <json>` reads existing iPhone log-capture metadata. The script does not
@@ -126,8 +131,8 @@ no-build/no-restart design task. Its request latency is NOT Home round-trip or
 Gateway cold-start latency. See [profile ownership](../../scripts/tron-profile-gateway.md).
 There is no existing single CLI for end-to-end Home latency, cold-start timing,
 installed iPhone identity, approval timestamps or a complete seven-day flake ledger.
-Do not invent commands or infer those values from a fast status RPC. Proposed
-collection below must expose missing data before any implementation is accepted.
+Do not invent commands or infer those values from a fast status RPC. The proposed
+collection is undecided and not implemented.
 
 ## One owner, reuse first
 
@@ -138,15 +143,6 @@ new database, queue, model judge or parallel runner. Its command is wired in
 `tools/verify/batch.py` remains the sole owner of batch children/cancellation/logs
 and last-green state. Do not duplicate its process manager or cleanup journal.
 
-| North Star output | Trigger / input / owner / output |
-|---|---|
-| Automatic evals | After an explicitly requested batch, reuse its case outcomes and manifests; health script emits a scorecard, never merges or deploys. No model grading. |
-| Nightly Mac coverage | A single Mac script invocation of existing batch; only after approval of scheduler/time. Reuse pinned range, cancellation and immutable batch directories. Existing physical leases: up to three host slots, one job/worktree; no extra global suite queue. Busy/incomplete is reported, never a pass. |
-| SDK/dependency freshness | Read exact pins/lockfiles and npm metadata through existing updater owners; nightly report-only changelog diff. Separate per-version bump uses Pi seam oracles and the decided patch/minor versus major policy; never update a running Gateway. |
-| Per-decision scorecard | Health script joins explicit approved-intent/landed timestamps with verify and installed identity evidence; source owners export aggregates, not raw sessions. |
-| Seven-day digest | Same script summarizes bounded seven-day run records once per week. One local Markdown file, no automatic external send, issue creation or Home mutation. |
-| Capability usage | Capability names, counts, status and latency buckets only; source owners aggregate at actual completion, including refused/error/unknown. No queries, bodies, file paths, prompts, credentials or raw tool arguments. |
-
 Runtime gaps belong to existing owners: `repo/profile` for fixture spawn→verified
 ready monotonic timing; `gateway/home` for accepted maintainer input→first visible
 response and terminal outcome (separate queue/model/tool durations); `gateway/delegation`
@@ -154,42 +150,3 @@ for complete admitted lineage counts; existing Mac/iOS identity projections for
 installed cohort. Never open live canonical sessions in a second client. Proposed
 Home/usage collection exports only approved scalars through the existing logger;
 health reads an explicit aggregate export, never private stores or canonical sessions.
-
-Proposed local records: SHA/range, run ID, command/config digest, start/end/status,
-coverage, scalar samples and source artifact references. Result path stays under
-existing batch run directories; standalone local summaries under `test-results/health/`.
-One invocation owns its temp output and atomic rename; SIGINT/SIGTERM joins its own
-child and keeps an interrupted record. Never stop foreign work. Retain aggregate
-summaries 30 days, seven-day digests 90 days; keep existing raw batch evidence under
-its current owner. Health cleanup removes only its own expired aggregate files,
-not canonical logs, sessions, task evidence or another run's worktree.
-
-## Grading and acceptance before implementation
-
-- Exact case+digest, changed signature, missing lane and interrupted run: health must
-  reproduce the existing verifier's distinct outcomes; never convert unavailable to a pass.
-- Size before/after: compare identical classifier rules; replacement/external code
-  disclosed. Smaller with a missing surviving oracle is a failure, not improvement.
-- Real retained workflows: chat/reconnect, Home memory continuity, controls/log/Undo,
-  artifact reopen and independent access use existing executed checkpoint outcomes;
-  never score green from proposed case names or screenshots alone.
-- Timing: compare same scenario/config on a quiet host, retain first samples and
-  censoring. Report median/p90 with sample count; no startup claim from warm RPCs.
-- Lineage: refused resume excluded, copied check-ins deduplicated, incomplete history
-  partial. This uses the [task history contract](../../packages/gateway/src/modules/home/tasks.md#control-and-spend-status).
-- Privacy/cleanup: inspect emitted files for forbidden fields; interrupt a real owned
-  invocation and verify child exit and retained partial result. No copied algorithms
-  or mock-only proof of process/authority boundaries.
-
-Sample scorecard: `O1 unavailable (approval timestamp absent); O2 partial (iPhone
-identity absent); O3 unavailable (no complete main run); O4 unavailable (one attempt);
-O5 partial (history incomplete); static verify 2s (not test latency)`.
-Weekly digest: window/source SHAs, five fields with denominators and coverage,
-first new red/owner/expiry, unavailable reasons, supplemental timing and size deltas.
-
-Estimated incremental cost: seconds to parse bounded local JSON, zero provider spend;
-nightly suites keep their measured existing lane cost, currently unknown here.
-No promised nightly runtime until a complete authorized batch supplies it. Paid
-or model-driven evals require a separate explicit budget, not silent fallback.
-Collection and retention follow the approved scorecard scope. Scheduler/time and
-all proposed jobs remain undecided and unimplemented; they need separate authorization.
