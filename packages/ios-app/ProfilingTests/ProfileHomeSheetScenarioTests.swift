@@ -303,9 +303,9 @@ final class ProfileFrameClock: NSObject {
 /// Settings → Sandbox's custom sheet for `scripts/tron-profile ios` (#2302):
 /// the real `SandboxCustomSheetStage`, presenting its sheet through the stage's
 /// own control and closing it through Done, repeatedly. The ledger records the
-/// display frames the main thread missed while presenting and while dismissing,
-/// and the worst frame interval. `sandbox-stock-sheet` drives the same content
-/// in the stock sheet as the baseline.
+/// display frames the main thread missed while presenting and while dismissing
+/// (summed over the window), and the worst frame interval of each phase.
+/// `sandbox-stock-sheet` drives the same content in the stock sheet as the baseline.
 @MainActor
 final class ProfileSandboxSheetScenarioTests: XCTestCase {
     func testSandboxCustomSheet() throws {
@@ -330,6 +330,10 @@ final class ProfileSandboxSheetRun: ProfileScenarioRun {
     private var window: UIWindow?
     private var host: UIHostingController<AnyView>?
     private var cycles = 0
+    /// Worst frame interval per phase across the window, in milliseconds;
+    /// recorded once, after the last cycle (the ledger only adds).
+    private var presentWorst = 0
+    private var dismissWorst = 0
 
     init(open: String, stock: Bool) throws {
         self.open = open
@@ -367,6 +371,8 @@ final class ProfileSandboxSheetRun: ProfileScenarioRun {
             try await cycle()
             cycles += 1
         }
+        ProfileScenarioLedger.shared.add("sheet.present_worst_ms", presentWorst)
+        ProfileScenarioLedger.shared.add("sheet.dismiss_worst_ms", dismissWorst)
         try await profileSleep(until: window, from: start)
     }
 
@@ -383,12 +389,12 @@ final class ProfileSandboxSheetRun: ProfileScenarioRun {
         let presented = frames.take()
         ProfileScenarioLedger.shared.add("sheet.presents")
         ProfileScenarioLedger.shared.add("sheet.present_missed_frames", presented.missed)
-        ProfileScenarioLedger.shared.add("sheet.present_worst_ms", presented.worstMilliseconds)
+        presentWorst = max(presentWorst, presented.worstMilliseconds)
         guard done.accessibilityActivate() else { throw ProfileScenarioError.workloadDiverged("Done refused activation") }
         try await Task.sleep(for: Self.settle)
         let dismissed = frames.take()
         ProfileScenarioLedger.shared.add("sheet.dismiss_missed_frames", dismissed.missed)
-        ProfileScenarioLedger.shared.add("sheet.dismiss_worst_ms", dismissed.worstMilliseconds)
+        dismissWorst = max(dismissWorst, dismissed.worstMilliseconds)
         if doneControl() != nil { throw ProfileScenarioError.workloadDiverged("the sheet did not close") }
         try await Task.sleep(for: .milliseconds(200))
     }
@@ -428,6 +434,9 @@ private final class ProfileSheetFrameClock: NSObject {
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         self.link = link
+        // Seeded now, so a stall right after start (the activation itself)
+        // shows up in the first interval.
+        last = CACurrentMediaTime()
     }
 
     func stop() {
