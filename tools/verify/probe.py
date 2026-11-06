@@ -59,16 +59,21 @@ def unit_files(unit: str, modules: dict, tracked: list[str]) -> tuple[str, list[
 
 
 def names_of(unit: str, files: list[str]) -> list[re.Pattern]:
-    """How a failure message points at the unit: a repo-relative path, or a distinctive file name.
+    """How a failure message points at the unit: a repo-relative path, a distinctive file name, or, for
+    a Python file, the interpreter's "No module named '<stem>'".
 
     A short or common name ("tron", "data") also occurs in scratch paths and unrelated text, so it
     alone never counts as naming the unit."""
     names = {unit, *files}
+    modules = []
     for path in files:
         name = path.rsplit("/", 1)[-1]
         stem = name.rsplit(".", 1)[0]
         names |= {candidate for candidate in (name, stem) if len(candidate) >= 8 and re.search(r"[-_.]", candidate)}
-    return [re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(name) + r"(?![A-Za-z0-9_-])") for name in sorted(names)]
+        if name.endswith(".py"):
+            # Python names a missing module by its import name, the file's stem; quoted, it is exact.
+            modules.append(re.compile(r"No module named '" + re.escape(stem) + "'"))
+    return [re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(name) + r"(?![A-Za-z0-9_-])") for name in sorted(names)] + modules
 
 
 def guardians(unit: str, files: list[str], modules: dict, tracked: list[str]) -> tuple[list[str], dict[str, str]]:

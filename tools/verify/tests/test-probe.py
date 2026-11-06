@@ -17,7 +17,7 @@ helper verify imports into a disposable Git repository and probes one unit as a 
 7. A guardian that seals a tree read-only leaves no scratch behind, and guardians running side by
    side each get their own checkout: one writing into its tree never dirties another's.
 8. A short unit name ("tron") that also occurs in scratch paths does not count as naming the unit,
-   so a vague failure is still a cascade.
+   so a vague failure is still a cascade; Python's "No module named '<stem>'" does name a .py unit.
 9. Deleting a guardian's own runner (scripts/tron-node) is a failure that names it, not a crash;
    a relay test is listed as not run, never run as a shell script.
 10. A checkout that cannot be prepared (unreadable dependencies, or a move under a tracked file)
@@ -220,6 +220,16 @@ class ProbeTests(unittest.TestCase):
         result, report = r.probe("tools/tool/tool.sh", "--jobs", "8")
         self.assertEqual(report.get("baselineRed", []), [], result.stdout + result.stderr)
         self.assertIn("tools/tool/tests/test-greeting-1.sh", report["failing"])
+
+    def test_python_naming_a_missing_module_names_the_unit(self) -> None:
+        r = self.repo
+        r.write("tools/tool/glue.py", "# Shared helper the tool imports.\nGREETING = 'hello'\n")
+        r.write("tools/tool/tests/test-glue.sh", "#!/usr/bin/env bash\n# Imports the helper by module name.\n"
+                "python3 -c \"import sys; sys.path.insert(0, 'tools/tool'); import glue; print(glue.GREETING)\"\n")
+        r.commit("a helper imported by its module name")
+        result, report = r.probe("tools/tool/glue.py")
+        self.assertIn("No module named 'glue'", (r.path / report["guardians"]["tools/tool/tests/test-glue.sh"]["after"]["log"]).read_text())
+        self.assertEqual(report["verdict"], "precise", result.stdout)
 
     def test_a_short_name_in_a_scratch_path_does_not_name_the_unit(self) -> None:
         r = self.repo

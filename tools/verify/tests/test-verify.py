@@ -934,9 +934,9 @@ class MutateTests(VerifyCase):
         # The seed that samples the failing mutant first: candidates are in line order.
         self.seed = next(seed for seed in range(100) if (lambda pool: (random.Random(seed).shuffle(pool), pool)[1])([0, 1]) == [0, 1])
 
-    def mutate(self, *args: str) -> subprocess.Popen:
+    def mutate(self, *args: str, env: dict | None = None) -> subprocess.Popen:
         return subprocess.Popen([str(self.repo.path / "scripts/tron"), "mutate", "packages/gateway/src/store/store.ts",
-                                 "--seed", str(self.seed), *args], cwd=self.repo.path, env=self.repo.env,
+                                 "--seed", str(self.seed), *args], cwd=self.repo.path, env={**self.repo.env, **(env or {})},
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     def report(self) -> dict:
@@ -998,6 +998,23 @@ class MutateTests(VerifyCase):
         self.assertIn(f'"purpose": "mutate packages/gateway/src/store/store.ts"', self.repo.lock.read_text())
         with self.repo.lock.open() as lock:  # released when mutate exits
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_inside_a_holder_mutate_runs_without_waiting_for_the_lock(self) -> None:
+        import fcntl
+        # A batch lane holds the host lock and marks its children; mutate inside it must not wait
+        # for that lock, which its own ancestor holds until it exits.
+        with self.repo.lock.open("a") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            process = self.mutate("--count", "1", "--timeout", "60", env={"TRON_FULL_GATEWAY_LOCK_HELD": "1"})
+            try:
+                output, _ = process.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                output, _ = process.communicate()
+                self.fail(f"mutate waited for a lock its caller holds:\n{output}")
+        self.assertEqual(process.returncode, 0, output)
+        runs = [json.loads(line) for line in (self.repo.path / "packages/gateway/runs.jsonl").read_text().splitlines()]
+        self.assertEqual([run["held"] for run in runs], ["1", "1"], output)
 
 
 if __name__ == "__main__":
