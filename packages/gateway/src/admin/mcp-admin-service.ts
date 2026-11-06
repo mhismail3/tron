@@ -2,9 +2,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
-import { rename } from "node:fs/promises";
 import lockfile from "proper-lockfile";
 import { GatewayError } from "../errors.js";
+import { durableAtomicWriteText } from "../foundation/durable-json.js";
 
 const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
@@ -212,11 +212,9 @@ export class McpAdminService {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("not_found", `MCP server ${server} was not found`);
       if (patch.exposure !== undefined && !(EXPOSURES as readonly string[]).includes(patch.exposure)) throw new GatewayError("invalid_request", "MCP exposure is invalid");
       Object.assign(entry, patch);
-      const output = Buffer.from(`${JSON.stringify(config, null, 2)}\n`);
-      if (output.length > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
-      const temporary = `${path}.${createHash("sha256").update(`${process.pid}:${Date.now()}`).digest("hex").slice(0, 12)}.tmp`;
-      await writeFile(temporary, output, { mode: 0o600 });
-      await rename(temporary, path);
+      const output = `${JSON.stringify(config, null, 2)}\n`;
+      if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
+      await durableAtomicWriteText(path, output);
       return { server, reloadRequired: true, changed: Object.keys(patch) };
     } finally { await release(); }
   }
@@ -241,11 +239,9 @@ export class McpAdminService {
       const headers = definition.headers && typeof definition.headers === "object" && !Array.isArray(definition.headers) ? definition.headers as Record<string, unknown> : {};
       headers.Authorization = `!/usr/bin/security find-generic-password -s tron.mcp -a ${account} -w | /usr/bin/sed 's/^/Bearer /'`;
       definition.headers = headers;
-      const output = Buffer.from(`${JSON.stringify(config, null, 2)}\n`);
-      if (output.length > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
-      const temporary = `${path}.${createHash("sha256").update(`${process.pid}:${Date.now()}`).digest("hex").slice(0, 12)}.tmp`;
-      await writeFile(temporary, output, { mode: 0o600 });
-      await rename(temporary, path);
+      const output = `${JSON.stringify(config, null, 2)}\n`;
+      if (Buffer.byteLength(output) > MAX_CONFIG_BYTES) throw new GatewayError("conflict", "Updated MCP configuration exceeds its size limit");
+      await durableAtomicWriteText(path, output);
     } finally { await release(); }
     return { server, stored: true };
   }
