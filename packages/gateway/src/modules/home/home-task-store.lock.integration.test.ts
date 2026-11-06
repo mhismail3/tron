@@ -10,7 +10,7 @@ import { HomeTaskStore, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrit
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 /**
- * `gateway/home` mutation-path lock for the Home task store (plan §6.5 V4, §6.6;
+ * `gateway/home` mutation-path lock for the Home task store (packages/gateway/docs/scenario-locks.md#persisted-stores-v4;
  * test-support/store-path-lock.ts): setup, authority saves, task put/update/wake
  * publication, record admission, paging and temporary recovery, with each refusal code
  * and the exact files under `gateway/home/tasks` after every step.

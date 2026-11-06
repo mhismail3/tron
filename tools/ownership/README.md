@@ -54,9 +54,8 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `owns` | yes | non-empty list of unique patterns, relative to the manifest's directory |
   | `purpose` | no | one line; `--ledger` shows it for owned files that state none themselves |
   | `layout` | no | only in `root.module.json`; see [Layout](#layout) |
-  | `dependsOn` | no | other module ids; kernel ports (plan §6.1) are accepted once K-0 defines them |
+  | `dependsOn` | no | other module ids |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
-  | `capabilities` | no | non-empty strings (the catalog does not exist yet) |
   | `verify` | no | `scripts/tron …` commands |
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
   | `interfaces` | card | inbound contracts; see [Purpose cards](#purpose-cards) |
@@ -88,7 +87,7 @@ default owner is one manifest per directory with `"owns": ["**"]`. Mixed
 directories are split by explicit lists, and cross-directory owners sit at the
 common parent. A repo tool keeps its code, `tests/` and configuration in
 `tools/<tool>/` beside its one manifest (for example `tools/work/work.module.json`).
-Edges, capabilities, risk classes and verification declarations are optional
+Edges, risk classes and verification declarations are optional
 fields checked by their owning tools. `--modules` prints the current map.
 
 ## Purpose cards

@@ -35,7 +35,7 @@ import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { TronWorkspace } from "../src/workspace/tron-workspace.js";
 
 /**
- * The stores the persisted-store corpus holds (restructure plan §6.5, V4): for each,
+ * The stores the persisted-store corpus holds (packages/gateway/docs/scenario-locks.md#persisted-stores-v4): for each,
  * how its real owner records representative synthetic data and how the current
  * owner reads it back. `tron-store-corpus.ts` stages, records and compares them.
  */

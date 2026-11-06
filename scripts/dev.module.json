@@ -30,6 +30,7 @@
         "mac-app/integration-tests",
         "repo/cli",
         "repo/ios",
+        "repo/profile",
         "repo/protocol-contract"
       ]
     },

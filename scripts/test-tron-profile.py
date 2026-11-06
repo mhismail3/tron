@@ -295,6 +295,34 @@ class Attribution(unittest.TestCase):
         self.assertFalse((root / "attribution.json").exists())
 
 
+class DriverProtocol(unittest.TestCase):
+    """The driver speaks to a Gateway as the phone does, so the protocol contract owner checks its copy."""
+
+    CONTRACT_INPUTS = ("config/GatewayProtocol.json", "packages/gateway/src/version.ts", "scripts/gateway-payload-deploy.mjs",
+                       "scripts/tron-profile-gateway-driver.mjs", "packages/mac-app/scripts/tron-gateway-launcher.c",
+                       "packages/ios-app/Core/Gateway/GatewayProtocolContract.swift",
+                       "packages/mac-app/Sources/Server/Health/GatewayProtocolContract.swift",
+                       "packages/ios-app/project.yml", "packages/mac-app/project.yml",
+                       "packages/ios-app/Sources/Info.plist", "packages/mac-app/Sources/Info.plist")
+
+    def test_a_driver_protocol_that_drifts_from_the_contract_is_refused(self) -> None:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import gateway_protocol_contract as contract
+        self.assertEqual(contract.verify_source_contract(ROOT).protocol_version, 8)
+        with tempfile.TemporaryDirectory(prefix="tron-driver-protocol-") as temporary:
+            copy = Path(temporary)
+            for relative in self.CONTRACT_INPUTS:
+                (copy / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, copy / relative)
+            driver = copy / "scripts/tron-profile-gateway-driver.mjs"
+            source = driver.read_text()
+            self.assertIn("\nconst PROTOCOL_VERSION = 8;\n", source)
+            driver.write_text(source.replace("\nconst PROTOCOL_VERSION = 8;\n", "\nconst PROTOCOL_VERSION = 9;\n"))
+            with self.assertRaisesRegex(contract.ProtocolContractError,
+                                        r"profiling driver protocol 9 does not match the contract's 8"):
+                contract.verify_source_contract(copy)
+
+
 def load_gateway_profiler():
     sys.path.insert(0, str(ROOT / "scripts"))
     loader = SourceFileLoader("tron_profile_gateway", str(GATEWAY_PROFILER))

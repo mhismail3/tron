@@ -6,7 +6,7 @@ import { expectScenario } from "../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /**
- * Session lifecycle locks (restructure plan §6.4, V3; K-0 §7 E0d) guarding the
+ * Session lifecycle locks (packages/gateway/docs/scenario-locks.md#locks; K-0 §7 E0d) guarding the
  * heap, eviction, cold load and drain owners that kernel slices E5 (`run/`) and
  * E7 (`session/`) move out of `RuntimeRegistry`. Each runs the real Gateway over
  * a loopback WebSocket (`gateway-lock-harness.ts`) with the faux provider.
