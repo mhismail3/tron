@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
 import lockfile from "proper-lockfile";
 import { waitFor } from "../../test-support/wait-for.js";
+import { drainDurableWriteStats } from "../foundation/durable-json.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
 
 /** The Pi CLI the package declares in its own manifest, not a guessed layout. */
@@ -222,8 +223,13 @@ describe("McpAdminService", () => {
       } };
       await writeFile(config, JSON.stringify(original));
       const service = new McpAdminService(root, cliPath);
+      drainDurableWriteStats();
       await service.update({ scope: "global" }, "wanted", { enabled: false, exposure: "hidden" });
-      const saved = JSON.parse(await readFile(config, "utf8"));
+      expect(drainDurableWriteStats().count).toBe(2); // synchronized, file then directory, before it returns
+      const text = await readFile(config, "utf8");
+      const saved = JSON.parse(text);
+      expect(text).toBe(`${JSON.stringify(saved, null, 2)}\n`);
+      expect((await stat(config)).mode & 0o777).toBe(0o600);
       expect(saved.mcpServers.wanted).toEqual({ ...original.mcpServers.wanted, enabled: false, exposure: "hidden" });
       expect(saved.mcpServers.other).toEqual(original.mcpServers.other);
       expect(saved.extensionData).toEqual(original.extensionData);
@@ -323,7 +329,9 @@ describe("McpAdminService", () => {
       const origin = `http://127.0.0.1:${address.port}`;
       await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp` } } }));
       const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
+      drainDurableWriteStats();
       const response = await service.storeBearer({ scope: "global" }, "fixture", "never-projected-secret");
+      expect(drainDurableWriteStats().count).toBe(2);
       const config = await readFile(join(root, "mcp.json"), "utf8");
       const saved = JSON.parse(config) as { mcpServers: Record<string, { headers: { Authorization: string } }> };
       expect(saved.mcpServers.fixture.headers.Authorization).toContain("Bearer ");
