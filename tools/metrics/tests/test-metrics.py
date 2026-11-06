@@ -17,7 +17,7 @@ fixture files with fixed dates, and runs the command as a worker would:
    follows files over 500 lines through renames; its rows sum to the total.
 5. An unknown revision fails loudly and writes nothing.
 6. Structure counts modules, the ones `layout.uncarded` exempts, root entries, files directly
-   in `scripts/`, references between modules and source files nothing names.
+   in `scripts/`, references between modules and source files no tracked file names.
 
 The last comparison is kept in `test-results/metrics-cli/` for review.
 """

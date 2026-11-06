@@ -451,7 +451,7 @@ def compare(base: dict, head: dict) -> str:
 STRUCTURE_ROWS = (("modules", "Modules"), ("uncarded", "Modules without a card"), ("rootEntries", "Root entries"),
                   ("scriptsTopFiles", "Files directly in scripts/"),
                   ("crossModuleReferences", "Cross-module file references"), ("modulePairs", "Module pairs that reference"),
-                  ("unreachedFiles", "Source files nothing names"))
+                  ("unreachedFiles", "Source files no tracked file names"))
 
 
 def summary(result: dict) -> str:

@@ -110,16 +110,21 @@ RUNNING: set = set()  # test process groups this probe started; stopped on inter
 STOPPING = threading.Event()
 
 
-def remove_tree(path: Path) -> None:
-    """Delete a scratch tree a guardian may have sealed read-only (bundle-gateway.sh seals payloads); say so if it stays."""
-    if not path.exists():
-        return
+def writable(path: Path) -> None:
+    """Restore owner-write on a tree a guardian may have sealed read-only (bundle-gateway.sh seals payloads)."""
     for folder, directories, _ in os.walk(path):
         for name in [folder, *(os.path.join(folder, d) for d in directories)]:
             try:
                 os.chmod(name, os.stat(name, follow_symlinks=False).st_mode | 0o700, follow_symlinks=False)
             except (OSError, NotImplementedError):
                 pass
+
+
+def remove_tree(path: Path) -> None:
+    """Delete a scratch tree, sealed or not; say so if it stays."""
+    if not path.exists():
+        return
+    writable(path)
     shutil.rmtree(path, ignore_errors=True)
     if path.exists():
         print(f"probe: could not remove {path}; remove it by hand", file=sys.stderr)
@@ -152,7 +157,11 @@ def checkout(commit: str, dependencies: Path | None) -> Path:
 
 def discard(tree: Path) -> None:
     """Remove one of this probe's worktrees; other checkouts' worktree entries are not touched."""
+    if tree.exists():
+        writable(tree)
     git(verify.ROOT, "worktree", "remove", "--force", str(tree), check=False)
+    if str(tree.resolve()) in git(verify.ROOT, "worktree", "list", "--porcelain"):
+        print(f"probe: could not unregister worktree {tree}; run `git worktree remove --force {tree}`", file=sys.stderr)
     remove_tree(tree.parent)
 
 
@@ -300,8 +309,9 @@ def main(argv: list[str]) -> int:
     dependencies = next((candidate.resolve() for candidate in (verify.ROOT / verify.GATEWAY / "node_modules",
                                                                common.parent / verify.GATEWAY / "node_modules")
                          if (candidate / ".bin").is_dir()), None)
-    scratch = checkout(sha, None)
+    scratch = None
     try:
+        scratch = checkout(sha, None)
         # A guardian's baseline depends only on the commit, so probes of one commit share it.
         cache = out.parent / "baseline.json"
         known = json.loads(cache.read_text()) if cache.exists() else {}
@@ -337,8 +347,12 @@ def main(argv: list[str]) -> int:
         changed = git(scratch, "rev-parse", "HEAD").strip()
         static = [line for line in static_check(scratch) if line not in before]
         after = run_tests(changed, dependencies, tests, out / "after", args.jobs, args.timeout)
+    except (subprocess.CalledProcessError, verify.VerifyError) as error:
+        print(f"probe: could not prepare a checkout: {error}", file=sys.stderr)
+        return 2
     finally:
-        discard(scratch)
+        if scratch is not None:
+            discard(scratch)
     names = names_of(unit, files)
     failing = {test: (verify.ROOT / outcome["log"]).read_text() for test, outcome in after.items()
                if outcome["outcome"] == "fail" and baseline[test]["outcome"] == "pass"}
@@ -350,8 +364,11 @@ def main(argv: list[str]) -> int:
     (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(f"verdict: {verdict.upper()}  ({len(failing)} failing test file(s); {len(static)} static finding(s))")
     for test in sorted(failing):
-        line = next((line.strip() for line in failing[test].splitlines() if any(name.search(line) for name in names)
-                     and re.search(r"error|fail|no such|not found|missing|cannot|assert", line, re.I)), "")
+        lines = failing[test].splitlines()
+        problem = re.compile(r"error|fail|no such|not found|missing|cannot|assert", re.I)
+        # The line that names the unit; for a vague failure, its first error so the reader sees what it said.
+        line = next((line.strip() for line in lines if any(name.search(line) for name in names) and problem.search(line)),
+                    next((line.strip() for line in lines if problem.search(line)), ""))
         print(f"  red  {test}{'  (does not name the unit)' if test in vague else ''}\n       {line[:200]}")
     for line in static:
         print(f"  static  {line[:240]}")

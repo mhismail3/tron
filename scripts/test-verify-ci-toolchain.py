@@ -82,10 +82,11 @@ class ReleaseXcodeAdmissionTests(unittest.TestCase):
         self.developer = self.root / "Xcode.app/Contents/Developer"
         self.developer.mkdir(parents=True)
 
-    def admit(self, developer_dir, version="Xcode 26.6\nBuild version 17F113", sdk="26.5", first_launch=0):
+    def admit(self, developer_dir, version="Xcode 26.6\nBuild version 17F113", sdk="26.5", first_launch=0, free_gb=1):
         (self.root / "config/ci-toolchain.env").write_text(
             "TRON_RELEASE_IOS_XCODE_VERSION=26.6\nTRON_RELEASE_IOS_XCODE_BUILD=17F113\n"
-            f"TRON_RELEASE_IOS_SDK_VERSION=26.5\nTRON_RELEASE_IOS_DEVELOPER_DIR={developer_dir}\n")
+            f"TRON_RELEASE_IOS_SDK_VERSION=26.5\nTRON_RELEASE_IOS_DEVELOPER_DIR={developer_dir}\n"
+            f"TRON_RELEASE_IOS_MIN_FREE_GB={free_gb}\n")
         for name, body in (("xcodebuild", f'[[ $1 == -checkFirstLaunchStatus ]] && exit {first_launch}\n'
                                           f'[[ $DEVELOPER_DIR == {shlex.quote(str(developer_dir))} ]] || exit 9\n'
                                           f'printf %b {shlex.quote(version)}'),
@@ -108,7 +109,8 @@ class ReleaseXcodeAdmissionTests(unittest.TestCase):
                                 (dict(developer_dir=self.developer, version="Xcode 26.6\nBuild version 17F999"),
                                  "release Xcode must be 26.6 (17F113); found: Xcode 26.6 Build version 17F999"),
                                 (dict(developer_dir=self.developer, sdk="26.4"), "release iPhoneOS SDK must be 26.5; found: 26.4"),
-                                (dict(developer_dir=self.developer, first_launch=1), "first-launch tasks or license acceptance")):
+                                (dict(developer_dir=self.developer, first_launch=1), "first-launch tasks or license acceptance"),
+                                (dict(developer_dir=self.developer, free_gb=10 ** 9), "GB free beside the checkout")):
             with self.subTest(message=message):
                 completed = self.admit(**kwargs)
                 self.assertEqual(completed.returncode, 1, completed.stderr)
