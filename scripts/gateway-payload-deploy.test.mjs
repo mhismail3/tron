@@ -375,16 +375,19 @@ test("runBounded settles at the kill deadline when a descendant retains pipes", 
 // process with a real TCP listener, read through the deploy's own ps/lsof
 // probes. The old Gateway's port stays open while it drains accepted work and
 // closes only when its shutdown begins.
+// The release timer starts only once this fixture has captured the listener (the deploy's
+// drain likewise starts from a captured identity), so a slow lsof under load cannot find the
+// port already closed.
 async function oldGatewayFixture({ releaseAfterMs, then }) {
   const program = `
     const server = require("node:net").createServer().listen(0, "127.0.0.1", () => {
       process.stdout.write(server.address().port + "\\n");
-      setTimeout(() => server.close(() => {
+      process.stdin.once("data", () => setTimeout(() => server.close(() => {
         if (${JSON.stringify(then)} === "exit") process.exit(0);
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
-      }), ${releaseAfterMs});
+      }), ${releaseAfterMs}));
     });`;
-  const child = spawn(process.execPath, ["-e", program], { stdio: ["ignore", "pipe", "ignore"] });
+  const child = spawn(process.execPath, ["-e", program], { stdio: ["pipe", "pipe", "ignore"] });
   const exited = once(child, "exit");
   const [line] = await once(child.stdout, "data");
   const port = Number(String(line).trim());
@@ -394,6 +397,7 @@ async function oldGatewayFixture({ releaseAfterMs, then }) {
     if (!identity) await new Promise((resolve) => setTimeout(resolve, 20));
   }
   assert.equal(identity?.pid, child.pid);
+  child.stdin.write("release\n");
   return { child, exited, port, identity };
 }
 

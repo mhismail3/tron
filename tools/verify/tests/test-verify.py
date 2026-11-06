@@ -311,14 +311,15 @@ class GatewayFailureTests(VerifyCase):
                 "out=next(a.split('=',1)[1] for a in sys.argv if a.startswith('--outputFile.json='))\n"
                 "report=json.loads(pathlib.Path('report-input.json').read_text())\n"
                 "pathlib.Path(out).write_text(json.dumps(report))\n"
-                "pathlib.Path('test-results-executed').write_text('executed')\n"
+                "pathlib.Path('test-results').mkdir(exist_ok=True)\n"
+                "pathlib.Path('test-results/executed').write_text('executed')\n"
                 "print(report.get('diagnostic', ''))\n"
                 "sys.exit(1)\n")
         r.write("packages/gateway/report-input.json", json.dumps({"numPassedTests": 1, "numFailedTests": 1,
             "numFailedTestSuites": 1, "testResults": [{"name": str(r.path / path), "status": "failed",
             "assertionResults": [{"fullName": "sample known failure", "status": "failed", "failureMessages": ["Error: original defect"]},
                                  {"fullName": "sample passes", "status": "passed"}]}]}))
-        r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\npackages/gateway/test-results-executed\n")
+        r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\n")
         r.commit("report protocol producer")
     def test_every_gateway_case_failure_is_raw_red_without_exemption(self):
         r = self.repo
@@ -337,13 +338,14 @@ class GatewayFailureTests(VerifyCase):
                 if change != "exact":
                     r.write("packages/gateway/report-input.json", json.dumps(raw))
                     r.commit(change)
+                (r.path / "packages/gateway/test-results/executed").unlink(missing_ok=True)
                 result = r.verify("--module", "gateway/sample")
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 report = r.report()
                 self.assertEqual(report["verdict"], "failed")
                 self.assertNotIn("expiredEntries", report)
                 if change != "missing-report":
-                    self.assertTrue((r.path / "packages/gateway/test-results-executed").exists())
+                    self.assertTrue((r.path / "packages/gateway/test-results/executed").exists())
                 card = r.health()['fields']['mainReds']
                 self.assertEqual(card['verifierOutcomes'], {'failed': 1})
                 self.assertNotEqual(card['status'], 'available')
@@ -387,18 +389,20 @@ class GatewayFailureTests(VerifyCase):
     def test_health_repeated_attempts_privacy_identity_and_owned_cleanup(self):
         r = self.repo
         self.fixture()
-        # Environmental producer input is ignored: SHA/config stay identical.
-        r.write('.gitignore', (r.path / '.gitignore').read_text() + 'packages/gateway/report-input.json\n')
-        r.git('rm', '--cached', 'packages/gateway/report-input.json')
+        # Environmental producer input lives in the module's evidence directory: SHA/config stay identical.
+        runner = (r.path / 'tools/verify/gateway.py').read_text()
+        r.write('tools/verify/gateway.py', runner.replace("Path('report-input.json')", "Path('test-results/report-input.json')"))
+        r.write('packages/gateway/test-results/report-input.json', (r.path / 'packages/gateway/report-input.json').read_text())
+        (r.path / 'packages/gateway/report-input.json').unlink()
         r.commit('external report producer inputs')
-        raw = json.loads((r.path / 'packages/gateway/report-input.json').read_text())
+        raw = json.loads((r.path / 'packages/gateway/test-results/report-input.json').read_text())
         self.assertEqual(r.verify('--module', 'gateway/sample').returncode, 1)
         first = r.report()
         r.write('test-results/first.json', json.dumps(first))
         raw['numPassedTests'], raw['numFailedTests'] = 2, 0
         raw['testResults'][0]['status'] = 'passed'
         raw['testResults'][0]['assertionResults'][0].update(status='passed', failureMessages=[])
-        r.write('packages/gateway/report-input.json', json.dumps(raw))
+        r.write('packages/gateway/test-results/report-input.json', json.dumps(raw))
         # Producer exit remains an observed harness failure, not a clean pass.
         r.verify('--module', 'gateway/sample')
         second = r.report()
@@ -440,7 +444,7 @@ class GatewayFailureTests(VerifyCase):
         # flaky case. The unchanged repeatedly-passing case remains comparable.
         raw['numPassedTests'], raw['numFailedTests'] = 1, 1
         raw['testResults'][0]['assertionResults'][0].update(status='failed', failureMessages=['Error: different signature'])
-        r.write('packages/gateway/report-input.json', json.dumps(raw))
+        r.write('packages/gateway/test-results/report-input.json', json.dumps(raw))
         r.verify('--module', 'gateway/sample')
         r.write('test-results/third.json', json.dumps(r.report()))
         changed = r.health(*args, '--verify-report', 'test-results/third.json')['fields']['flakeRate']
@@ -525,9 +529,9 @@ class SelectionTests(VerifyCase):
         self.assertEqual(report["selection"]["modules"], ["repo/alpha"])
         self.assertEqual(report["selection"]["tests"], ["mods/alpha/test-alpha.py"])
         self.assertEqual(report["verdict"], "passed")
-        self.assertEqual([step["name"] for step in report["steps"]][:7],
-                         ["ownership", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard",
-                          "git diff --check"])
+        self.assertEqual([step["name"] for step in report["steps"]][:8],
+                         ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy",
+                          "privacy guard", "git diff --check"])
         self.assertIn("[1/", passed.stdout)
         r.write("mods/alpha/test-alpha.py", FAILING)
         r.commit("break alpha")
@@ -536,6 +540,19 @@ class SelectionTests(VerifyCase):
         self.assertIn("tests: python FAILED", failed.stdout)
         self.assertIn("AssertionError: 1 != 2", failed.stdout)
         self.assertNotIn("mods/beta/test-beta.py", json.dumps(r.report()["selection"]["tests"]))
+
+    def test_ignored_residue_with_no_named_writer_fails_the_run(self) -> None:
+        r = self.repo
+        r.write(".gitignore", "test-results/\n*.log\n")
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
+        r.commit("ignore logs")
+        r.write("mods/alpha/probe-output.log", "left behind\n")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertIn("tidy: residue: mods/alpha/probe-output.log — ignored path with no named writer", failed.stdout)
+        self.assertEqual(next(step for step in r.report()["steps"] if step["name"] == "worktree residue")["status"], "failed")
+        (r.path / "mods/alpha/probe-output.log").unlink()
+        self.assertEqual(r.verify("--changed").returncode, 0)
 
     def test_kernel_layer_or_unowned_change_widens_to_every_lock(self) -> None:
         r = self.repo

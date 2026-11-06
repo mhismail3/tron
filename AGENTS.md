@@ -101,14 +101,12 @@ owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the 
    deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
    Run affected checks before landing; obtain independent ACCEPT
    where required. Do not repeat broad main baselines per worker or retry-to-green.
-2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push
-   origin HEAD:main`; never force-push. On a race, fetch/merge and rerun only evidence
-   invalidated by integration. Workers never run full suites or ABBA reruns; a batch red is
-   causally reverted or stays red with its issue, and the owner root-fixes before relanding.
-3. Close the issue with the change, actual commands and results, and residual risk;
-   link long logs (`test-results/`, internal workspace). Use plain Git to integrate/push. Incidents also name the one-step diagnosing signal, added
-   with a test and a row in its module README Signals (`packages/gateway/docs/observability.md`).
-   Each landed slice posts a 3-line #2173 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence.
+2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push origin HEAD:main`; never
+   force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. Workers never run full suites or
+   ABBA reruns; a batch red is causally reverted or stays red with its issue, and the owner root-fixes before relanding.
+3. Close the issue with the change, actual commands and results, and residual risk; link long logs (`test-results/`,
+   internal workspace). Incidents also name the one-step diagnosing signal, added with a test and a row in its module
+   README Signals (`packages/gateway/docs/observability.md`). Each landed slice posts a 3-line #2173 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence.
 
 ## Work tracking
 
@@ -135,12 +133,14 @@ owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the 
   Gateway/Mac/iPhone rebuilds wait until all workers stop/park cleanly; Home coordinates, the maintainer executes lockstep delivery.
 
 ## Where things go
-- `root.module.json` `layout` fixes the root entries, `scripts/` top level and frozen paths; its lists only shrink and
-  `scripts/tron ownership` (verify's first step) names each fix. Code, tests and fixtures sit together in a package;
-  repo tooling lives beside its tests in `tools/<tool>/` (moving to `scripts/<area>/`), runs as `scripts/tron <command>`
-  and opens with a purpose line. Search `scripts/tron ownership --ledger` before adding a script and extend its owner;
-  remove a tool with its tests, owner entry and `scripts/tron` arm. Scratch (workflow scripts, notes, drafts) goes only
-  in `.scratch/`; `scripts/tron tidy` reports drift, and `--prune` clears what main already has.
+- `root.module.json` `layout` fixes root entries, `scripts/` top level and frozen paths; its lists only shrink, and
+  `scripts/tron ownership` (verify's first step) names each fix. Code, tests and fixtures sit together; repo tooling
+  lives beside its tests in `tools/<tool>/` or `scripts/`, runs as `scripts/tron <command>` and opens with a purpose line.
+- Every module carries a [purpose card](tools/ownership/README.md#purpose-cards) (exemptions in `layout.uncarded` only
+  shrink): purpose, interfaces with their consumers, guardians. Read `scripts/tron ownership --card <path>` before editing; a file, module or cross-module reference the card
+  does not declare fails ownership. Move or delete a unit only with its card, callers and `scripts/tron probe` evidence.
+- You own your residue: scratch only in `.scratch/`; before `report` or parking, `scripts/tron tidy --here` exits 0
+  (verify already refuses untracked and unnamed ignored files). Remove a tool with its tests, card entry and `scripts/tron` arm.
 
 ## Documentation
 - Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, `packages/gateway/README.md`, `packages/ios-app/docs/`, `packages/mac-app/docs/`,

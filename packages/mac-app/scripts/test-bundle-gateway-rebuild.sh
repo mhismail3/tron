@@ -61,7 +61,13 @@ trap restore EXIT
 trap 'exit 130' INT TERM HUP
 
 step() { printf '==> %s\n' "$*" | tee -a "$LOG"; }
-fail() { printf 'FAIL: %s (log: %s)\n' "$*" "$LOG" | tee -a "$LOG" >&2; exit 1; }
+# A failure shows the end of the build log, where the failing command names what it missed.
+fail() {
+    local recent
+    recent="$(tail -n 15 "$LOG" 2>/dev/null | sed 's/^/  | /')"
+    printf 'FAIL: %s (log: %s)\n%s\n' "$*" "$LOG" "$recent" | tee -a "$LOG" >&2
+    exit 1
+}
 bundle() { "$SCRIPT_DIR/bundle-gateway.sh" "$@" >>"$LOG" 2>&1; }
 manifest_field() {
     python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$PAYLOAD_DIR/manifest.json" "$1"

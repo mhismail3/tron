@@ -4,6 +4,8 @@
   scripts/tron tidy            # read-only report; exit 1 when something needs a decision
   scripts/tron tidy --json     # the same report, machine-readable
   scripts/tron tidy --prune    # also delete expired scratch/evidence, bytecode, merged branches and worktrees
+  scripts/tron tidy --here     # this worktree only: what its agent must clean before it reports (exit 1 if any)
+  scripts/tron tidy --here --landing  # only what may not land: untracked files and ignored residue (verify runs it)
 
 Pruning never touches tracked files, unmerged commits, worktrees holding local files or a live
 process, unknown ignored paths or directories that are not registered worktrees. Every branch it
@@ -310,9 +312,66 @@ FIXES = {
 }
 
 
+HERE_FIXES = {
+    "untracked": "commit it with an owner, or delete it",
+    "residue": "ignored path with no named writer: delete it, or name its writer in tools/ownership/tidy.py",
+    "scratch": "your scratch: delete it before you report (keep evidence in test-results/ or the issue)",
+    "subagent_worktrees": "a worktree your subagents left: remove it with `git worktree remove` and delete its branch",
+}
+
+
+def here(tree: Path) -> dict[str, list[str]]:
+    """The residue one agent's worktree holds: what it must clean before it reports or parks.
+
+    Untracked files and ignored paths no writer is named for, any `.scratch/` or loose `.pi/`
+    entry (scratch is for the task, not after it), and worktrees registered under
+    `<checkout>-worktrees/worktrees/<this worktree>/`, where pi-subagents places a delegated child's tree.
+    """
+    out: dict[str, list[str]] = {key: [] for key in HERE_FIXES}
+    status = git("status", "--porcelain", "--ignored", "--untracked-files=normal", cwd=tree, check=False)
+    for line in status.splitlines():
+        code, rel = line[:2], unquote(line[3:]).rstrip("/")
+        if code == "??":
+            out["untracked"].append(rel)
+        elif code == "!!":
+            for entry in ignored_entries(tree, rel):
+                if known(entry, tree) is None and not entry.endswith("__pycache__"):
+                    out["residue"].append(entry)
+    for folder in (tree / SCRATCH, *tree.glob(f"packages/*/{SCRATCH}")):
+        if folder.is_dir() and not folder.is_symlink():
+            out["scratch"] += [str(entry.relative_to(tree)) for entry in sorted(folder.iterdir())]
+    pi = tree / PI_SCRATCH
+    if pi.is_dir() and not pi.is_symlink():
+        ignored = set(git("ls-files", "-o", "-i", "--exclude-standard", "--directory", "--", PI_SCRATCH,
+                          cwd=tree, check=False).splitlines())
+        out["scratch"] += sorted(rel for rel in ignored if pi_scratch(rel) and (tree / rel).is_file())
+    primary = Path(worktrees()[0]["worktree"])
+    children = os.path.realpath(primary.parent / f"{primary.name}-worktrees" / "worktrees" / tree.name)
+    out["subagent_worktrees"] = [w["worktree"] for w in worktrees()
+                                 if os.path.realpath(w["worktree"]).startswith(children + os.sep)]
+    return out
+
+
 def main(argv: list[str]) -> int:
+    if "--here" in argv:
+        if any(arg not in ("--here", "--json", "--landing") for arg in argv):
+            print("usage: scripts/tron tidy --here [--landing] [--json]", file=sys.stderr)
+            return 2
+        tree = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).strip())
+        found = here(tree)
+        if "--landing" in argv:  # scratch and live subagent trees are allowed while the task runs
+            found = {key: items for key, items in found.items() if key in ("untracked", "residue")}
+        count = sum(len(items) for items in found.values())
+        if "--json" in argv:
+            print(json.dumps({"worktree": str(tree), **found, "count": count}, indent=1))
+            return 1 if count else 0
+        for key, fix in HERE_FIXES.items():
+            for item in found.get(key, []):
+                print(f"tidy: {key}: {item} — {fix}")
+        print(f"tidy: {tree}: {'clean' if not count else f'{count} item(s) to clean before you report'}")
+        return 1 if count else 0
     if any(arg not in ("--json", "--prune") for arg in argv):
-        print("usage: scripts/tron tidy [--json] [--prune]", file=sys.stderr)
+        print("usage: scripts/tron tidy [--json] [--prune] | --here [--json]", file=sys.stderr)
         return 2
     started = time.monotonic()
     result = report("--prune" in argv)

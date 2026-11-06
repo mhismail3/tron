@@ -191,7 +191,7 @@ that fixture. Run these selectors individually;
 
 The repository never archives or uploads production iOS artifacts. The maintainer selects a
 checked commit with a clean checkout (`scripts/tron version check`), runs the smoke set, required
-journeys and a physical review, runs `scripts/ios-release-toolchain-doctor.sh`, archives
+journeys and a physical review, runs `scripts/verify-ci-toolchain.sh release`, archives
 `Tron Release`, checks it with `packages/ios-app/scripts/verify-archive-privacy.sh <xcarchive>`,
 and uploads through Xcode Organizer.
 

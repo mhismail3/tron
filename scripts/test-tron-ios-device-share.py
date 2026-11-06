@@ -191,11 +191,16 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         sock.close()
-        server = subprocess.Popen([sys.executable, str(SERVER), str(served), str(port)],
-                                  stderr=subprocess.DEVNULL)
+        server_log = served.parent / "share-server.log"
+        with server_log.open("w") as server_errors:
+            server = subprocess.Popen([sys.executable, str(SERVER), str(served), str(port)], stderr=server_errors)
         try:
             local = f"http://127.0.0.1:{port}"
             for _ in range(50):
+                # A server that exited cannot answer; say why instead of reporting a refused connection.
+                if server.poll() is not None:
+                    check(False, f"share server exited {server.returncode} before listening: "
+                                 f"{server_log.read_text().strip()[-400:]}")
                 try:
                     fetch(local + "/latest.plist")
                     break

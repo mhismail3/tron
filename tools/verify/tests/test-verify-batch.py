@@ -16,6 +16,16 @@ ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / 'test-results/verify-batch'
 
 
+def shipped_runner(root, lock):
+    """The shipped Gateway runner and its host lock under `root`, pointed at this test's lock path, not the host's."""
+    (root / 'tools/verify').mkdir(parents=True, exist_ok=True)
+    (root / 'tools/verify/gateway.py').write_text((ROOT / 'tools/verify/gateway.py').read_text())
+    source = (ROOT / 'tools/verify/host_lock.py').read_text()
+    assert "'/tmp/tron-full-gateway.lock'" in source, 'the host lock path moved; point this fixture at its new spelling'
+    (root / 'tools/verify/host_lock.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
+    return root / 'tools/verify/gateway.py'
+
+
 def wait_until(predicate, message, timeout=30):
     deadline = time.monotonic() + timeout
     while not predicate():
@@ -33,10 +43,7 @@ class GatewayRuns:
         self.temporary = tempfile.TemporaryDirectory(prefix='tron-gateway-runs-')
         directory = Path(self.temporary.name)
         self.directory, self.order, self.runs = directory, directory / 'order', {}
-        source = (ROOT / 'tools/verify/gateway.py').read_text()
-        self.gateway = directory / 'tools/verify/gateway.py'
-        self.gateway.parent.mkdir(parents=True)
-        self.gateway.write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
+        self.gateway = shipped_runner(directory, lock)
         node = directory / 'scripts/tron-node'
         node.parent.mkdir()
         node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
@@ -96,7 +103,7 @@ class BatchTests(unittest.TestCase):
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.git('init', '-q', '-b', 'main')
-        for file in ('batch.py', 'verify.py', 'timing.py'):
+        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.
@@ -1469,8 +1476,7 @@ class BrowserForkProvisionTests(unittest.TestCase):
         root = Path(self.temporary.name).resolve()
         self.seen = root / 'seen'
         (root / 'tools/verify').mkdir(parents=True)
-        source = (ROOT / 'tools/verify/gateway.py').read_text()
-        (root / 'tools/verify/gateway.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(root / 'full-gateway.lock'))))
+        shipped_runner(root, root / 'full-gateway.lock')
         self.adapter = root / 'packages/gateway/src/display/browser-live-view-adapter.ts'
         self.adapter.parent.mkdir(parents=True)
         self.adapter.write_text(f'const sources = [\n  "git:github.com/fitchmultz/pi-agent-browser-native",\n  "git:github.com/fitchmultz/pi-agent-browser-native@{self.PIN}",\n];\n')
@@ -1706,10 +1712,7 @@ class FullGatewayLockTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.lock = root / 'full-gateway.lock'
         self.ran = root / 'ran'
-        # The shipped runner, pointed at this test's lock path instead of the host's.
-        source = (ROOT / 'tools/verify/gateway.py').read_text()
-        (root / 'tools/verify').mkdir(parents=True)
-        (root / 'tools/verify/gateway.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(self.lock))))
+        shipped_runner(root, self.lock)
         (root / 'scripts').mkdir()
         (root / 'scripts/tron-node').write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
         vitest = root / 'packages/gateway/node_modules/.bin/vitest'
@@ -1797,19 +1800,6 @@ class FullGatewayLockQueueTests(unittest.TestCase):
         self.assertNotIn('waiting for', self.runs.stderr('fresh'))
         self.assertEqual(self.runs.names(), ['holder', 'after', 'fresh'])
 
-    def test_batch_and_gateway_runs_share_one_queue_owner(self):
-        # The batch fixture replaces gateway.py, so batch.py keeps its own copy of the queue owner;
-        # both must stay the same code.
-        import ast
-        def owner(path):
-            tree = ast.parse((ROOT / path).read_text())
-            [function] = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'wait_for_full_gateway_lock']
-            return ast.dump(function)
-        self.assertEqual(owner('tools/verify/batch.py'), owner('tools/verify/gateway.py'))
-        constants = lambda path: [line for line in (ROOT / path).read_text().splitlines()
-                                  if line.startswith(('FULL_GATEWAY_LOCK = ', "FULL_GATEWAY_LOCK_HELD = ", 'HELD_BY_CALLER = '))]
-        self.assertEqual([line.split(' = ')[1] for line in constants('tools/verify/batch.py')],
-                         [line.split(' = ')[1] for line in constants('tools/verify/gateway.py')])
 
 
 if __name__ == '__main__':

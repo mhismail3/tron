@@ -92,6 +92,15 @@ else `(root)`.
   construction. A window with no commits (a merge whose ancestors are all older)
   reports `share: null`, printed `n/a`, never 0%.
 
+- **`M4.structure`** (from `scripts/tron ownership` and its [card](../ownership/README.md#purpose-cards)
+  reference scanner, on the commit's objects): `modules`; `uncarded`, the modules
+  `layout.uncarded` still exempts; `rootEntries`; `scriptsTopFiles`, files directly in
+  `scripts/`; `crossModuleReferences`, distinct (consumer module, named file or directory)
+  pairs; `modulePairs`, module pairs with at least one; and `unreachedFiles` with the list
+  `unreached`: owned non-test source files no tracked file names. Swift files are left out
+  (they resolve by type, which `scripts/tron layers ios` measures). An additive key: the
+  schema stays `tron-metrics/1`, whose `M3.size` `scripts/tron health` reads.
+
 ## Not measured here
 
 Verify records per-run step timings in `test-results/verify/<sha>.json`.

@@ -16,7 +16,8 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass", "layout"}
+FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "capabilities", "verify", "riskClass", "layout",
+          "interfaces", "uses"}
 ROOT_MANIFEST = "root.module.json"
 EDGE_FIELDS = {"to", "kind", "via", "why"}
 FORBIDDEN = set("[]{}\\")
@@ -43,9 +44,33 @@ def inventory(rev: str | None) -> tuple[list[str], callable]:
         sha = git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").decode().strip()
     except GitError:
         raise GitError(f"unknown revision {rev!r}") from None
-    paths = [p.decode("utf-8", "surrogateescape")
-             for p in git("ls-tree", "-r", "-z", "--name-only", sha).split(b"\0") if p]
-    return sorted(paths), lambda path: git("cat-file", "blob", f"{sha}:{path}")
+    entries = {}
+    for entry in git("ls-tree", "-r", "-z", sha).split(b"\0"):
+        if entry:
+            meta, path = entry.split(b"\t", 1)
+            entries[path.decode("utf-8", "surrogateescape")] = meta.split()[2].decode()
+    blobs: dict[str, bytes] = {}
+
+    def read(path: str) -> bytes:
+        if not blobs:  # one `git cat-file --batch` for the whole tree, on first use
+            oids = sorted(set(entries.values())) or [""]
+            raw = subprocess.run(["git", "-C", str(ROOT), "cat-file", "--batch"], input="\n".join(oids).encode() + b"\n",
+                                 stdout=subprocess.PIPE, check=True).stdout
+            at = 0
+            while at < len(raw):
+                header_end = raw.index(b"\n", at)
+                header = raw[at:header_end].split(b" ")
+                if len(header) != 3:  # "<oid> missing": a gitlink names a commit, not a blob
+                    at = header_end + 1
+                    continue
+                oid, _, size = header
+                start = header_end + 1
+                blobs[oid.decode()] = raw[start:start + int(size)]
+                at = start + int(size) + 1
+        if path not in entries or entries[path] not in blobs:
+            raise OSError(f"{path} is not a file at {sha[:12]}")
+        return blobs[entries[path]]
+    return sorted(entries), read
 
 
 def modes_of(rev: str | None) -> dict[str, str]:
@@ -288,6 +313,10 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
     if "layout" in root:
         import layout  # sibling module; only repositories that declare a layout need it
         errors.extend(layout.problems(root["layout"], paths, modes_of(rev), read, base_layout(rev) if shrink else None))
+        uncarded = root["layout"].get("uncarded") if isinstance(root["layout"], dict) else None
+        if isinstance(uncarded, list) and all(isinstance(entry, str) for entry in uncarded):
+            import cards  # purpose cards are part of the layout a repository declares
+            errors.extend(cards.problems(modules, paths, read, uncarded))
 
     def listed(module: dict, key: str) -> list:
         value = module["data"].get(key)
@@ -303,13 +332,51 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
     return {"tracked": paths, "modules": dict(sorted(summary.items()))}, sorted(set(errors))
 
 
-USAGE = """usage: scripts/tron ownership [<rev>] [--modules | --ledger]
+USAGE = """usage: scripts/tron ownership [<rev>] [--modules | --ledger] | --card <module-id|path> [<rev>]
 Checks every tracked path has exactly one <name>.module.json owner, and the layout root.module.json
-declares (tools/ownership/README.md). --ledger prints path, module, layer and purpose per tracked path.
+declares, with each module's purpose card (tools/ownership/README.md). --ledger prints path, module, layer
+and purpose per tracked path; --card prints one module's purpose, inbound and outbound edges and guardians.
 Without <rev>: the index's paths with working-tree contents. Exit 0 clean, 1 violations, 2 usage/Git."""
 
 
+def show_card(target: str, rev: str | None) -> int:
+    """Print one module's card (by module id or any path it owns): what it is for, who reaches it,
+    what it reaches and which checks guard it."""
+    import cards
+    result, errors = check(rev)
+    paths, read = inventory(rev)
+    modules = {}
+    for key, module in result["modules"].items():
+        try:
+            data = json.loads(read(module["manifest"]))
+        except (OSError, ValueError):
+            data = {}
+        modules[module["manifest"]] = {"id": key, "data": data if isinstance(data, dict) else {}, "owned": module["owned"]}
+    owner = {path: key for key, module in result["modules"].items() for path in module["owned"]}
+    key = target if target in result["modules"] else owner.get(target.rstrip("/"))
+    if key is None:
+        folders = cards.directories(paths, owner)
+        key = folders.get(target.rstrip("/"))
+    if key is None:
+        print(f"ownership: {target!r} is neither a module id nor a tracked path with one owner", file=sys.stderr)
+        return 2
+    print(json.dumps(cards.card(key, modules, paths, read), indent=2))
+    mine = [error for error in errors if result["modules"][key]["manifest"] in error or f"{key!r}" in error]
+    for error in mine:
+        print(error, file=sys.stderr)
+    return 1 if mine else 0
+
+
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["--card"]:
+        if len(argv) not in (2, 3):
+            print(USAGE, file=sys.stderr)
+            return 2
+        try:
+            return show_card(argv[1], argv[2] if len(argv) == 3 else None)
+        except GitError as error:
+            print(f"ownership: {error}", file=sys.stderr)
+            return 2
     args = [a for a in argv if a not in ("--modules", "--ledger")]
     if any(a.startswith("-") for a in args) or len(args) > 1 or {"--modules", "--ledger"} <= set(argv):
         print(USAGE, file=sys.stderr)

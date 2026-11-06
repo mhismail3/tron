@@ -1,5 +1,6 @@
 {
   "layer": "L5",
+  "purpose": "On-demand Gateway, iOS and device profiling that writes tron.profile-report.v1 reports with attribution.",
   "owns": [
     "profile.module.json",
     "test-tron-profile.py",
@@ -14,5 +15,39 @@
     "tron-profile-relay.mjs",
     "tron_profile_attribution.py",
     "tron_profile_report.py"
+  ],
+  "interfaces": [
+    {
+      "name": "scripts/tron-profile",
+      "kind": "exec",
+      "consumers": [
+        "ios-app/package",
+        "ios-app/profiling",
+        "repo/ios",
+        "repo/verify"
+      ],
+      "external": "maintainer and agents profiling (packages/ios-app/docs/performance.md)"
+    },
+    {
+      "name": "scripts/tron-profile-gateway",
+      "kind": "exec",
+      "consumers": [
+        "gateway/lifecycle"
+      ]
+    },
+    {
+      "name": "scripts/tron-profile-ios",
+      "kind": "exec",
+      "consumers": [
+        "ios-app/profiling",
+        "repo/ios"
+      ]
+    }
+  ],
+  "uses": [
+    {
+      "name": "xctrace",
+      "kind": "cli"
+    }
   ]
 }

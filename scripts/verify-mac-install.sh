@@ -73,10 +73,11 @@ verify_codesign "$NATIVE_CLIENT" "native capture client"
 CLIENT_ARCHS="$(lipo -archs "$NATIVE_CLIENT" 2>/dev/null || true)"
 [[ "$CLIENT_ARCHS" == "x86_64 arm64" || "$CLIENT_ARCHS" == "arm64 x86_64" ]] \
   && pass "native capture client is universal" || fail "native capture client architectures invalid"
-if python3 "$(dirname "$0")/validate-native-host.py" --app "$APP" >/dev/null 2>&1; then
+# The validator's last stderr line names what is wrong, or that the validator itself could not run.
+if native_error="$(python3 "$(dirname "$0")/validate-native-host.py" --app "$APP" 2>&1 >/dev/null)"; then
   pass "native helper and Aqua Mach service composition"
 else
-  fail "native helper or Aqua Mach service composition invalid"
+  fail "native helper or Aqua Mach service composition invalid: ${native_error##*$'\n'}"
 fi
 CUA_DRIVER="$APP/Contents/Library/Native/cua-driver"
 CUA_PIN="$REPO_ROOT/packages/mac-app/cua-driver-release.json"

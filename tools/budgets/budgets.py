@@ -12,8 +12,8 @@ import metrics  # noqa: E402  (the one classification and line-count authority)
 
 # A doc fails only above this multiple of its budget; between budget and limit it is reported.
 DOC_FACTOR = 2
-# The charter's two root budgets are owned by scripts/check-documentation-policy.py.
-POLICY_OWNED = {"README.md", "AGENTS.md"}
+# The front door and the agent charter (AGENTS.md "Documentation") fail at their budget itself.
+HARD_LIMITS = {"README.md": 250, "AGENTS.md": 150}
 
 
 def doc_budget(path: str) -> int:
@@ -37,7 +37,11 @@ def main(argv: list[str]) -> int:
     problems, over = [], 0
     for f in sorted(files, key=lambda f: f["path"]):
         path, lines = f["path"], f["lines"]
-        if f["category"] != "docs" or path in POLICY_OWNED:
+        if f["category"] != "docs":
+            continue
+        if path in HARD_LIMITS:
+            if lines > HARD_LIMITS[path]:
+                problems.append(f"{path} has {lines} lines; maximum is {HARD_LIMITS[path]}")
             continue
         budget = doc_budget(path)
         over += lines > budget

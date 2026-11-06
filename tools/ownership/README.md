@@ -11,7 +11,9 @@ scripts/tron ownership             # index paths, working-tree manifest contents
 scripts/tron ownership <rev>       # one commit's Git objects, without checking it out
 scripts/tron ownership --modules   # also print id, layer, owned paths, manifest
 scripts/tron ownership --ledger    # path, module, layer and purpose of every tracked path
+scripts/tron ownership --card <id|path>  # one module's card, dependents and dependencies (below)
 scripts/tron tidy [--json|--prune] # workspace hygiene (below)
+scripts/tron tidy --here [--landing]     # this worktree's residue; exit 1 until it is clean
 ```
 
 Exit 0: every path is owned exactly once and every manifest is valid. Exit 1:
@@ -57,6 +59,8 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `capabilities` | no | non-empty strings (the catalog does not exist yet) |
   | `verify` | no | `scripts/tron …` commands |
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
+  | `interfaces` | card | inbound contracts; see [Purpose cards](#purpose-cards) |
+  | `uses` | no | outside contracts the module depends on: `{name, kind, why?}`; `name` must occur in an owned file |
 
   Lists must not repeat an entry.
 
@@ -87,6 +91,46 @@ common parent. A repo tool keeps its code, `tests/` and configuration in
 Edges, capabilities, risk classes and verification declarations are optional
 fields checked by their owning tools. `--modules` prints the current map.
 
+## Purpose cards
+
+A card answers, for one module: what is it for, who reaches it, what does it reach, and
+which checks go red if it breaks. It is the manifest's `purpose`, `interfaces` and `uses`
+keys plus its guardians: the tests it owns and its `verify` commands. Before editing a
+module, read `scripts/tron ownership --card <module-id or any path it owns>`: it prints the
+card, the modules whose files name this one (`foundDependents`, with file names) and the
+modules it names (`foundDependencies`), whether or not a card declares them yet.
+
+```json
+{"layer": "L5", "owns": ["**"], "purpose": "Runs the iOS UI tests on leased simulators.",
+ "interfaces": [{"name": "scripts/tron-ios-test", "kind": "exec", "consumers": ["repo/verify"],
+                 "external": "maintainer and agents in Terminal"}],
+ "uses": [{"name": "DEVELOPER_DIR", "kind": "env"}]}
+```
+
+- **`interfaces`** entries are `{name, kind, consumers?, external?}`. `name` is an owned
+  file or single-owner directory, or a contract name (subcommand, RPC, env var) that occurs
+  in an owned file. `kind` is `exec`, `import`, `read`, `cli`, `env`, `wire`, `fs` or
+  `launchd` (`exec`, `import` and `read` name a tracked path; `wire` covers protocols, events and data formats). `consumers` are module ids; `external` says who outside the repository uses it.
+  Each entry needs one of the two.
+- **References are found, not trusted.** Each tracked source file (not Markdown, not a
+  manifest) is scanned for names of tracked files and single-owner directories, resolved
+  from the root, the file's package and its own directory; a distinctive bare file name
+  counts in its own directory, and so does a Python `import` of a sibling. A comment that
+  names a path counts: a move must update it too.
+- **Checks** for every module not exempt (each message names the fix): a purpose; a
+  guardian; at least one interface; every module whose files name an owned file is a
+  listed consumer of an interface covering it, and every listed consumer still names it;
+  an interface path the module no longer owns is refused with the files that still name
+  it (a half-done move); and every owned non-test file is reached by another owned
+  non-test file or covered by an interface (otherwise it is dead: delete it).
+- **Ratchet.** `layout.uncarded` in `root.module.json` lists the modules still exempt. It
+  only shrinks against origin/main, an entry whose card is complete is stale, and a new
+  module is carded from birth.
+
+Outbound edges are derived, never declared twice: a module's dependencies are the
+interfaces of other modules that list it, plus `dependsOn` and `dynamicEdges`.
+`scripts/tron probe` (tools/verify/README.md) checks that the guardians actually go red.
+
 ## Layout
 
 `root.module.json` `layout` declares where files may go; `tools/ownership/layout.py`
@@ -99,6 +143,7 @@ checks it in the same pass, and each message names the fix:
 - **`frozen`**: paths code older than the checkout runs by path (the installed
   Gateway, or the Mac replace orchestrator at another revision). They must exist;
   change their content, never their path.
+- **`uncarded`**: modules not yet [carded](#purpose-cards); see the ratchet there.
 - **Purpose.** Tooling (`.py`, `.sh`, `.mjs`, `.js`, `.ts` or executable files under
   `scripts/`, `tools/` and `packages/<pkg>/scripts/`, except tests) states what it does in
   a comment or docstring in its first 12 lines. Directives such as `# shellcheck`
@@ -131,6 +176,13 @@ registered worktrees; a pre-commit hook that differs from what
 HEAD activity; and branches merged into `origin/main` or idle over 14 days. Exit 1
 means something needs a decision; `--json` prints the same report.
 
+`--here` checks only the current worktree, the residue its agent owns: untracked files,
+ignored paths with no named writer, any `.scratch/` or loose `.pi/` entry, and worktrees
+pi-subagents left under `<checkout>-worktrees/worktrees/<this worktree>/`. It exits 1 until
+they are gone; an agent runs it before it reports or parks. `--here --landing` checks only
+untracked files and unnamed ignored residue, and is a `scripts/tron verify` step, so residue
+cannot land.
+
 `--prune` deletes only expired scratch and evidence (never through a symlinked
 `.scratch` or `test-results`, and never in a linked worktree with a live process,
 local changes or unknown ignored data, or in any linked worktree without `lsof`:
@@ -147,7 +199,9 @@ reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 ## Verify
 
 `scripts/tron test tooling tools/ownership/tests/test-ownership.py tools/ownership/tests/test-layout.py
-tools/ownership/tests/test-tidy.py tools/ownership/tests/test-tidy-scope.py` runs the CLIs against disposable Git repositories:
-ownership (valid layouts, coverage and schema violations, placement, Git-only
-discovery), one case per layout rule and the shrink-only lists, and tidy's report,
-prune safety and ownership scope. The last runs are kept under `test-results/{ownership,layout,tidy}-cli/`.
+tools/ownership/tests/test-cards.py tools/ownership/tests/test-tidy.py tools/ownership/tests/test-tidy-scope.py`
+runs the CLIs against disposable Git repositories: ownership (valid layouts, coverage and
+schema violations, placement, Git-only discovery), one case per layout rule and the
+shrink-only lists, one per card rule (undeclared and stale consumers, a half-done move,
+dead files, the exemption ratchet, `--card`), and tidy's report, `--here`, prune safety and
+ownership scope. The last runs are kept under `test-results/{ownership,layout,cards,tidy}-cli/`.

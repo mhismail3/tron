@@ -61,7 +61,8 @@ its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and e
 records itself there, so Gateway runs never overlap each other or a `verify --batch` Gateway lane,
 which holds it only while that lane runs ([batch](batch.md)). Waiters, batch included, take the lock first-come first-served: each holds the
 flock of a numbered ticket in `/tmp/tron-full-gateway.lock.queue/` while it waits, so a dead
-waiter's ticket is pruned, and only the earliest live ticket tries the lock.
+waiter's ticket is pruned, and only the earliest live ticket tries the lock. `host_lock.py` is
+the lock's one owner; the runner and the batch import it.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
 user's settings or profile. Test input and output must not depend on live stores.
 
@@ -82,16 +83,17 @@ the build that stamped it). Python unittest counts exclude skipped and expected-
 cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 ## Static checks (existing tools only)
-1. `scripts/tron ownership`
-2. `scripts/tron budgets HEAD --base <base>` (sizes are reported; few cases fail)
-3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
+1. `scripts/tron ownership`, including each module's [purpose card](../ownership/README.md#purpose-cards)
+2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer
+3. `scripts/tron budgets HEAD` (sizes are reported; few cases fail)
+4. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
    --base <base>` when Markdown, a manifest or the Gateway changed; `--all` and empty-diff
    baselines check every block without `--base` (loaded generators need Gateway dependencies).
-4. the privacy guard over `git diff <base>..HEAD`
-5. `git diff --check`
-6. When the selection touches the Gateway: `npm run check` (production and test
+5. the privacy guard over `git diff <base>..HEAD`
+6. `git diff --check`
+7. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
-7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
+8. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
@@ -100,7 +102,6 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 There is no known-failure registry, quarantine, waiver, expiry or qualified verdict
 ([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Every
 executed failure is `failed` (exit 1); it is fixed at its root or causally reverted.
-
 
 ## Selection
 
@@ -246,11 +247,35 @@ restored after each mutant, interrupt or SIGTERM. Incremental `test-results/muta
 reports retain partial results (`complete: false` until finished). Stryker remains
 deferred until a known-kill probe proves activation with pinned Vitest.
 
+## Removal probes
+
+`scripts/tron probe <path|module-id> [--move <new-path>] [--jobs 4] [--timeout 900]` asks what
+would break if a unit (file, directory or module) were removed, or moved without updating its
+callers. It checks out HEAD in a private worktree (with a copy-on-write clone of installed Gateway
+dependencies, which a guardian may reinstall), runs the unit's guardians unchanged, applies the change with the manifests kept
+true to the tree, commits it and runs them again. Guardians are the tests `verify` selects for
+the unit, every test that names it, and the tests that name a file of their own module that names
+it (one hop through a consumer; references as in [purpose cards](../ownership/README.md#purpose-cards)).
+Runners verify drives in their own lanes (iOS, Mac, push relay) are listed, not run. A guardian already red at HEAD is left out and reported
+(`baselineRed`); with none left green the probe stops before any change (exit 1).
+
+| Verdict | Meaning | What to do |
+|---|---|---|
+| precise | guardians that passed now fail and every failure names the unit | keep; the card's guardians are real |
+| cascade | some failure never names the unit | make the failing check name what it needs (structure defect) |
+| silent | nothing fails | dead: delete it; or unguarded: add a test that fails before and passes after |
+
+The static `scripts/tron ownership` findings the change adds (a half-done move, a stale card)
+are reported beside the verdict. It measures and never gates; `test-results/probe/<sha>/<unit>/`
+keeps `report.json` and each test's baseline and after logs, and the worktree is always removed.
+
 ## Verify
 
+`scripts/tron test tooling tools/verify/tests/test-probe.py` covers each verdict, a move that
+leaves its callers behind and a red baseline in a disposable repository; logs: `test-results/probe-cli/`.
 `scripts/tron test tooling tools/verify/tests/test-verify.py tools/verify/tests/test-verify-tiers.py tools/verify/tests/test-verify-batch.py`
 drives real Git/CLI fixtures: affected selection, known-bad small changes, zero-test
-refusal, reproducible digests, dirty planning, descendant cleanup, batch ranges/overlap,
+refusal, reproducible digests, dirty planning, unnamed ignored residue failing the run, descendant cleanup, batch ranges/overlap,
 bisection, causal revert publication and refused issue authority. The iOS stand-in compiles real Swift indexes
 and stamps, exercises real `layers ios`, and emits XCTest-style summaries: locks-only
 selection, reuse, extensions, empty/failing runs and busy deferral. Every Gateway case

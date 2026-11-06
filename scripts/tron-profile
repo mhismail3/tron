@@ -37,11 +37,9 @@ USAGE
 command="${1:-}"
 (($#)) && shift
 case "$command" in
-  ios|gateway|device)
-    tool="$ROOT/scripts/tron-profile-$command"
-    [[ -x "$tool" ]] || { echo "error: the $command profiler is not installed in this checkout ($tool)" >&2; exit 2; }
-    exec "$tool" "$@"
-    ;;
+  ios) exec "$ROOT/scripts/tron-profile-ios" "$@" ;;
+  gateway) exec "$ROOT/scripts/tron-profile-gateway" "$@" ;;
+  device) exec "$ROOT/scripts/tron-profile-device" "$@" ;;
   compare) exec python3 "$REPORT" compare "$@" ;;
   status) exec python3 "$REPORT" status --worktree "$ROOT" ;;
   environment) exec python3 "$REPORT" environment ;;

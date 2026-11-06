@@ -12,10 +12,10 @@ generated now (`scripts/tron ownership --ledger`), so it is not kept on main.
 
 | Slice | State | Musk verdict |
 |---|---|---|
-| S1 guards: layout rules in `scripts/tron ownership`, `--ledger`, `tidy`, AGENTS "Where things go" | landed `4121a32c2` | keep: 0.2 s, blocks new root entries, root manifests and flat scripts at commit |
+| S1 guards: layout rules in `scripts/tron ownership`, `--ledger`, `tidy`, AGENTS "Where things go" | landed `4121a32c2` | keep: about 1.3 s with purpose cards (was 0.2 s), blocks new root entries, root manifests and flat scripts at commit |
 | S2 residue, ignore rules, first `tidy --prune` | landed `5e4bbacd1` | keep; `tidy --prune` root-fixed for read-only payloads in `3de01846d` |
 | S3 fold `tools/` into `scripts/<area>/` | **changed** to S3', landed with this change | see below |
-| S4a/b/c flat `scripts/` into areas | **dropped** | see below |
+| S4a/b/c flat `scripts/` into areas | **dropped**; moves now follow removal probes in [#2297](ground-up.md) | see below |
 | S5 packages and docs | **narrowed**; done except `tools/web` | deletions kept; moves re-judged below |
 | S6 weekly hygiene automation | maintainer decision | recommend `tidy --prune`, not report-only |
 
@@ -31,7 +31,8 @@ gains its tests (`tools/<tool>/tests/`, as `tools/ownership` already does) and i
 root keeps only `root.module.json`. `tools/work/work.json`, its configuration, moved out of `.github`
 with its tool.
 
-**S4 dropped.** Why move 108 flat scripts into areas? To find them. Agents find tooling through
+**S4 dropped** as a blanket move; the [ground-up program](ground-up.md) moves a file only when its
+removal probe shows the move is needed. Why move 108 flat scripts into areas? To find them. Agents find tooling through
 `scripts/tron --help`, `--ledger` purpose lines and grep; the shrink-only layout guard already
 stops growth. The moves touch frozen executed paths, Xcode build phases and the payload
 fingerprint inputs: the highest regression risk in the plan for no measured gain. Kept from S4:

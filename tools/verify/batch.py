@@ -17,17 +17,16 @@ import tempfile
 import threading
 import time
 
+from host_lock import FULL_GATEWAY_LOCK, HELD_BY_CALLER, wait_for_full_gateway_lock
 import timing
 import verify
 
 ROOT = verify.ROOT
 # The host's one full-Gateway run at a time. A batch takes it only around each lane or probe
 # marked `gatewayLock` (a full Gateway Vitest run), in arrival order with every other Gateway
-# Vitest run (tools/verify/gateway.py, same path), and marks that subprocess
-# FULL_GATEWAY_LOCK_HELD so its runner does not wait on the batch. Every other subprocess runs
+# Vitest run (tools/verify/host_lock.py owns the lock), and marks that subprocess
+# HELD_BY_CALLER so its runner does not wait on the batch. Every other subprocess runs
 # unmarked: Gateway runs inside it (the verifier's Gateway groups) queue for the lock themselves.
-FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
-FULL_GATEWAY_LOCK_HELD = 'TRON_FULL_GATEWAY_LOCK_HELD'
 # A Gateway lane waits its turn this long, then is uncovered naming the holder; never skipped.
 FULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
@@ -264,7 +263,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     if lane['name'] == 'full verify':
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         (root / 'test-results/verify' / f'{sha}.json').unlink(missing_ok=True)
-    env = {key: value for key, value in os.environ.items() if key != FULL_GATEWAY_LOCK_HELD}
+    env = {key: value for key, value in os.environ.items() if key != HELD_BY_CALLER}
     env['TRON_IOS_E2E_NO_INSTALL'] = '1'
     env.update(lane.get('env', {}))
     held, window = None, None
@@ -280,7 +279,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
                     'reason': f'a full-Gateway run held or preceded this lane at {FULL_GATEWAY_LOCK} past the '
                               f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); not run'}
-        env[FULL_GATEWAY_LOCK_HELD] = '1'
+        env[HELD_BY_CALLER] = '1'
         window = {'waitSeconds': round(time.monotonic() - start, 3), 'acquiredAt': time.time()}
     try:
         if CANCELLED.is_set():
@@ -883,90 +882,6 @@ def next_action(journal: dict) -> dict:
                     next=f"scripts/tron verify --batch --review {journal['culprit']} --decision ACCEPT|BLOCK "
                          f"--reviewer <non-author review id> --binding {journal['bindingDigest']}")
     return item
-
-
-# tools/verify/gateway.py owns this same function; this copy exists because the batch fixture
-# replaces that file. tools/verify/tests/test-verify-batch.py keeps the two identical.
-def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
-    """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
-
-    Waiters take the lock in arrival order: each queues a numbered ticket beside the lock and
-    holds that ticket's flock while it waits, so a waiter that dies (even by SIGKILL) gives up
-    its place and the next look at the queue deletes its ticket. Only the earliest live ticket
-    tries the lock, whose own flock the kernel likewise drops for a dead holder. The queue
-    directory's flock serializes numbering and pruning. Never interrupts the holder; raises
-    TimeoutError naming it after `wait_seconds` (None waits indefinitely), and InterruptedError
-    once `cancelled()` is true, giving up its place.
-    """
-    queue = Path(FULL_GATEWAY_LOCK + '.queue')
-    queue.mkdir(exist_ok=True)
-
-    def guarded(action):
-        guard = os.open(queue, os.O_RDONLY)
-        try:
-            fcntl.flock(guard, fcntl.LOCK_EX)
-            return action()
-        finally:
-            os.close(guard)
-
-    def live():
-        tickets = []
-        for path in sorted(queue.glob('*.ticket')):
-            with path.open() as probe:
-                try:
-                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    tickets.append(path)
-                    continue
-            path.unlink()
-        return tickets
-
-    def enqueue():
-        tickets = live()
-        ticket = (queue / f'{int(tickets[-1].stem) + 1 if tickets else 0:012d}.ticket').open('x')
-        fcntl.flock(ticket, fcntl.LOCK_EX)
-        ticket.write(json.dumps(record))
-        ticket.flush()
-        return ticket
-
-    ticket = guarded(enqueue)
-    mine = Path(ticket.name)
-    handle = open(FULL_GATEWAY_LOCK, 'a+')
-    started = time.monotonic()
-    announced = False
-    try:
-        try:
-            while True:
-                earlier = guarded(lambda: [path.read_text() for path in live() if path < mine])
-                if not earlier:
-                    try:
-                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        pass
-                handle.seek(0)
-                line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
-                waited = time.monotonic() - started
-                if cancelled is not None and cancelled():
-                    raise InterruptedError(f'cancelled after {round(waited)}s waiting ({line})')
-                if wait_seconds is not None and waited >= wait_seconds:
-                    raise TimeoutError(f'{line}; waited {round(waited)}s')
-                if not announced:
-                    announce(f'waiting for {FULL_GATEWAY_LOCK} ({line})')
-                    announced = True
-                time.sleep(0.2)
-        finally:
-            try:
-                guarded(mine.unlink)
-            finally:
-                ticket.close()
-        handle.truncate(0)
-        handle.write(json.dumps(record))
-        handle.flush()
-    except BaseException:
-        handle.close()
-        raise
-    return handle
 
 
 class Locks:
