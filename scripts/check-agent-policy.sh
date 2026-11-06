@@ -57,6 +57,11 @@ for path in paths:
     names.add(name)
 
 PY
+# A localized guide adds local facts only; the root charter stays the one place for shared rules.
+for guide in $(git -C "$ROOT" ls-files '*/AGENTS.md'); do
+  up=$(dirname "$guide" | sed -E 's|[^/]+|..|g')
+  grep -Fq "($up/AGENTS.md)" "$ROOT/$guide" || fail "$guide does not link the root charter"
+done
 grep -Fq 'SIGSTOP' "$ROOT/AGENTS.md" \
   || fail "shared guidance lacks Gateway work-suspension stop rule"
 grep -Fq 'XcodeBuildMCP' "$ROOT/AGENTS.md" \
