@@ -320,7 +320,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
-    modelRuntime, devices, sessions: registry, display: displayOwnerOf(registry), modules: registry.moduleHost, trust, settingsModel, settingsChanges, receipts,
+    modelRuntime, devices, sessions: registry, display: displayOwnerOf(registry), trust, settingsModel, settingsChanges, receipts,
     ...(options.home ? { home: homeOwnerOf(registry) } : {}),
     ...(automations ? { automations } : {}),
     ...(knowledge ? { knowledge } : {}),

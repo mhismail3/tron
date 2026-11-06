@@ -75,7 +75,7 @@ async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Pro
   await registry.initializeBlobStorage();
   const service = new GatewayService({ display: displayOwnerOf(registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-    sessions: registry, modules: registry.moduleHost, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
+    sessions: registry, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
   const instances = selectedInstances.get(root) ?? new Map<string, string>();

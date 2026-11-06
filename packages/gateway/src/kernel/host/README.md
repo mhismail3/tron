@@ -86,7 +86,7 @@ semantic form adapters, including their exact audited package admission.
   creation recipe, consumed after selection. The runtime retains its selected
   object. Its request-policy selector resolves the live K3 hook at the original cut.
 - **RPC (D5).** A module's `rpc` methods are routed before `GatewayService`'s
-  switch. `read` handlers are admitted while the Gateway drains; `mutation`
+  switch, through the one host its session registry holds (`RuntimeRegistry.moduleHost`). `read` handlers are admitted while the Gateway drains; `mutation`
   handlers run under the command receipt and are refused while draining.
   Handlers receive transport-owned authenticated identity, never a params actor;
   only disposable reads receive the disconnect signal. Accepted mutation context

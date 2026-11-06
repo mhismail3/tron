@@ -81,7 +81,6 @@ import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modu
 import type { HomeOwner } from "../modules/home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
-import type { ModuleHost } from "../kernel/host/module-host.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -285,8 +284,6 @@ export interface GatewayServiceDependencies {
   devices: DeviceStore;
   sessions: RuntimeRegistry;
   display: Pick<DisplayOwner, "removeArtifacts">;
-  /** Started modules; their RPCs route before this service's own methods (K3, D5). */
-  modules?: ModuleHost;
   filesystem: FilesystemService;
   workspaceInspector?: WorkspaceInspectionService;
   gitWorktrees?: GitWorktreeService;
@@ -545,7 +542,7 @@ export class GatewayService {
         "compaction-policy.v1",
         "drain-status.v1",
         PROVIDER_USAGE_CAPABILITY,
-        ...(this.dependencies.modules?.capabilities() ?? []),
+        ...(this.dependencies.sessions.moduleHost?.capabilities() ?? []),
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.updateService.channel === "stable" ? [MAC_REPLACE_CAPABILITY] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
@@ -560,7 +557,7 @@ export class GatewayService {
 
   async invoke(client: ClientContext, method: string, rawParams: unknown): Promise<JsonValue> {
     const params = object(rawParams ?? {}, "params");
-    const routed = this.dependencies.modules?.rpc(method);
+    const routed = this.dependencies.sessions.moduleHost?.rpc(method);
     if (this.dependencies.sessions.isAdministrativeDrainStarted && !restartDrainMethods.has(method) && routed?.kind !== "read") {
       throw new GatewayError("busy", "The Gateway is draining accepted work", true);
     }
@@ -2081,7 +2078,7 @@ export class GatewayService {
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
       case "modules.list": {
         rejectUnknownFields(params, [], "Module listing");
-        return safeJson({ modules: tronModuleSummaries(this.dependencies.modules) });
+        return safeJson({ modules: tronModuleSummaries(this.dependencies.sessions.moduleHost) });
       }
       case "hooks.list":
         rejectUnknownFields(params, ["cwd"], "Hook listing");

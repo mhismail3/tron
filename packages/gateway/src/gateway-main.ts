@@ -790,7 +790,7 @@ const service = new GatewayService({
   providerUsage,
   modelRuntime,
   devices,
-  sessions, modules, display,
+  sessions, display,
   filesystem,
   uploads,
   trust,
