@@ -1,4 +1,10 @@
-# Budgets
+# Repository tooling guide
+
+Read this before editing `scripts/` or `tools/`, with the [root charter](../AGENTS.md), which binds
+everywhere. `scripts/tron --help` lists every command; each `tools/<tool>/` keeps its own README, and
+`scripts/tron ownership --card <path>` prints a tool's purpose, users and guardians.
+
+## Doc budgets (`tools/budgets`)
 
 `scripts/tron budgets` reports doc sizes against their budgets for one commit
 and fails only on a doc far over its budget. Code size is not budgeted:
@@ -14,7 +20,7 @@ Exit 0: no problem. Exit 1: problems, one per line. Exit 2: usage error or an
 unmeasurable revision. None of these is reported as clean. The summary line
 always reports the docs over budget.
 
-## Rules
+### Rules
 
 Categories and line counts come from `tools/metrics` (`read_tree`), so the
 checker and the metrics report cannot drift. It reads Git objects only: commit first.
@@ -30,7 +36,7 @@ checker and the metrics report cannot drift. It reads Git objects only: commit f
 The root `README.md` (250) and `AGENTS.md` (150) fail at their budget itself:
 the front door and the charter stay short. Manifests carry no size exceptions.
 
-## Verify
+### Verify
 
 `scripts/tron test tooling tools/budgets/tests/test-budgets.py` runs the CLI on
 disposable repositories: docs at twice their budget pass and one line more

@@ -258,7 +258,7 @@ always allowed.
 [Layer rules](../tools/layers/README.md).
 
 `scripts/tron budgets` reports a commit's docs over budget and fails a doc above
-twice its budget, or the root README or AGENTS.md over theirs. [Budget rules](../tools/budgets/README.md).
+twice its budget, or the root README or AGENTS.md over theirs. [Budget rules](../tools/AGENTS.md#doc-budgets-toolsbudgets).
 
 Run affected checks before landing with the merge procedure in the
 [Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)).

@@ -11,7 +11,8 @@
     "README.md",
     "VERSION.env",
     "config/**",
-    "root.module.json"
+    "root.module.json",
+    "tools/AGENTS.md"
   ],
   "layout": {
     "root": [
