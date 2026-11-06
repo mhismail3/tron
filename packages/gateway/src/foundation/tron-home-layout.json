@@ -1,6 +1,8 @@
 {
   "version": 1,
-  "retired": [],
+  "retired": [
+    {"from": "state/integrations/connections.json", "to": "gateway/integrations/connections.json"}
+  ],
   "paths": {
     "agent": {"owner": "pi-sdk", "writer": "gateway(pi)", "life": "durable", "rebuild": "none", "backup": true, "secret": "private", "retention": "per child", "view": "config"},
     "agent/sessions": {"owner": "pi-sdk", "writer": "gateway(pi)", "life": "durable", "rebuild": "none: canonical transcripts; absolute paths are recorded in other transcripts and Gateway indexes", "backup": true, "secret": "private", "retention": "kept: canonical, deleted only by an explicit session delete", "view": "knowledge", "subtree": true},
@@ -51,6 +53,7 @@
     "gateway/model-recents.json": {"owner": "gateway/providers", "writer": "gateway", "life": "cache", "rebuild": "empty list", "backup": false, "secret": null, "retention": "12 entries", "view": "config"},
     "gateway/model-release-dates.json": {"owner": "gateway/providers", "writer": "gateway", "life": "cache", "rebuild": "bundled seed plus refetch", "backup": false, "secret": null, "retention": "single document", "view": "system"},
     "gateway/automations": {"owner": "gateway/automations", "writer": "gateway", "life": "durable", "rebuild": "none", "backup": true, "secret": "private", "retention": null, "view": "config", "subtree": true},
+    "gateway/integrations": {"owner": "gateway/integrations", "writer": "gateway", "life": "durable", "rebuild": "set connections up again", "backup": true, "secret": "private", "retention": "single document", "view": "config", "subtree": true},
     "gateway/session-search.sqlite": {"owner": "gateway/session-search", "writer": "gateway", "life": "cache", "rebuild": "reindexed from agent/sessions", "backup": false, "secret": "private", "retention": "follows the session catalog", "view": "system"},
     "gateway/session-search.sqlite-*": {"owner": "gateway/session-search", "writer": "gateway", "life": "scratch", "rebuild": "SQLite journal", "backup": false, "secret": "private", "retention": "SQLite", "view": "system"},
     "gateway/catalog-metadata-v3": {"owner": "gateway/session-catalog", "writer": "gateway", "life": "cache", "rebuild": "rescanned from agent/sessions", "backup": false, "secret": "private", "retention": "manifest-driven shards", "view": "system", "subtree": true},
@@ -107,9 +110,6 @@
     "ios-builds/latest.plist": {"owner": "repo/ios", "writer": "scripts", "life": "cache", "rebuild": "republish", "backup": false, "secret": null, "retention": "replaced on publish", "view": "system"},
     "ios-builds/.publish.lock": {"owner": "repo/ios", "writer": "scripts", "life": "lock", "rebuild": "n/a", "backup": false, "secret": null, "retention": "flock", "view": "system"},
 
-    "mac-terminal": {"owner": "gateway/security", "writer": "gateway, sshd", "life": "durable", "rebuild": "new host key; phones re-pin it", "backup": true, "secret": "credential", "retention": "keys removed on revoke", "view": "system", "subtree": true},
-
-    "state": {"owner": "gateway/integrations", "writer": "gateway", "life": "durable", "rebuild": "per child", "backup": true, "secret": "private", "retention": "per child", "view": "config"},
-    "state/integrations": {"owner": "gateway/integrations", "writer": "gateway", "life": "durable", "rebuild": "set connections up again", "backup": true, "secret": "private", "retention": "single document", "view": "config", "subtree": true}
+    "mac-terminal": {"owner": "gateway/security", "writer": "gateway, sshd", "life": "durable", "rebuild": "new host key; phones re-pin it", "backup": true, "secret": "credential", "retention": "keys removed on revoke", "view": "system", "subtree": true}
   }
 }

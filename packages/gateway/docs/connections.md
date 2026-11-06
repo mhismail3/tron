@@ -1,7 +1,7 @@
 # Connection management owner
 
 `ConnectionOwner` owns generic account envelopes under
-`state/integrations/connections.json`. It does not own provider credentials or
+`gateway/integrations/connections.json`. It does not own provider credentials or
 execute provider operations. Credential values never enter this state: an envelope
 holds only an opaque reference, omitted from presentation snapshots.
 

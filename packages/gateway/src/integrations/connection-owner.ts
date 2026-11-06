@@ -41,7 +41,7 @@ function conflict(message: string): GatewayError { return new GatewayError("conf
 function unsupported(message: string): GatewayError { return new GatewayError("unsupported", message); }
 function now(): string { return new Date().toISOString(); }
 function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTION_STATE_SCHEMA_VERSION, stateRevision: 0, instances: {}, setupOperations: {}, receipts: {} }; }
-function statePath(tronHome: string): string { return tronHomePath(tronHome, "state/integrations", "connections.json"); }
+function statePath(tronHome: string): string { return tronHomePath(tronHome, "gateway/integrations", "connections.json"); }
 function copy<T>(value: T): T { return structuredClone(value); }
 
 /** The presentation projection omits credential references, so an unadmitted
@@ -334,16 +334,13 @@ export class ConnectionOwner implements ConnectionAccess {
   }
 
   private async save(state: ConnectionOwnerState): Promise<void> {
-    const stateRoot = tronHomePath(this.tronHome, "state");
-    const root = tronHomePath(this.tronHome, "state/integrations");
-    for (const path of [stateRoot, root]) {
-      try {
-        const info = await lstat(path);
-        if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o700) throw new GatewayError("conflict", "Connection state directory must be owner-only");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        await mkdir(path, { mode: 0o700 });
-      }
+    const root = tronHomePath(this.tronHome, "gateway/integrations");
+    try {
+      const info = await lstat(root);
+      if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o700) throw new GatewayError("conflict", "Connection state directory must be owner-only");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await mkdir(root, { recursive: true, mode: 0o700 });
     }
     await durableAtomicWriteJson(statePath(this.tronHome), state, 0o600);
   }

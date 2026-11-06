@@ -48,9 +48,12 @@ rewriting canonical transcripts or adding symlinks, and Pi fixes the names under
 
 ## Profile
 
-The personal Profile's canonical store is `ProfileStore`'s single file. The settings
-change log records each Profile edit as subject `home.profile.item` for history and
-Undo; it is not the Profile. `gateway/home/profile.json` is Home's settings layer.
+The personal Profile is one registered file, `workspace/files/Profile.json`, published
+only by `ProfileStore` (#2138 chose one readable file among the workspace documents and
+retired `workspace/state/profile`). The settings change log records each Profile edit
+as subject `home.profile.item` for history and Undo; it is not the Profile.
+`gateway/home/profile.json` is Home's settings layer (model, thinking), not the Profile.
+Prune never proposes a registered file, so document retention cannot remove it.
 
 ## Rules
 

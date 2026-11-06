@@ -79,8 +79,8 @@ def validate(registry: dict, root: Path) -> list[str]:
         if "/" in key and parent not in paths:
             problems.append(f"{key}: parent {parent} is not registered")
     for move in registry.get("retired", []):
-        if not registered(paths, move["to"]) or registered(paths, move["from"]):
-            problems.append(f"retired {move['from']} -> {move['to']}: the destination must be registered and the source not")
+        if not registered(paths, move["to"]) or move["from"] in paths:
+            problems.append(f"retired {move['from']} -> {move['to']}: the destination must be registered and the source not an entry")
     return problems
 
 
@@ -184,8 +184,14 @@ def pinned_subagents(root: Path, home: Path) -> set[str]:
     return pins
 
 
-def candidates(home: Path, paths: dict, files_days: int | None, now: float) -> list[dict]:
-    rows = [{"path": relative, "reason": "not in the registry"} for relative in walk(home, paths)[1]]
+def candidates(home: Path, registry: dict, files_days: int | None, now: float) -> list[dict]:
+    paths = registry["paths"]
+    sources = [move["from"] for move in registry["retired"]]
+
+    def pending(relative: str) -> bool:  # a retired source, or its parent, waits for `migrate`
+        return any(source == relative or source.startswith(f"{relative}/") for source in sources)
+
+    rows = [{"path": relative, "reason": "not in the registry"} for relative in walk(home, paths)[1] if not pending(relative)]
     pins = pinned_subagents(ROOT, home)
     installs = home / "internal/pi-subagents"
     if installs.is_dir() and "*" not in pins:
@@ -198,8 +204,8 @@ def candidates(home: Path, paths: dict, files_days: int | None, now: float) -> l
     if files_days is not None and (home / "workspace/files").is_dir():
         for entry in sorted((home / "workspace/files").iterdir()):
             relative = f"workspace/files/{entry.name}"
-            if paths.get(relative):
-                continue  # a registered file such as the Profile is never a document candidate
+            if relative in paths or pending(relative):
+                continue  # a registered or not-yet-migrated file is never a document candidate
             if now - usage(entry)[2] > files_days * DAY:
                 rows.append({"path": relative, "reason": f"workspace document untouched for {files_days} days"})
     for row in rows:
@@ -342,7 +348,7 @@ def main(argv: list[str]) -> int:
                 return 0
             if not args.home or not args.plan:
                 raise LayoutError("prune needs --home and --plan OUT, or --apply PLAN --confirm SHA256")
-            plan = {"version": 1, "home": str(home), "candidates": candidates(home, registry["paths"], args.files_older_than, time.time())}
+            plan = {"version": 1, "home": str(home), "candidates": candidates(home, registry, args.files_older_than, time.time())}
             args.plan.parent.mkdir(parents=True, exist_ok=True)
             args.plan.write_text(json.dumps(plan, indent=2) + "\n")
             for row in plan["candidates"]:
