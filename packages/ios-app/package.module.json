@@ -9,5 +9,24 @@
     "package.module.json",
     "project.yml",
     "scripts/**"
-  ]
+  ],
+  "directories": {
+    "Core": {"name": "core", "layer": "L1"},
+    "E2ETests": {"name": "e2e-tests", "layer": "L5"},
+    "MacTerminalSSH": {"name": "mac-terminal-ssh", "layer": "L3"},
+    "ProfilingTests": {"name": "profiling", "layer": "L5"},
+    "ShareExtension": {"name": "share-extension", "layer": "L5"},
+    "Sources/Auth": {"name": "auth", "layer": "L3"},
+    "Sources/Features/SwiftApps/State": {"name": "swift-apps-state", "layer": "L2"},
+    "Sources/Notifications": {"name": "notifications", "layer": "L3"},
+    "Sources/UI/Automations": {"name": "automations", "layer": "L4"},
+    "Sources/UI/Chat": {"name": "chat", "layer": "L4"},
+    "Sources/UI/Onboarding": {"name": "onboarding", "layer": "L4"},
+    "Sources/UI/Settings": {"name": "settings", "layer": "L4"},
+    "Sources/UI/SwiftApps": {"name": "swift-apps", "layer": "L4"},
+    "Sources/UI/Terminal": {"name": "terminal", "layer": "L4"},
+    "SwiftAppEngine": {"name": "swift-app-engine", "layer": "L3"},
+    "SwiftAppUITests": {"name": "swift-app-ui-tests", "layer": "L5"},
+    "docs": {"name": "docs", "layer": "L5"}
+  }
 }
