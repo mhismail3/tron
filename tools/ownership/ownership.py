@@ -146,7 +146,7 @@ def directory_modules(manifest: str, data: dict, problems: list[str]) -> dict[st
         if pattern_problem(directory) or set(directory) & set("*?"):
             problems.append(f"{label} must be a relative directory path without wildcards")
         elif not isinstance(entry, dict) or set(entry) != {"name", "layer"} or not isinstance(entry["name"], str) \
-                or not STEM.match(entry["name"]) or not one_of(entry["layer"], LAYERS):
+                or not STEM.fullmatch(entry["name"]) or not one_of(entry["layer"], LAYERS):
             problems.append(f"{label} must be {{\"name\": <lowercase-kebab>, \"layer\": L0..L5}}")
         else:
             path = directory if folder == "." else f"{folder}/{directory}"
@@ -359,7 +359,7 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
 
 
 USAGE = """usage: scripts/tron ownership [<rev>] [--modules | --ledger] | --card <module-id|path> [<rev>]
-Checks every tracked path has exactly one <name>.module.json owner, and the layout root.module.json
+Checks every tracked path has exactly one module owner (tools/ownership/README.md), and the layout root.module.json
 declares, with each module's purpose card (tools/ownership/README.md). --ledger prints path, module, layer
 and purpose per tracked path; --card prints one module's purpose, inbound and outbound edges and guardians.
 Without <rev>: the index's paths with working-tree contents. Exit 0 clean, 1 violations, 2 usage/Git."""

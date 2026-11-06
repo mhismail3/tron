@@ -22,10 +22,14 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ownership"))
+import ownership  # noqa: E402  (the one module-id authority)
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "docs-cli"
@@ -63,14 +67,10 @@ class RealRepositoryTests(unittest.TestCase):
         manifests = subprocess.run(["git", "ls-files", "*.module.json"], cwd=ROOT, text=True,
                                    stdout=subprocess.PIPE, check=True).stdout.split()
         expected = set()
-        declared = list(manifests)  # each manifest, and each whole directory it declares
-        for path in manifests:
-            base = path.rpartition("/")[0]
-            for directory, entry in json.loads((ROOT / path).read_text()).get("directories", {}).items():
-                declared.append(f"{base + '/' if base else ''}{directory}/{entry['name']}.module.json")
-        for path in declared:
-            parts = path.split("/")
-            expected.add(f"{parts[1] if parts[0] == 'packages' and len(parts) > 2 else 'repo'}/{parts[-1][:-12]}")
+        for path in manifests:  # each manifest's module, and each whole directory it declares
+            expected.add(ownership.module_id(path))
+            directories = ownership.directory_modules(path, json.loads((ROOT / path).read_text()), [])
+            expected |= {own_id for own_id, _, _ in directories.values()}
         self.assertEqual({cell.strip("`") for cell in first_cells(self.generate("modules"))}, expected)
         gateway = {cell.strip("`") for cell in first_cells(self.generate("modules", "packages/gateway"))}
         self.assertEqual(gateway, {m for m in expected if m.startswith("gateway/")})

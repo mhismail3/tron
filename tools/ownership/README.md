@@ -1,7 +1,8 @@
 # Module ownership
 
 Every tracked path has exactly one owning module. A module is declared by a
-co-located `<name>.module.json` manifest (format B′).
+co-located `<name>.module.json` manifest (format B′), or as a whole directory by
+an ancestor's [`directories`](#directory-modules) entry.
 `scripts/tron ownership` checks the whole repository and the [layout](#layout)
 `root.module.json` declares. It is read-only; `scripts/tron verify` runs it as its
 first static step.
@@ -83,8 +84,9 @@ stale and reported, so manifests move with their code.
 
 ## Directory modules
 
-A module that is a whole directory with only a layer has no file of its own. Its package's
-`package.module.json` (outside a package, `root.module.json`) declares it under `directories`:
+A module that is a whole directory with only a layer has no file of its own. A manifest above it
+declares it under `directories`, relative to the manifest's folder; by convention that is its
+package's `package.module.json` (outside a package, `root.module.json`):
 `"src/util": {"name": "util", "layer": "L0"}` is exactly the module a
 `src/util/util.module.json` of `{"layer": "L0", "owns": ["**"]}` would be: the same id, layer and
 owned paths. `--modules` names it `<manifest>#<dir>`. A module that needs any other key (a card,
