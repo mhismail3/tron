@@ -203,8 +203,11 @@ private struct AutomationDateControlsViewport: UIViewRepresentable {
                 for _ in 0..<20 {
                     try Task.checkCancellation()
                     if let window = view?.window,
-                       let scroll = Self.scroll(in: window), scroll.contentSize.height > scroll.bounds.height + 900 {
-                        scroll.setContentOffset(CGPoint(x: 0, y: 900), animated: false)
+                       let scroll = Self.scroll(in: window), scroll.contentSize.height > scroll.bounds.height + 600 {
+                        // The schedule sits about 900 points down; a shorter form
+                        // stops at its end, where the schedule is still on screen.
+                        let end = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
+                        scroll.setContentOffset(CGPoint(x: 0, y: min(900, end)), animated: false)
                         onReady()
                         return
                     }
