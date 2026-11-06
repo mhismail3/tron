@@ -7,7 +7,7 @@ import { awaitsWithin } from "../../test-support/wait-for.js";
 import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, openLockSession, promptStreamScenario, type LockSession } from "../../test-support/lock-scenarios.js";
 
 /**
- * Kernel run locks (restructure plan §6.4, V3) for the `gateway/run` module:
+ * Kernel run locks (packages/gateway/docs/scenario-locks.md) for the `gateway/run` module:
  * prompt/stream, steer, abort, compaction and extension UI, each through the
  * real Gateway over a loopback WebSocket (`gateway-lock-harness.ts`) with the
  * faux provider as the only scripted party.

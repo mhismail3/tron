@@ -7,7 +7,7 @@ import { normalizeTraceValue, type TraceValue } from "../../test-support/scenari
 import { expectScenario } from "../../test-support/lock-projections.js";
 
 /**
- * Project-root resources lock (restructure plan §6.4, V3; K-0 §7 E0e follow-up)
+ * Project-root resources lock (packages/gateway/docs/scenario-locks.md; K-0 §7 E0e follow-up)
  * for the two session-free `projectDir` call sites `project-root-trust` does not
  * reach: the package owner (`packages.list`, `admin/package-service.ts`) and the
  * session-free extension loader behind `hooks.list`

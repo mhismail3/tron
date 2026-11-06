@@ -43,7 +43,7 @@ import {
 import { waitFor } from "./wait-for.js";
 
 /**
- * One real Gateway for a kernel scenario lock (restructure plan §6.4): the
+ * One real Gateway for a kernel scenario lock (packages/gateway/docs/scenario-locks.md): the
  * production `RuntimeRegistry`, `GatewayService` and `GatewayServer` on a
  * loopback WebSocket with a paired device, the settings model and its change
  * path, and the faux provider as the only scripted party. Nothing inside the

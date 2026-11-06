@@ -8,7 +8,7 @@ import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue,
 import { waitFor } from "../../../test-support/wait-for.js";
 
 /**
- * Kernel subagent lock (restructure plan §6.4, V3) for the `gateway/delegation`
+ * Kernel subagent lock (packages/gateway/docs/scenario-locks.md) for the `gateway/delegation`
  * module: one foreground subagent run through the real managed pi-subagents
  * install, a real child Pi process and the real `RuntimeRegistry`. The parent's
  * model is the faux provider; the child's model is the scripted local HTTP model

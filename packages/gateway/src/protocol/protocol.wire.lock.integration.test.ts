@@ -8,7 +8,7 @@ import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } fr
 import { waitFor } from "../../test-support/wait-for.js";
 
 /**
- * Wire contract lock (restructure plan §6.5, V7) for the `gateway/protocol` module:
+ * Wire contract lock (packages/gateway/docs/scenario-locks.md#wire-contract-v7) for the `gateway/protocol` module:
  * the shapes the iOS and Mac clients rely on, recorded from real frames of the real
  * Gateway on a loopback WebSocket (`gateway-lock-harness.ts`).
  *

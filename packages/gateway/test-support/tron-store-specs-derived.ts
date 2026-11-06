@@ -10,8 +10,8 @@ import { CORPUS_EPOCH } from "./fixed-recording.js";
 import { CORPUS_IDS, type StoreSpec } from "./tron-store-specs.js";
 
 /**
- * Derived and rebuildable stores in the persisted-store corpus (restructure plan §6.5,
- * V4): the Gateway can regenerate them, but a build still reads what an earlier one
+ * Derived and rebuildable stores in the persisted-store corpus
+ * (packages/gateway/docs/scenario-locks.md#persisted-stores-v4): the Gateway can regenerate them, but a build still reads what an earlier one
  * wrote (the search index, the release-date cache) or a child process reads what the
  * Gateway wrote (the model-queue projection), so their bytes are a contract too.
  */

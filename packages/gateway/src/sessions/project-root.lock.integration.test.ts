@@ -7,7 +7,7 @@ import { expectScenario } from "../../test-support/lock-projections.js";
 import { projectRootTrustScenario } from "../../test-support/lock-scenarios.js";
 
 /**
- * Project-root lock (restructure plan §6.4, V3; K-0 §7 E0e) guarding the Pi seam
+ * Project-root lock (packages/gateway/docs/scenario-locks.md; K-0 §7 E0e) guarding the Pi seam
  * slice E2 (`kernel/pi`) at the `projectDir` patch call sites (K-0 §4 patch
  * item 1): a chat whose cwd is a subdirectory of a Git project, through the real
  * Gateway over a loopback WebSocket (`gateway-lock-harness.ts`).

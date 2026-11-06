@@ -6,7 +6,7 @@ import { expectScenario } from "../../test-support/lock-projections.js";
 import { awaitsWithin } from "../../test-support/wait-for.js";
 
 /**
- * Kernel reconnect-snapshot lock (restructure plan §6.4, V3) for the
+ * Kernel reconnect-snapshot lock (packages/gateway/docs/scenario-locks.md) for the
  * `gateway/transport` module, through the real Gateway over loopback WebSockets.
  *
  * The invariant (AGENTS.md architecture): an accepted prompt survives a client

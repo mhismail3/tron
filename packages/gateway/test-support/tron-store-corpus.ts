@@ -9,7 +9,7 @@ import { CORPUS_IDS, STORES, type StoreSpec } from "./tron-store-specs.js";
 import { DERIVED_STORES } from "./tron-store-specs-derived.js";
 
 /**
- * The persisted-store corpus (restructure plan §6.5, V4).
+ * The persisted-store corpus (packages/gateway/docs/scenario-locks.md#persisted-stores-v4).
  *
  * `test-fixtures/tron-corpus/home` is a Tron home written by the real store owners
  * (`record-tron-corpus.integration.test.ts`, `npm run record:tron-corpus`): synthetic,
