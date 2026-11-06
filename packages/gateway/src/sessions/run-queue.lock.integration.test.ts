@@ -5,7 +5,7 @@ import { expectScenario } from "../../test-support/lock-projections.js";
 import { openLockSession, queueControlScenario, type QueueState } from "../../test-support/lock-scenarios.js";
 
 /**
- * Queue lock (restructure plan §6.4, V3; K-0 §7, guarding E5 `kernel/run`'s
+ * Queue lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5 `kernel/run`'s
  * admission, queue and abort) for the `gateway/run` module, through the real
  * Gateway over a loopback WebSocket (`gateway-lock-harness.ts`).
  *

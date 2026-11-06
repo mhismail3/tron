@@ -231,7 +231,7 @@ These are follow-ups, not exemptions.
   error.
 
 A renamed, removed, added or retyped field fails it; a wire change belongs to
-a lockstep slice that updates both ends (plan §4.1 B4).
+a lockstep slice that updates both ends ([charter](../../../AGENTS.md#architecture-invariants)).
 
 ## Run and update
 
