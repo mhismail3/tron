@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Setup embeds prototypes without another navigation wrapper.
-/// Each switch is a device-local preference with no Gateway setting behind it.
+/// Each switch is a device-local preference with no Gateway setting behind it;
+/// the Sandbox row opens fake-data component experiments.
 struct ExperimentalSettingsContent: View {
     @PresentationState private var swiftApps = SwiftAppExperiment.shared
 
@@ -18,6 +19,18 @@ struct ExperimentalSettingsContent: View {
                 }
                 .tronSettingsVisualTheme(inheriting: .tronPrimary)
                 .tronSettingsCaption("Run opens a single-file SwiftUI app shown in chat as a native app, with no file, network or system access. Applies only to this iPhone.")
+                TronSettingsGroup(nil, accent: .tronPrimary) {
+                    TronProgressiveSheetLink(accessibilityLabel: "Sandbox", identity: "settings.sandbox") {
+                        SandboxSettingsView()
+                    } label: {
+                        TronSettingsRow(icon: "testtube.2", title: "Sandbox",
+                                        subtitle: "Playground for custom components, with fake data",
+                                        subtitleColor: .tronTextSecondary)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityIdentifier("settings-link-Sandbox")
+                }
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
         }
     }
 }

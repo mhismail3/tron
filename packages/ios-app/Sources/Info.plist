@@ -48,6 +48,8 @@
 	<string>$(TRON_PUSH_SERVICE_ORIGIN)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Tron uses the camera to scan Mac pairing QR codes and capture photos for messages.</string>
 	<key>NSLocalNetworkUsageDescription</key>
