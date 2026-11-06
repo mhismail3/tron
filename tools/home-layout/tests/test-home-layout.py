@@ -9,9 +9,10 @@ and a disposable Tron home, so no real home is read or written:
    Tron-home literal in a script and a literal Gateway join; it ignores tests.
 2. `audit` lists only on-disk entries the registry does not cover.
 3. `prune` plans dead and expired entries, never a registered file; `--apply`
-   needs the plan's digest and refuses a candidate that changed since.
-4. `migrate` backs up and moves a retired location, is idempotent, refuses a
-   running Gateway, and `--rollback` restores the original place.
+   needs the plan's digest and, when any candidate changed since, deletes nothing.
+4. `migrate` refuses a live runtime lock but takes over a stale one, replaces
+   an interrupted backup with a complete copy before moving, is idempotent,
+   releases the lock, and `--rollback` restores the original place.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ PATHS = {
     "workspace": entry(), "workspace/files": entry(subtree=True, retention=None),
     "workspace/files/Profile.json": entry(), "workspace/state": entry(), "workspace/state/profile": entry(subtree=True),
     "internal": entry(), "internal/pi-subagents": entry(subtree=True), "gateway/layout-migration": entry(subtree=True),
+    "agent": entry(),
 }
 
 
@@ -94,11 +96,17 @@ class HomeLayoutTests(unittest.TestCase):
         fixture.write("scripts/publish.sh", 'out="$HOME/.tron/bogus/cache"\nok="$HOME/.tron/gateway/devices.json"\n')
         fixture.write("scripts/test-publish.sh", 'out="$HOME/.tron/bogus/cache"\n')
         fixture.write("packages/gateway/src/store.ts", 'const path = join(options.tronHome, "gateway", "devices.json");\n')
+        fixture.write("packages/mac-app/Sources/Paths.swift", 'let a = TronPaths.tronHome.appendingPathComponent("bogus")\n'
+                      'let b = home.appendingPathComponent("gateway/unknown.json")\n'
+                      'let c = homeDirectory.appendingPathComponent("Library")\n')
         result = fixture.run("check")
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("scripts/publish.sh:1: bogus/cache is not in", result.stdout)
         self.assertIn("packages/gateway/src/store.ts:1: resolve Tron-home paths with tronHomePath()", result.stdout)
         self.assertIn("logs: owner repo/missing is not a module", result.stdout)
+        self.assertIn("packages/mac-app/Sources/Paths.swift:1: bogus is not in", result.stdout)
+        self.assertIn("packages/mac-app/Sources/Paths.swift:2: gateway/unknown.json is not in", result.stdout)
+        self.assertNotIn("Paths.swift:3", result.stdout)
         self.assertNotIn("test-publish.sh", result.stdout)
         self.assertNotIn("publish.sh:2", result.stdout)
 
@@ -138,6 +146,7 @@ class HomeLayoutTests(unittest.TestCase):
         changed = fixture.run("prune", "--apply", str(plan), "--confirm", digest)
         self.assertEqual(changed.returncode, 1)
         self.assertIn("workspace/files/old-run changed since the plan", changed.stderr)
+        self.assertTrue(dead.exists(), "a refused apply deletes nothing, not even rows planned before the changed one")
 
         (fixture.home / "workspace/files/old-run/new.txt").unlink()
         os.utime(fixture.home / "workspace/files/old-run", (old.stat().st_mtime, old.stat().st_mtime))
@@ -158,24 +167,28 @@ class HomeLayoutTests(unittest.TestCase):
             {"from": "workspace/files/Profile.json", "to": "workspace/state/profile/Profile.json"}], "paths": PATHS_WITHOUT}))
         fixture.touch("workspace/files/Profile.json", "profile-v2")
         moved = fixture.home / "workspace/state/profile/Profile.json"
+        backup = fixture.home / "gateway/layout-migration/backup/workspace/files/Profile.json"
+        fixture.touch("gateway/layout-migration/backup/workspace/files/Profile.json", "partial")  # an interrupted earlier copy
 
         lock = fixture.home / "agent/.tron-gateway-runtime.lock.lock"
         lock.mkdir(parents=True)
         running = fixture.run("migrate", "--home", str(fixture.home))
         self.assertEqual(running.returncode, 1)
         self.assertIn("stop Tron before migrating", running.stderr)
-        lock.rmdir()
-        lock.parent.rmdir()
+        self.assertTrue((fixture.home / "workspace/files/Profile.json").exists())
+        stale = time.time() - 120
+        os.utime(lock, (stale, stale))  # a dead Gateway's lock is no longer refreshed
 
         first = fixture.run("migrate", "--home", str(fixture.home))
         self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertFalse(lock.exists(), "the migration releases the runtime lock it held")
         self.assertEqual(moved.read_text(), "profile-v2")
         self.assertFalse((fixture.home / "workspace/files/Profile.json").exists())
-        self.assertEqual((fixture.home / "gateway/layout-migration/backup/workspace/files/Profile.json").read_text(), "profile-v2")
+        self.assertEqual(backup.read_text(), "profile-v2")
         again = fixture.run("migrate", "--home", str(fixture.home))
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn("moved", again.stdout)
-        self.assertEqual(fixture.run("audit", "--home", str(fixture.home)).returncode, 0)
+        self.assertEqual(fixture.run("audit", "--home", str(fixture.home)).returncode, 0, fixture.run("audit", "--home", str(fixture.home)).stdout)
 
         back = fixture.run("migrate", "--home", str(fixture.home), "--rollback")
         self.assertEqual(back.returncode, 0, back.stderr)

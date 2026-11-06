@@ -89,9 +89,13 @@ def validate(registry: dict, root: Path) -> list[str]:
 LITERALS = [
     re.compile(r"\.tron/([\w.-]+)(?:/([\w.*-]+))?"),
     re.compile(r"""["']\.tron["']\s*[,/]\s*["']([\w.-]+)["'](?:\s*[,/]\s*["']([\w.*-]+)["'])?"""),
-    re.compile(r"""tronHome\b[^\n]*?appendingPathComponent\(\s*"([\w.-]+)\""""),
-    re.compile(r"""\b(?:join|resolve)\(\s*[\w.]*(?:tronHome|tron_home|TRON_HOME)\b[^,()]*,\s*["']([\w.-]+)["'](?:\s*,\s*["']([\w.*-]+)["'])?"""),
+    re.compile(r'\b\w*[hH]ome\b[^\n]*?appendingPathComponent\(\s*"([\w.-]+)(?:/([\w.*-]+))?"'),
+    re.compile(r"""\b(?:join|resolve)\(\s*[\w.]*(?:tronHome|tron_home|TRON_HOME|\bhome)\b[^,()]*,\s*["']([\w.-]+)["'](?:\s*,\s*["']([\w.*-]+)["'])?"""),
 ]
+# The last two patterns also match other homes (the user's, a bundle's): unless the
+# receiver names the Tron home, only a first segment that is a registered root counts.
+TRON_RECEIVER = re.compile(r"tronHome|tron_home|TRON_HOME|TronHome")
+GATEWAY_JOIN = LITERALS[3]
 SOURCE_ROOTS = ("packages/gateway/src", "packages/gateway/scripts", "packages/mac-app/Sources", "packages/mac-app/scripts", "scripts", "tools")
 SOURCE_SUFFIXES = {".ts", ".mjs", ".js", ".py", ".swift", ".c", ".sh"}
 TEST_NAME = re.compile(r"((^|/)test[-_][^/]*$|[.-]test\.|\.(integration|e2e|lock)\.|Tests?/|/tests/)")
@@ -110,20 +114,23 @@ def check(root: Path = ROOT) -> list[str]:
     registry = load(root)
     problems = validate(registry, root)
     paths = registry["paths"]
-    gateway_literal = LITERALS[3]
+    roots = {key for key in paths if "/" not in key}
     for path in tracked(root):
         try:
             text = (root / path).read_text()
         except (OSError, UnicodeDecodeError):
             continue
         for number, line in enumerate(text.splitlines(), 1):
-            if path.startswith("packages/gateway/src/") and gateway_literal.search(line):
+            joined = GATEWAY_JOIN.search(line)
+            if path.startswith("packages/gateway/src/") and joined and joined.group(1) in roots:
                 problems.append(f"{path}:{number}: resolve Tron-home paths with tronHomePath(), not a literal join")
                 continue
-            for pattern in LITERALS:
+            for index, pattern in enumerate(LITERALS):
                 for match in pattern.finditer(line):
                     segments = [segment for segment in match.groups() if segment and not re.search(r"[*$]|^\.tron", segment)]
                     relative = "/".join(segments)
+                    if index >= 2 and match.group(1) not in roots and not TRON_RECEIVER.search(match.group(0)):
+                        continue
                     if relative and not registered(paths, relative):
                         problems.append(f"{path}:{number}: {relative} is not in {REGISTRY}")
     return problems
@@ -147,21 +154,21 @@ def walk(home: Path, paths: dict) -> tuple[list[str], list[str]]:
     return found, sorted(unknown)
 
 
-def usage(path: Path) -> tuple[int, int, float]:
-    """Bytes, files and newest mtime of a path, never following symlinks."""
+def usage(path: Path) -> tuple[int, int, int]:
+    """Bytes, files and newest mtime (ns) of a path, never following symlinks."""
     if path.is_symlink() or path.is_file():
         info = path.lstat()
-        return info.st_blocks * 512, 1, info.st_mtime
-    total, files, newest = 0, 0, path.lstat().st_mtime
+        return info.st_size, 1, info.st_mtime_ns
+    total, files, newest = 0, 0, path.lstat().st_mtime_ns
     for directory, names, children in os.walk(path):
         for name in names + children:
             try:
                 info = os.lstat(os.path.join(directory, name))
             except FileNotFoundError:
                 continue
-            total += info.st_blocks * 512
+            total += info.st_size
             files += name in children
-            newest = max(newest, info.st_mtime)
+            newest = max(newest, info.st_mtime_ns)
     return total, files, newest
 
 
@@ -206,11 +213,11 @@ def candidates(home: Path, registry: dict, files_days: int | None, now: float) -
             relative = f"workspace/files/{entry.name}"
             if relative in paths or pending(relative):
                 continue  # a registered or not-yet-migrated file is never a document candidate
-            if now - usage(entry)[2] > files_days * DAY:
+            if now - usage(entry)[2] / 1e9 > files_days * DAY:
                 rows.append({"path": relative, "reason": f"workspace document untouched for {files_days} days"})
     for row in rows:
         size, files, newest = usage(home / row["path"])
-        row.update(bytes=size, files=files, newest=int(newest))
+        row.update(bytes=size, files=files, newest=newest)
     return rows
 
 
@@ -219,19 +226,53 @@ def plan_digest(plan: dict) -> str:
     return hashlib.sha256(body.encode()).hexdigest()
 
 
-def runtime_lock(home: Path) -> bool:
-    return (home / "agent/.tron-gateway-runtime.lock.lock").exists()
+LOCK_STALE_SECONDS = 60  # packages/gateway/src/sessions/agent-runtime-lock.ts: stale 60 s, refreshed every 10 s
 
 
-# Migration: the only reader of `retired` sources. It needs a stopped Gateway,
-# copies every source into a backup first, journals each step, and is
-# idempotent, resumable and reversible (`--rollback`).
+def hold_runtime_lock(agent_dir: Path) -> Path:
+    """Take the agent runtime lock a Gateway holds while it runs, so none can start
+    mid-migration; a lock not refreshed for 60 s belongs to a dead Gateway."""
+    lock = agent_dir / ".tron-gateway-runtime.lock.lock"
+    if not agent_dir.is_dir():
+        raise LayoutError(f"{agent_dir} is not this home's agent directory; pass --agent-dir")
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        if time.time() - lock.stat().st_mtime < LOCK_STALE_SECONDS:
+            raise LayoutError(f"a Gateway holds {agent_dir}; stop Tron before migrating") from None
+        lock.rmdir()
+        lock.mkdir()
+    return lock
+
+
+# Migration: the only reader of `retired` sources. It holds the runtime lock,
+# backs each source up (complete copy renamed into place) before moving it,
+# journals each step, and is idempotent, resumable and reversible (`--rollback`).
 JOURNAL = "gateway/layout-migration/journal.json"
 
 
-def migrate(home: Path, registry: dict, rollback: bool) -> list[str]:
-    if runtime_lock(home):
-        raise LayoutError(f"a Gateway holds {home}/agent; stop Tron before migrating")
+def backup_copy(source: Path, copy: Path) -> None:
+    """Replace any earlier (possibly partial) backup with a complete copy of `source`."""
+    copy.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    staging = copy.with_name(f".{copy.name}.partial")
+    for stale in (staging, copy):
+        if stale.is_dir() and not stale.is_symlink():
+            shutil.rmtree(stale)
+        elif stale.exists() or stale.is_symlink():
+            stale.unlink()
+    (shutil.copytree if source.is_dir() else shutil.copy2)(source, staging)
+    os.replace(staging, copy)
+
+
+def migrate(home: Path, agent_dir: Path, registry: dict, rollback: bool) -> list[str]:
+    lock = hold_runtime_lock(agent_dir)
+    try:
+        return migrate_locked(home, registry, rollback)
+    finally:
+        lock.rmdir()
+
+
+def migrate_locked(home: Path, registry: dict, rollback: bool) -> list[str]:
     journal_path = home / JOURNAL
     backup = journal_path.parent / "backup"
     journal = json.loads(journal_path.read_text()) if journal_path.exists() else {"version": 1, "moves": {}}
@@ -240,7 +281,7 @@ def migrate(home: Path, registry: dict, rollback: bool) -> list[str]:
         source, destination = home / move["from"], home / move["to"]
         state = journal["moves"].get(move["from"])
         if rollback:
-            if state != "moved" and not (state == "copied" and destination.exists()):
+            if state not in ("moved", "copied") or not destination.exists():
                 continue
             if source.exists():
                 raise LayoutError(f"cannot roll back {move['to']}: {move['from']} exists again")
@@ -248,18 +289,15 @@ def migrate(home: Path, registry: dict, rollback: bool) -> list[str]:
             os.replace(destination, source)
             journal["moves"][move["from"]] = "rolled-back"
             log.append(f"restored {move['from']}")
-        else:
-            if state == "moved" and not source.exists():
-                continue
-            if not source.exists():
+        elif not source.exists():
+            if state == "copied" and destination.exists():
+                journal["moves"][move["from"]] = "moved"  # the move landed before the journal did
+            elif state != "moved":
                 log.append(f"absent {move['from']}")
-                continue
+        else:
             if destination.exists():
                 raise LayoutError(f"{move['to']} and {move['from']} both exist; resolve by hand")
-            copy = backup / move["from"]
-            if not copy.exists():
-                copy.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                (shutil.copytree if source.is_dir() else shutil.copy2)(source, copy)
+            backup_copy(source, backup / move["from"])
             journal["moves"][move["from"]] = "copied"
             write_journal(journal_path, journal)
             destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -301,6 +339,7 @@ def main(argv: list[str]) -> int:
     prune.add_argument("--confirm", metavar="SHA256", help="the digest `--plan` printed")
     move = commands.add_parser("migrate", help="move retired locations to their registered place (Gateway stopped)")
     move.add_argument("--home", required=True, type=Path)
+    move.add_argument("--agent-dir", type=Path, help="the home's Pi agent directory when not <home>/agent")
     move.add_argument("--rollback", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -328,7 +367,7 @@ def main(argv: list[str]) -> int:
                     continue
                 size, files, newest = usage(home / relative)
                 flag = "NO-RULE" if entry["retention"] is None else entry["life"]
-                print(f"{human(size):>7} {files:>8} {int((now - newest) / DAY):>4}d {flag:<8} {relative}  [{entry['retention'] or 'no retention rule'}]")
+                print(f"{human(size):>7} {files:>8} {int((now - newest / 1e9) / DAY):>4}d {flag:<8} {entry['view']:<9} {relative}  [{entry['retention'] or 'no retention rule'}]")
             return 0
         if args.command == "prune":
             if args.apply:
@@ -336,13 +375,12 @@ def main(argv: list[str]) -> int:
                 if args.confirm != plan_digest(plan):
                     raise LayoutError("--confirm must be the plan's digest")
                 target = Path(plan["home"])
-                for row in plan["candidates"]:
+                present = [row for row in plan["candidates"] if (target / row["path"]).exists() or (target / row["path"]).is_symlink()]
+                for row in present:  # every candidate is checked before the first deletion
+                    if list(usage(target / row["path"])) != [row["bytes"], row["files"], row["newest"]]:
+                        raise LayoutError(f"{row['path']} changed since the plan; plan again (nothing was deleted)")
+                for row in present:
                     path = target / row["path"]
-                    if not path.exists() and not path.is_symlink():
-                        continue
-                    size, files, newest = usage(path)
-                    if (files, int(newest)) != (row["files"], row["newest"]):
-                        raise LayoutError(f"{row['path']} changed since the plan; plan again")
                     shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
                     print(f"deleted {row['path']} ({human(row['bytes'])})")
                 return 0
@@ -357,7 +395,8 @@ def main(argv: list[str]) -> int:
             print(f"plan {args.plan}: {len(plan['candidates'])} candidate(s), {human(total)}; digest {plan_digest(plan)}")
             print(f"apply (maintainer): scripts/tron home-layout prune --apply {args.plan} --confirm {plan_digest(plan)}")
             return 0
-        for line in migrate(home, registry, args.rollback):
+        agent_dir = (args.agent_dir or home / "agent").expanduser().resolve()
+        for line in migrate(home, agent_dir, registry, args.rollback):
             print(line)
         print(f"home-layout {'rollback' if args.rollback else 'migrate'} {home}: done")
         return 0

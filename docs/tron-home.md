@@ -34,8 +34,8 @@ Each entry also carries `view`, the answer to "what kind of thing is this":
 - **knowledge**: what agents know and made (transcripts, skills, prompts, Home record,
   tasks and cwd, uploads, displays, `workspace/`).
 
-`scripts/tron home-layout retention --home ~/.tron` prints every entry with its view,
-size, age and rule.
+`scripts/tron home-layout retention --home ~/.tron` prints each on-disk entry's size,
+file count, age, lifecycle (or `NO-RULE`), view and rule.
 
 ## Why the views are not roots
 
@@ -49,8 +49,8 @@ rewriting canonical transcripts or adding symlinks, and Pi fixes the names under
 ## Profile
 
 The personal Profile is one registered file, `workspace/files/Profile.json`, published
-only by `ProfileStore` (#2138 chose one readable file among the workspace documents and
-retired `workspace/state/profile`). The settings change log records each Profile edit
+only by `ProfileStore`: one readable file among the workspace documents. The retired
+`workspace/state/profile` namespace is never reused. The settings change log records each Profile edit
 as subject `home.profile.item` for history and Undo; it is not the Profile.
 `gateway/home/profile.json` is Home's settings layer (model, thinking), not the Profile.
 Prune never proposes a registered file, so document retention cannot remove it.
@@ -62,12 +62,18 @@ Prune never proposes a registered file, so document retention cannot remove it.
   on any Gateway `join(tronHome, "...")` outside the registry module.
 - `scripts/tron home-layout audit --home DIR` lists on-disk entries no entry covers.
 - Moving a path is a persisted-layout migration: add `retired: {from, to}`. The Gateway
-  refuses to start while a `from` exists. `scripts/tron home-layout migrate --home DIR`
-  (Tron stopped) copies each source to `gateway/layout-migration/backup/`, journals each
-  step, moves it, and is idempotent; `--rollback` restores. It is the only reader of old
-  locations. Running it on a live home is the maintainer's action.
+  refuses to start while a `from` exists. `scripts/tron home-layout migrate --home DIR
+  [--agent-dir DIR]` holds the agent runtime lock (refusing one refreshed in the last
+  60 s), replaces `gateway/layout-migration/backup/<from>` with a complete copy, journals,
+  moves, and is idempotent and resumable. It is the only reader of old locations and is
+  forward-only for the running product: a payload built before the move cannot read the
+  new place. Restoring one is an explicit maintainer action: stop Tron, run
+  `migrate --rollback` (moves each destination back), then reinstall the prior payload.
+  Running either on a live home is the maintainer's action; after accepting the
+  cutover the maintainer deletes `gateway/layout-migration/`.
 - Retention: `retention` names the rule and its owner, or `null` (reported as
   `NO-RULE`). `prune --home DIR --plan OUT [--files-older-than DAYS]` lists unregistered
   entries, unpinned pi-subagents installs and workspace documents untouched for DAYS,
-  never a registered file. `prune --apply OUT --confirm DIGEST` deletes exactly that
-  plan and refuses a candidate that changed; applying it is the maintainer's action.
+  never a registered file or a retired source awaiting migration. `prune --apply PLAN
+  --confirm DIGEST` deletes exactly that plan; if any candidate's size, file count or
+  newest mtime changed it deletes nothing. Applying it is the maintainer's action.
