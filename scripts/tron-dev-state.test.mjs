@@ -433,7 +433,10 @@ test("Debug handoff refuses a candidate whose source dirtiness is unknown", () =
 //     handoff-debug instead of refusing.
 // 25. handoff-debug gets the wrong Debug or Stable home, or a host other than
 //     the live supervisor's recorded one.
-const handoffWiring = ({ supervisorPid, supervisorIdentity, dirty = false, ready = true }) => {
+// 26. An agent runs handoff (no terminal, or an agent shell's PI_SESSION_ID): it must be
+//     refused before any state is read. The maintainer's terminal is a pseudo-terminal
+//     from /usr/bin/script, which merges the script's stderr into its output.
+const handoffWiring = ({ supervisorPid, supervisorIdentity, dirty = false, ready = true, terminal = true, agentSession }) => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-handoff-wiring-"));
   const home = join(root, "home");
   const fakeBin = join(root, "bin");
@@ -462,11 +465,14 @@ exec "${process.execPath}" "${"$"}@"
       ...(supervisorPid ? { supervisorPid, supervisorStartIdentity: supervisorIdentity } : {}),
       candidateSources: [{ runtimeEpoch: epochFor(1), worktree: root, branch: "feat/source", dirty }],
     })}\n`);
-    const result = spawnSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "handoff"], {
-      env: { PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode }, encoding: "utf8",
+    const handoff = ["bash", new URL("./tron-dev", import.meta.url).pathname, "handoff"];
+    const [program, ...argv] = terminal ? ["/usr/bin/script", "-q", "/dev/null", ...handoff] : handoff;
+    const result = spawnSync(program, argv, {
+      env: { PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode, ...(agentSession ? { PI_SESSION_ID: agentSession } : {}) },
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
     });
     const readLines = (path) => (existsSync(path) ? readFileSync(path, "utf8").trim().split("\n") : null);
-    return { home, version, status: result.status, stderr: result.stderr, calls: readLines(calls) ?? [], deploy: readLines(deployArgv) };
+    return { home, version, status: result.status, output: result.stdout + result.stderr, calls: readLines(calls) ?? [], deploy: readLines(deployArgv) };
   } finally { rmSync(root, { recursive: true, force: true }); }
 };
 
@@ -478,7 +484,7 @@ test("Debug handoff passes exactly the admitted candidate to handoff-debug witho
     const supervisorIdentity = execFileSync(process.execPath, [helper, "pid-start", supervisorPid], { encoding: "utf8" }).trim();
     // Failure modes 22 and 25.
     const admitted = handoffWiring({ supervisorPid, supervisorIdentity });
-    assert.equal(admitted.status, 0, admitted.stderr);
+    assert.equal(admitted.status, 0, admitted.output);
     assert.deepEqual(admitted.deploy, [
       new URL("./gateway-payload-deploy.mjs", import.meta.url).pathname, "handoff-debug",
       "--host", "tailscale", "--dev-home", join(admitted.home, ".tron-dev"), "--stable-home", join(admitted.home, ".tron"),
@@ -488,21 +494,29 @@ test("Debug handoff passes exactly the admitted candidate to handoff-debug witho
     // Failure mode 23.
     const dirty = handoffWiring({ supervisorPid, supervisorIdentity, dirty: true });
     assert.notEqual(dirty.status, 0);
-    assert.match(dirty.stderr, /Debug handoff refused/u);
+    assert.match(dirty.output, /Debug handoff refused/u);
     assert.equal(dirty.deploy, null);
     // Failure mode 24: no recorded supervisor, a reused PID, and not ready.
     for (const unsupervised of [{}, { supervisorPid, supervisorIdentity: "replaced" }]) {
       const refused = handoffWiring(unsupervised);
       assert.notEqual(refused.status, 0);
-      assert.match(refused.stderr, /not supervised/u);
+      assert.match(refused.output, /not supervised/u);
       assert.equal(refused.calls.includes("handoff-admission"), false);
       assert.equal(refused.deploy, null);
     }
     const notReady = handoffWiring({ supervisorPid, supervisorIdentity, ready: false });
     assert.notEqual(notReady.status, 0);
-    assert.match(notReady.stderr, /not ready/u);
+    assert.match(notReady.output, /not ready/u);
     assert.equal(notReady.calls.includes("handoff-admission"), false);
     assert.equal(notReady.deploy, null);
+    // Failure mode 26: an agent, with no terminal or with its session id, never reaches state.
+    for (const agent of [{ terminal: false }, { agentSession: "agent-session" }]) {
+      const refused = handoffWiring({ supervisorPid, supervisorIdentity, ...agent });
+      assert.equal(refused.status, 77, refused.output);
+      assert.match(refused.output, /handoff is maintainer-only/u);
+      assert.deepEqual(refused.calls, []);
+      assert.equal(refused.deploy, null);
+    }
   } finally {
     supervisor.kill("SIGTERM");
     await exited;
