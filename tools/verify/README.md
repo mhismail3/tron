@@ -256,7 +256,7 @@ dependencies, which a guardian may reinstall), runs the unit's guardians unchang
 true to the tree, commits it and runs them again. Guardians are the tests `verify` selects for
 the unit, every test that names it, and the tests that name a file of their own module that names
 it (one hop through a consumer; references as in [purpose cards](../ownership/README.md#purpose-cards)).
-Xcode runners are listed, not run. A guardian already red at HEAD is left out and reported
+Runners verify drives in their own lanes (iOS, Mac, push relay) are listed, not run. A guardian already red at HEAD is left out and reported
 (`baselineRed`); with none left green the probe stops before any change (exit 1).
 
 | Verdict | Meaning | What to do |

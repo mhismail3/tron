@@ -7,6 +7,7 @@ log through the caller; each real process and file fixture is scoped to one case
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -82,7 +83,8 @@ class ReleaseXcodeAdmissionTests(unittest.TestCase):
         self.developer = self.root / "Xcode.app/Contents/Developer"
         self.developer.mkdir(parents=True)
 
-    def admit(self, developer_dir, version="Xcode 26.6\nBuild version 17F113", sdk="26.5", first_launch=0, free_gb=1):
+    def admit(self, developer_dir, version="Xcode 26.6\nBuild version 17F113", sdk="26.5", first_launch=0, free_gb=1,
+              machine="arm64", path=None):
         (self.root / "config/ci-toolchain.env").write_text(
             "TRON_RELEASE_IOS_XCODE_VERSION=26.6\nTRON_RELEASE_IOS_XCODE_BUILD=17F113\n"
             f"TRON_RELEASE_IOS_SDK_VERSION=26.5\nTRON_RELEASE_IOS_DEVELOPER_DIR={developer_dir}\n"
@@ -90,12 +92,24 @@ class ReleaseXcodeAdmissionTests(unittest.TestCase):
         for name, body in (("xcodebuild", f'[[ $1 == -checkFirstLaunchStatus ]] && exit {first_launch}\n'
                                           f'[[ $DEVELOPER_DIR == {shlex.quote(str(developer_dir))} ]] || exit 9\n'
                                           f'printf %b {shlex.quote(version)}'),
-                           ("xcrun", f"printf '%s\\n' {shlex.quote(sdk)}")):
+                           ("xcrun", f"printf '%s\\n' {shlex.quote(sdk)}"),
+                           ("uname", f'[[ $1 == -m ]] && echo {machine} || echo Darwin')):
             tool = self.root / "bin" / name
             tool.write_text(f"#!/bin/bash\n{body}\n")
             tool.chmod(0o700)
-        return subprocess.run(["bash", str(self.root / "scripts/verify-ci-toolchain.sh"), "release"], capture_output=True,
-                              text=True, timeout=30, env=dict(os.environ, PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"]))
+        search = path if path is not None else str(self.root / "bin") + os.pathsep + os.environ["PATH"]
+        return subprocess.run(["/bin/bash", str(self.root / "scripts/verify-ci-toolchain.sh"), "release"], capture_output=True,
+                              text=True, timeout=30, env=dict(os.environ, PATH=search))
+
+    def path_without(self, missing):
+        """The private tools plus links to every system tool the check uses, except `missing`."""
+        system = self.root / "system"
+        system.mkdir(exist_ok=True)
+        for name in ("dirname", "sed", "awk", "df", "python3", "security", "codesign"):
+            found = shutil.which(name)
+            if name != missing and found and not (system / name).exists():
+                (system / name).symlink_to(found)
+        return str(self.root / "bin") + os.pathsep + str(system)
 
     def test_the_pinned_xcode_build_and_sdk_are_admitted(self):
         completed = self.admit(self.developer)
@@ -110,11 +124,25 @@ class ReleaseXcodeAdmissionTests(unittest.TestCase):
                                  "release Xcode must be 26.6 (17F113); found: Xcode 26.6 Build version 17F999"),
                                 (dict(developer_dir=self.developer, sdk="26.4"), "release iPhoneOS SDK must be 26.5; found: 26.4"),
                                 (dict(developer_dir=self.developer, first_launch=1), "first-launch tasks or license acceptance"),
-                                (dict(developer_dir=self.developer, free_gb=10 ** 9), "GB free beside the checkout")):
+                                (dict(developer_dir=self.developer, free_gb=10 ** 9), "GB free beside the checkout"),
+                                (dict(developer_dir=self.developer, free_gb=0), "must be a whole number of GB"),
+                                (dict(developer_dir=self.developer, free_gb="abc"), "must be a whole number of GB"),
+                                (dict(developer_dir=self.developer, machine="x86_64"), "a release archives on an Apple silicon Mac")):
             with self.subTest(message=message):
                 completed = self.admit(**kwargs)
                 self.assertEqual(completed.returncode, 1, completed.stderr)
                 self.assertIn(message, completed.stderr)
+
+    def test_each_missing_release_tool_is_named(self):
+        for tool in ("python3", "security", "codesign"):
+            with self.subTest(tool=tool):
+                shutil.rmtree(self.root / "system", ignore_errors=True)
+                completed = self.admit(self.developer, path=self.path_without(tool))
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                self.assertIn(f"release needs {tool}", completed.stderr)
+        shutil.rmtree(self.root / "system", ignore_errors=True)
+        completed = self.admit(self.developer, path=self.path_without(None))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":

@@ -347,7 +347,7 @@ def main(argv: list[str]) -> int:
         changed = git(scratch, "rev-parse", "HEAD").strip()
         static = [line for line in static_check(scratch) if line not in before]
         after = run_tests(changed, dependencies, tests, out / "after", args.jobs, args.timeout)
-    except (subprocess.CalledProcessError, verify.VerifyError) as error:
+    except (OSError, subprocess.CalledProcessError, verify.VerifyError) as error:
         print(f"probe: could not prepare a checkout: {error}", file=sys.stderr)
         return 2
     finally:
@@ -368,12 +368,13 @@ def main(argv: list[str]) -> int:
         problem = re.compile(r"error|fail|no such|not found|missing|cannot|assert", re.I)
         # The line that names the unit; for a vague failure, its first error so the reader sees what it said.
         line = next((line.strip() for line in lines if any(name.search(line) for name in names) and problem.search(line)),
-                    next((line.strip() for line in lines if problem.search(line)), ""))
+                    next((line.strip() for line in lines if problem.search(line)),
+                         next((line.strip() for line in lines if line.strip()), "(no output)")))
         print(f"  red  {test}{'  (does not name the unit)' if test in vague else ''}\n       {line[:200]}")
     for line in static:
         print(f"  static  {line[:240]}")
     if report["notRun"]:
-        print(f"  not run (Xcode): {', '.join(report['notRun'])}")
+        print(f"  not run (own lane): {', '.join(report['notRun'])}")
     print(f"report {out.relative_to(verify.ROOT)}/report.json")
     return 0
 

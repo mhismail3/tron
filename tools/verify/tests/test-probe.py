@@ -19,7 +19,8 @@ helper verify imports into a disposable Git repository and probes one unit as a 
    so a vague failure is still a cascade.
 9. Deleting a guardian's own runner (scripts/tron-node) is a failure that names it, not a crash;
    a relay test is listed as not run, never run as a shell script.
-10. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
+10. A checkout that cannot be prepared (unreadable dependencies) is a `probe:` error, exit 2.
+11. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
    checkout's (bundle-gateway.sh runs `npm ci`).
 
 Every run leaves no scratch worktree behind. The last run's output is kept in `test-results/probe-cli/`.
@@ -129,6 +130,7 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "cascade", result.stdout)
         self.assertEqual(len(report["failing"]), 7)  # the tool's own tests; no other module names the file
         self.assertIn("does not name the unit", result.stdout)
+        self.assertIn("tools/tool/tool.sh failed", result.stdout)  # the vague red still shows what it said
 
     def test_an_unreached_file_is_silent(self) -> None:
         result, report = self.repo.probe("tools/tool/unused.sh")
@@ -240,6 +242,22 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("tools/tool/tests/runner.test.mjs", report["failing"])
         self.assertIn("packages/push-relay/tests/worker.test.ts", report["notRun"])
         self.assertNotIn("packages/push-relay/tests/worker.test.ts", report.get("baselineRed", []))
+
+    def test_a_checkout_that_cannot_be_prepared_is_an_error_not_a_crash(self) -> None:
+        r = self.repo
+        r.write(".gitignore", "test-results/\nnode_modules/\n")
+        r.write("packages/gateway/package.json", "{}\n")
+        unreadable = r.path / "packages/gateway/node_modules/.bin/locked"
+        r.write("packages/gateway/node_modules/.bin/locked", "x\n")
+        r.commit("dependencies a clone cannot read")
+        unreadable.chmod(0)
+        try:
+            result, _ = r.probe("tools/caller/caller.sh")
+        finally:
+            unreadable.chmod(0o644)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("probe: could not prepare a checkout", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_a_guardian_that_reinstalls_dependencies_leaves_the_checkouts_copy_alone(self) -> None:
         r = self.repo
