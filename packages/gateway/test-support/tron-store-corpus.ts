@@ -17,7 +17,7 @@ import { DERIVED_STORES } from "./tron-store-specs-derived.js";
  * opens it with the current owner, reads it through that owner's public read path,
  * and compares the normalized projection with the owning module's golden. It also
  * proves reading changed no byte anywhere in the staged home, so an owner can never
- * silently migrate user data on open (§4.1 B3).
+ * silently migrate user data on open (format changes are dedicated migrations: AGENTS.md "Architecture invariants").
  *
  * Pi's canonical session JSONL and agent configuration are locked by the Pi
  * persisted-state corpus (`pi-persisted-state-corpus.integration.test.ts`).

@@ -7,7 +7,7 @@ The embedded runtime stays canonical for sessions, provider/model semantics,
 credentials, settings, packages, resources, compaction and retries; the Gateway keeps
 no session database or event journal.
 
-Index only. Module READMEs own each contract (§5.6 shape: Purpose, Owns, Contract,
+Index only. Module READMEs own each contract (sections: Purpose, Owns, Contract,
 Invariants, Entry points, Signals, Verify, Not here). Generated indexes replace
 hand-kept tables:
 
