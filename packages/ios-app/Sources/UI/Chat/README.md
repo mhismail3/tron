@@ -191,8 +191,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   independent of the reading family, including View All. `TronSessionRowClockUITests` checks
   their rendered glyph advances and caption metrics against shared code text references.
 - Reduce Motion removes spatial motion and never hides authoritative text.
-- Disable Home's icon, title and subtitle use `tronError`; its row overrides the inherited
-  settings theme locally so the decorative icon cannot revert to primary. Pause memory stays standard.
+- Pause/Resume memory and Disable Home are `HomeControlsSection`, the last section of Home
+  Settings (never Manage Home); it owns its own fenced `home.status` read. Disable Home's icon,
+  title and subtitle use `tronError` and Pause memory's use `tronSlate` (the Paused pill's
+  neutral); each row overrides the inherited settings theme locally so its icon cannot revert to primary.
 - Tasks default to in-progress/attention lineages; the shared toolbar filter exposes finished
   and all work. The Gateway owns grouping by explicit resume links, never by title.
 - Task check-ins use shared list insets and line/block spacing once per record: summary headline,
