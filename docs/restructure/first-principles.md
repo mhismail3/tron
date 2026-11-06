@@ -89,7 +89,7 @@ validated only by `ownership.py` and set by no manifest; its own slice removes i
 | An agent knows what a module is for, who uses it and what breaks | A one-line `purpose`; dependents derived and printed by `scripts/tron ownership --card`; declared edges at module level; per-file interfaces only for entry points outsiders run (CLI, launchd, env, wire). |
 | Test selection widening | Unchanged: `riskClass` and the L0–L2 rule. |
 
-**Recommendation.** Keep per-module manifests. Make ownership inherit from the nearest ancestor and
+**Decided (M1).** Keep per-module manifests. Make ownership inherit from the nearest ancestor and
 delete the 35 trivial manifests. Replace per-file consumer lists with module-level `dependsOn`, which the
 reference scanner checks for every carded module, and keep per-file `interfaces` only for external entry
 points. This is [decision M1](#decisions-for-mohsin): it changes the ownership and card conventions,
@@ -113,7 +113,7 @@ files.
 - `.pi/prompts/test-suite-audit.md` and `.agents/skills/tron-home-audit/report.md` look like audits but
   are a prompt and a report template. They stay.
 
-**Recommendation.** Add a localized `AGENTS.md`, at most 150 lines, at each place an agent starts work:
+**Decided (M2).** Add a localized `AGENTS.md`, at most 150 lines, at each place an agent starts work:
 
 - `packages/gateway/`
 - `packages/ios-app/`
@@ -233,7 +233,7 @@ Candidates:
 | Gate | Finding | Next step |
 |---|---|---|
 | `check-agent-policy.sh` | Its path asserts may duplicate the documentation policy; its safety-phrase asserts are charter-mandated | Plant a broken skill path. If the documentation policy catches it, drop only the duplicated asserts. |
-| `scripts/tron mutate` | Measured after 5d at 33165e9c4 (seed 1465). `kernel/run/run-markers.ts`: 6 of 6 sampled mutants killed by its 22 selected lock files in 331 s. `modules/apps/swift-app-store.ts`: 0 of 12 killed by its one lock file in 10 s, so that file's lock coverage is thin (its unit tests are not in the lock selection). It separates covered from thin lock coverage. | Keep on demand ([G1](#decisions-for-mohsin)). |
+| `scripts/tron mutate` | Measured after 5d at 33165e9c4 (seed 1465). `kernel/run/run-markers.ts`: 6 of 6 sampled mutants killed by its 22 selected lock files in 331 s. `modules/apps/swift-app-store.ts`: 0 of 12 killed by its one lock file in 10 s, so that file's lock coverage is thin. It separates covered from thin lock coverage. | Keep on demand ([G1](#decisions-for-mohsin)). |
 | `scripts/tron health` | Consumer is Home's improvement loop (`improvement-loop.md`), on demand | Keep. |
 | `scripts/tron probe` | It found real defects, but costs minutes to hours per unit | Keep it on demand. Never schedule it. |
 | Pre-commit privacy hook | Same script as the verify step, earlier (staged) | Keep both: verify covers commits made without the hook. |
@@ -247,8 +247,9 @@ Candidates:
     `runtime-registry.ts` (4,509).
   - Split these only by owner (change-together), last in the bottom-up order: kernel and `AppModel` at the
     end.
-- **Dead code.** Name-based scans are unreliable here. The 17 "unreferenced" Gateway exports are mostly
-  `compatibility-manifest.ts`, a compile-time exhaustiveness inventory that `tsc` checks; it is not dead.
+- **Dead code.** Name-based scans are unreliable here. Slice 5c removed the dead ones; the 10 Gateway
+  exports still named only at their declaration are `compatibility-manifest.ts`, a compile-time
+  exhaustiveness inventory that `tsc` checks; it is not dead.
   Delete only with a typecheck and lint pass plus a reviewer.
 - **Dependencies.** No unused runtime npm dependency was found in the Gateway.
 - **Docs.** 22 docs are over budget and none is over twice its budget. Folding the restructure docs and the
@@ -267,15 +268,15 @@ Candidates:
 
 ## Decisions for Mohsin
 
-Mohsin decided M1, M2, W1 and C1 on 2026-11-06 by taking the recommendations; G1 follows the
-measurement in section 6.
+Mohsin decided M1, M2, W1 and C1 on 2026-11-06 by taking the recommendations, and delegated G1 to
+the measurement in section 6.
 
 | # | Decision | Options | Decided |
 |---|---|---|---|
 | M1 | Manifest and card convention | (a) As now: per-file consumer lists on every module, about 4,500 lines when complete. (b) Ownership inherits from the nearest ancestor; delete 35 trivial manifests; module-level `dependsOn` checked against found references for every module; per-file `interfaces` only for external entry points. (c) Derive everything and declare nothing (fails "a new edge must be declared"). | **(b)** |
 | M2 | Localized `AGENTS.md` | (a) None; READMEs stay. (b) Five: four packages plus `scripts/` (covering `tools/`), with folder READMEs under 40 lines folded in. (c) One per module (about 100 files). | **(b)** |
 | G1 | `scripts/tron mutate` if one run shows little value | Keep on demand, or delete it with its test | **Keep on demand**: one run killed 6 of 6 on a well-guarded file and 0 of 12 on a thinly guarded one |
-| W1 | Wire error codes on request paths | (a) Keep raw throws, which go out as `internal`. (b) Convert them to typed `GatewayError` codes, which changes what clients see (code and message), path by path. | **(b)**, one path per slice; a path whose iOS handling needs a Swift change waits for #2285. Each is a lockstep wire change (AGENTS.md "Architecture invariants"): it updates the wire golden, and iOS handling ships together; if clients would misread the old protocol, the protocol version rises. |
+| W1 | Wire error codes on request paths | (a) Keep raw throws, which go out as `internal`. (b) Convert them to typed `GatewayError` codes, which changes what clients see (code and message), path by path. | **(b)**, one path per slice. Each is a lockstep wire change (AGENTS.md "Architecture invariants"): it updates the wire golden, and iOS handling ships together; if clients would misread the old protocol, the protocol version rises. |
 | C1 | Hosted CI | None today; every gate is local | **Keep none.** The pre-merge check and the post-land batch already run every gate locally. |
 
 ## Execution order
