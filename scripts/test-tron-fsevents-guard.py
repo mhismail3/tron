@@ -245,8 +245,10 @@ class FseventsGuard(unittest.TestCase):
         target = "gui/%d/%s" % (os.getuid(), label)
 
         def install():
-            return subprocess.run([PYTHON, str(script), "--temp-dir", str(self.temp), "install"],
-                                  env=env, capture_output=True, text=True, timeout=60, check=True)
+            done = subprocess.run([PYTHON, str(script), "--temp-dir", str(self.temp), "install"],
+                                  env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            return done
 
         try:
             install()
@@ -272,9 +274,10 @@ class FseventsGuard(unittest.TestCase):
                       "from pathlib import Path; from tron_mac_replace_platform import MacPlatform; "
                       "p=MacPlatform(); p.home=Path(sys.argv[2]); "
                       "p.refresh_guard(Path(sys.argv[3]), 'HEAD', Path(sys.argv[4]))")
-            subprocess.run([PYTHON, "-c", driver, str(ROOT / "scripts"), str(self.home),
-                            str(repository), str(self.base / "refresh.log")],
-                           env=env, capture_output=True, text=True, timeout=180, check=True)
+            refreshed = subprocess.run([PYTHON, "-c", driver, str(ROOT / "scripts"), str(self.home),
+                                        str(repository), str(self.base / "refresh.log")],
+                                       env=env, capture_output=True, text=True, timeout=180)
+            self.assertEqual(refreshed.returncode, 0, refreshed.stdout + refreshed.stderr)
             program = plistlib.loads(plist.read_bytes())["ProgramArguments"]
             run = subprocess.run([*program, "--dry-run", "--sample-seconds", "0", *COLD],
                                  env=env, capture_output=True, text=True, timeout=180, check=True)
