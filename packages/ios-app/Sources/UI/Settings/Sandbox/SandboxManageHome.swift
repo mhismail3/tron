@@ -92,7 +92,8 @@ struct SandboxManageHomeHeader: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
+        // Solid, not glass: controls inside the glass card never stack glass on glass.
+        .background(Circle().fill(Color.tronPrimary.opacity(0.12)))
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
     }
@@ -298,7 +299,7 @@ struct SandboxPlaygroundBar: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
+        .background(Circle().fill(Color.tronPrimary.opacity(enabled ? 0.12 : 0.05)))
         .disabled(!enabled)
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)

@@ -233,20 +233,31 @@ full-screen stage, beside the same content in the stock medium/large sheet:
   height, capped 12 pt below the status bar; only above the cap does the body scroll. A content
   change animated with the sheet's spring resizes the card in the same transaction.
 - One interruptible spring (`TronFluidSheetMotion`, response 0.42 s, critically damped; a 0.14
-  bounce only after a flick) drives present, dismiss, release and resizing. A UIKit pan on the
-  stage tracks 1:1, rubber-bands above rest, projects the release with Apple's deceleration
-  formula and hands its velocity to the spring. It catches the card where it is drawn, so a
-  moving or dismissing card can be grabbed and thrown back. It shares the touch with the
-  body's scroll view: the content scrolls until it is at its top, then the sheet moves.
-- Only the dim and one geometry effect observe the position, so drag frames re-lay out nothing.
-  Reduce Motion cross-fades; VoiceOver sees a modal container with an escape action.
+  bounce only after a flick) drives the morph, the release and resizing. The sheet morphs out of
+  the control marked `tronFluidSheetSource()`. Its glass shape, corner radius and content
+  (uniformly scaled, never stretched) interpolate from the control's frame to the card's rest.
+  Dismissal collapses back into that control. A UIKit pan on the stage tracks 1:1,
+  rubber-bands above rest, projects the release with Apple's deceleration formula and hands
+  its velocity to the spring. It catches the card where it is drawn, so a moving or
+  dismissing card can be grabbed and thrown back. It shares the touch with the body's scroll
+  view: the content scrolls until it is at its top, then the sheet moves.
+- The card is mounted once and kept, so presenting only animates. The morph and the drag are
+  render-only (a shape, a geometry effect and three small animatable modifiers), so motion frames
+  lay out nothing. Reduce Motion cross-fades; VoiceOver sees a modal container with an escape action.
+- Corners are one fixed radius: the display corner less the 8 pt margin, so the bottom is
+  concentric at rest. `ConcentricRectangle` re-resolved against the display as the card
+  moved, rounding it more at rest than when lifted. Content scrolled under the header or
+  footer gets a progressive blur and canvas fade there, shown only while content is under
+  that edge; the system scroll edge effect is off.
 - The playground bar adds and removes rows and sections; Slow motion stretches every spring 4x.
   The frame meter counts main-thread display frames missed in the 4 s after a present.
   `CADisableMinimumFrameDurationOnPhone` lets app animations reach 120 Hz on ProMotion iPhones.
 
 `TronSandboxCustomSheetUITests` opens the playground from Settings and checks content sizing,
 growth to the cap, and dismissal by Done, a fling and the dim; it also records the frame-meter
-baseline and the review captures.
+baseline and the review captures. `scripts/tron-profile ios --scenario sandbox-sheet` (with
+`sandbox-stock-sheet` as the baseline) measures repeated present and dismiss in the optimized
+build: missed main-thread frames and the worst frame interval per phase.
 
 ## Project lifecycle presentation
 

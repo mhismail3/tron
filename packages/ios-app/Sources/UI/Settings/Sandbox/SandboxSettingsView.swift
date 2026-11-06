@@ -133,6 +133,7 @@ struct SandboxCustomSheetStage: View {
                 }
                 .buttonStyle(.glassProminent)
                 .tint(.tronPrimary)
+                .tronFluidSheetSource()
                 .accessibilityIdentifier("sandbox-present-custom")
             }
         }

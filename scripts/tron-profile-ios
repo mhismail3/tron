@@ -89,6 +89,14 @@ SCENARIOS: dict[str, tuple[str, float, str]] = {
         "ProfileHomeSheetScenarioTests/testHomeCompletedSheet", 14.0,
         "Home view over 50 Home workers; opens Recently Completed's sheet, scrolls it end to end and closes it, repeatedly, while 2 running workers publish a summary each second.",
     ),
+    "sandbox-sheet": (
+        "ProfileSandboxSheetScenarioTests/testSandboxCustomSheet", 14.0,
+        "Settings Sandbox stage; presents the custom fluid sheet through its control and closes it through Done, repeatedly.",
+    ),
+    "sandbox-stock-sheet": (
+        "ProfileSandboxSheetScenarioTests/testSandboxStockSheet", 14.0,
+        "Settings Sandbox stage; presents the same content in the stock medium/large sheet and closes it through Done, repeatedly.",
+    ),
     "summary-storm": (
         "ProfileDashboardScenarioTests/testSummaryStorm", 15.0,
         "Dashboard mounted; 5 running sessions each send a session.summary every 750 ms (snapshot rate).",

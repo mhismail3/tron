@@ -210,6 +210,17 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
             app.buttons["sandbox-sections-toggle"].tap()
             settle()
             keep(app, "2302-custom-many-\(name)")
+            // Content scrolled under the header: the top edge blur shows.
+            let window = app.windows.firstMatch
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            settle()
+            keep(app, "2302-custom-scrolled-\(name)")
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            settle()
             app.buttons["sandbox-row-1"].tap()
             settle()
             keep(app, "2302-custom-detail-\(name)")
