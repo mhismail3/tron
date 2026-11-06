@@ -714,10 +714,12 @@ class IosLaneTests(VerifyCase):
         tooling = json.loads((r.path / "tooling.module.json").read_text())
         tooling["owns"].append("scripts/tron-ios-test")
         r.write("tooling.module.json", json.dumps(tooling))
+        r.write("packages/ios-app/scripts/test-source-policy.sh", "#!/bin/sh\nexit ${FIXTURE_IOS_POLICY_EXIT:-0}\n")
+        (r.path / "packages/ios-app/scripts/test-source-policy.sh").chmod(0o755)
         r.write("scripts/tron-ios-test", IOS_TEST_STUB)
         (r.path / "scripts/tron-ios-test").chmod(0o755)
         ios = "packages/ios-app"
-        r.write(f"{ios}/package.module.json", json.dumps({"layer": "L5", "owns": ["*.json"]}))
+        r.write(f"{ios}/package.module.json", json.dumps({"layer": "L5", "owns": ["*.json", "scripts/**"]}))
         r.write(f"{ios}/Sources/UI/Chat/chat.module.json", json.dumps({"layer": "L4", "owns": ["**"]}))
         r.write(f"{ios}/Sources/UI/Chat/ChatView.swift", "struct ChatView {}\n")
         r.write(f"{ios}/UITests/ui-tests.module.json", json.dumps({"layer": "L5", "owns": ["**"], "dynamicEdges": [
@@ -744,8 +746,8 @@ class IosLaneTests(VerifyCase):
             digests.append(report["resultDigest"])
             self.assertEqual(report["selection"]["tests"], [f"{ios}/UITests/Locks/FixtureLockTests.swift"])
             steps = {step["name"]: step for step in report["steps"]}
-            self.assertEqual((steps["ios build"]["status"], steps["layers ios"]["status"], steps["tests: ios"]["tests"]),
-                             ("ok", "ok", 1))
+            self.assertEqual((steps["ios source policy"]["status"], steps["ios build"]["status"], steps["layers ios"]["status"],
+                              steps["tests: ios"]["tests"]), ("ok", "ok", "ok", 1))
         self.assertEqual(digests[0], digests[1])
         self.assertIn("already stamped for this commit", steps["ios build"]["detail"])
         self.assertEqual(calls.read_text().splitlines(), ["build --host-slot-wait-seconds 30", "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests",
@@ -761,6 +763,13 @@ class IosLaneTests(VerifyCase):
                                env={**r.env, "FIXTURE_IOS_PASSED": "0"}, capture_output=True, text=True)
         self.assertEqual(empty.returncode, 1, empty.stdout)
         self.assertIn("tests: ios ran zero passing tests", empty.stdout)
+        # A red source policy fails the lane before it builds.
+        calls.write_text("")
+        policy = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
+                                env={**r.env, "FIXTURE_IOS_POLICY_EXIT": "1"}, capture_output=True, text=True)
+        self.assertEqual(policy.returncode, 1, policy.stdout)
+        self.assertIn("ios source policy failed", policy.stdout)
+        self.assertEqual(calls.read_text(), "")
         # The module's own journeys run in the lane, except the harnessed one, which its harness runs.
         calls.write_text("")
         module = r.verify("--module", "ios-app/ui-tests")

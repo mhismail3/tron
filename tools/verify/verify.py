@@ -656,10 +656,11 @@ def main(argv: list[str]) -> int:
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
-        + (["ios build"] if ios_lane else []) + ["layers ios"] \
+        + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
         + [name for group in sorted(groups) for name in test_step_names(group, shards, skipped_group(group))]
     tron = str(ROOT / "scripts/tron")
     ios_test = str(ROOT / "scripts/tron-ios-test")
+    ios_policy = [str(ROOT / "packages/ios-app/scripts/test-source-policy.sh")]
     node = [str(ROOT / "scripts/tron-node"), "exec"]
     # A baseline has no trusted green predecessor: unchanged bytes can already
     # be stale. Keep diff-scoped generation only for actual changed selections.
@@ -684,6 +685,7 @@ def main(argv: list[str]) -> int:
             commands += [{"name": label, "command": command, "cwd": "." if label == "layers gateway" else GATEWAY}
                          for label, command in gateway_checks]
         if ios_lane:
+            commands.append({"name": "ios source policy", "command": ios_policy})
             commands.append({"name": "ios build", "command": [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])], "reuse": "only if current build stamp is fresh"})
         commands.append({"name": "layers ios", "command": [tron, "layers", "ios", "--base", base], "requires": "fresh iOS index"})
         for group, files in sorted(groups.items()):
@@ -762,6 +764,8 @@ def main(argv: list[str]) -> int:
         stale = ios_index_stale()
         ios_deferred = False
         if ios_lane:
+            if run.step("ios source policy", ios_policy)["status"] == "failed":
+                return finish("failed", "ios source policy failed")
             if stale is None:
                 run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])])
             else:
