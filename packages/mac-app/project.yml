@@ -291,7 +291,8 @@ targets:
         product: TronComputerControl
 
   # Real-boundary tests only (spawned processes, loopback sockets, the built
-  # launcher). Unit tests are not kept; see docs/development.md.
+  # launcher, shared cross-language format files). Unit tests are not kept;
+  # see docs/development.md.
   TronMacIntegrationTests:
     type: bundle.unit-test
     platform: macOS

@@ -371,6 +371,8 @@ struct SessionSettingsView: View {
                         TronSheetLoadingState(label: "Loading settings…")
                     } else if let homeProfileID {
                         homeSections(rows, sections, profileID: homeProfileID)
+                        // Pause and disable close Home Settings, below Connection.
+                        HomeControlsSection(profileID: homeProfileID)
                     } else if project == nil {
                         TronSettingsGroup(nil, accent: .tronPrimary) { links(rows, sections) }
                             .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
