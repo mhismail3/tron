@@ -27,6 +27,7 @@
       "kind": "exec",
       "consumers": [
         "mac-app/gateway-payload",
+        "mac-app/integration-tests",
         "repo/cli",
         "repo/ios",
         "repo/protocol-contract"
