@@ -1,7 +1,10 @@
 # First-principles structure plan (#2297)
 
 This is the single structure plan. It replaces the structure plan (#2276), the ground-up charter, the
-cleanup 5-whys and the scorecard; those decisions and preventions are folded in below.
+cleanup 5-whys and the scorecard. Their still-current rules are restated below. Each prevention from the
+5-whys already has its owner: branch end-of-life in `.agents/skills/tron-work/SKILL.md`, epic closure in
+`tools/work/README.md`, Mac rollback retention in `packages/mac-app/docs/development.md`, and scratch and
+evidence aging in `tools/ownership/tidy.py`.
 
 ## Order and rules
 
@@ -20,34 +23,38 @@ The end state is a clean, organized repository with nothing lost in fidelity and
 - No golden, timeout or tolerance edit may turn a red green. No waivers. Never remove the only guard of a
   behavior.
 - iOS and Xcode work waits for #2285. Paths owned by #2279 and #2282 are off limits until those land.
-- Persisted formats, user-visible capabilities, the manifest system, repository-wide conventions and gates
-  required by the charter are listed under [Decisions for Mohsin](#decisions-for-mohsin). Everything else
-  that is reversible and preserves behavior is decided and done here.
+- Persisted formats and bytes, wire output, user-visible capabilities, the manifest convention,
+  repository-wide conventions and gates required by the charter are listed under
+  [Decisions for Mohsin](#decisions-for-mohsin). Everything else that is reversible and preserves behavior
+  is decided and done here.
+- No symlinks, aliases or compatibility copies: a move updates its consumers in the same change.
+- These slices are post-checkpoint work. They never gate #2173 (PRINCIPLES P9).
 
-## Where we are (main `73545949a`)
+### Per-slice method
 
-Measured with `scripts/tron metrics`, `scripts/tron budgets`, `scripts/tron ownership` and the
-#2297 inventories. Baseline is `047805caf`, the program's start.
+1. Read the module's card (`scripts/tron ownership --card`).
+2. Probe its units (`scripts/tron probe`, [verdicts](../../tools/verify/README.md#removal-probes)).
+3. Silent unit: delete it if nothing needs it; otherwise add the test that fails without it.
+4. Cascade: make the failing check name what broke.
+5. Precise: keep it.
+6. Work bottom-up, leaves of the dependency graph first. The kernel, `AppModel.swift` and
+   `runtime-registry.integration.test.ts` come last.
 
-| Measure | `047805caf` | `73545949a` |
-|---|---:|---:|
-| Hand-written lines (production / tests / tooling / docs) | 247,666 / 182,038 / 39,743 / 16,668 | 247,689 / 183,567 / 40,514 / 16,853 |
-| Files over 500 lines | 219 | 219 |
-| Modules / without a purpose card | 99 / 99 | 101 / 83 |
-| Manifest files / lines (of which card keys) | 99 / 1,446 | 101 / 2,397 (817) |
-| Files directly in `scripts/` | 95 | 92 |
-| Cross-module references / module pairs | 1,494 / 622 | 1,511 / 625 |
-| Gateway layer pairs: upward / two-way | 0 / 1 | 0 / 0 (`layer-baseline.json` empty) |
-| iOS layer baseline: two-way / upward | 12 / 7 | 12 / 7 (#2296 Phase B) |
-| Markdown files / lines / READMEs | 123 / 16,702 / 61 | 125 / 16,887 / 61 |
-| Docs over budget / over twice budget | 22 / 0 | 22 / 0 |
+## Current state
 
-The honest reading: #2297 so far added mapping and tooling (+771 tooling lines, +817 lines of cards,
-+951 manifest lines, +2 modules). It did not simplify much. The deletions were one script, one duplicated lock function, one
-doc-budget owner and the core-journeys ledger. The probes it ran found real defects: four failures that
-did not name what broke, now fixed; three units nothing guarded, now guarded; and a probe that leaked
-worktrees. At about 45 card lines per module, carding all 101 modules would add about 4,500 lines of
-hand-kept mapping, most of it derivable. That is the wrong direction. The plan below cuts mapping first.
+Numbers below are taken from main `73545949a`. To re-measure, run `scripts/tron metrics` (sizes, cards,
+references), `scripts/tron budgets` (docs) and `scripts/tron ownership` (modules).
+
+- **Size.** 488,623 hand-written lines (production 247,689, tests 183,567, tooling 40,514, docs 16,853).
+  219 files are over 500 lines.
+- **Modules.** 101 modules; 19 have a purpose line (18 full cards plus the root manifest).
+  The 101 manifests total 2,397 lines, 817 of them card keys.
+- **References.** 1,511 cross-module file references across 625 module pairs.
+- **Layers.** The Gateway layer baseline is empty. The iOS baseline has 12 two-way and 7 upward pairs.
+- **Docs.** 125 Markdown files (61 READMEs). 22 docs are over budget; none is over twice its budget.
+
+#2297 so far has added more mapping and tooling than it removed. Carding every module the current way
+would add about 4,500 lines of hand-kept, mostly derivable mapping. The plan below cuts mapping first.
 
 ## 1. Manifests
 
@@ -57,12 +64,12 @@ hand-kept mapping, most of it derivable. That is the wrong direction. The plan b
 |---|---:|---|
 | Only `layer` and `owns: ["**"]` | 35 | the ownership check |
 | Other `{layer, owns}` with explicit file lists, which split mixed directories | 13 | the ownership check |
-| `dependsOn` (Gateway) | 24 | the layer check (`tools/layers/layers.py`) |
-| Purpose cards (`purpose`, `interfaces`, `uses`) | 18 | `tools/ownership/cards.py` |
+| `dependsOn` (Gateway) | 29 | the layer check (`tools/layers/layers.py`) |
+| Purpose cards (`purpose`, `interfaces`, `uses`) | 18 (`purpose` alone also in `root.module.json`) | `tools/ownership/cards.py` |
 | `riskClass` | 5 | verify selection |
 | `verify` | 6 | verify selection |
 
-`capabilities` has no users. Readers: ownership (`ownership.py`), cards (`cards.py`), layout (`layout.py`),
+`capabilities` had no users and is removed by its own slice. Readers: ownership (`ownership.py`), cards (`cards.py`), layout (`layout.py`),
 verify selection, layers, generated docs, metrics and the work tool.
 
 **What each guarantee needs.**
@@ -77,8 +84,9 @@ verify selection, layers, generated docs, metrics and the work tool.
 **Recommendation.** Keep per-module manifests. Make ownership inherit from the nearest ancestor and
 delete the 35 trivial manifests. Replace per-file consumer lists with module-level `dependsOn`, which the
 reference scanner checks for every carded module, and keep per-file `interfaces` only for external entry
-points. Delete the unused `capabilities` key. This is [decision M1](#decisions-for-mohsin): it changes
-the ownership and card conventions.
+points. This is [decision M1](#decisions-for-mohsin): it changes the ownership and card conventions,
+including the current rule of one manifest per module directory. Deleting the never-used
+`capabilities` key is not part of M1. That is an unused field, not a convention.
 
 **Regression guard.** The ownership ledger (`--ledger`) must be byte-identical in path→module before and
 after. Each card-check rule keeps its case in `tools/ownership/tests/test-cards.py`. The layer fixtures
@@ -105,7 +113,9 @@ files.
 - `packages/push-relay/`
 - `scripts/`, which also covers `tools/`
 
-Each holds what an agent must know before editing there:
+Each holds what an agent must know before editing there. Every fact keeps one owner: `AGENTS.md` takes
+the module map and local hazards, and the package README or docs keep the human overview and contracts.
+The superseded README sections are deleted in the same slice. Its contents:
 
 - the module map (generated from manifests, like the existing generated doc blocks);
 - the package's invariants and its test lanes, with exact commands;
@@ -171,8 +181,8 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 
 | Value | Today | Fix |
 |---|---|---|
-| Protocol version | `version.ts` is the source; `gateway-payload-deploy.mjs` and `tron-profile-gateway-driver.mjs` keep copies | Read `version.ts`, as `tron_mac_replace.py` already does. The Swift copies are lockstep consumers. |
-| Debug/Stable ports 9848/9847 | 14 files | #2296 item 18 |
+| Protocol version | `config/GatewayProtocol.json` is the contract. The Gateway, deploy helper, launcher, iOS and Mac copies are lockstep consumers checked by `scripts/gateway_protocol_contract.py`; the profiling driver's copy was not checked. | The contract check covers the driver too |
+| Debug/Stable ports 9848/9847 | 39 non-test, non-doc files | #2296 item 18 |
 | Host lock path | `host_lock.py`, plus documentary copies | Keep `host_lock.py` |
 | `TRON_UI_LOCK_RENDERING` | read in shipped iOS code | #2296 item 16, after #2285 |
 
@@ -181,10 +191,10 @@ The 11 snake and 72 kebab names already follow this split. No renames.
 | Area | Duplicates | One pattern | When |
 |---|---|---|---|
 | Gateway RPC | Module `RpcHandler` (`kernel/host/module-host.ts`) plus 168 `case`s in `transport/gateway-service.ts` | Module handlers. Move one method family per slice and extend the duplicate-method guard to the switch. | After the card and manifest slices; each slice has its RPC tests as guard |
-| Gateway errors | 519 raw `throw new Error` on 114 files | `GatewayError(code)` on request paths (`transport/`, `kernel/run/`) only | Wire-code change: per path, with the wire golden unchanged |
-| JSON writes | `foundation/durable-json.ts` (39 importers) plus about 14 inline temp→rename writers | `durableAtomicWriteJson` | One site per slice, keeping each site's fsync order, with a fail-before test |
+| Gateway errors | 517 raw `throw new Error` in 113 non-test `src` files; `publicError` turns each into code `internal` on the wire | `GatewayError(code)` on request paths | A converted site changes wire output: [decision W1](#decisions-for-mohsin) |
+| JSON writes | `foundation/durable-json.ts` (30 non-test importers) plus about 14 inline temp→rename writers | `durableAtomicWriteJson` | One site per slice, keeping each site's fsync order and its exact bytes (byte-identical fixture), with a fail-before test. A byte change is a persisted-format decision. |
 | Logging | `GatewayLogger` plus 42 console/stdio sites | Logger, except CLI entry points | Per-file review |
-| Python git and process helpers | 12 `git()` wrappers, 10 process-group runners | One `git()` and one runner in a shared tools module | Low risk, one slice |
+| Python git and process helpers | `git()` defined in 11 non-test scripts/tools files; `killpg` process-group runners in 10 | One `git()` and one runner in a shared tools module | Low risk, one slice |
 | iOS sheet, row and loading | `Tron*` primitives exist, but `SettingsRendererRow`, `ListRow` and three loading states overlap | The `Tron*` owners in `presentation-parity.md` | After #2285 and #2282 |
 
 ## 6. Gates and tests
@@ -242,6 +252,7 @@ Candidates:
 | M1 | Manifest and card convention | (a) As now: per-file consumer lists on every module, about 4,500 lines when complete. (b) Ownership inherits from the nearest ancestor; delete 35 trivial manifests; module-level `dependsOn` checked against found references for every module; per-file `interfaces` only for external entry points. (c) Derive everything and declare nothing (fails "a new edge must be declared"). | **(b)** |
 | M2 | Localized `AGENTS.md` | (a) None; READMEs stay. (b) Five: four packages plus `scripts/` (covering `tools/`), with folder READMEs under 40 lines folded in. (c) One per module (about 100 files). | **(b)** |
 | G1 | `scripts/tron mutate` if one run shows little value | Keep on demand, or delete it with its test | Decide after the measurement |
+| W1 | Wire error codes on request paths | (a) Keep raw throws, which go out as `internal`. (b) Convert them to typed `GatewayError` codes, which changes what clients see (code and message), path by path. | **(b)**, one path per slice, with the client (iOS) handling checked |
 | C1 | Hosted CI | None today (removed in `279ee16c7`); every gate is local | Keep none, per P2 |
 
 ## Execution order
@@ -252,13 +263,13 @@ Each slice is small and reversible, and lands with its own evidence.
 |---|---|---|
 | 1 | Fold the four restructure docs into this file | Documentation policy and budgets |
 | 1b | Repoint the 32 comments that cite the retired "restructure plan §6" to `scenario-locks.md` | Comment-only diff; the lock tests that verify selects pass |
-| 2 | Delete the unused manifest key `capabilities` | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
-| 3 | Protocol-version readers in the two `.mjs` copies | Lockstep tests fail on a planted drift |
+| 2 | Delete the never-used manifest key `capabilities` (readers: `ownership.py`, its README and tests) | Before the change a manifest using it is accepted; after, it is refused as an unknown key |
+| 3 | The contract check covers the profiling driver's protocol copy | Planted drift: the old checker passes; the new one names it |
 | 4 | One Python `git()` and one process-group runner for tools | Existing tool suites; interrupt tests |
 | 5 | Agent-policy path asserts, if the planted break proves the overlap | The break is caught by the documentation policy |
-| 6 | Gateway inline JSON writers, one site per slice | A durability test per site |
+| 6 | Gateway inline JSON writers, one site per slice | Byte-identical output plus a durability test per site |
 | 7 | Gateway RPC switch to module handlers, one method family per slice | RPC tests plus the duplicate-route guard |
-| 8 | Error codes on request paths | Wire golden unchanged |
+| 8 | After W1: error codes on request paths | Wire golden updated per path with reviewer ACCEPT; iOS handling checked |
 | 9 | After M1: trivial manifests and card simplification | Byte-identical ledger |
 | 10 | After M2: localized `AGENTS.md`, folding READMEs | Link and budget checks |
 | 11 | After #2285 and #2282: #2296 Phase B, iOS duplicates, then the largest files by owner | Each with its lane |
