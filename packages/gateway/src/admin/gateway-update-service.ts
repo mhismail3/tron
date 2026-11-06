@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { isAbsolute, join, parse } from "node:path";
 import { GatewayError } from "../errors.js";
+import { durableAtomicWriteText } from "../foundation/durable-json.js";
 import type { JsonValue } from "../protocol/types.js";
 import {
   COMMAND_ID,
@@ -393,8 +394,7 @@ export class GatewayUpdateService {
       schema: 1, kind: UPDATE_CONFIG_KIND, sourceRoot,
       ...(artifactRoot === undefined ? {} : { artifactRoot }), updatedAt: new Date().toISOString(),
     };
-    await mkdir(join(this.options.tronHome, "gateway"), { recursive: true, mode: 0o700 });
-    await writeJsonAtomic(this.configPath(), config);
+    await durableAtomicWriteText(this.configPath(), `${JSON.stringify(config)}\n`);
     return config;
   }
 
