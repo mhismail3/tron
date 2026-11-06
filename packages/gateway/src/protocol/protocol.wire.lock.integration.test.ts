@@ -8,7 +8,7 @@ import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } fr
 import { waitFor } from "../../test-support/wait-for.js";
 
 /**
- * Wire contract lock (restructure plan §6.5, V7) for the `gateway/protocol` module:
+ * Wire contract lock (packages/gateway/docs/scenario-locks.md#wire-contract-v7) for the `gateway/protocol` module:
  * the shapes the iOS and Mac clients rely on, recorded from real frames of the real
  * Gateway on a loopback WebSocket (`gateway-lock-harness.ts`).
  *
@@ -19,7 +19,7 @@ import { waitFor } from "../../test-support/wait-for.js";
  * and of its response or error. Values that vary per run are not shapes, so the
  * golden is stable. Shared tool declaration schemas belong to the full Home
  * schema oracle; other renamed, removed, added or retyped fields fail this lock.
- * A wire change updates both ends in a lockstep slice (plan §4.1 B4).
+ * A wire change updates both ends in a lockstep slice (AGENTS.md "Architecture invariants").
  */
 
 const MODULE = "gateway/protocol";

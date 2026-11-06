@@ -6,7 +6,7 @@ import { expectScenario } from "../../test-support/lock-projections.js";
 import { createAndOpen, DETACHED_RUN, drainBlockersScenario, openExisting, WAITING_COMMAND } from "../../test-support/lock-scenarios.js";
 
 /**
- * Heap and drain locks (restructure plan §6.4, V3; K-0 §7, guarding E5's run
+ * Heap and drain locks (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5's run
  * ownership and E7's eviction and drain) for the `gateway/run` module, beside
  * `session-lifecycle.lock` (E0d), through the real Gateway (`gateway-lock-harness.ts`).
  *
