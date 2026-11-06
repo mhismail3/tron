@@ -4,7 +4,7 @@ Repository-wide development runbooks: the privacy guard, the pinned toolchain,
 the isolated Debug Gateway lifecycle, the development Mac's fseventsd guard, and versions
 and releases. The rules that
 bind every change are in the [charter](../AGENTS.md); package runbooks live with
-their packages ([Gateway](../packages/gateway/README.md#development),
+their packages ([Gateway](../packages/gateway/AGENTS.md#test-lanes),
 [iOS](../packages/ios-app/docs/development.md),
 [Mac](../packages/mac-app/docs/development.md)).
 

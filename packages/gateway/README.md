@@ -151,36 +151,6 @@ See [session search](docs/session-search.md).
 
 See [gateway/episodic](src/episodic/README.md); Home is its only caller.
 
-## Development
-
-```bash
-npm ci && npm run build && npm test && npm audit --omit=dev   # in packages/gateway
-scripts/tron test gateway                                   # from the repo root
-scripts/tron-node exec npm --prefix packages/gateway run test:nested
-cd packages/gateway && ../../scripts/tron-node exec npx vitest run <file>
-scripts/tron chat [--session <id>]   # terminal chat attached to the Gateway runtime
-```
-
-- `npm run check` type-checks production and test-support/corpus scopes without
-  emitting, using TypeScript's incremental data in `node_modules/.cache/tron/`;
-  `npm run build` always emits. `npm run test:typescript-build` proves both
-  (`test-results/typescript-build/report.json`).
-- `npm test` runs the parallel pass, then the nested pass
-  ([test-support](test-support/README.md#contract)).
-- `scripts/tron chat` never opens JSONL; a concurrent `pi --session` on the same file is
-  unsupported ([charter](../../AGENTS.md#architecture-invariants)).
-
-### Lint
-
-`npm run lint` runs Oxlint (pinned in `devDependencies`) over `src`, `test-support`,
-`test-fixtures` and `scripts`. `.oxlintrc.json` enables only the rules it lists; a rule
-joins only with zero findings, and a disable needs a reason after `--`.
-`npm run test:lint` proves real bad fixtures fail. Type-aware async rules and
-`no-unused-vars` wait on #1227.
-
-Wire-traffic profiling and multi-session qualification:
-[Gateway profile](../../scripts/tron-profile-gateway.md).
-
 ## Session subagent activity
 
 See [delegated activity](src/kernel/delegation/delegated-activity.md#session-subagent-activity).
