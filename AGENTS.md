@@ -11,7 +11,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
    `scripts/tron dev handoff`, Gateway update/rollback/promotion/restart or their RPCs,
    or touches `/Applications/Tron.app`, `com.tron.server`, a Mac reinstall, production
    or a device release; agents prepare, validate and report the exact action.
-   [check: channel-bound RPCs; handoff refuses dirty or unknown candidates]
+   [check: channel-bound RPCs; handoff refuses agent shells and dirty or unknown candidates]
 2. **Never run or add automated production deployment.** A Mac reinstall happens only
    when the user asks, by the Mac development runbook; the user replaces the app, then
    `scripts/tron mac verify`. Never delete `~/.tron` or reset credentials.
