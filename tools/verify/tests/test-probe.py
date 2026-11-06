@@ -191,7 +191,8 @@ class ProbeTests(unittest.TestCase):
     def test_sigterm_stops_running_tests_and_removes_the_worktree(self) -> None:
         r = self.repo
         marker = f"61.{os.getpid() % 100000:05d}"  # a sleep only this run starts
-        r.write("tools/caller/tests/test-caller.sh", f"#!/usr/bin/env bash\n# Slow guardian.\nsleep {marker}\n")
+        r.write("tools/caller/tests/test-caller.sh", f"#!/usr/bin/env bash\n# Slow guardian that cleans up when stopped.\n"
+                f"trap 'touch \"$HOME/stopped\"; exit 1' TERM\nsleep {marker} &\nwait\n")
         r.commit("slow")
         process = subprocess.Popen([str(r.path / "scripts/tron"), "probe", "tools/caller/caller.sh"], cwd=r.path, env=r.env,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -206,6 +207,16 @@ class ProbeTests(unittest.TestCase):
         self.assertNotEqual(process.returncode, 0, output)
         self.assertEqual(subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode, 1,
                          "a guardian's process outlived the probe")
+        self.assertTrue((Path(r.env["HOME"]) / "stopped").exists(), "the guardian got no SIGTERM to clean up on")
+
+    def test_a_timed_out_guardian_gets_sigterm_to_clean_up(self) -> None:
+        r = self.repo
+        r.write("tools/caller/tests/test-caller.sh", "#!/usr/bin/env bash\n# Hangs until stopped, then cleans up.\n"
+                "trap 'touch \"$HOME/stopped\"; exit 1' TERM\nsleep 300 &\nwait\n")
+        r.commit("hangs")
+        result, report = r.probe("tools/caller/caller.sh", "--timeout", "2")
+        self.assertEqual(report["baselineRed"], ["tools/caller/tests/test-caller.sh"], result.stdout + result.stderr)
+        self.assertTrue((Path(r.env["HOME"]) / "stopped").exists(), result.stdout + result.stderr)
 
     def test_a_guardian_that_seals_a_tree_read_only_leaves_no_scratch_behind(self) -> None:
         r = self.repo
