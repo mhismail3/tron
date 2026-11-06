@@ -40,7 +40,7 @@ const receipts = new CommandReceiptStore(tronHome, async (path, value, mode) => 
 });
 const service = new GatewayService({ display: displayOwnerOf(registry),
   config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-  sessions: registry, modules: registry.moduleHost, receipts, broadcast: () => {},
+  sessions: registry, receipts, broadcast: () => {},
   globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
 } as unknown as GatewayServiceDependencies);
 try {

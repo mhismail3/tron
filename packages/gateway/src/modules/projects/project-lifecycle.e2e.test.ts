@@ -47,7 +47,6 @@ async function fixture() {
   await setHomeMemoryModels(f.registry, [f.model]);
   const service = new GatewayService({ display: displayOwnerOf(f.registry),
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
-    modules: (f.registry as unknown as { options: Pick<GatewayServiceDependencies, "modules"> }).options.modules,
     modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: changes, sessions: f.registry, home: homeOwnerOf(f.registry),
     receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),
     notifications: { enqueue: async () => "queued" }, broadcast: () => {},
