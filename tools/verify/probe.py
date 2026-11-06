@@ -267,6 +267,16 @@ def drop_owns(scratch: Path, manifests: list[str], files: list[str], renamed: di
               removed_modules: set[str]) -> None:
     """Keep each manifest true to the tree: an exact owns entry follows its file, a deleted file loses it."""
     for manifest in manifests:
+        if "#" in manifest:  # a directory module: its declaration goes once nothing is left under it
+            host, directory = manifest.split("#", 1)
+            folder = str(Path(host).parent)
+            if not (scratch / ("" if folder == "." else folder) / directory).exists():
+                data = json.loads((scratch / host).read_text())
+                del data["directories"][directory]
+                if not data["directories"]:
+                    del data["directories"]
+                (scratch / host).write_text(json.dumps(data, indent=2) + "\n")
+            continue
         path = scratch / manifest
         if not path.exists():
             continue

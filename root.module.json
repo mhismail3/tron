@@ -216,5 +216,11 @@
       "repo/docs",
       "repo/root"
     ]
+  },
+  "directories": {
+    ".agents": {"name": "agents", "layer": "L5"},
+    "docs": {"name": "docs", "layer": "L5"},
+    "packages/protocol-fixtures": {"name": "protocol-fixtures", "layer": "L1"},
+    "packages/push-relay": {"name": "push-relay", "layer": "L3"}
   }
 }

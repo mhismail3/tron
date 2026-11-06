@@ -128,6 +128,15 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("verdict: PRECISE", result.stdout)
         self.assertIn("caller.sh", result.stdout)
 
+    def test_removing_a_directory_module_removes_its_declaration(self) -> None:
+        r = self.repo
+        r.git("rm", "-q", "tools/caller/caller.module.json")
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        r.write("tooling.module.json", json.dumps({**tooling, "directories": {"tools/caller": {"name": "caller", "layer": "L5"}}}))
+        r.commit("caller is a directory module")
+        result, report = r.probe("repo/caller")
+        self.assertEqual(report["static"], [], result.stdout)  # no stale declaration for the removed directory
+
     def test_a_quietly_missing_input_is_a_cascade(self) -> None:
         result, report = self.repo.probe("tools/tool/greeting.txt")
         self.assertEqual(report["verdict"], "cascade", result.stdout)
