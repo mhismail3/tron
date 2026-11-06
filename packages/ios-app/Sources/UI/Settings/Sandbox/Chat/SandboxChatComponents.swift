@@ -233,6 +233,10 @@ struct SandboxFeedbackCluster: View {
     let events: [SandboxChatModel.Event]
     let collapsed: Bool
     let action: () -> Void
+    /// The latest event's glyph is one element in both forms: it shrinks into
+    /// the leading badge while the text fades and the shell narrows toward its
+    /// trailing anchor, and grows back out of it.
+    @Namespace private var glyphs
 
     var body: some View {
         Button(action: action) {
@@ -241,12 +245,17 @@ struct SandboxFeedbackCluster: View {
                     Image(systemName: latest.icon)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(latest.tint)
+                        .frame(width: SandboxDesign.Size.badge, height: SandboxDesign.Size.badge)
+                        .background(Circle().fill(latest.tint.opacity(0.12)))
+                        .matchedGeometryEffect(id: latest.id, in: glyphs)
                     Text(latest.title)
                         .font(SandboxDesign.Typeface.utility)
                         .foregroundStyle(Color.tronTextPrimary)
                         .lineLimit(1)
                         .fixedSize()
-                        .transition(.opacity.combined(with: .offset(x: -6)))
+                        .contentTransition(.opacity)
+                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 6)).animation(.easeOut(duration: 0.18).delay(0.08)),
+                                                removal: .opacity.animation(.easeOut(duration: 0.1))))
                 } else {
                     HStack(spacing: -7) {
                         ForEach(events.prefix(3)) { event in
@@ -256,6 +265,7 @@ struct SandboxFeedbackCluster: View {
                                 .frame(width: SandboxDesign.Size.badge, height: SandboxDesign.Size.badge)
                                 .background(Circle().fill(Color.tronSurface))
                                 .overlay(Circle().stroke(event.tint.opacity(0.35), lineWidth: 0.75))
+                                .matchedGeometryEffect(id: event.id, in: glyphs)
                         }
                     }
                     if events.count > 3 {

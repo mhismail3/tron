@@ -15,6 +15,16 @@ struct SandboxChatView: View {
     @FocusState private var composerFocused: Bool
     @State private var showsEvents = false
     @State private var showsEventDetail = false
+    /// The transcript's scroll owner: kept while overlays come and go, and
+    /// moved to the end only by a send.
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    /// Where VoiceOver returns when an overlay closes: the control that opened it.
+    @AccessibilityFocusState private var returnFocus: ReturnFocus?
+    /// The keyboard was up when the menu opened; closing the menu without an
+    /// action brings it back, choosing an action leaves it down.
+    @State private var restoresKeyboard = false
+
+    private enum ReturnFocus: Hashable { case context, feedback, menu }
 
     private var motion: SandboxDesign.Motion { SandboxDesign.Motion(reduceMotion: reduceMotion) }
 
@@ -39,6 +49,9 @@ struct SandboxChatView: View {
             }
         }
         .environment(\.sandboxMotion, motion)
+        .onChange(of: showsEvents) { _, shown in
+            if !shown { restore(.feedback) }
+        }
         .tronFluidSheet(isPresented: $showsEvents) {
             SandboxSheetHeader(title: "Updates", onDone: { showsEvents = false })
         } content: {
@@ -63,6 +76,7 @@ struct SandboxChatView: View {
                 .accessibilityIdentifier("chat-proto-close")
             Spacer(minLength: 0)
             SandboxContextPicker(title: chat.contextTitle, detail: chat.contextDetail) { setOverlay(.context) }
+                .accessibilityFocused($returnFocus, equals: .context)
             Spacer(minLength: 0)
             SandboxActionCircle(icon: "slider.horizontal.3", label: "Manage session", diameter: SandboxDesign.Size.smallCircle) {}
                 .accessibilityIdentifier("chat-proto-manage")
@@ -82,6 +96,7 @@ struct SandboxChatView: View {
             .padding(.horizontal, SandboxDesign.Space.inset)
             .padding(.vertical, SandboxDesign.Space.md)
         }
+        .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom)
         .scrollDismissesKeyboard(.interactively)
         // A hard top edge keeps scrolled text off the clock; the bottom stays soft.
@@ -113,6 +128,7 @@ struct SandboxChatView: View {
                     composerFocused = false
                     showsEvents = true
                 }
+                .accessibilityFocused($returnFocus, equals: .feedback)
                 .opacity(chat.menuOpen ? 0 : 1)
                 .allowsHitTesting(!chat.menuOpen)
                 .accessibilityHidden(chat.menuOpen)
@@ -122,10 +138,14 @@ struct SandboxChatView: View {
                     .disabled(chat.menuOpen)
                 SandboxLiquidMenu(open: chat.menuOpen, mounted: chat.menuMounted, items: menuItems,
                                   onToggle: { setMenu(!chat.menuOpen) })
+                    .accessibilityFocused($returnFocus, equals: .menu)
                     .overlay {
                         if !chat.draft.isEmpty && !chat.menuOpen {
                             SandboxActionCircle(icon: "arrow.up", label: "Send", prominent: true) {
-                                withAnimation(motion.geometry) { chat.send() }
+                                withAnimation(motion.geometry) {
+                                    chat.send()
+                                    scrollPosition.scrollTo(edge: .bottom)
+                                }
                             }
                             .accessibilityIdentifier("chat-proto-send")
                             .transition(.scale(scale: 0.6).combined(with: .opacity))
@@ -218,8 +238,16 @@ struct SandboxChatView: View {
 
     // MARK: Intents
 
-    private func setMenu(_ open: Bool) {
-        if open { composerFocused = false }
+    /// Opens or closes the menu. `chosen` closes it because an action ran, which
+    /// leaves the keyboard down; any other close returns to where the user was.
+    private func setMenu(_ open: Bool, chosen: Bool = false) {
+        if open {
+            restoresKeyboard = composerFocused
+            composerFocused = false
+        } else {
+            if restoresKeyboard && !chosen { composerFocused = true } else { restore(.menu) }
+            restoresKeyboard = false
+        }
         TronHaptics.shared.play(.selectionChanged)
         let animate = {
             withAnimation(motion.progress) { chat.menuOpen = open } completion: {
@@ -237,12 +265,22 @@ struct SandboxChatView: View {
     }
 
     private func setOverlay(_ overlay: SandboxChatModel.Overlay) {
-        if overlay != .none { composerFocused = false; if chat.menuOpen { setMenu(false) } }
+        let closing = overlay == .none && chat.overlay == .context
+        if overlay != .none { composerFocused = false; if chat.menuOpen { setMenu(false, chosen: true) } }
         withAnimation(motion.geometry) { chat.overlay = overlay }
+        if closing { restore(.context) }
+    }
+
+    /// VoiceOver focus returns to the opening control once the overlay has gone.
+    private func restore(_ target: ReturnFocus) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            returnFocus = target
+        }
     }
 
     private func menuAction(_ icon: String, _ title: String, _ detail: String) {
-        setMenu(false)
+        setMenu(false, chosen: true)
         chat.report(chat.makeEvent(icon, title, detail, .tronPrimary), animation: motion.progress)
     }
 }
