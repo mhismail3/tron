@@ -106,7 +106,7 @@ unknown fields are rejected.
   and every 12 h; `models.refresh` (60 s) adds `releaseDates: {updated[, error]}`
   without failing the provider refresh; `force: true` bypasses freshness; `PI_OFFLINE`
   disables fetching; `models.catalogChanged` on change. Baseline:
-  `scripts/update-model-release-dates.mjs` (`--check`).
+  `scripts/models/update-model-release-dates.mjs` (`--check`).
 
 Verify: `auth-broker`, `compaction-policy`, `runtime-compaction` and
 `rpc-idle-admission` integration tests.
