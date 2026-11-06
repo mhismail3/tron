@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI tests for `scripts/tron budgets` (tools/budgets/README.md).
+"""CLI tests for `scripts/tron budgets` (tools/AGENTS.md, "Doc budgets").
 
 Each case copies the real `scripts/tron`, `tools/budgets` and `tools/metrics`
 into a disposable Git repository and commits a change:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Doc budgets: reported above budget, failing only far over it (tools/budgets/README.md)."""
+"""Doc budgets: reported above budget, failing only far over it (tools/AGENTS.md, "Doc budgets")."""
 
 from __future__ import annotations
 
