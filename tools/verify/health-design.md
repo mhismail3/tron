@@ -39,7 +39,7 @@ Keep sample count, environment, source SHA and coverage beside every measurement
 report, never runs suites, fetches, deploys or opens sessions. `--sha <main-sha>` pins
 another first-parent main commit. Repeat `--verify-report <json>` for retained attempts
 (including batch-owned `lane-*/verify.json`). Attempt IDs deduplicate copies for flake rate
-and test minutes; verifier outcomes and harness errors count every report given.
+and test minutes; verifier outcomes and harness errors count every exact-SHA report given.
 `landedChanges` inspects at most 20 first-parent commits and 1,000 local remote-main
 reflog entries. A successful `update by push` observation plus its preceding ancestor
 tip identifies introduced commits (at most 1,000) and earliest Git author time.
@@ -130,10 +130,10 @@ scripts/tron mac verify
 The profiler builds/starts its own faux-model fixture; do not run it during a
 no-build/no-restart design task. Its request latency is NOT Home round-trip or
 Gateway cold-start latency. See [profile ownership](../../scripts/tron-profile-gateway.md).
-There is no existing single CLI for end-to-end Home latency, cold-start timing,
-installed iPhone identity, approval timestamps or a complete seven-day flake ledger.
-Do not invent commands or infer those values from a fast status RPC. The proposed
-collection is undecided and not implemented.
+Home response timing reaches health only as approved owner-summary scalars (#2135). There is
+no existing CLI for cold-start timing, installed iPhone identity, approval timestamps or a
+complete seven-day flake ledger; their collection is undecided and not implemented. Do not
+invent commands or infer those values from a fast status RPC.
 
 ## One owner, reuse first
 
