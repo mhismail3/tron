@@ -221,6 +221,80 @@ class DeviceCapture(unittest.TestCase):
                       result.stderr)
 
 
+ATTRIBUTION = ROOT / "scripts/tron_profile_attribution.py"
+TOC = """<?xml version="1.0"?>
+<trace-toc><run number="1"><info><target><process pid="4242"/></target>
+<summary><start-date>2026-11-06T10:00:00.000+00:00</start-date></summary></info>
+<data>{tables}</data></run></trace-toc>
+"""
+TIME_PROFILE = """<?xml version="1.0"?>
+<trace-query-result><node>
+<schema name="time-profile"><col><mnemonic>time</mnemonic></col><col><mnemonic>thread</mnemonic></col>
+<col><mnemonic>process</mnemonic></col><col><mnemonic>weight</mnemonic></col><col><mnemonic>stack</mnemonic></col></schema>
+<row><sample-time id="1">1000</sample-time><thread id="2" fmt="Main Thread 0x1"/><process id="3"><pid id="4">4242</pid></process>
+<weight id="5">3000000</weight><backtrace id="6"><frame id="7" name="ChatView.body"><binary id="8" name="TronMobile"/></frame>
+<frame id="9" name="main"><binary id="10" name="TronMobile"/></frame></backtrace></row>
+<row><sample-time>2000</sample-time><thread ref="2"/><process ref="3"/><weight>1000000</weight>
+<backtrace><frame name="0x1f00"><binary ref="8"/></frame><frame ref="9"/></backtrace></row>
+<row><sample-time>3000</sample-time><thread fmt="Worker 0x2"/><process><pid>9999</pid></process><weight>5000000</weight>
+<backtrace><frame name="elsewhere"><binary name="Other"/></frame></backtrace></row>
+</node></trace-query-result>
+"""
+# xctrace stand-in: `export --toc` prints the table of contents; `export --xpath <query> --output F`
+# writes the one table the query names.
+FAKE_XCRUN = """#!/usr/bin/env python3
+import os, re, sys
+argv = sys.argv[1:]
+assert argv[:2] == ["xctrace", "export"], argv
+fixtures = os.environ["ATTRIBUTION_FIXTURES"]
+if "--toc" in argv:
+    sys.stdout.write(open(os.path.join(fixtures, "toc.xml")).read())
+else:
+    schema = re.search(r'schema="([^"]+)"', argv[argv.index("--xpath") + 1]).group(1)
+    open(argv[argv.index("--output") + 1], "w").write(open(os.path.join(fixtures, schema + ".xml")).read())
+"""
+
+
+class Attribution(unittest.TestCase):
+    """The real attribution CLI over an xctrace export stand-in: who spent the CPU, by symbol."""
+
+    def run_attribution(self, tables: list[str]) -> tuple[subprocess.CompletedProcess[str], Path]:
+        temporary = tempfile.TemporaryDirectory(prefix="tron-attribution-")
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "bin").mkdir()
+        (root / "bin/xcrun").write_text(FAKE_XCRUN)
+        (root / "bin/xcrun").chmod(0o755)
+        (root / "toc.xml").write_text(TOC.format(tables="".join(f'<table schema="{name}"/>' for name in tables)))
+        (root / "time-profile.xml").write_text(TIME_PROFILE)
+        (root / "capture.trace").mkdir()
+        result = subprocess.run([sys.executable, str(ATTRIBUTION), str(root / "capture.trace"), "--template", "time-profiler",
+                                 "--device-capture", "--output-dir", str(root)], capture_output=True, text=True, timeout=60,
+                                env={**os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}", "ATTRIBUTION_FIXTURES": str(root)})
+        return result, root
+
+    def test_cpu_is_attributed_to_the_target_process_by_symbol(self) -> None:
+        result, root = self.run_attribution(["time-profile"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        document = json.loads((root / "attribution.json").read_text())
+        profile = document["time_profile"]
+        self.assertEqual((document["pid"], document["scope"]), (4242, "whole recording"))
+        self.assertEqual((profile["samples"], profile["samples_other_processes"], profile["cpu_ms"]), (2, 1, 4.0))
+        self.assertEqual([(entry["symbol"], entry["ms"]) for entry in profile["all_threads"]["self"]],
+                         [("ChatView.body", 3.0), ("<unresolved address in TronMobile>", 1.0)])
+        self.assertEqual(profile["main_thread_symbols"]["total"][0], {"symbol": "main", "image": "TronMobile",
+                                                                    "ms": 4.0, "share": 1.0})
+        self.assertEqual(profile["unresolved_frame_share"], 0.125)
+        self.assertIn("app signposts unavailable", " ".join(document["warnings"]))
+        self.assertTrue((root / "attribution.md").read_text())
+
+    def test_a_time_profiler_trace_without_its_table_is_refused(self) -> None:
+        result, root = self.run_attribution(["os-log"])
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("the time-profiler trace has no time-profile table (tables: os-log)", result.stderr)
+        self.assertFalse((root / "attribution.json").exists())
+
+
 def load_gateway_profiler():
     sys.path.insert(0, str(ROOT / "scripts"))
     loader = SourceFileLoader("tron_profile_gateway", str(GATEWAY_PROFILER))

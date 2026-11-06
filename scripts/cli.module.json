@@ -15,7 +15,6 @@
     "test-verify-ci-toolchain.py",
     "tron",
     "tron-node",
-    "update-model-release-dates.mjs",
     "verify-ci-toolchain.sh"
   ],
   "interfaces": [
@@ -117,11 +116,6 @@
         "repo/version"
       ],
       "external": "maintainer pins and installs Node (docs/development.md)"
-    },
-    {
-      "name": "scripts/update-model-release-dates.mjs",
-      "kind": "exec",
-      "external": "maintainer refreshes the Gateway's vendored model release dates (packages/gateway/src/admin/runtime-configuration.md)"
     },
     {
       "name": "scripts/verify-ci-toolchain.sh",

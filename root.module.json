@@ -117,7 +117,6 @@
       "scripts/tron_profile_report.py",
       "scripts/tron_rebuild_lock.py",
       "scripts/tron_triage.py",
-      "scripts/update-model-release-dates.mjs",
       "scripts/validate-ios-artifact.py",
       "scripts/validate-native-host.py",
       "scripts/validate-push-service-config.sh",

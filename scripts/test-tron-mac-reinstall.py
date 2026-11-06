@@ -7,11 +7,16 @@ identity documents stand in for signed apps, and a held OS lock for a host write
 No installed app, launchd service, login item, credential or real HOME is used.
 This does not qualify codesigning, host process detection or a real reinstall.
 
+CheckpointPlan guards `scripts/tron checkpoint` (tron_checkpoint.py) without building: every
+journey it runs is one `scripts/ios-gateway-e2e-test run-ui` owns, every Gateway test it runs
+exists, and its CLI refuses to prepare a live reinstall from a test-mode run before touching Git.
+
 Run: python3 scripts/test-tron-mac-reinstall.py
 Evidence: test-results/mac-reinstall/report.json (including failing runs).
 """
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -59,6 +64,33 @@ def fixture_main(root, arguments):
     except reinstall.Stop as error:
         print(f'STOP: {error}', file=sys.stderr)
         return 2
+
+
+class CheckpointPlan(unittest.TestCase):
+    def test_every_journey_and_gateway_test_the_checkpoint_runs_exists(self):
+        spec = importlib.util.spec_from_file_location("tron_checkpoint", HERE / "tron_checkpoint.py")
+        sys.path.insert(0, str(HERE))
+        checkpoint = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checkpoint)
+        # run-ui refuses any selector outside its owned list; read that list as bash defines it.
+        harness = HERE / "ios-gateway-e2e-test"
+        listed = subprocess.run(["/bin/bash", "-c", 'eval "$(sed -n "/^ui_owned_journeys=(/,/^)/p" "$1")"; '
+                                 'printf "%s\\n" "${ui_owned_journeys[@]}"', "owned", str(harness)],
+                                capture_output=True, text=True, check=True).stdout.split()
+        self.assertGreater(len(listed), 10, f"no ui_owned_journeys list read from {harness}")
+        for _name, journeys, gateway_tests in checkpoint.OUTCOMES:
+            for journey in journeys:
+                with self.subTest(journey=journey):
+                    self.assertIn(checkpoint.UI + journey, listed, f"{harness.name} run-ui does not own this journey")
+            for test in gateway_tests:
+                with self.subTest(test=test):
+                    self.assertTrue((REPO / "packages/gateway" / test).is_file(), f"no Gateway test {test}")
+
+    def test_a_test_mode_run_never_prepares_a_live_reinstall(self):
+        result = subprocess.run([sys.executable, str(HERE / "tron_checkpoint.py"), "--test-mode", "--prepare-reinstall"],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("--test-mode cannot prepare a live reinstall", result.stderr)
 
 
 class ReinstallWindow(unittest.TestCase):
@@ -204,7 +236,8 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--fixture':
         sys.exit(fixture_main(Path(sys.argv[2]), sys.argv[3:]))
     started = time.monotonic()
-    result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(ReinstallWindow))
+    suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (CheckpointPlan, ReinstallWindow))
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
     report = REPO / 'test-results/mac-reinstall/report.json'
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps({'passed': result.wasSuccessful(), 'testsRun': result.testsRun,

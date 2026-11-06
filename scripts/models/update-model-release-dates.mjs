@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Regenerate the vendored model release dates the Gateway serves in `model.list`.
 // This is a maintainer baseline refresh, not a runtime or build dependency.
-// `scripts/update-model-release-dates.mjs [--check]`
+// `scripts/models/update-model-release-dates.mjs [--check]`
 
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { RELEASE_DATE_SOURCE, releaseDatesFromCatalog } from "../packages/gateway/src/providers/release-date-normalization.mjs";
+import { RELEASE_DATE_SOURCE, releaseDatesFromCatalog } from "../../packages/gateway/src/providers/release-date-normalization.mjs";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const GATEWAY = join(ROOT, "packages/gateway");
 const PI_DATA = join(GATEWAY, "node_modules/@earendil-works/pi-ai/dist/providers/data");
 const ALIASES = join(GATEWAY, "src/providers/model-release-date-aliases.json");
@@ -47,6 +47,6 @@ const { providers, sorted } = await build();
 const encoded = `${JSON.stringify(sorted, null, 2)}\n`;
 const current = await readFile(SNAPSHOT, "utf8").catch(() => undefined);
 if (check) {
-  if (current !== encoded) throw new Error(`${SNAPSHOT} is stale; run scripts/update-model-release-dates.mjs`);
+  if (current !== encoded) throw new Error(`${SNAPSHOT} is stale; run scripts/models/update-model-release-dates.mjs`);
 } else await writeFile(SNAPSHOT, encoded, "utf8");
 console.log(`${check ? "verified" : "wrote"} ${Object.keys(sorted).length} release dates across ${providers} providers from ${RELEASE_DATE_SOURCE}`);
