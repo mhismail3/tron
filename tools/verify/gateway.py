@@ -225,8 +225,11 @@ def main() -> int:
     # worker's 108-character TMPDIR left a realistic catalog fixture short of rows).
     with tempfile.TemporaryDirectory(prefix=SCRATCH_PREFIX, dir=SCRATCH_PARENT) as temporary:
         root = Path(temporary)
-        # Created already locked (O_EXLOCK), so a reaper never finds the file unlocked in between.
-        owner = os.open(root / OWNER_LOCK, os.O_RDWR | os.O_CREAT | os.O_EXLOCK, 0o600)
+        # Locked under another name, then renamed into place, so a reaper never finds it unlocked.
+        partial = root / (OWNER_LOCK + '.partial')
+        owner = os.open(partial, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(owner, fcntl.LOCK_EX)
+        os.rename(partial, root / OWNER_LOCK)
         home, scratch = root / "home", root / "tmp"
         home.mkdir(); scratch.mkdir()
         environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node}

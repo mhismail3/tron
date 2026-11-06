@@ -88,6 +88,33 @@ class ScratchReaper(unittest.TestCase):
         self.assertIn(f"removed abandoned scratch {abandoned}", errors)
         self.assertEqual(sorted(self.parent.iterdir()), [], "the run also removed its own scratch")
 
+    def test_a_root_stays_owned_while_vitest_outlives_its_runner(self) -> None:
+        orphaned = self.start(hold=True)
+        self.wait_for_runs(1)
+        os.kill(orphaned.pid, signal.SIGKILL)  # the runner only; its Vitest keeps the inherited lock
+        orphaned.wait()
+        owned = Path(self.homes()[0]).parent
+        vitest = json.loads(self.runs.read_text().splitlines()[0])["pid"]
+        try:
+            second = subprocess.run([sys.executable, str(self.root / "tools/verify/gateway.py"), "y.test.ts"],
+                                    env=self.env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertTrue(owned.is_dir(), "a root whose Vitest still runs was removed")
+        finally:
+            Path(str(self.runs) + ".hold").unlink(missing_ok=True)
+        deadline = time.monotonic() + 30
+        while True:  # the orphaned Vitest exits once released
+            try:
+                os.kill(vitest, 0)
+            except ProcessLookupError:
+                break
+            self.assertLess(time.monotonic(), deadline, "the orphaned Vitest never exited")
+            time.sleep(0.05)
+        third = subprocess.run([sys.executable, str(self.root / "tools/verify/gateway.py"), "z.test.ts"],
+                               env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(third.returncode, 0, third.stderr)
+        self.assertFalse(owned.exists(), third.stderr)
+
     def test_a_live_runs_scratch_and_a_lockless_root_are_kept(self) -> None:
         legacy = self.parent / "tron-gateway-tests-legacy"
         (legacy / "home").mkdir(parents=True)
