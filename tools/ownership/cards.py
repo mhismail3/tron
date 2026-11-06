@@ -153,9 +153,9 @@ def module_edges(refs: dict[str, set[str]], owner: dict[str, str], folders: dict
     edges: dict[str, dict[str, dict[str, list[str]]]] = {}
     for source, targets in refs.items():
         for target in targets:
-            provider = owner_of(target, owner, folders)
-            if provider and provider != owner.get(source):
-                edges.setdefault(provider, {}).setdefault(owner[source], {}).setdefault(target, []).append(source)
+            provider, consumer = owner_of(target, owner, folders), owner.get(source)
+            if provider and consumer and provider != consumer:  # an unowned source is reported as unowned instead
+                edges.setdefault(provider, {}).setdefault(consumer, {}).setdefault(target, []).append(source)
     return edges
 
 

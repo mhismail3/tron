@@ -15,6 +15,7 @@ as a worker would. Every refusal names the file and the fix:
    old path; a moved card whose callers were not updated is refused per consumer.
 5. A file nothing outside its tests reaches is refused as dead.
 6. `--card <path>` prints the module's card with the dependents found in the tree.
+7. An unowned file that names a carded tool is reported as unowned, not as a crash.
 
 The last run's output is kept in `test-results/cards-cli/`.
 """
@@ -192,6 +193,14 @@ class CardTests(CardCase):
                      "delete it, or name it in \"interfaces\" with who runs it")
         r.write("tools/tool/tool.sh", TOOL + "source \"$(dirname \"$0\")/helper.sh\"\n", mode=0o755)
         self.clean()
+
+    def test_an_unowned_file_naming_a_tool_is_reported_as_unowned(self) -> None:
+        r = self.repo
+        r.write("notes/run.sh", "#!/usr/bin/env bash\n# Runs the tool.\nbash tools/tool/tool.sh\n")
+        result = r.run()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("unowned: notes/run.sh", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_card_prints_dependents_found_in_the_tree(self) -> None:
         result = self.repo.run("--card", "tools/tool/tool.sh")

@@ -10,7 +10,7 @@ are folded in here: a file moves only when a removal probe shows the move is nee
 
 | Need | Owner | Gate |
 |---|---|---|
-| Every tracked file has exactly one owner | `scripts/tron ownership` | verify step 1, pre-commit layout |
+| Every tracked file has exactly one owner | `scripts/tron ownership` | verify step 1 |
 | Purpose card: purpose, inbound interfaces with consumers, guardians; outbound derived | [cards](../../tools/ownership/README.md#purpose-cards) | same step; undeclared, stale or half-moved references and dead files fail |
 | Read one module's card and found dependents before editing | `scripts/tron ownership --card <path>` | none (read) |
 | What would break if a unit were removed or moved | [`scripts/tron probe`](../../tools/verify/README.md#removal-probes) | measures; verdict precise, cascade or silent |

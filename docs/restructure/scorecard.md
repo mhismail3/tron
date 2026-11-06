@@ -19,7 +19,7 @@ and the pilot's `scripts/tron probe` runs. Lower is better except carded modules
 | Modules without a card | 99 | |
 | Cross-module file references | 1,494 | |
 | Module pairs that reference each other | 622 | |
-| Source files nothing names (non-Swift) | 58 | |
+| Source files no tracked file names (non-Swift) | 58 | |
 | Gateway layer pairs: upward / two-way / undeclared | 0 / 1 / 57 | |
 | iOS layer pairs | not measured (needs an Xcode index) | |
 | Probed units: precise / cascade / silent | not measurable (no probe) | |

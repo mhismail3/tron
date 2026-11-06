@@ -21,6 +21,7 @@ def shipped_runner(root, lock):
     (root / 'tools/verify').mkdir(parents=True, exist_ok=True)
     (root / 'tools/verify/gateway.py').write_text((ROOT / 'tools/verify/gateway.py').read_text())
     source = (ROOT / 'tools/verify/host_lock.py').read_text()
+    assert "'/tmp/tron-full-gateway.lock'" in source, 'the host lock path moved; point this fixture at its new spelling'
     (root / 'tools/verify/host_lock.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
     return root / 'tools/verify/gateway.py'
 

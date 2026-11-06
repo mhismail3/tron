@@ -143,6 +143,7 @@ checks it in the same pass, and each message names the fix:
 - **`frozen`**: paths code older than the checkout runs by path (the installed
   Gateway, or the Mac replace orchestrator at another revision). They must exist;
   change their content, never their path.
+- **`uncarded`**: modules not yet [carded](#purpose-cards); see the ratchet there.
 - **Purpose.** Tooling (`.py`, `.sh`, `.mjs`, `.js`, `.ts` or executable files under
   `scripts/`, `tools/` and `packages/<pkg>/scripts/`, except tests) states what it does in
   a comment or docstring in its first 12 lines. Directives such as `# shellcheck`

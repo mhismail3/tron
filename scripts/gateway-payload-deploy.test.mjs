@@ -375,8 +375,9 @@ test("runBounded settles at the kill deadline when a descendant retains pipes", 
 // process with a real TCP listener, read through the deploy's own ps/lsof
 // probes. The old Gateway's port stays open while it drains accepted work and
 // closes only when its shutdown begins.
-// The release timer starts only once the deploy has captured the listener, as a real drain
-// begins after capture, so a slow lsof under load cannot see the port already closed.
+// The release timer starts only once this fixture has captured the listener (the deploy's
+// drain likewise starts from a captured identity), so a slow lsof under load cannot find the
+// port already closed.
 async function oldGatewayFixture({ releaseAfterMs, then }) {
   const program = `
     const server = require("node:net").createServer().listen(0, "127.0.0.1", () => {

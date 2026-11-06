@@ -39,7 +39,6 @@ import verify  # noqa: E402  (selection and runners)
 sys.path.insert(0, str(verify.ROOT / "tools" / "ownership"))
 import cards  # noqa: E402  (references between modules)
 
-XCODE_RUNNERS = {"ios", "ios-lanes", "mac"}
 
 
 def git(cwd: Path, *args: str, check: bool = True) -> str:
@@ -59,13 +58,17 @@ def unit_files(unit: str, modules: dict, tracked: list[str]) -> tuple[str, list[
     return clean, files
 
 
-def names_of(unit: str, files: list[str]) -> set[str]:
-    """Words a failure message would use to point at the unit."""
-    found = {unit, unit.rsplit("/", 1)[-1]}
+def names_of(unit: str, files: list[str]) -> list[re.Pattern]:
+    """How a failure message points at the unit: a repo-relative path, or a distinctive file name.
+
+    A short or common name ("tron", "data") also occurs in scratch paths and unrelated text, so it
+    alone never counts as naming the unit."""
+    names = {unit, *files}
     for path in files:
         name = path.rsplit("/", 1)[-1]
-        found |= {path, name, name.rsplit(".", 1)[0]}
-    return {name for name in found if len(name) > 3}
+        stem = name.rsplit(".", 1)[0]
+        names |= {candidate for candidate in (name, stem) if len(candidate) >= 8 and re.search(r"[-_.]", candidate)}
+    return [re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(name) + r"(?![A-Za-z0-9_-])") for name in sorted(names)]
 
 
 def guardians(unit: str, files: list[str], modules: dict, tracked: list[str]) -> tuple[list[str], dict[str, str]]:
@@ -136,17 +139,21 @@ def checkout(commit: str, dependencies: Path | None) -> Path:
     guardian may reinstall them (bundle-gateway.sh runs `npm ci`) or write into its checkout, and neither
     may reach another checkout or a guardian running beside it."""
     tree = Path(tempfile.mkdtemp(prefix="tron-probe-")) / "tree"
-    git(verify.ROOT, "worktree", "add", "--detach", "-q", str(tree), commit)
-    if dependencies:
-        (tree / verify.GATEWAY).mkdir(parents=True, exist_ok=True)
-        subprocess.run(["cp", "-c", "-R", str(dependencies), str(tree / verify.GATEWAY / "node_modules")], check=True)
+    try:
+        git(verify.ROOT, "worktree", "add", "--detach", "-q", str(tree), commit)
+        if dependencies:
+            (tree / verify.GATEWAY).mkdir(parents=True, exist_ok=True)
+            subprocess.run(["cp", "-c", "-R", str(dependencies), str(tree / verify.GATEWAY / "node_modules")], check=True)
+    except BaseException:
+        discard(tree)
+        raise
     return tree
 
 
 def discard(tree: Path) -> None:
+    """Remove one of this probe's worktrees; other checkouts' worktree entries are not touched."""
     git(verify.ROOT, "worktree", "remove", "--force", str(tree), check=False)
     remove_tree(tree.parent)
-    git(verify.ROOT, "worktree", "prune", check=False)
 
 
 def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Path, jobs: int,
@@ -156,33 +163,45 @@ def run_tests(commit: str, dependencies: Path | None, tests: list[str], logs: Pa
     logs.mkdir(parents=True, exist_ok=True)
 
     def one(test: str) -> tuple[str, dict]:
-        runner = verify.runner_of(test, nested, mac_terminal)
-        if runner in XCODE_RUNNERS:
-            return test, {"outcome": "not-run", "why": f"{runner} needs Xcode; run it through scripts/tron verify"}
+        try:
+            runner = verify.runner_of(test, nested, mac_terminal)
+        except verify.VerifyError as error:
+            return test, {"outcome": "not-run", "why": str(error)}
+        if runner in verify.NOT_DRIVEN or runner == "ios":
+            return test, {"outcome": "not-run", "why": f"the {runner} runner needs its own lane; run it through scripts/tron verify"}
         if STOPPING.is_set():
             return test, {"outcome": "not-run", "why": "the probe was stopped"}
-        scratch = checkout(commit, dependencies)
-        argv, cwd = command(scratch, test, runner)
-        private = Path(tempfile.mkdtemp(prefix="probe-test-"))
-        started = time.time()
-        process = subprocess.Popen(argv, cwd=cwd, env={**os.environ, "TMPDIR": str(private) + "/"}, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)
-        RUNNING.add(process)
+        started, scratch, private, process = time.time(), None, None, None
         try:
-            output, _ = process.communicate(timeout=timeout)
-            code = process.returncode
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            output, _ = process.communicate()
-            output, code = f"{output}\nprobe: timed out after {timeout}s", 124
+            scratch = checkout(commit, dependencies)
+            argv, cwd = command(scratch, test, runner)
+            private = Path(tempfile.mkdtemp(prefix="probe-test-"))
+            try:
+                process = subprocess.Popen(argv, cwd=cwd, env={**os.environ, "TMPDIR": str(private) + "/"},
+                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+                                           start_new_session=True)
+            except OSError as error:  # the change removed the runner itself (scripts/tron-node, a deleted cwd)
+                output, code = f"probe: cannot start {' '.join(argv)} in {cwd}: {error}", 127
+            else:
+                RUNNING.add(process)
+                try:
+                    output, _ = process.communicate(timeout=timeout)
+                    code = process.returncode
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    output, _ = process.communicate()
+                    output, code = f"{output}\nprobe: timed out after {timeout}s", 124
         finally:
-            RUNNING.discard(process)
-            try:  # a test's own descendants belong to its group, also after a clean exit
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            remove_tree(private)
-            discard(scratch)
+            if process is not None:
+                RUNNING.discard(process)
+                try:  # a test's own descendants belong to its group, also after a clean exit
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if private is not None:
+                remove_tree(private)
+            if scratch is not None:
+                discard(scratch)
         log = logs / (test.replace("/", "__") + ".log")
         log.write_text(output)
         return test, {"outcome": "pass" if code == 0 else "fail", "exit": code, "seconds": round(time.time() - started, 1),
@@ -239,10 +258,10 @@ def drop_owns(scratch: Path, manifests: list[str], files: list[str], renamed: di
             root.write_text(json.dumps(data, indent=2) + "\n")
 
 
-def classify(failing: dict[str, str], names: set[str]) -> tuple[str, list[str]]:
+def classify(failing: dict[str, str], names: list[re.Pattern]) -> tuple[str, list[str]]:
     if not failing:
         return "silent", []
-    vague = [test for test, output in failing.items() if not any(name in output for name in names)]
+    vague = [test for test, output in failing.items() if not any(name.search(output) for name in names)]
     if vague:
         return "cascade", vague
     return "precise", []
@@ -331,7 +350,7 @@ def main(argv: list[str]) -> int:
     (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(f"verdict: {verdict.upper()}  ({len(failing)} failing test file(s); {len(static)} static finding(s))")
     for test in sorted(failing):
-        line = next((line.strip() for line in failing[test].splitlines() if any(name in line for name in names)
+        line = next((line.strip() for line in failing[test].splitlines() if any(name.search(line) for name in names)
                      and re.search(r"error|fail|no such|not found|missing|cannot|assert", line, re.I)), "")
         print(f"  red  {test}{'  (does not name the unit)' if test in vague else ''}\n       {line[:200]}")
     for line in static:

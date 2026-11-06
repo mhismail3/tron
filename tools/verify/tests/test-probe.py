@@ -15,7 +15,11 @@ helper verify imports into a disposable Git repository and probes one unit as a 
 6. SIGTERM stops every running test's process group and removes the scratch worktree.
 7. A guardian that seals a tree read-only leaves no scratch behind, and guardians running side by
    side each get their own checkout: one writing into its tree never dirties another's.
-8. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
+8. A short unit name ("tron") that also occurs in scratch paths does not count as naming the unit,
+   so a vague failure is still a cascade.
+9. Deleting a guardian's own runner (scripts/tron-node) is a failure that names it, not a crash;
+   a relay test is listed as not run, never run as a shell script.
+10. A guardian that reinstalls Gateway dependencies changes only the probe's own copy, never the
    checkout's (bundle-gateway.sh runs `npm ci`).
 
 Every run leaves no scratch worktree behind. The last run's output is kept in `test-results/probe-cli/`.
@@ -210,6 +214,32 @@ class ProbeTests(unittest.TestCase):
         result, report = r.probe("tools/tool/tool.sh", "--jobs", "8")
         self.assertEqual(report.get("baselineRed", []), [], result.stdout + result.stderr)
         self.assertIn("tools/tool/tests/test-greeting-1.sh", report["failing"])
+
+    def test_a_short_name_in_a_scratch_path_does_not_name_the_unit(self) -> None:
+        r = self.repo
+        r.write("tools/tool/tron", "hello\n")
+        r.write("tools/tool/tool.sh", TOOL.replace("greeting.txt", "tron"), mode=0o755)
+        vague = ("#!/usr/bin/env bash\n# Vague about what broke.\n"
+                 '[[ $(bash tools/tool/tool.sh) == hello ]] || { echo "unexpected output in $PWD"; exit 1; }\n')
+        for test in ["test-tool.sh", *(f"test-greeting-{index}.sh" for index in range(6))]:
+            r.write(f"tools/tool/tests/{test}", vague)
+        r.commit("a unit with a short name")
+        result, report = r.probe("tools/tool/tron")
+        self.assertIn("tron-probe-", (r.path / report["guardians"]["tools/tool/tests/test-greeting-0.sh"]["after"]["log"]).read_text())
+        self.assertEqual(report["verdict"], "cascade", result.stdout)
+
+    def test_a_deleted_runner_names_itself_and_relay_tests_are_not_run(self) -> None:
+        r = self.repo
+        r.write("scripts/tron-node", "#!/bin/bash\n# Fixture runner: every node test passes.\nexit 0\n", mode=0o755)
+        r.write("tools/tool/tests/runner.test.mjs", "// Runs through scripts/tron-node.\n")
+        r.write("packages/push-relay/relay.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("packages/push-relay/tests/worker.test.ts", "// Needs the relay's own runner: scripts/tron-node.\n")
+        r.commit("a node guardian and a relay test")
+        result, report = r.probe("scripts/tron-node")
+        self.assertEqual(report["verdict"], "precise", result.stdout + result.stderr)
+        self.assertIn("tools/tool/tests/runner.test.mjs", report["failing"])
+        self.assertIn("packages/push-relay/tests/worker.test.ts", report["notRun"])
+        self.assertNotIn("packages/push-relay/tests/worker.test.ts", report.get("baselineRed", []))
 
     def test_a_guardian_that_reinstalls_dependencies_leaves_the_checkouts_copy_alone(self) -> None:
         r = self.repo

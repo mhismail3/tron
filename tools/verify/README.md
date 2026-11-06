@@ -97,6 +97,12 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
+### No exemptions
+
+There is no known-failure registry, quarantine, waiver, expiry or qualified verdict
+([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Every
+executed failure is `failed` (exit 1); it is fixed at its root or causally reverted.
+
 ## Selection
 
 Paths changed between the merge base and HEAD, both old and new names, map to
