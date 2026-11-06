@@ -19,13 +19,13 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
 
         // Adding rows grows the card with its content; past the cap it stops below the status bar.
         for _ in 0..<4 { app.buttons["sandbox-rows-add"].tap() }
-        settle()
+        settle(sheet)
         let more = sheet.frame
         XCTAssertGreaterThan(more.height, few.height + 100, "\(few) → \(more)")
         XCTAssertEqual(more.maxY, few.maxY, accuracy: 1, "The card grows upward from its bottom edge")
         for _ in 0..<10 { app.buttons["sandbox-rows-add"].tap() }
         app.buttons["sandbox-sections-toggle"].tap()
-        settle()
+        settle(sheet)
         let capped = sheet.frame
         XCTAssertGreaterThan(capped.minY, 40, "The cap keeps the card clear of the status bar: \(capped)")
         XCTAssertEqual(app.staticTexts["sandbox-rows-count"].label, "14 rows")
@@ -37,7 +37,7 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
             .press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7 - 200 / window.height)),
                    withVelocity: .slow, thenHoldForDuration: 0.3)
-        settle()
+        settle(sheet, firstRow)
         XCTAssertLessThan(firstRow.frame.minY, rowTop - 100, "The content scrolled")
         XCTAssertEqual(sheet.frame.minY, capped.minY, accuracy: 1, "The card did not move while the content scrolled")
         // Dragging down scrolls the content back to its top, then moves the sheet; a slow
@@ -45,13 +45,13 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: content / window.height))
             .press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)),
                    withVelocity: .slow, thenHoldForDuration: 0.5)
-        settle()
+        settle(sheet, firstRow)
         XCTAssertEqual(firstRow.frame.minY, rowTop, accuracy: 1, "The content is back at its top")
         XCTAssertEqual(sheet.frame.minY, capped.minY, accuracy: 1, "The released card returned to rest")
         // Removing rows shrinks it again.
         for _ in 0..<14 { app.buttons["sandbox-rows-remove"].tap() }
         app.buttons["sandbox-sections-toggle"].tap()
-        settle()
+        settle(sheet)
         XCTAssertLessThan(sheet.frame.height, few.height, "No rows: smaller than two rows")
 
         // Done closes it.
@@ -72,7 +72,7 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 2.5)),
                    withVelocity: .slow, thenHoldForDuration: 0.3)
-        settle()
+        settle(held)
         XCTAssertTrue(held.exists)
         XCTAssertEqual(held.frame.minY, rest.minY, accuracy: 1, "The card returns to rest")
 
@@ -256,7 +256,7 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
         let sheet = fluidSheet(app)
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["sandbox-sheet-done"].waitForExistence(timeout: 5), app.debugDescription)
-        settle()
+        settle(sheet)
         return sheet
     }
 
@@ -266,6 +266,21 @@ final class TronSandboxCustomSheetUITests: XCTestCase {
     }
 
     private func settle() { Thread.sleep(forTimeInterval: 0.9) }
+
+    /// Waits until the springs have come to rest: two consecutive reads, 150 ms
+    /// apart, of every element's frame agree. Fails after 5 s rather than
+    /// reading a frame mid-motion.
+    @MainActor private func settle(_ elements: XCUIElement...) {
+        var previous = elements.map(\.frame)
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.15)
+            let current = elements.map(\.frame)
+            if current == previous { return }
+            previous = current
+        }
+        XCTFail("Frames still moving after 5 s: \(previous)")
+    }
 
     @MainActor private func waitForAbsence(_ element: XCUIElement) -> Bool {
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
