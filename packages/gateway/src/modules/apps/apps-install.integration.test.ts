@@ -139,7 +139,7 @@ function publish(f: Fixture, title: string): void {
 }
 
 describe("reviewed Swift app lifecycle through the Gateway", () => {
-  it("lists pending offers once a session file the last reconcile could not prove is gone", async () => {
+  it("lists pending offers on the owner pass after an unprovable session file is gone", async () => {
     const f = await fixture();
     await tool(f, offerArgs(["ios-builds"]));
     const sessions = join(f.root, "agent/sessions");
