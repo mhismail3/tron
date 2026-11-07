@@ -81,6 +81,18 @@ class Fixture:
         return path
 
 
+def expected_failure(case: unittest.TestCase, body, reason: str) -> None:
+    """A known defect (#2316): passes only while `body` fails with exactly `reason`. Any other
+    error stays red, and a body that starts passing turns red so its fix updates the test."""
+    try:
+        body()
+    except AssertionError as error:
+        if reason in str(error):
+            return
+        raise
+    case.fail(f"expected failure no longer reproduces: {reason}")
+
+
 class HomeLayoutTests(unittest.TestCase):
     def setUp(self) -> None:
         self.base = Path(tempfile.mkdtemp(prefix="home-layout-"))
@@ -158,6 +170,25 @@ class HomeLayoutTests(unittest.TestCase):
         self.assertTrue((fixture.home / "internal/pi-subagents/1.0.0").exists())
         self.assertTrue((fixture.home / "workspace/files/recent/log.txt").exists())
         self.assertTrue(profile.exists())
+
+    def test_apply_keeps_an_install_a_payload_pinned_after_the_plan(self) -> None:
+        """#2316 F13: the `prune --apply` branch rechecks each candidate's own size, file count
+        and mtime, but not the payload pins (`pinned_subagents`) that made an install a
+        candidate. A payload staged between plan and apply that pins the planned version does
+        not stop its deletion. Expected to fail until apply re-derives pins."""
+        def body() -> None:
+            fixture = Fixture(self.base)
+            fixture.touch("internal/pi-subagents/0.9.0/index.js")
+            plan = self.base / "plan.json"
+            planned = fixture.run("prune", "--home", str(fixture.home), "--plan", str(plan))
+            self.assertEqual(planned.returncode, 0, planned.stderr)
+            self.assertEqual([row["path"] for row in json.loads(plan.read_text())["candidates"]], ["internal/pi-subagents/0.9.0"])
+            digest = planned.stdout.rsplit("--confirm ", 1)[1].strip()
+            fixture.touch("gateway/payloads/stable/versions/v2/app/pi-subagents-pin.json", json.dumps({"version": "0.9.0"}))
+            fixture.run("prune", "--apply", str(plan), "--confirm", digest)
+            self.assertTrue((fixture.home / "internal/pi-subagents/0.9.0").exists(),
+                            "F13: apply deleted an install a payload pinned after the plan")
+        expected_failure(self, body, "F13: apply deleted an install a payload pinned after the plan")
 
     def test_migrate_backs_up_moves_is_idempotent_and_rolls_back(self) -> None:
         fixture = Fixture(self.base, retired=[{"from": "workspace/files/Profile.json", "to": "workspace/state/profile/Profile.json"}])
