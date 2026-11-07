@@ -17,7 +17,6 @@
     "scripts/compare-pi-sdk-graph.mjs",
     "scripts/install-pi-subagents.mjs",
     "scripts/pi-session-compatibility-probe.mjs",
-    "scripts/regenerate-subagent-parity.sh",
     "scripts/update-pi-sdk.mjs",
     "scripts/update-pi-subagents.integration.test.mjs",
     "scripts/update-pi-subagents.mjs",
@@ -28,8 +27,6 @@
     "src/sessions/session-entries.lock.integration.test.ts",
     "test-fixtures/pi-sdk/**",
     "test-support/pi-persisted-state-corpus.ts",
-    "test-support/subagent-parity-approved.json",
-    "test-support/subagent-parity-old.json",
     "third_party/**",
     "vitest.corpus.config.ts"
   ]
