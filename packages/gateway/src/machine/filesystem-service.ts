@@ -40,7 +40,9 @@ export class FilesystemService {
   }
 
   private async canonical(path: string): Promise<string> {
-    const target = await realpath(resolve(path));
+    const target = await realpath(resolve(path)).catch((error: NodeJS.ErrnoException) => {
+      throw error.code === "ENOENT" || error.code === "ENOTDIR" ? new GatewayError("not_found", "Path does not exist") : error;
+    });
     if (!containedWithin(this.root, target)) throw new GatewayError("invalid_request", "Path is outside the allowed workspace root");
     return target;
   }
@@ -96,7 +98,9 @@ export class FilesystemService {
     const canonicalParent = await this.canonical(parent);
     const target = join(canonicalParent, name);
     if (!containedWithin(this.root, target)) throw new GatewayError("invalid_request", "Folder is outside the allowed workspace root");
-    await mkdir(target);
+    await mkdir(target).catch((error: NodeJS.ErrnoException) => {
+      throw error.code === "EEXIST" ? new GatewayError("conflict", "Folder already exists") : error;
+    });
     return realpath(target);
   }
 
