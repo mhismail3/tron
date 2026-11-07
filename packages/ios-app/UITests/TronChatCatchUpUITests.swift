@@ -31,7 +31,12 @@ final class TronChatCatchUpUITests: XCTestCase {
 
         let readout = app.descendants(matching: .any)["chat.hosted.catch-up-staged-gap"]
         XCTAssertTrue(readout.waitForExistence(timeout: 5), app.debugDescription)
-        if app.keyboards.firstMatch.exists { app.buttons["Dismiss keyboard"].firstMatch.tap() }
+        if app.keyboards.firstMatch.exists {
+            // The transcript dismisses the keyboard interactively.
+            let window = app.windows.firstMatch
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        }
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10), "the keyboard is dismissed")
         for keyboardUp in [false, true] {
             // Read back with the keyboard down: an interactive drag over the
