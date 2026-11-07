@@ -50,6 +50,32 @@ final class TronComposerUploadUITests: XCTestCase {
         keepEvidence(app, "916-lost-staging-reupload")
     }
 
+    /// On iPad, Return sends a photos-only message like Send, and like Send it
+    /// does nothing while an upload is still in flight.
+    @MainActor func testPadReturnSendsPhotosOnlyOnceUploadsSettle() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
+        continueAfterFailure = false
+        let app = launch("reconnect"); defer { app.terminate() }
+        pastePhotos(app)
+        XCTAssertTrue(waitCounts(app, "held:1"), counts(app))
+        let composer = app.textViews["Message input"]
+        app.typeText("\n")
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        XCTAssertTrue(counts(app).contains("prompts: "), "Return sends nothing while uploading: \(counts(app))")
+        XCTAssertEqual(composer.value as? String ?? "", "", "Return inserts no newline")
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        waitConnected(app)
+        XCTAssertTrue(waitCounts(app, "staged:1,1,1,1"), counts(app))
+        let send = app.buttons["Send message"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isEnabled == true"), object: send)], timeout: 20), .completed, counts(app))
+        composer.tap()
+        app.typeText("\n")
+        XCTAssertTrue(waitCounts(app, "prompts:4 "), "Return sends the message with all four photos: \(counts(app))")
+    }
+
     /// A new app process must restore actual user input from the real draft store,
     /// not a remounted view or a fixture seed. The UUID root belongs to this test.
     @MainActor func testDraftTextSurvivesColdProcessRelaunch() {

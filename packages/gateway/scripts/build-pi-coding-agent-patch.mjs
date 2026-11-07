@@ -84,9 +84,12 @@ try {
   const patchPath = join(gatewayDir, pin.patch.path);
   const touched = run("git", ["-C", source, "apply", "--numstat", patchPath], { capture: true })
     .split("\n").filter(Boolean).map((line) => line.split("\t")[2]);
-  const outside = touched.filter((path) => !path.startsWith("packages/coding-agent/") && !path.startsWith("packages/evals/"));
+  const outside = touched.filter((path) => path !== "package-lock.json" && !path.startsWith("packages/coding-agent/") && !path.startsWith("packages/evals/"));
   if (outside.length > 0) throw new Error(`the patch changes packages this script does not rebuild: ${outside.join(", ")}`);
   run("git", ["-C", source, "apply", "--whitespace=nowarn", patchPath]);
+  // The bundled entries (bin pi, ./rpc-entry) inline their dependencies, so a patch that moves a
+  // dependency pin reinstalls from its lockfile; the build then bundles the versions it declares.
+  if (touched.includes("package-lock.json")) run("npm", ["ci", REGISTRY], { cwd: source, env });
   run("npm", ["run", "clean"], { cwd: codingAgent, env });
   run("npm", ["run", "build"], { cwd: codingAgent, env });
   const built = pack("patched");

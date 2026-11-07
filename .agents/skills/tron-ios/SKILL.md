@@ -53,6 +53,7 @@ scripts/tron-ios-simulator status
 scripts/tron-ios-simulator stop
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
+scripts/tron-ios-test run --lane ipad --device-type "iPad Pro 13-inch (M5)" --only-testing TronMobileUITests/TronPadSheetPresentationUITests
 scripts/tron-ios-test run                 # the smoke set
 scripts/tron-ios-test checkpoint         # build, then the smoke set
 scripts/tron-ios-test status --all
