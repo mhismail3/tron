@@ -1,5 +1,5 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
-import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,13 +16,8 @@ import { RuntimeRegistry } from "../session/runtime-registry.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-// This driver is also copied unchanged into the pre-cutover Gateway. Only
-// package selection and the released workflow input spelling vary by leg.
-const old = process.env.TRON_PARITY_LEG === "old";
-const baseline = fileURLToPath(new URL("../../../test-support/subagent-parity-old.json", import.meta.url));
 type ParityResourceRow = { name: string; path?: string; [key: string]: unknown };
 type ParityReport = Record<string, unknown> & {
-  leg: "old" | "new";
   passed: boolean;
   checkpoints: Record<string, unknown>;
   snapshots?: Record<string, unknown>;
@@ -38,7 +33,7 @@ const gate = () => {
   return { promise, release };
 };
 
-it("preserves OLD app-facing subagent projections except approved delivery and identity changes", async () => {
+it("drives managed subagents through single, workflow, question and steering checkpoints", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-subagent-parity-"));
   // The temp root and its canonical form differ under macOS aliases (/tmp and
   // /var resolve below /private). Normalize both, canonical first, so reports
@@ -60,7 +55,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
   let registry: RuntimeRegistry | undefined;
   let inspectFailure: (() => unknown) | undefined;
   let server: ReturnType<typeof createServer> | undefined;
-  const report: ParityReport = { leg: old ? "old" : "new", passed: false, checkpoints: {} };
+  const report: ParityReport = { passed: false, checkpoints: {} };
   try {
     await mkdir(agentDir, { recursive: true });
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
@@ -73,28 +68,12 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
     let managedSubagents;
     let managedSource: string | undefined;
-    if (old) {
-      const packageRoot = join(agentDir, "npm", "node_modules", "pi-subagents");
-      if (!process.env.TRON_PARITY_OLD_PACKAGE) throw new Error("TRON_PARITY_OLD_PACKAGE must name the read-only 0.59.0 source");
-      await cp(process.env.TRON_PARITY_OLD_PACKAGE, packageRoot, { recursive: true,
-        // Source installations may be read-only. Fixture directories must stay
-        // writable for dependency links, loader caches and owner cleanup.
-        filter: async (source, target) => { if ((await stat(source)).isDirectory()) await mkdir(target, { recursive: true, mode: 0o700 }); return true; },
-      });
-      const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-      if (manifest.name !== "pi-subagents" || manifest.version !== "0.59.0") throw new Error("The parity baseline requires pi-subagents 0.59.0");
-      report.providerVersion = manifest.version;
-      await symlink(join(process.cwd(), "node_modules"), join(packageRoot, "node_modules"), "dir");
-      await writeFile(join(agentDir, "npm", "package.json"), JSON.stringify({ dependencies: { "pi-subagents": "0.59.0" } }));
-      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-subagents@0.59.0"], extensions: ["./parity-input.mjs"] }));
-    } else {
-      const modulePath = "./managed-subagents.js";
-      const { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } = await import(modulePath);
-      managedSubagents = ManagedSubagents.activateForStartup(tronHome);
-      managedSource = MANAGED_SUBAGENTS_SOURCE;
-      report.providerVersion = JSON.parse(await readFile(join(managedSubagents.verify(), "package.json"), "utf8")).version;
-      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["./parity-input.mjs"] }));
-    }
+    const modulePath = "./managed-subagents.js";
+    const { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } = await import(modulePath);
+    managedSubagents = ManagedSubagents.activateForStartup(tronHome);
+    managedSource = MANAGED_SUBAGENTS_SOURCE;
+    report.providerVersion = JSON.parse(await readFile(join(managedSubagents.verify(), "package.json"), "utf8")).version;
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["./parity-input.mjs"] }));
     const requested = new Set<string>();
     let requests = 0;
     server = createServer(async (request, response) => {
@@ -139,7 +118,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       if (action) {
         const current = action; action = undefined;
         const input = current === "single" ? { agent: "parity-worker", task: "PARITY_SINGLE", async: true, mission: false, acceptance: { level: "none", reason: "Read-only parity" } }
-          : { [old ? "workflowScriptPath" : "workflow"]: "./parity-workflow.js", async: true, mission: false, acceptance: { level: "none", reason: "Read-only parity" } };
+          : { workflow: "./parity-workflow.js", async: true, mission: false, acceptance: { level: "none", reason: "Read-only parity" } };
         return fauxAssistantMessage([fauxToolCall("subagent", input, { id: `${current}-launch` })], { stopReason: "toolUse" });
       }
       const entries = sessionFile ? SessionManager.open(sessionFile).getEntries() : [];
@@ -259,7 +238,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
           contents: { lines: widget.lines, placement: widget.placement } })),
         ...Object.keys(semantic.statuses).sort().map(key => ({ type: "status", key, owner: semantic.statusOwners[key], contents: semantic.statuses[key] }))]
         .map(value => {
-          const privateSubagent = old ? value.owner?.source?.startsWith("npm:pi-subagents") === true : value.owner?.kind === "subagent";
+          const privateSubagent = value.owner?.kind === "subagent";
           return { type: value.type, key: value.key, source: value.owner?.source ?? null, title: value.owner?.title ?? null, kind: value.owner?.kind ?? null,
             privateSubagent, nativeVisibility: privateSubagent ? "hidden" : "visible", contents: privateSubagent ? null : normalize(value.contents) };
         });
@@ -268,7 +247,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       // 112 and 124). Private frames are not app text; compare ownership and
       // hidden visibility, retaining their raw bytes in report.snapshots only.
       const surfaces = snapshot.extensionPresentation.surfaces.map(surface => {
-        const privateSubagent = old ? surface.provenance?.source?.startsWith("npm:pi-subagents") === true : surface.provenance?.kind === "subagent";
+        const privateSubagent = surface.provenance?.kind === "subagent";
         const presentable = surface.kind === "widget" && surface.lifecycle !== "blocking" && surface.frame.lines.length > 0;
         return normalize({ ...surface, revision: "<revision>", privateSubagent,
           nativeVisibility: privateSubagent || !presentable ? "hidden" : "visible", frame: privateSubagent ? null : surface.frame });
@@ -298,14 +277,11 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     let preflightStarted = false;
     globals.parityPreflight = async () => { preflightStarted = true; await gates.preflight.promise; };
     gates.single.release();
-    if (!old) {
-      await waitFor(() => preflightStarted && Boolean(slot.snapshot().pendingPrompt), "idle wake pending preflight");
-      const pending = slot.snapshot().pendingPrompt!;
-      expect(pending.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
-      report.pendingWakeAuthority = pending;
-      report.inputPresentation = { pending: pending.semantic?.direction === "hiddenInternal" ? null : pending.text };
-    }
-    if (old) report.inputPresentation = { pending: null };
+    await waitFor(() => preflightStarted && Boolean(slot.snapshot().pendingPrompt), "idle wake pending preflight");
+    const pending = slot.snapshot().pendingPrompt!;
+    expect(pending.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
+    report.pendingWakeAuthority = pending;
+    report.inputPresentation = { pending: pending.semantic?.direction === "hiddenInternal" ? null : pending.text };
     gates.preflight.release();
     delete globals.parityPreflight;
     await waitFor(() => acknowledged === 1 && parentIdle(), "single completion wakes idle parent");
@@ -321,46 +297,43 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       && entries().filter(entry => entry.type === "custom_message" && entry.customType === "subagent_supervisor_request").length === 2,
       "artifact watchers publish failed child and pending question details without explicit discovery");
     await capture("workflow-question");
-    if (!old) {
-      // Hostile derivatives of the real child file exercise reciprocal-edge
-      // admission, not provider execution. This fixture restores exact bytes.
-      const status = (report.statuses as Record<string, { steps: Array<{ label?: string; runId: string }> }>)["workflow-question:workflow-launch"]!;
-      const question = status.steps.find(step => step.label === "question")!;
-      const launch = launches().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "workflow-launch")!;
-      if (launch.type !== "message" || launch.message.role !== "toolResult") throw new Error("No workflow launch");
-      const directory = (launch.message.details as { asyncDir: string }).asyncDir;
-      const path = join(dirname(directory), question.runId, "status.json");
-      const original = await readFile(path, "utf8");
-      const refused: string[] = [];
-      const replacement = `${path}.parity-fixture`;
-      const replaceStatus = async (bytes: string) => {
-        await writeFile(replacement, bytes);
-        await rename(replacement, path);
-      };
-      try {
-        for (const key of ["parentWorkflowRunId", "workflowKey", "sessionOwnerId"] as const) {
-          const candidate = JSON.parse(original);
-          candidate[key] = "foreign-owner";
-          candidate.steps[0].model = "FORGED_MODEL";
-          await replaceStatus(JSON.stringify(candidate));
-          await slot.ownedTurns.discoverExtensionArtifact(directory);
-          expect((slot.snapshot().processActivities ?? []).map(row => row.model), `${key} cannot attach foreign child detail`).not.toContain("FORGED_MODEL");
-          refused.push(key);
-        }
-      } finally { await replaceStatus(original); await rm(replacement, { force: true }); }
-      report.refusedChildEdges = refused;
-      await slot.ownedTurns.discoverExtensionArtifact(directory);
-    }
+    // Hostile derivatives of the real child file exercise reciprocal-edge
+    // admission, not provider execution. This fixture restores exact bytes.
+    const status = (report.statuses as Record<string, { steps: Array<{ label?: string; runId: string }> }>)["workflow-question:workflow-launch"]!;
+    const question = status.steps.find(step => step.label === "question")!;
+    const launch = launches().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "workflow-launch")!;
+    if (launch.type !== "message" || launch.message.role !== "toolResult") throw new Error("No workflow launch");
+    const directory = (launch.message.details as { asyncDir: string }).asyncDir;
+    const path = join(dirname(directory), question.runId, "status.json");
+    const original = await readFile(path, "utf8");
+    const refused: string[] = [];
+    const replacement = `${path}.parity-fixture`;
+    const replaceStatus = async (bytes: string) => {
+      await writeFile(replacement, bytes);
+      await rename(replacement, path);
+    };
+    try {
+      for (const key of ["parentWorkflowRunId", "workflowKey", "sessionOwnerId"] as const) {
+        const candidate = JSON.parse(original);
+        candidate[key] = "foreign-owner";
+        candidate.steps[0].model = "FORGED_MODEL";
+        await replaceStatus(JSON.stringify(candidate));
+        await slot.ownedTurns.discoverExtensionArtifact(directory);
+        expect((slot.snapshot().processActivities ?? []).map(row => row.model), `${key} cannot attach foreign child detail`).not.toContain("FORGED_MODEL");
+        refused.push(key);
+      }
+    } finally { await replaceStatus(original); await rm(replacement, { force: true }); }
+    report.refusedChildEdges = refused;
+    await slot.ownedTurns.discoverExtensionArtifact(directory);
     gates.answer.release();
     await waitFor(() => replies.size === 1 && parentIdle(), "question answer reaches child");
     gates.finish.release();
     await waitFor(() => acknowledged === 2 && parentIdle(), "workflow completion wakes idle parent");
     await capture("workflow-completed");
-    // A factory-bound API probe covers the racing steer lifetime separately
-    // from the unchanged released-provider scenario above. OLD had only a
-    // custom-message turn here; NEW retains its typed, hidden normal-input wake.
+    // A factory-bound API probe covers the racing steer lifetime: the managed
+    // producer's wake stays a typed, hidden normal input.
     const api = globals.parityPi!;
-    const sender = old ? api : await (async () => {
+    const sender = await (async () => {
       const { managedProducerAPI } = await import("./managed-producer.js");
       const owner = { id: "parity-managed-owner", source: managedSource!, title: "Subagents", kind: "subagent" as const };
       return managedProducerAPI(api, owner, (...args) => slot.admitSubagentWake(...args));
@@ -370,12 +343,11 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       ...Array.from({ length: 8 }, () => fauxAssistantMessage("PARITY_PARENT_IDLE"))]);
     await slot.prompt("Maintainer continues after workflow");
     await waitFor(() => busyStarted, "maintainer model gate");
-    if (old) sender.sendMessage({ customType: "parity-wake-probe", content: "Queued context", display: false }, { triggerTurn: true });
-    else sender.sendUserMessage("PARITY_QUEUED_WAKE", { deliverAs: "steer" });
+    sender.sendUserMessage("PARITY_QUEUED_WAKE", { deliverAs: "steer" });
     await slot.prompt("Queued maintainer input", [], "steer");
-    await waitFor(() => slot.snapshot().queuedItems.length === (old ? 1 : 2), "racing internal and maintainer steering inputs");
+    await waitFor(() => slot.snapshot().queuedItems.length === 2, "racing internal and maintainer steering inputs");
     const queued = slot.snapshot().queuedItems;
-    if (!old) expect(queued.find(item => item.text === "PARITY_QUEUED_WAKE")?.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
+    expect(queued.find(item => item.text === "PARITY_QUEUED_WAKE")?.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
     report.queuedWakeAuthority = queued;
     (report.inputPresentation as Record<string, unknown>).queued = queued.filter(item => item.semantic?.direction !== "hiddenInternal").map(item => ({ ...item, id: "<input>" }));
     gates.busy.release();
@@ -402,10 +374,8 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     const invalid = join(cwd, ".pi", "agents", "parity-invalid.md");
     await writeFile(invalid, "---\nname: parity-invalid\ndescription: Invalid parity definition\nfallbackModels: [parity-child/child]\n---\nRead only.\n");
     resourceStates.invalid = await settings();
-    if (!old) {
-      expect(resourceStates.invalid.subagentDiagnostics).toContain("fallbackModels");
-      expect(resourceStates.invalid.subagents["parity-invalid"]).toBeUndefined();
-    }
+    expect(resourceStates.invalid.subagentDiagnostics).toContain("fallbackModels");
+    expect(resourceStates.invalid.subagents["parity-invalid"]).toBeUndefined();
     await rm(invalid);
     resourceStates.repaired = await settings();
     expect(resourceStates.healthy.subagentDiagnostics).toBeNull();
@@ -414,17 +384,6 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     report.packages = inventory.packages.filter(value => value.provides.skills.includes("pi-subagents")).map(value => ({ source: value.source, skills: value.provides.skills, prompts: value.provides.prompts }));
     report.entries = entries();
     report.schemaVersion = 2;
-    if (old && process.env.TRON_PARITY_BASELINE_OUTPUT) {
-      const { checkpoints, settings, packages, inputPresentation, schemaVersion } = report;
-      await writeFile(process.env.TRON_PARITY_BASELINE_OUTPUT, JSON.stringify({ schemaVersion, checkpoints, settings, packages, inputPresentation }, null, 2) + "\n");
-    }
-    if (!old) {
-      const before = JSON.parse(await readFile(baseline, "utf8"));
-      const approved = JSON.parse(await readFile(fileURLToPath(new URL("../../../test-support/subagent-parity-approved.json", import.meta.url)), "utf8"));
-      const differences = compareParity(before, report, managedSource!, approved);
-      report.differences = differences;
-      expect(differences.filter(diff => !diff.approved), JSON.stringify(differences, null, 2)).toEqual([]);
-    }
     report.passed = true;
   } catch (error) {
     report.error = String(error);
@@ -458,60 +417,9 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
 });
 
 // pi-subagents' installation root embeds its version and its bundled worker-eval
-// frames embed line/column positions. Both change on any fork bump and carry no
-// app-facing meaning, so the NEW capture and the committed OLD baseline share this rule.
+// frames embed line/column positions; the report normalizes both.
 function volatileProviderText(text: string) {
   return text
     .replace(/(?:<fixture>\/agent\/npm\/node_modules\/pi-subagents|<fixture>\/tron\/internal\/pi-subagents\/[^\/\s"']+|<fixture>\/tron\/internal\/[^\s"']*?\/root)(?=\/|$)/g, "<provider>")
     .replace(/\[worker eval\]:\d+:\d+/g, "[worker eval]:<frame>");
-}
-
-// Finite allowances from #611: this compares deterministic Gateway projections,
-// not Swift rendering or absolute timing. Arrays retain meaningful launch order.
-function compareParity(before: Record<string, unknown>, after: Record<string, unknown>, managedSource: string, upstream: Array<{ path: string; old: unknown; new: unknown; approved: string }>) {
-  const differences: Array<{ path: string; old: unknown; new: unknown; approved: string | null }> = [];
-  const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
-  const normalizeVolatile = (value: unknown): unknown => typeof value === "string" ? volatileProviderText(value)
-    : Array.isArray(value) ? value.map(normalizeVolatile)
-    : record(value) ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalizeVolatile(item)])) : value;
-  // The committed OLD baseline was captured before this rule existed; normalizing it
-  // here keeps both legs under one volatile-text rule without regenerating OLD.
-  const baseline = normalizeVolatile(before) as Record<string, unknown>;
-  function approval(a: unknown, b: unknown, path: string): string | null {
-    // Upstream changes accepted in decisions.md are exact value pairs, not
-    // exemptions for content, details, or resource fields.
-    // Pairs stay raw evidence; they match after the same volatile rule as the baseline.
-    const expected = upstream.find(change => change.path === path && JSON.stringify(normalizeVolatile(change.old)) === JSON.stringify(a ?? null) && JSON.stringify(normalizeVolatile(change.new)) === JSON.stringify(b ?? null));
-    if (expected) return expected.approved;
-    if (path.endsWith(".source") && (a === "npm:pi-subagents@0.59.0" || a === null) && b === managedSource) return path.startsWith("skills.") || path.startsWith("packages.") ? "skills listed under the managed package" : "source and title label change (admitted producer attribution)";
-    if (path.endsWith(".title") && (a === "Pi Subagents" || a === null) && b === "Subagents") return "source and title label change";
-    if (/\.(?:retained\.\d+\.kind|surfaces\.\d+\.provenance\.kind)$/.test(path) && (a === null || a === undefined) && b === "subagent") return "source and title label change (typed retained provider classification)";
-    if (/\.transcript\.(need_decision|progress_update|subagent-notify)\.\d+\.origin$/.test(path) && a === "extension" && b === "subagent") return "source and title label change (typed producer classification)";
-    if (/\.(transcript|deliveries)\.progress_update\.\d+\.delivery$/.test(path) && a === "triggeredTurn" && b === "stored") return "progress stored with no turn";
-    if (a === undefined && Array.isArray(b)) {
-      const checkpoint = path.split(".")[1];
-      // Canonical deliveries pin the per-checkpoint count above. The projected
-      // transcript publishes asynchronously, so a capture may observe the
-      // question checkpoint's failed-child note before or after projection;
-      // whenever present, each row must have the approved typed shape.
-      if (path.endsWith(".transcript.subagent-incremental-child-notify") && ["workflow-question", "workflow-completed"].includes(checkpoint!) && b.length > 0 && b.every(row => record(row) && row.category === "subagent-incremental-child-notify" && row.origin === "subagent" && row.title === "Subagents" && row.direction === "inboundContext" && row.delivery === "stored" && row.visibility === "visible")) return "per-child notes stored; independent question/barrier owns turns";
-      if (path.endsWith(".deliveries.subagent-incremental-child-notify") && ["workflow-question", "workflow-completed"].includes(checkpoint!) && b.length === (checkpoint === "workflow-question" ? 1 : 3) && b.every(row => record(row) && row.delivery === "stored" && row.source === managedSource && row.title === "Subagents" && typeof row.display === "boolean")) return "per-child notes stored; independent question/barrier owns turns";
-    }
-    return null;
-  }
-  function visit(a: unknown, b: unknown, path: string) {
-    if (JSON.stringify(a) === JSON.stringify(b)) return;
-    const approved = approval(a, b, path);
-    if (approved) { differences.push({ path, old: a ?? null, new: b ?? null, approved }); return; }
-    if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
-      for (let index = 0; index < a.length; index++) visit(a[index], b[index], `${path}.${index}`);
-    } else if (record(a) && record(b)) {
-      for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) visit(a[key], b[key], `${path}.${key}`);
-    } else differences.push({ path, old: a ?? null, new: b ?? null, approved: null });
-  }
-  visit(baseline.checkpoints, after.checkpoints, "checkpoints");
-  visit(baseline.settings, after.settings, "settings");
-  visit(baseline.packages, after.packages, "packages");
-  visit(baseline.inputPresentation, after.inputPresentation, "inputPresentation");
-  return differences;
 }

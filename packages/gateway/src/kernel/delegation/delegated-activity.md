@@ -175,10 +175,8 @@ not depend on the Transport logger implementation. Optional logging and metadata
   which. Closing the parent presentation retires every lease.
 - Proof: `child-session-admission`, `managed-workflow-children`
   (`test-results/managed-workflow-resume.json`), `home-task-subagents-reports.e2e.test.ts` and
-  `subagent-parity.integration.test.ts`, which compares projections with
-  `test-support/subagent-parity-old.json` under approved deltas in
-  `test-support/subagent-parity-approved.json` (`test-results/subagent-parity.json`;
-  regenerate OLD with `packages/gateway/scripts/regenerate-subagent-parity.sh`, isolated).
+  `subagent-parity.integration.test.ts`, which drives the managed provider through single,
+  workflow, question and steering checkpoints (`test-results/subagent-parity.json`).
 
 ## Extension activity lifecycle and history
 
