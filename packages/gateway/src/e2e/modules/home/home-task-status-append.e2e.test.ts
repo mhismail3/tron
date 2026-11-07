@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
 
 /** One real canonical append landing inside a status read's evidence cut: after the
  * cut's first stat and before its read. The append itself is the worker session's own
@@ -13,8 +13,8 @@ const appendDuringCut = vi.hoisted(() => ({
   appended: 0,
 }));
 
-vi.mock("../../kernel/session/canonical-reader.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../kernel/session/canonical-reader.js")>();
+vi.mock("../../../kernel/session/canonical-reader.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../kernel/session/canonical-reader.js")>();
   return {
     ...actual,
     readCanonicalSessionFile: async (options: Parameters<typeof actual.readCanonicalSessionFile>[0]) => {

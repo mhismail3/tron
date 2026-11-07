@@ -3,13 +3,13 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../../test-support/home-task-subagent-child.js";
-import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../../kernel/delegation/task-subagents.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { closeSubagentFixtures, bound, childModel, captureTimer, captureDeadline, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, type FauxContext } from "../../../test-support/home-task-subagents-support.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import * as subagentControl from "../../kernel/delegation/subagent-control.js";
+import { dispatch, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../../../test-support/home-task-subagent-child.js";
+import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../../../kernel/delegation/task-subagents.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { closeSubagentFixtures, bound, childModel, captureTimer, captureDeadline, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, type FauxContext } from "../../../../test-support/home-task-subagents-support.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import * as subagentControl from "../../../kernel/delegation/subagent-control.js";
 
 afterEach(closeSubagentFixtures);
 
@@ -247,7 +247,7 @@ describe("Home task subagents: settlement and stop", () => {
     if (interleaving === "late runner terminal state") {
       // The child's runner records its step stopped, then holds its run's terminal state:
       // settlement must join the run, not the step (#1021). Fixture disposal unstubs this.
-      const preload = fileURLToPath(new URL("../../../test-support/late-runner-terminal-status-preload.mjs", import.meta.url));
+      const preload = fileURLToPath(new URL("../../../../test-support/late-runner-terminal-status-preload.mjs", import.meta.url));
       vi.stubEnv("NODE_OPTIONS", `${process.env.NODE_OPTIONS ?? ""} --import ${preload}`.trim());
       vi.stubEnv("TRON_LATE_RUNNER_TERMINAL_MS", "1500");
     }

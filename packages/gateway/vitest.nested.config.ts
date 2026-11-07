@@ -8,10 +8,10 @@ import { defineConfig } from "vitest/config";
  * pass after the parallel suite; the main config excludes this list. */
 export const nestedTestFiles = [
   "src/modules/home/home-task-managed-provider.e2e.test.ts",
-  "src/modules/home/home-task-subagents-controls.e2e.test.ts",
-  "src/modules/home/home-task-subagents-model-queue.e2e.test.ts",
-  "src/modules/home/home-task-subagents-reports.e2e.test.ts",
-  "src/modules/home/home-task-subagents-settlement.e2e.test.ts",
+  "src/e2e/modules/home/home-task-subagents-controls.e2e.test.ts",
+  "src/e2e/modules/home/home-task-subagents-model-queue.e2e.test.ts",
+  "src/e2e/modules/home/home-task-subagents-reports.e2e.test.ts",
+  "src/e2e/modules/home/home-task-subagents-settlement.e2e.test.ts",
   "src/lifecycle/exit-after-shutdown.e2e.test.ts",
   "src/transport/gateway-process-prompt.e2e.test.ts",
   "src/transport/gateway-process-restart.e2e.test.ts",

@@ -1,16 +1,16 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setModelQueue } from "../../../test-support/settings-dependencies.js";
+import { setModelQueue } from "../../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Model, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
-import { DelegationOperations } from "../../kernel/delegation/delegation-operations.js";
-import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../sessions/session-settings.js";
-import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { homeOwnerOf, queueOwnerOf } from "../../../test-support/gateway-registry.js";
+import { DelegationOperations } from "../../../kernel/delegation/delegation-operations.js";
+import { SESSION_SETTINGS_ENTRY, readSessionFixedSettings } from "../../../sessions/session-settings.js";
+import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../../../test-support/home-task-fixture.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { homeOwnerOf, queueOwnerOf } from "../../../../test-support/gateway-registry.js";
 
-import { ProfileStore } from "./profile-store.js";
-import { workspaceModule } from "../../workspace/workspace-module.js";
+import { ProfileStore } from "../../../modules/home/profile-store.js";
+import { workspaceModule } from "../../../workspace/workspace-module.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();

@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { UploadStore } from "../../machine/upload-store.js";
-import { CommandReceiptStore } from "../../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
-import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
+import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { UploadStore } from "../../../machine/upload-store.js";
+import { CommandReceiptStore } from "../../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../../transport/gateway-service.js";
+import { displayOwnerOf, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 const homes: string[] = [];
 afterEach(async () => {

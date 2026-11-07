@@ -1,9 +1,9 @@
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 const ledgerType = "tron.home-obligation.v1";
 const call = (request: Record<string, unknown>, id: string) => fauxAssistantMessage([fauxToolCall("obligation", request, { id })], { stopReason: "toolUse" });
