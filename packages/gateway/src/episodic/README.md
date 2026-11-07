@@ -38,7 +38,8 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   size, times; `dev` is recorded but never compared, because macOS renumbers a
   volume across mounts). An unchanged key skips the chapter. A changed key with the
   same size and a re-derived prefix digest is the same chapter at a new identity (a
-  copied or restored home): the cursor is re-keyed with no re-projection or spend.
+  copied or restored home): the cursor is re-keyed with no re-projection or spend
+  (bytes after the last newline are never admitted, so they are not proven).
   The same file appends from the cursor, verifying only an 8 KiB window (a
   same-length rewrite outside it can go unseen); a new identity extends only after
   its whole prefix is re-proven. Any other change re-reads an active chapter and

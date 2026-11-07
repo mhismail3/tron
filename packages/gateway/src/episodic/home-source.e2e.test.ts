@@ -265,7 +265,7 @@ it("keeps memory on a copied Home whose transcripts have new inodes, without re-
 });
 
 it.each([["sealed", 0, "violet", "orange"], ["active", 1, "amber", "green!"]] as const)(
-  "still refuses a copied Home whose %s history was rewritten", async (_kind, index, from, to) => {
+  "on a copied Home, a rewritten %s chapter is refused if sealed and re-read if active", async (_kind, index, from, to) => {
   const fx = await fixture(); const memory = await fx.open(); await memory.entriesCommitted("home");
   const { copy } = await copiedHome(fx, memory, async root => {
     const path = join(root, fx.chapters[index]!.sessionId + ".jsonl");
