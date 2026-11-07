@@ -25,14 +25,14 @@ OUTCOMES = [
         "src/modules/home/home-profile-triage.integration.test.ts"]),
     ("Controls: settings persistence and exact native review", [
         "testSettingsOutsideChangesAndBuiltinExtensionPersist"], [
-        "src/admin/native-change.e2e.test.ts"]),
+        "src/e2e/admin/native-change.e2e.test.ts"]),
     ("Files/artifacts/research: uploads, reopen and source reads", [
         "testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen"], [
         "src/display/display.store.lock.integration.test.ts",
         "src/sessions/home-research-tools.integration.test.ts"]),
     ("Independent SSH access and protocol/release identity", [
         "testMacReplacementRowAndProgressFollowTheJournal"], [
-        "src/security/mac-terminal.e2e.test.ts",
+        "src/e2e/security/mac-terminal.e2e.test.ts",
         "src/protocol/protocol.wire.lock.integration.test.ts"]),
 ]
 

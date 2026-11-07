@@ -177,5 +177,5 @@ power-loss/page-cache durability or physical-device installation.
 
 ```bash
 scripts/tron verify --module gateway/apps
-scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
+scripts/tron test gateway src/e2e/modules/apps/apps-install.integration.test.ts
 ```

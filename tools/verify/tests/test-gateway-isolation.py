@@ -70,7 +70,7 @@ test('HOME resolution and filesystem writes stay outside caller HOME',()=>{
     def test_actual_settings_fixture_needs_no_caller_home_stores(self):
         with tempfile.TemporaryDirectory(prefix="tron-settings-home-contract-") as temporary:
             root = Path(temporary)
-            result = self.run_gateway(root, ["src/admin/native-change.e2e.test.ts", "-t",
+            result = self.run_gateway(root, ["src/e2e/admin/native-change.e2e.test.ts", "-t",
                                             "applies a reversible routine edit"])
             self.assertEqual(result.returncode, 0, result.stdout[-5000:])
             self.assertFalse((root / "caller-home/.tron").exists())

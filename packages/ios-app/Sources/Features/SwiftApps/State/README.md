@@ -66,7 +66,7 @@ receipt. No source or app-data logging.
 
 ## Verify
 ```bash
-scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
+scripts/tron test gateway src/e2e/modules/apps/apps-install.integration.test.ts
 TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS=300 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight
 scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsInstallLight
 ```

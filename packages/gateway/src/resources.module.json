@@ -1,7 +1,6 @@
 {
   "layer": "L2",
   "owns": [
-    "sessions/agent-instructions.integration.test.ts",
     "sessions/agent-instructions.ts",
     "sessions/resource-distribution.ts",
     "resources.module.json",
@@ -12,5 +11,8 @@
     "gateway/pi",
     "gateway/util",
     "gateway/foundation"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/kernel/resources/project-root.integration.test.ts"
   ]
 }

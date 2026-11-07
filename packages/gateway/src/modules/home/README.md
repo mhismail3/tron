@@ -278,7 +278,7 @@ and the [built-in improvement-loop design](improvement-loop.md).
 ## Verify
 `scripts/tron verify --module gateway/home` or `scripts/tron test gateway <file>` covers
 `src/modules/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested suites add `--config vitest.nested.config.ts`).
-`src/automations/home-tool-admission.e2e.test.ts` captures provider declarations for fresh/stale chapters, maintainer/automation turns and saved selections.
+`src/e2e/automations/home-tool-admission.e2e.test.ts` captures provider declarations for fresh/stale chapters, maintainer/automation turns and saved selections.
 Boundary fixtures read session presence/files through Native; chapter metrics remain Home-owned.
 The redelivery rollover case keeps the result pending across rollover, observes the
 successor wake's acknowledgement, then waits for both `hasActiveAgentRun` and

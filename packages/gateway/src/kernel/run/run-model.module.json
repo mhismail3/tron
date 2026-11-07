@@ -2,11 +2,13 @@
   "layer": "L5",
   "owns": [
     "run-model.module.json",
-    "task-lifecycle.reference-model.ts",
-    "task-lifecycle.conformance.integration.test.ts"
+    "task-lifecycle.reference-model.ts"
   ],
   "riskClass": [
     "kernel",
     "lifecycle"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts"
   ]
 }

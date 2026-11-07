@@ -184,7 +184,7 @@ Independently owned wake turns retain ordinary completion stamping.
 ### Bounded lifecycle conformance
 
 `task-lifecycle.reference-model.ts` states quiescent task laws independently of
-the run implementation. Its normal-lane `task-lifecycle.conformance.integration.test.ts`
+the run implementation. Its `src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts` journey
 drives real Registry/Pi sessions, durable task/marker stores and a faux provider:
 start, steering, tool-interrupt without executing tools, Stop, report, same-session
 resume, terminal Stop and observation. Seeded
@@ -222,7 +222,7 @@ scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.t
 scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts
 scripts/tron test gateway src/sessions/runtime-control-publication.integration.test.ts
 scripts/tron test gateway src/sessions/annotation-only-steer.integration.test.ts
-scripts/tron test gateway src/kernel/run/task-lifecycle.conformance.integration.test.ts
+scripts/tron test gateway src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts
 scripts/tron verify --module gateway/run
 ```
 

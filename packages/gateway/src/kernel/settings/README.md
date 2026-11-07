@@ -107,10 +107,10 @@ Persistence errors propagate to their caller. No background expiry/retry timer e
 ## Verify
 
 ```bash
-scripts/tron test gateway src/admin/native-change.e2e.test.ts \
-  src/admin/settings-worker-fences.e2e.test.ts \
-  src/admin/settings-three-layer.e2e.test.ts \
-  src/admin/settings-change.integration.test.ts \
+scripts/tron test gateway src/e2e/admin/native-change.e2e.test.ts \
+  src/e2e/admin/settings-worker-fences.e2e.test.ts \
+  src/e2e/admin/settings-three-layer.e2e.test.ts \
+  src/e2e/admin/settings-change.integration.test.ts \
   src/admin/settings-subject-audit.e2e.test.ts
 ```
 

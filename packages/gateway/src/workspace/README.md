@@ -79,7 +79,7 @@ section and the `subagent` handoff hook).
 
 ```bash
 scripts/tron verify --module gateway/workspace
-scripts/tron test gateway src/workspace/tron-workspace.integration.test.ts
+scripts/tron test gateway src/e2e/workspace/tron-workspace.integration.test.ts
 ```
 
 Behavior lock: `tron-workspace.lock.integration.test.ts`.

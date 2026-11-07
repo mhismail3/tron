@@ -14,5 +14,8 @@
     "gateway/resources",
     "gateway/settings",
     "gateway/util"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/modules/projects/project-lifecycle.e2e.test.ts"
   ]
 }
