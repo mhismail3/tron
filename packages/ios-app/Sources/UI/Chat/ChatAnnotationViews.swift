@@ -248,8 +248,12 @@ struct ChatAnnotationBubbleHost: View {
     /// its bottom edge as the keyboard rises, so the selection moves by the
     /// same amount and the bubble follows it.
     @State private var capturedRegionMaxY: CGFloat?
-    /// A hardware Shift+Return's newline is an edit, not a save.
-    @State private var lineBreakAllowed = false
+    @State private var selection: TextSelection?
+    /// The comment Shift+Return produced; its newline is an edit, not a save.
+    @State private var lineBreakComment: String?
+    /// A hardware Return also ends the vertical field's editing; Shift+Return
+    /// keeps the comment focused.
+    @State private var refocusAfterLineBreak = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -290,6 +294,7 @@ struct ChatAnnotationBubbleHost: View {
         .animation(ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion), value: presenter.pending?.id)
         .onChange(of: presenter.pending?.id) { _, id in
             comment = ""
+            selection = nil
             capturedRegionMaxY = id == nil ? nil : region.maxY
             // Only claim focus. Clearing it on close would resign whichever
             // responder holds the keyboard by then, i.e. the composer after Save.
@@ -310,28 +315,36 @@ struct ChatAnnotationBubbleHost: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("chat.annotation.bubble.quote")
             HStack(alignment: .bottom, spacing: 4) {
-                TextField("Add a comment", text: $comment, axis: .vertical)
+                TextField("Add a comment", text: $comment, selection: $selection, axis: .vertical)
                     .font(TronFont.body())
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1...4)
                     .focused($focused)
                     .submitLabel(.done)
-                    // iPad: Return saves like the check and Escape cancels like the
-                    // X; hardware Shift+Return keeps its newline. iPhone Return
-                    // stays a newline.
-                    .onKeyPress(keys: [.return, .escape], phases: .down) { press in
+                    // iPad: Return saves like the check. A hardware Return would
+                    // otherwise end editing, so Shift+Return inserts the multi-line
+                    // comment's newline here. iPhone Return stays a newline.
+                    .onKeyPress(.return, phases: .all) { press in
                         guard Self.returnSaves else { return .ignored }
-                        if press.key == .escape {
-                            presenter.cancel()
-                            return .handled
+                        // Consume the whole press; the field acts on more than key-down.
+                        guard press.phase == .down else { return .handled }
+                        if press.modifiers.contains(.shift) {
+                            insertLineBreak()
+                        } else {
+                            save(comment)
                         }
-                        lineBreakAllowed = press.modifiers.contains(.shift)
-                        return .ignored
+                        return .handled
                     }
-                    // Every Return, on-screen or hardware, arrives as one typed newline.
+                    .onChange(of: focused) { _, isFocused in
+                        guard refocusAfterLineBreak else { return }
+                        refocusAfterLineBreak = false
+                        if !isFocused { focused = true }
+                    }
+                    // The on-screen Return key arrives as one typed newline.
                     .onChange(of: comment) { old, new in
-                        defer { lineBreakAllowed = false }
-                        guard Self.returnSaves, !lineBreakAllowed, Self.isTypedNewline(from: old, to: new) else { return }
+                        guard Self.returnSaves else { return }
+                        defer { lineBreakComment = nil }
+                        guard new != lineBreakComment, Self.isTypedNewline(from: old, to: new) else { return }
                         comment = old
                         save(old)
                     }
@@ -366,6 +379,18 @@ struct ChatAnnotationBubbleHost: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("chat.annotation.bubble")
+    }
+
+    private func insertLineBreak() {
+        let range: Range<String.Index> = switch selection?.indices {
+        case .selection(let range)? where range.upperBound <= comment.endIndex: range
+        default: comment.endIndex..<comment.endIndex
+        }
+        let offset = comment.distance(from: comment.startIndex, to: range.lowerBound)
+        comment.replaceSubrange(range, with: "\n")
+        lineBreakComment = comment
+        selection = TextSelection(insertionPoint: comment.index(comment.startIndex, offsetBy: offset + 1))
+        refocusAfterLineBreak = true
     }
 
     private func save(_ comment: String) {

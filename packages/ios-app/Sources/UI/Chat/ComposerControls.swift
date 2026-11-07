@@ -46,31 +46,46 @@ struct MultilineComposerTextView: UIViewRepresentable {
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
     var onPasteImages: (@MainActor ([NSItemProvider]) -> Void)? = nil
-    /// When set, a plain Return calls this instead of inserting a newline;
-    /// Shift+Return and Return that commits IME marked text still edit.
+    /// When set, a typed Return calls this instead of inserting a newline;
+    /// hardware Shift+Return, Return that commits IME marked text, paste and
+    /// dictation still edit.
     var onReturn: (@MainActor () -> Void)? = nil
 
     final class LayoutAwareTextView: UITextView {
         var didLayout: ((LayoutAwareTextView) -> Void)?
         var onPasteImages: (([NSItemProvider]) -> Void)?
-        /// Set where plain Return submits: hardware Shift+Return then inserts
-        /// its newline through `insertLineBreak` instead of the submit path.
-        var submitsOnReturn = false
-        /// The newline being inserted is Shift+Return's, not Return's.
-        private(set) var isInsertingLineBreak = false
+        /// Called instead of inserting a typed Return's newline. Both keyboards
+        /// type Return through `insertText`; paste and Shift+Return's line break
+        /// do not reach this path as a Return.
+        var onReturn: (() -> Void)?
+        private var isInsertingLineBreak = false
         private var isReportingLayout = false
+        private lazy var lineBreakCommand: UIKeyCommand = {
+            let command = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(insertLineBreak))
+            command.wantsPriorityOverSystemBehavior = true
+            return command
+        }()
 
         override var keyCommands: [UIKeyCommand]? {
-            guard submitsOnReturn else { return super.keyCommands }
-            let lineBreak = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(insertLineBreak))
-            lineBreak.wantsPriorityOverSystemBehavior = true
-            return (super.keyCommands ?? []) + [lineBreak]
+            guard onReturn != nil else { return super.keyCommands }
+            return (super.keyCommands ?? []) + [lineBreakCommand]
         }
 
         @objc private func insertLineBreak() {
             isInsertingLineBreak = true
             defer { isInsertingLineBreak = false }
             insertText("\n")
+        }
+
+        override func insertText(_ text: String) {
+            // Return that commits IME marked text, and dictation's "new line",
+            // stay text.
+            if text == "\n", let onReturn, !isInsertingLineBreak, markedTextRange == nil,
+               textInputMode?.primaryLanguage != "dictation" {
+                onReturn()
+                return
+            }
+            super.insertText(text)
         }
 
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
@@ -145,7 +160,9 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.keyboardAppearance = keyboardAppearance
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = "Message input"
-        view.submitsOnReturn = onReturn != nil
+        view.onReturn = onReturn == nil ? nil : { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onReturn?()
+        }
         context.coordinator.updateFont(on: view)
         context.coordinator.requestCaretReveal(on: view)
         responder?.attach(view)
@@ -165,7 +182,9 @@ struct MultilineComposerTextView: UIViewRepresentable {
         let fontChanged = context.coordinator.updateFont(on: view)
         view.isEditable = isEditable
         view.isSelectable = isEditable
-        view.submitsOnReturn = onReturn != nil
+        view.onReturn = onReturn == nil ? nil : { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onReturn?()
+        }
         if view.keyboardAppearance != keyboardAppearance {
             view.keyboardAppearance = keyboardAppearance
             if view.isFirstResponder { view.reloadInputViews() }
@@ -182,6 +201,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         coordinator.parent.responder?.detach(view)
         view.didLayout = nil
         view.onPasteImages = nil
+        view.onReturn = nil
         view.delegate = nil
     }
 
@@ -257,13 +277,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
             hasMirroredFocus: Bool
         ) -> Bool {
             !desiredFocus && isFirstResponder && hasMirroredFocus
-        }
-
-        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            guard text == "\n", let onReturn = parent.onReturn, textView.markedTextRange == nil,
-                  (textView as? LayoutAwareTextView)?.isInsertingLineBreak != true else { return true }
-            onReturn()
-            return false
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
