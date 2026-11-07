@@ -496,33 +496,20 @@ struct ProviderUsageLoadingLine: View {
 /// The caller supplies its final layout so loading never replaces the whole row.
 struct ProviderUsageLoadingPlaceholder<Content: View>: View {
     @ViewBuilder let content: () -> Content
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var isVisible = false
 
     var body: some View {
-        TimelineView(.animation(
-            minimumInterval: 1 / 30,
-            paused: TronPulseLoadingIndicatorEngine.animationPaused(
-                reduceMotion: reduceMotion,
-                sceneActive: scenePhase == .active,
-                surfaceActive: presentationActivity.allowsContinuousAnimation && isVisible
-            )
-        )) { context in
+        TronLoadingAnimationClock { date, reduceMotion in
             content()
                 .foregroundStyle(Color.tronTextMuted)
                 .redacted(reason: .placeholder)
                 .opacity(reduceMotion
                     ? ProviderUsageLoadingLineEngine.maximumOpacity
                     : ProviderUsageLoadingLineEngine.opacity(
-                        progress: context.date.timeIntervalSinceReferenceDate
+                        progress: date.timeIntervalSinceReferenceDate
                             .truncatingRemainder(dividingBy: ProviderUsageLoadingLineEngine.cycleDuration)
                             / ProviderUsageLoadingLineEngine.cycleDuration
                     ))
         }
-        .onAppear { isVisible = true }
-        .onDisappear { isVisible = false }
         .accessibilityLabel("Loading account usage")
     }
 }

@@ -2481,19 +2481,16 @@ enum TronPulseLoadingIndicatorEngine {
     }
 }
 
-struct TronPulseLoadingIndicator: View {
-    var accent: Color = .tronPrimary
-    var size: CGFloat = 18
-
+/// The one clock for continuous loading animations: it pauses under Reduce Motion, in an
+/// inactive scene, and while its surface is inactive or off screen.
+struct TronLoadingAnimationClock<Content: View>: View {
+    @ViewBuilder let content: (_ date: Date, _ reduceMotion: Bool) -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var isVisible = false
 
     var body: some View {
-        let resolvedAccent = settingsTheme?.accent ?? accent
-        let visualSize = TronPulseLoadingIndicatorEngine.visualSize(for: size)
         TimelineView(.animation(
             minimumInterval: 1 / 30,
             paused: TronPulseLoadingIndicatorEngine.animationPaused(
@@ -2501,7 +2498,24 @@ struct TronPulseLoadingIndicator: View {
                 sceneActive: scenePhase == .active,
                 surfaceActive: presentationActivity.allowsContinuousAnimation && isVisible
             )
-        )) { _ in
+        )) { context in
+            content(context.date, reduceMotion)
+        }
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
+    }
+}
+
+struct TronPulseLoadingIndicator: View {
+    var accent: Color = .tronPrimary
+    var size: CGFloat = 18
+
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    var body: some View {
+        let resolvedAccent = settingsTheme?.accent ?? accent
+        let visualSize = TronPulseLoadingIndicatorEngine.visualSize(for: size)
+        TronLoadingAnimationClock { _, reduceMotion in
             Canvas(rendersAsynchronously: true) { context, canvasSize in
                 let diameter = min(canvasSize.width, canvasSize.height)
                 let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
@@ -2541,8 +2555,6 @@ struct TronPulseLoadingIndicator: View {
             }
         }
         .frame(width: visualSize, height: visualSize)
-        .onAppear { isVisible = true }
-        .onDisappear { isVisible = false }
         .accessibilityHidden(true)
     }
 }
