@@ -343,16 +343,8 @@ final class AppModel {
     /// state used while the Connections sheet adds a secondary server.
     var isAddingServer = false
     var setupComplete: Bool {
-        get {
-            if UserDefaults.standard.object(forKey: "tronSetupComplete.v1") != nil {
-                return UserDefaults.standard.bool(forKey: "tronSetupComplete.v1")
-            }
-            return UserDefaults.standard.bool(forKey: "piSetupComplete.v1")
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "tronSetupComplete.v1")
-            UserDefaults.standard.removeObject(forKey: "piSetupComplete.v1")
-        }
+        get { UserDefaults.standard.bool(forKey: "tronSetupComplete.v1") }
+        set { UserDefaults.standard.set(newValue, forKey: "tronSetupComplete.v1") }
     }
 
     private var eventTask: Task<Void, Never>?
@@ -732,7 +724,6 @@ final class AppModel {
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
             for profile in profiles.profiles { try? profiles.remove(profile) }
             UserDefaults.standard.removeObject(forKey: "tronSetupComplete.v1")
-            UserDefaults.standard.removeObject(forKey: "piSetupComplete.v1")
             UserDefaults.standard.removeObject(forKey: "defaultWorkspace.v1")
             extensionInteractionDrafts.removeAll()
         }
