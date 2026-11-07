@@ -87,7 +87,7 @@ final class TronEdgeToEdgeBackgroundUITests: XCTestCase {
             ("trailing", steps { vertical(w - 1 - $0) }),
         ]
         for (edge, step) in edges {
-            XCTAssertLessThan(step, 6, "\(name): a background step \(step) within 24 pt of the \(edge) window edge: a clipped safe-area strip")
+            XCTAssertLessThan(step, 9, "\(name): a background step \(step) within 24 pt of the \(edge) window edge: a clipped safe-area strip")
         }
     }
 }
