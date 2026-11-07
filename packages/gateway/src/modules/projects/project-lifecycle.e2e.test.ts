@@ -167,6 +167,8 @@ describe("Gateway project lifecycle", () => {
     const before = await readdir(f.workspace);
     await expect(f.service.invoke(phone, "projects.change", { ...fields, commandId: `wire-wrong-${++command}`,
       confirmation: { digest: "0".repeat(64), intent } })).rejects.toMatchObject({ code: "conflict" });
+    await expect(f.service.invoke(phone, "projects.change", { ...fields, commandId: `wire-malformed-${++command}`,
+      confirmation: "not an object" })).rejects.toMatchObject({ code: "invalid_request", message: "Project confirmation is invalid" });
     expect(await readdir(f.workspace)).toEqual(before);
     const result = await f.service.invoke(phone, "projects.change", { ...fields, commandId: `wire-confirm-${++command}`,
       confirmation: { digest: pending.review!.digest, intent } }) as unknown as ChangeResult;
