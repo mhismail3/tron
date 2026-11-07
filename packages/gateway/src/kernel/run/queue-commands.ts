@@ -12,7 +12,7 @@ export const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
 const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
 
 
-export function queueText(text: string, attachmentEnvelope: string): string {
+function queueText(text: string, attachmentEnvelope: string): string {
   return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
 }
 

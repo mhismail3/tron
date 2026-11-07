@@ -21,7 +21,7 @@ export interface HomeTaskSubagents {
   stoppedAtEnd: number | null;
 }
 
-export interface HomeTaskSubagentsEntry { receiptId: string; operationId: string; stoppedAtEnd: number | null }
+interface HomeTaskSubagentsEntry { receiptId: string; operationId: string; stoppedAtEnd: number | null }
 
 /** A live subagent run of a task's worker, as task status shows it. Projected from the live
  * slot on each read and never persisted with the task. */

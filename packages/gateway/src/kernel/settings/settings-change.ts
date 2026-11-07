@@ -68,16 +68,16 @@ export interface SettingsWriters {
 export interface SubjectWrite { id: string; before: unknown; after: unknown; direction: "widen" | "narrow"; undoOf?: string }
 export type SubjectContext = Pick<ChangeContext, "actor" | "reason"> & { commandId: string };
 export interface SubjectAuditReference { groupId: string; size: number; digest: string }
-export interface PreparedSubjectAudit { writes: SubjectWrite[]; context: SubjectContext; replayAt: string }
-export type SubjectMutation<T> = { context: SubjectContext; writes: readonly SubjectWrite[] } & (
+interface PreparedSubjectAudit { writes: SubjectWrite[]; context: SubjectContext; replayAt: string }
+type SubjectMutation<T> = { context: SubjectContext; writes: readonly SubjectWrite[] } & (
   { status: "applied"; result: T } | { status: "failed"; error: unknown; failure: string }
 );
 
-export interface SettingsObserver {
+interface SettingsObserver {
   applied(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; reason?: string }): void | Promise<void>;
 }
 
-export interface SettingsChangeOwner extends SettingsReadOwner {
+interface SettingsChangeOwner extends SettingsReadOwner {
   projectRoot(path: string): Promise<string>;
   admitModel(runtime: ModelRuntime, ref: ModelRefValue, options?: { physical?: boolean }): Promise<void>;
   contextWindowValue(runtime: ModelRuntime, qualifier: string | undefined, value: unknown): number;
@@ -110,7 +110,7 @@ const STORE_ORDER: Record<Binding["store"], number> = {
   "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "mac-terminal-service": 1, "home": 3, "gateway": 4, "session": 5, "session-settings": 5, "session-launch": 5,
 };
 
-export type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
+type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
 
 export class SettingsChangePath {
   private readonly stripes = Array.from({ length: 32 }, () => new RequestSpanLane("settings.target-stripe"));

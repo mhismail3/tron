@@ -90,7 +90,7 @@ export interface HomeRecord {
 /** What the Home record says about one session id. `unnamed` means the record
  * does not name that session, which is the only window in which a creation-time
  * profile argument applies. */
-export type HomeSessionProfile = "home" | "ordinary" | "unnamed";
+type HomeSessionProfile = "home" | "ordinary" | "unnamed";
 
 /** Home chapter/model policy. Canonical session operations use the actual
  * native runtime authority directly, never callbacks forwarding into it. */
@@ -1901,7 +1901,7 @@ function designation(record: HomeRecord): HomeDesignation {
  * Only the format version gates admission: a newer `policyRevision` is still a
  * record this build can read, preserve and re-enable. Shared by the canonical
  * ledger owner and offline verification; neither path changes admission. */
-export function admitHomeRecord(value: unknown): HomeRecord | undefined {
+function admitHomeRecord(value: unknown): HomeRecord | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const root = value as Record<string, unknown>;
   if (!hasOnlyKeys(root, ["version", "homeId", "chapters", "bindingRevision", "generation", "routeGeneration", "policyRevision", "enabled", "createdAt", "updatedAt", "memory"])

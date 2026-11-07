@@ -7,7 +7,7 @@ export type RemoteComponentFactory = (tui: TUI, theme: Theme) => Component | Pro
 export type ComponentRecordState = "pending" | "mounted" | "failed" | "retired" | "disposed";
 export interface ComponentRecord { readonly key: string; readonly hostEpoch: string; readonly generation: number; readonly recording: RecordingComponent; state: ComponentRecordState; factoryPending: boolean }
 
-export interface ComponentRegistryOptions {
+interface ComponentRegistryOptions {
   readonly hostEpoch: string;
   readonly tui: TUI;
   readonly theme: Theme;

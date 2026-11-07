@@ -23,7 +23,7 @@ export interface TrustInspection {
   effectiveDecision: boolean | null;
 }
 
-export interface TrustServiceOptions {
+interface TrustServiceOptions {
   /**
    * Directories that are their own Project root even inside a Git work tree.
    * Tron Home's neutral workspace is one: its explicit untrusted decision must
@@ -32,7 +32,7 @@ export interface TrustServiceOptions {
   standaloneDirectories?: readonly string[];
 }
 
-export interface PropagatedTrustDecision {
+interface PropagatedTrustDecision {
   source: TrustInspection;
   target: TrustInspection;
   rollback: () => Promise<void>;

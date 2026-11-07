@@ -7,7 +7,7 @@ import type { HomeDiagnostic } from "./home-diagnostic.js";
 
 /** The live Home runtime, reloaded through the same `RuntimeSlot.reload` an
  * ordinary chat's resource reload uses. */
-export interface HomeResourceSlot {
+interface HomeResourceSlot {
   readonly id: string;
   reload(): Promise<void>;
 }

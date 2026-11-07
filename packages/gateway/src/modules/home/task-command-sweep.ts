@@ -6,7 +6,7 @@ import {
 import { busyShare, readCpuTicks, type CpuTicks } from "./host-pressure.js";
 
 /** Cheap: one `ps` plus one `lsof` per scope. */
-export const TASK_COMMAND_SWEEP_INTERVAL_MS = 60_000;
+const TASK_COMMAND_SWEEP_INTERVAL_MS = 60_000;
 /** Busy share of all CPUs over one sweep window at which the sweep attributes host CPU. Load
  * average does not track busy CPUs on this Mac (host-load.md), so it is not used. */
 const RUNAWAY_CPU_BUSY = 0.9;

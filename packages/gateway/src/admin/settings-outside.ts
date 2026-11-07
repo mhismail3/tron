@@ -60,7 +60,7 @@ interface StoreState {
 
 interface ObservedDocument { version: 1; stores: Record<string, StoreState> }
 
-export interface OutsideObserver {
+interface OutsideObserver {
   outside(entries: readonly ChangeEntry[]): void | Promise<void>;
 }
 

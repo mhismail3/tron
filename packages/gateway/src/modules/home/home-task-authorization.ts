@@ -51,7 +51,7 @@ export interface HomeTaskAuthorizationStore {
   save(state: HomeTaskAuthorizationState): Promise<void>;
 }
 
-export interface HomeTaskAuthorizationOptions {
+interface HomeTaskAuthorizationOptions {
   store: HomeTaskAuthorizationStore;
   now?: () => number;
   /** Canonicalizes and verifies that the directory is trusted at decision time. */
@@ -66,7 +66,7 @@ export interface HomeTaskAuthorizationDiagnostic {
   referenceHash?: string;
 }
 
-export type HomeTaskAuthorizationResult =
+type HomeTaskAuthorizationResult =
   | { kind: "standing-scope"; scopeId: string }
   | { kind: "one-use-grant"; grantId: string };
 

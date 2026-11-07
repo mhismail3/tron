@@ -40,7 +40,7 @@ export interface InstalledPackage {
 }
 
 /** An installed-package row with the names it provides. */
-export type PackageProvidesEntry = InstalledPackage & {
+type PackageProvidesEntry = InstalledPackage & {
   provides: PackageProvides;
   conflict?: PackageConflict;
   nodeRequirement?: PackageNodeRequirement;
@@ -135,7 +135,7 @@ function subagentNames(subagents: AvailableSubagent[], pkg: InstalledPackage): s
     .map((subagent) => subagent.name));
 }
 
-export interface PackageProvidesInput {
+interface PackageProvidesInput {
   pkg: InstalledPackage;
   resources: ResolvedPaths;
   extensions: Extension[];
@@ -157,7 +157,7 @@ function packageProvides(input: PackageProvidesInput): PackageProvides {
   };
 }
 
-export interface PackageProvidesRequest {
+interface PackageProvidesRequest {
   agentDir: string;
   managedSubagents?: ManagedSubagents;
   trust: TrustService;
@@ -171,7 +171,7 @@ export interface PackageProvidesRequest {
   loadDiscovery?: (packageRoot: string) => Promise<unknown>;
 }
 
-export interface PackageProvidesResult {
+interface PackageProvidesResult {
   resources: ResolvedPaths;
   entries: PackageProvidesEntry[];
   diagnostic?: string;

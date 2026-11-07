@@ -5,17 +5,17 @@ import { assertProfileCapacity, profilePath, type ProfileMetadata } from "./prof
 import { assertProfileNoteId, validateProfileNoteRecord, type ProfileNoteRecord, type NoteContent } from "./profile-note-contract.js";
 
 export type ProfileFile = "core" | "home" | `scopes/${string}`;
-export const PROFILE_FILE_TAG = "home-file-";
-export const PROFILE_FILE_PATTERN = "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$";
+const PROFILE_FILE_TAG = "home-file-";
+const PROFILE_FILE_PATTERN = "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$";
 const FILE_NAME = new RegExp(PROFILE_FILE_PATTERN);
-export function validProfileFile(file: string): file is ProfileFile { return FILE_NAME.test(file); }
+function validProfileFile(file: string): file is ProfileFile { return FILE_NAME.test(file); }
 export function profileFile(tags: readonly string[] = []): ProfileFile | null | undefined {
   const labels = tags.filter(tag => tag.startsWith(PROFILE_FILE_TAG));
   if (!labels.length) return undefined;
   const file = labels[0]!.slice(PROFILE_FILE_TAG.length).replace(/^scopes-/, "scopes/");
   return labels.length !== 1 || !validProfileFile(file) ? null : file;
 }
-export function profileFileTags(tags: readonly string[], file?: ProfileFile): string[] {
+function profileFileTags(tags: readonly string[], file?: ProfileFile): string[] {
   return [...tags.filter(tag => !tag.startsWith(PROFILE_FILE_TAG)), ...(file ? [PROFILE_FILE_TAG + file.replace("/", "-")] : [])];
 }
 export function carryNoteMarks(current: ProfileNoteRecord, content: NoteContent): NoteContent {
@@ -27,7 +27,7 @@ export function storedNoteContent(content: NoteContent): NoteContent {
   if (content.retired !== false) return content;
   const { retired: _cleared, ...rest } = content; return rest;
 }
-export function profileMigrationMembers(notes: readonly ProfileNoteRecord[]): ProfileNoteRecord[] {
+function profileMigrationMembers(notes: readonly ProfileNoteRecord[]): ProfileNoteRecord[] {
   const superseded = new Set(notes.flatMap(note => note.relations.filter(relation => relation.type === "supersedes").map(relation => relation.recordId)));
   return notes.filter(note => { const file = profileFile(note.content.tags); return !note.content.profile && !note.content.retired && !superseded.has(note.id) && (file === undefined || file === "core" || file === "home"); });
 }

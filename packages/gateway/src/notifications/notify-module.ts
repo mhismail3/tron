@@ -2,7 +2,7 @@ import type { ModuleDescriptor } from "../kernel/host/module-host.js";
 import type { NotificationService } from "./notification-service.js";
 import { createTronNotifyExtension, notifyTronAgentTerminal } from "./tron-notify-extension.js";
 
-export interface NotifyModuleServices { notifications: NotificationService | undefined; machineId: string | undefined }
+interface NotifyModuleServices { notifications: NotificationService | undefined; machineId: string | undefined }
 
 export function createNotifyModule(services: () => NotifyModuleServices): ModuleDescriptor {
   return {

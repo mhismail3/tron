@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 
 /** How long a finished shutdown may spend inside Node's own exit before it is killed. */
-export const EXIT_STALL_GRACE_MS = 5_000;
+const EXIT_STALL_GRACE_MS = 5_000;
 
 // Runs in a separate process because nothing in the Gateway can run once its
 // main thread is blocked inside process.exit. Its stdin is a pipe from the

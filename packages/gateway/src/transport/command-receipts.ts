@@ -44,7 +44,7 @@ export interface CommandReceiptBinding {
   physicalSessionId: string;
 }
 
-export interface CommandReceiptExecutionOptions {
+interface CommandReceiptExecutionOptions {
   /** The receipt decision owns route signaling: no identities or result data. */
   onRouteBound?: (category: CommandReceiptRouteCategory) => void;
   /** Resolve and persist a logical route after replay/fence lookup but before effects. */

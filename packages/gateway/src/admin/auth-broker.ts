@@ -48,7 +48,7 @@ interface AuthOperation {
 
 /** Result of `auth.begin`: either a new admission or the recovered active
  * operation for the same owner/provider/auth-method/target. */
-export interface AuthAdmission {
+interface AuthAdmission {
   operationId: string;
   recovered: boolean;
 }
@@ -78,8 +78,8 @@ interface BeginReceipt {
   expiresAt: number;
 }
 
-export type AdminEventSink = (clientId: string, topic: string, payload: JsonValue) => void;
-export type AuthLifecycleLog = (level: "info" | "warning", message: string, event: string) => void;
+type AdminEventSink = (clientId: string, topic: string, payload: JsonValue) => void;
+type AuthLifecycleLog = (level: "info" | "warning", message: string, event: string) => void;
 
 const DEFAULT_MAX_AUTH_OPERATIONS = 8;
 const DEFAULT_MAX_AUTH_OPERATIONS_PER_CLIENT = 2;

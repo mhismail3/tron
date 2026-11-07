@@ -150,7 +150,7 @@ export function subagentAbortRoute(
 
 /** Options resolving one frame's settlement: the Gateway-observed instant of
  * an exact paused run's process-terminal proof. */
-export interface SubagentProcessOptions {
+interface SubagentProcessOptions {
   pausedSettledAt?: string;
 }
 

@@ -4,7 +4,7 @@
  * frame. Socket admission, broadcast and the close decision stay in GatewayServer.
  */
 
-export interface OrderedOutboundQueueSnapshot {
+interface OrderedOutboundQueueSnapshot {
   queuedFrames: number;
   queuedBytes: number;
   writeActive: boolean;

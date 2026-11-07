@@ -17,13 +17,13 @@ export function homeTaskOperationSpan<T extends FileEntry>(entries: readonly T[]
   return { index, run: entries.slice(index + 1, next < 0 ? undefined : next) };
 }
 
-export interface HomeTaskWorkerIdentity {
+interface HomeTaskWorkerIdentity {
   taskId: string;
   homeId: string;
   generation: number;
   operationId: string;
 }
-export interface HomeTaskReportRequest {
+interface HomeTaskReportRequest {
   resultId: string;
   outcome: "progress" | "needs-input" | "final";
   text: string;

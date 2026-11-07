@@ -36,7 +36,7 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]{1,200}$/u;
 const BOUND = "task";
 const SETTLED = "settled";
 
-export interface TaskCommandScope { readonly directory: string; readonly tmp: string; readonly anchor: string; readonly groups: string }
+interface TaskCommandScope { readonly directory: string; readonly tmp: string; readonly anchor: string; readonly groups: string }
 
 /** Read when called, so an isolated `TMPDIR` (tests, verify) isolates the root too. */
 export function taskCommandRoot(): string { return join(os.tmpdir(), SCOPE_ROOT_NAME); }
@@ -77,7 +77,7 @@ function readMarker(scope: TaskCommandScope, name: string): string | undefined {
 }
 
 /** The task the scope is bound to now, if any. */
-export function taskCommandScopeBinding(scope: TaskCommandScope): string | undefined { return readMarker(scope, BOUND); }
+function taskCommandScopeBinding(scope: TaskCommandScope): string | undefined { return readMarker(scope, BOUND); }
 
 /** Ends the binding when its task settles, whatever the reap's outcome, so the session's later
  * commands are not scoped to a settled task. A successor's binding is left alone. */

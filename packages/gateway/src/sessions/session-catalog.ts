@@ -73,7 +73,7 @@ const CATALOG_EVENT_PENDING_PATH_LIMIT = 256;
 /** The backstop for every change the watcher cannot see: an event the platform
  * coalesced, dropped or reported while the watcher was restarting is repaired
  * by reading the folder's own cut this often. */
-export const CATALOG_RECONCILE_INTERVAL_MS = 30 * 60_000;
+const CATALOG_RECONCILE_INTERVAL_MS = 30 * 60_000;
 
 /** An incomplete pass publishes nothing, so every read refuses retryably until a
  * pass publishes. A transient reason (a transcript mid-append, a file being
@@ -114,13 +114,13 @@ export interface SessionCatalogReconcileOutcome {
 
 /** One canonical session file. `CatalogMetadataIndexRow` owns everything read
  * from the file; the catalog adds only the classification of its own paths. */
-export interface SessionCatalogRow extends CatalogMetadataIndexRow {
+interface SessionCatalogRow extends CatalogMetadataIndexRow {
   /** A pi-subagents reserved transcript (fork or child run), never a dashboard
    * session row. Derived from the path, so it is not persisted. */
   delegated: boolean;
 }
 
-export interface SessionCatalogCandidate {
+interface SessionCatalogCandidate {
   path: string;
   id: string;
   cwd: string;

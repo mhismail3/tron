@@ -5,7 +5,7 @@ import type { SessionManager } from "../../kernel/pi/coding-agent.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, SealedChapterMutationError, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "./home-diagnostic.js";
 
-export type HomeMaterializationAuthority = Readonly<{
+type HomeMaterializationAuthority = Readonly<{
   homeId: string;
   ordinal: number;
   sessionId: string;

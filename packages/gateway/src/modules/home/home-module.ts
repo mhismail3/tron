@@ -42,7 +42,7 @@ import type { ProfileStore } from "./profile-store.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../../sessions/session-search-contract.js";
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 
-export interface HomeModuleServices {
+interface HomeModuleServices {
   runSettled: RunSettledPolicy;
   lineage: SessionLineagePolicy;
   lifecycle: KernelLifecycleObserver;
@@ -86,7 +86,7 @@ export interface HomeComposition {
 }
 
 /** Home's one owner, built on first use over the composition and the registry's ports. */
-export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, native: () => SessionOperations): () => HomeOwner {
+function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, native: () => SessionOperations): () => HomeOwner {
   let owner: HomeOwner | undefined;
   return () => {
     if (owner) return owner;
@@ -196,7 +196,7 @@ export function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCom
 }
 
 /** Home owns its extension closures; the registry supplies only generic operations. */
-export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, sessions: SessionOperations): Omit<HomeModuleServices, "search"> {
+function homeModuleServices(owner: HomeOwner, platform: HomeComposition, sessions: SessionOperations): Omit<HomeModuleServices, "search"> {
   const workerChoice: HomeWorkerChoicePort = { settings: () => platform.settings()?.model,
     homeRuntime: async sessionId => (await sessions.acquire(sessionId)).snapshot(),
     model: (provider, id) => platform.modelRuntime?.getModel(provider, id),
@@ -259,7 +259,7 @@ export function homeModuleServices(owner: HomeOwner, platform: HomeComposition, 
 }
 
 /** Home's profile tool resolves the current change path and actor on each call. */
-export function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => ProfileStore | undefined, maintainerTurn: () => boolean): HomeProfileChangeAccess | undefined {
+function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => ProfileStore | undefined, maintainerTurn: () => boolean): HomeProfileChangeAccess | undefined {
   if (!changes || !session.profile().profileChanges) return undefined;
   const requireMaintainerTurn = () => {
     if (!maintainerTurn()) throw new GatewayError("invalid_request", "This profile decision requires the current maintainer turn, not a background wake or old message");
@@ -284,7 +284,7 @@ export function homeProfileChanges(session: SessionContext, changes: SettingsCha
 
 /** What Home's two modules read per runtime: the composition's inputs, the
  * registry's generic ports and the search owner, resolved at each call. */
-export interface HomeModuleOwners {
+interface HomeModuleOwners {
   sessions: SessionOperations;
   composition: HomeComposition;
   search: HomeModuleServices["search"];

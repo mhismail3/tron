@@ -4,7 +4,7 @@ import { makeInvocationReceipt, type InvocationProjection } from "../receipts/in
 import type { QueueAdmissionDisposition } from "./queue-input.js";
 
 
-export interface PromptAttemptInput {
+interface PromptAttemptInput {
   operationId: string;
   invocationId: string;
   invocationSource: InvocationProjection["source"];

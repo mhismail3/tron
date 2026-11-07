@@ -8,7 +8,7 @@ import { canonicalToolResultCallIDsFromBranch, fitSessionSnapshot, projectMessag
 import { boundExtensionActivities } from "./extension-run-projection.js";
 
 /** Synchronous reads of run-owned facts. No run state or canonical entries are copied here. */
-export interface SnapshotSource {
+interface SnapshotSource {
   displayProjection: ToolDisplayProjection;
   assertNoTrustReload(): void;
   runtime: { session: AgentSession; diagnostics: readonly { type: string; message: string }[] };

@@ -46,7 +46,7 @@ export interface BackgroundWorkRegistration {
 }
 
 /** Why a due slice did not start. */
-export type BackgroundPauseReason = "requests-in-flight" | "event-loop-p99";
+type BackgroundPauseReason = "requests-in-flight" | "event-loop-p99";
 
 /** One started slice, for `background.slice`. */
 interface BackgroundSliceRecord {
@@ -72,7 +72,7 @@ interface BackgroundBacklogRecord {
   due: number;
 }
 
-export interface BackgroundWorkStartOptions {
+interface BackgroundWorkStartOptions {
   /** True while a request is competing for the loop. The scheduler asks this at
    * every tick and starts nothing while it is true, so an interactive request
    * never shares the loop with a background slice. */

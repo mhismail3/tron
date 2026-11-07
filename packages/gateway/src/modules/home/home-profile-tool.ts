@@ -31,7 +31,7 @@ const PROFILE_PARAMETERS = Type.Object({
 }, { additionalProperties: false });
 
 /** Tool-result details: the saved revision, or the typed reason a change was refused. */
-export type HomeProfileToolDetails =
+type HomeProfileToolDetails =
   | HomeProfileSaved
   | { status: "deferred"; version: string }
   | { status: "read-record"; id: string; revisionId: string; offset: number; totalChars: number; chunk: string; nextOffset?: number }

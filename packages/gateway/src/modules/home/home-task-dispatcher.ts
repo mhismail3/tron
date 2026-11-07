@@ -67,7 +67,7 @@ export type HomeTaskDiagnostic =
   | HostPressureDiagnostic
   | TaskCommandDiagnostic
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
-export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
+type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
 export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice {
   taskId: string; intent: string; target: string; title?: string; reason?: string;
@@ -81,9 +81,9 @@ export interface HomeTaskOwnerSettlement {
   taskId: string; sessionId: string; operationId: string;
   markerEntryId: string; terminalEntryId: string; settlementEntryId: string; stoppedAtEnd: number;
 }
-export type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
+type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
 /** A task as Home's `task` tool lists it: enough to choose and send the next control. */
-export interface HomeTaskControlRow {
+interface HomeTaskControlRow {
   taskId: string;
   title: string;
   state: "starting" | "running" | "settled";

@@ -21,7 +21,7 @@ import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
 import { type FormatContext, type ModelRefValue, type OptionSources, type SettingsStores, type ResolveOptions, type ObservedStore, type PlannedWrite } from "../kernel/settings/settings-types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-export interface SettingsModelDependencies {
+interface SettingsModelDependencies {
   schema: SettingsSchema;
   agentDir: string;
   tronHome: string;

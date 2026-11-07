@@ -102,7 +102,7 @@ interface Options {
 }
 
 /** One listed record, with whether a maintainer decision is still owed for it. */
-export interface HomeTaskPageItem {
+interface HomeTaskPageItem {
   task: HomeTaskRecord;
   pendingGrant: boolean;
 }

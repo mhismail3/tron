@@ -152,7 +152,7 @@ function joinBytes(chunks: Uint8Array[], length: number): Uint8Array {
  * contributes to summaries and search. Structural signals only: never a
  * hostname or class-name allowlist, which drifts and silently eats articles.
  */
-export interface PublicUrlFetch {
+interface PublicUrlFetch {
   status?: number;
   bytes?: Uint8Array;
   mediaType?: string;

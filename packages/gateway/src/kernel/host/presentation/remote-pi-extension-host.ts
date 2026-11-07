@@ -18,7 +18,7 @@ import { type ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError, stripTerminalControls } from "./terminal-sanitizer.js";
 import { currentExtensionOwner } from "../extension-execution-context.js";
 
-export interface RemotePiExtensionHostOptions {
+interface RemotePiExtensionHostOptions {
   columns?: number;
   rows?: number;
   /** Production RPC has no truthful native path for blocking component UI. */

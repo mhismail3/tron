@@ -2,10 +2,10 @@ import type { ClassifierContext } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { JEV_CLASSIFIER } from "./jev-model-pricing.js";
 
-export const JEV_DEFAULT_MODEL = JEV_CLASSIFIER.model;
-export const JEV_MAX_STATE_BYTES = 24_000;
-export const JEV_MAX_BODY_BYTES = 60_000;
-export const JEV_MAX_STATE_QUESTION_BYTES = 28_000;
+const JEV_DEFAULT_MODEL = JEV_CLASSIFIER.model;
+const JEV_MAX_STATE_BYTES = 24_000;
+const JEV_MAX_BODY_BYTES = 60_000;
+const JEV_MAX_STATE_QUESTION_BYTES = 28_000;
 const JEV_MAX_QUESTIONS = 16;
 const JEV_MAX_RESPONSE_BYTES = 512_000;
 const JEV_MAX_JSON_DEPTH = 8;
@@ -16,18 +16,18 @@ export type JevQuestion =
   | { type: "choice"; instructions: string | Record<string, unknown> | unknown[]; criteria: Record<string, unknown> }
   | { type: "score"; instructions: string | Record<string, unknown> | unknown[]; criteria: [unknown, unknown, ...unknown[]] };
 export interface JevDecisionRequest { state: unknown; questions: Record<string, JevQuestion>; model?: string; }
-export interface JevNoulAnswer { type: "noul"; noul: number }
-export interface JevChoiceAnswer { type: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
-export interface JevScoreAnswer { type: "score"; score: number; legend: Record<string, string>; probabilities: Record<string, number>; confidence: number }
-export type JevAnswer = JevNoulAnswer | JevChoiceAnswer | JevScoreAnswer;
+interface JevNoulAnswer { type: "noul"; noul: number }
+interface JevChoiceAnswer { type: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
+interface JevScoreAnswer { type: "score"; score: number; legend: Record<string, string>; probabilities: Record<string, number>; confidence: number }
+type JevAnswer = JevNoulAnswer | JevChoiceAnswer | JevScoreAnswer;
 interface JevDecisionResponse { requestedModel: string; actualModel: string; answers: Record<string, JevAnswer>; usage: { input_tokens: number; output_tokens: number }; estimatedCostCents: number; maxEstimatedChargeCents: number }
-export type JevDispatchCertainty = "notSent" | "sent" | "uncertain";
+type JevDispatchCertainty = "notSent" | "sent" | "uncertain";
 
 class JevEvaluationError extends Error {
   constructor(message: string, readonly certainty: JevDispatchCertainty) { super(message); this.name = "JevEvaluationError"; }
 }
 
-export interface JevDispatchContext {
+interface JevDispatchContext {
   /** Per-call bound, not a workflow allowance. Workflow owners reserve separately. */
   maxChargeCents?: number;
   beforeDispatch?: () => Promise<void>;

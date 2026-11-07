@@ -43,7 +43,7 @@ export const SUPERSEDED_CLOSE_CODE = 4000;
  * serverNoContextTakeover or a numeric window option makes ws answer a legal
  * offer (including URLSession's parameterless one) with HTTP 400.
  */
-export const PAIRED_PER_MESSAGE_DEFLATE: PerMessageDeflateOptions = {
+const PAIRED_PER_MESSAGE_DEFLATE: PerMessageDeflateOptions = {
   zlibDeflateOptions: { level: 6, memLevel: 8 },
   // ws's zlib limiter is process-global and shared by inflate and deflate;
   // two slots leave the rest of libuv's four-thread pool to file I/O.
@@ -174,7 +174,7 @@ export const HTTP_LISTENER_LIMITS: LanListenerLimits = {
   idleTimeout: HTTP_REQUEST_IDLE_TIMEOUT_MS,
 };
 
-export interface HttpTransportLease {
+interface HttpTransportLease {
   identify(identity: string): void;
   release(): void;
 }
@@ -278,7 +278,7 @@ function parseBlobByteRange(value: string | string[] | undefined): BlobByteRange
   return end === undefined ? { start } : { start, end };
 }
 
-export interface ActiveSessionSynchronization {
+interface ActiveSessionSynchronization {
   barrier: SessionSyncBarrier;
   timeout: NodeJS.Timeout;
   requestId: string;
@@ -298,7 +298,7 @@ export interface ActiveSessionSynchronization {
  * attempt is abandoned only when its last waiting request leaves: a cancellation
  * that arrives while a retry still waits must not throw the retry's answer away.
  */
-export interface SessionOpenFlight {
+interface SessionOpenFlight {
   /** The request whose synchronization this attempt installs and owns. */
   readonly requestId: string;
   /** The shared attempt's signal; aborted when its last waiter leaves. */
@@ -379,7 +379,7 @@ type UpgradePhase = "request" | "auth" | "handshake" | "hello";
 /** Which listener accepted a connection: the LAN endpoint (E-3a), the main
  * listener at a Tailscale address, or the main listener at any other address
  * (the developer loopback default). The phone names the same two real legs. */
-export type ConnectionTransport = "lan" | "tailscale" | "primary";
+type ConnectionTransport = "lan" | "tailscale" | "primary";
 
 interface HttpConnectionTrace {
   acceptedAt: number;

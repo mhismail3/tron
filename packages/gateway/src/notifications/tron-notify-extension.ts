@@ -3,7 +3,7 @@ import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import type { NotificationAdmissionStatus } from "./notification-service.js";
 import type { AgentTerminalOutcome } from "../kernel/host/module-host.js";
 
-export interface TronNotificationEnqueue {
+interface TronNotificationEnqueue {
   (input: {
     sessionId: string;
     sourceId: string;

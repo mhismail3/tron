@@ -21,7 +21,7 @@ export interface ComponentDiagnostic {
   message: string;
 }
 
-export interface ComponentRenderCapture {
+interface ComponentRenderCapture {
   sequence: number;
   width: number;
   lines: readonly string[];
@@ -29,7 +29,7 @@ export interface ComponentRenderCapture {
   failed: boolean;
 }
 
-export interface RecordingComponentOptions {
+interface RecordingComponentOptions {
   maximumLines?: number;
   maximumSourceBytes?: number;
   onDiagnostic?: (diagnostic: ComponentDiagnostic) => void;

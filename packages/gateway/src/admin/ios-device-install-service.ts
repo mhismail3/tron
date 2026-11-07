@@ -41,9 +41,9 @@ const IDENTIFIER = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12
 const DEVICE_ID = /^[A-Za-z0-9._:-]{1,100}$/u;
 const execFileAsync = promisify(execFile);
 
-export type IosDeviceInstallChannel = "stable" | "dev";
-export type IosDeviceInstallBuildMode = "fast-debug" | "optimized";
-export type IosDeviceInstallState = "requested" | "running" | "succeeded" | "failed";
+type IosDeviceInstallChannel = "stable" | "dev";
+type IosDeviceInstallBuildMode = "fast-debug" | "optimized";
+type IosDeviceInstallState = "requested" | "running" | "succeeded" | "failed";
 
 interface IosPhysicalDeviceTarget {
   /** Owner-only CoreDevice identifier. Never project this field over RPC. */
@@ -54,7 +54,7 @@ interface IosPhysicalDeviceTarget {
   developerModeEnabled: boolean;
 }
 
-export interface IosDeviceInstallConfig {
+interface IosDeviceInstallConfig {
   schema: 1;
   kind: typeof CONFIG_KIND;
   deviceId: string;
@@ -64,7 +64,7 @@ export interface IosDeviceInstallConfig {
   updatedAt: string;
 }
 
-export interface IosDeviceInstallConfigProjection {
+interface IosDeviceInstallConfigProjection {
   schema: 1;
   kind: typeof CONFIG_KIND;
   deviceId: string;
@@ -74,7 +74,7 @@ export interface IosDeviceInstallConfigProjection {
   updatedAt: string;
 }
 
-export interface IosDeviceInstallStatus {
+interface IosDeviceInstallStatus {
   schema: 2;
   kind: typeof STATUS_KIND;
   deviceId: string;
@@ -99,8 +99,8 @@ interface ActiveInstall {
 /** Lists physical targets. `reach` names one bound device whose CoreDevice
  * tunnel discovery opens first: `devicectl` reports a paired phone as connected
  * only while a tunnel is open, and nothing else opens one on demand. */
-export type IosDeviceTargetDiscovery = (reach?: string) => Promise<IosPhysicalDeviceTarget[]>;
-export type IosDeviceInstallLauncher = (request: {
+type IosDeviceTargetDiscovery = (reach?: string) => Promise<IosPhysicalDeviceTarget[]>;
+type IosDeviceInstallLauncher = (request: {
   tronHome: string;
   deviceId: string;
   commandId: string;

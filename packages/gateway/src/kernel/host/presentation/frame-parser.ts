@@ -10,7 +10,7 @@ const TAB_WIDTH = 4;
 const MAX_LINK_LENGTH = 2_048;
 const MAX_DIAGNOSTICS = 16;
 
-export interface ExtensionFrameStyle {
+interface ExtensionFrameStyle {
   bold?: true;
   dim?: true;
   italic?: true;
@@ -22,28 +22,28 @@ export interface ExtensionFrameStyle {
   link?: string;
 }
 
-export interface ExtensionFrameRun {
+interface ExtensionFrameRun {
   text: string;
   style: ExtensionFrameStyle;
 }
 
-export interface ExtensionFrameLine {
+interface ExtensionFrameLine {
   plainText: string;
   runs: readonly ExtensionFrameRun[];
 }
 
-export interface ExtensionFrameCursor {
+interface ExtensionFrameCursor {
   row: number;
   column: number;
 }
 
-export interface ExtensionFrame {
+interface ExtensionFrame {
   lines: readonly ExtensionFrameLine[];
   plainText: string;
   cursor?: ExtensionFrameCursor;
 }
 
-export type FrameDiagnosticCode =
+type FrameDiagnosticCode =
   | "unsafe-control-stripped"
   | "unsafe-link-stripped"
   | "line-clamped"
@@ -52,18 +52,18 @@ export type FrameDiagnosticCode =
   | "run-limit-exceeded"
   | "frame-limit-exceeded";
 
-export interface FrameDiagnostic {
+interface FrameDiagnostic {
   code: FrameDiagnosticCode;
   message: string;
 }
 
-export interface ParseExtensionFrameResult {
+interface ParseExtensionFrameResult {
   ok: boolean;
   frame: ExtensionFrame;
   diagnostics: readonly FrameDiagnostic[];
 }
 
-export interface ExtensionFrameLimits {
+interface ExtensionFrameLimits {
   maxColumns?: number;
   maxLines?: number;
   maxRuns?: number;

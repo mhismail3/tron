@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
 
-export interface CatalogPage<T> {
+interface CatalogPage<T> {
   items: T[];
   nextCursor?: string;
 }

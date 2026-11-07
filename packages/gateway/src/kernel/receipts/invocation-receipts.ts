@@ -33,7 +33,7 @@ export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
 /** Canonical, non-context receipt family for Gateway invocation causality. */
 export const INVOCATION_RECEIPT_TYPE = "tron.chat-invocation.v1";
 const INVOCATION_RECEIPT_WRITER = "gateway";
-export const MAX_RECEIPT_BYTES = 400 * 1_024;
+const MAX_RECEIPT_BYTES = 400 * 1_024;
 const TERMINAL_LIFECYCLES = new Set<InvocationLifecycle>(["completed", "failed", "interrupted", "outcomeUnknown"]);
 const LIFECYCLES = new Set<InvocationLifecycle>([
   "staged", "accepted", "queued", "running", "waitingForInput", "retrying", "settling", "completed", "failed", "interrupted", "outcomeUnknown",

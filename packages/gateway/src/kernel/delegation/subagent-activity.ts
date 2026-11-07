@@ -73,7 +73,7 @@ export function extensionActivityOwnsLiveWork(turns: OwnedTurnOwner, activity: E
 }
 
 
-export function extensionActivityOwnsOwnLiveWork(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
+function extensionActivityOwnsOwnLiveWork(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
   if (!delegatedLifecycleOwner(turns, activity)) return false;
   const state = activity.lifecycle?.state;
   if (state === "queued" || state === "running") return true;
@@ -107,7 +107,7 @@ function delegatedLifecycleOwner(turns: OwnedTurnOwner, activity: ExtensionRunAc
  * A child's state is its lifecycle when projected, else its coarse status. Their
  * exact-owned paused-process proof is admitted with the detached-child binding,
  * never copied from untrusted tool-result presentation fields. */
-export function liveWorkflowChildren(turns: OwnedTurnOwner, activity: ExtensionRunActivity): ExtensionRunChild[] {
+function liveWorkflowChildren(turns: OwnedTurnOwner, activity: ExtensionRunActivity): ExtensionRunChild[] {
   const detached = activity.runId === undefined ? undefined : turns.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
   if (!detached?.size) return [];
   return activity.children.filter(child => {

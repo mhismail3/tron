@@ -42,7 +42,7 @@ const MAX_ATTRIBUTED_RETRIES_PER_SLOT = 64;
  * platform coalesced or dropped): every listed directory's status.json is
  * stat'd again this often. Active artifacts and new directories never wait for
  * it; they are checked on every pass. */
-export const EXTENSION_DISCOVERY_FULL_SWEEP_MS = 5 * 60_000;
+const EXTENSION_DISCOVERY_FULL_SWEEP_MS = 5 * 60_000;
 /** How soon a root whose watcher could not start or failed is watched again.
  * Until then each finished sweep starts the next, so the root is polled. */
 const EXTENSION_DISCOVERY_WATCH_RETRY_MS = 5_000;
@@ -71,7 +71,7 @@ export interface ExtensionArtifactRootWatchRequest {
   onReset(): void;
 }
 
-export interface ExtensionArtifactRootWatchHandle {
+interface ExtensionArtifactRootWatchHandle {
   close(): void;
 }
 

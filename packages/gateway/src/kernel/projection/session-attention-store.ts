@@ -33,7 +33,7 @@ export interface SessionAttentionProjection {
   isUnread: boolean;
 }
 
-export interface SessionAttentionMutation {
+interface SessionAttentionMutation {
   changed: boolean;
   projection: SessionAttentionProjection;
 }

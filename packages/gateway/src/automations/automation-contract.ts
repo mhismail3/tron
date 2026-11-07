@@ -119,7 +119,7 @@ export function admitsAutomationAction(value: unknown): value is AutomationActio
     && bounded(input.message, 512);
 }
 
-export function admitsAutomationProvenance(value: unknown): value is AutomationProvenance {
+function admitsAutomationProvenance(value: unknown): value is AutomationProvenance {
   const input = record(value);
   if (!input || typeof input.kind !== "string") return false;
   if (input.expiresAt !== undefined && !timestamp(input.expiresAt)) return false;

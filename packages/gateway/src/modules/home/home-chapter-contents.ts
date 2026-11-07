@@ -32,7 +32,7 @@ export function homeChapterTopic(summary: string): string {
 }
 
 /** The counts one canonical chapter file holds, before topics are attached. */
-export type HomeChapterCounts = Omit<HomeChapterContents, "topics">;
+type HomeChapterCounts = Omit<HomeChapterContents, "topics">;
 
 interface CachedChapter {
   path: string;

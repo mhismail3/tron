@@ -154,7 +154,7 @@ function validateSurface(surface: ExtensionSurface): void {
   }
 }
 
-export interface ExtensionPresentationDraft {
+interface ExtensionPresentationDraft {
   semanticState: ExtensionSemanticState;
   surfaces: ExtensionSurface[];
   pendingInteractions: ExtensionInteraction[];

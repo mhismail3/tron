@@ -13,7 +13,7 @@ import type { HomeTaskCheckin } from "../../protocol/types.js";
 import type { HomeTaskSubagents } from "../../kernel/delegation/task-subagents.js";
 
 export { HOME_TASK_RESULT_MESSAGE };
-export const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";
+const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";
 export interface HomeWakeRoute { homeId: string; routeGeneration: number; generation: number; enabled: boolean; sessionId: string }
 export interface HomeWakeEvent {
   eventId: string;
@@ -486,7 +486,7 @@ function wakeOrder(a: { createdAt: string; eventId: string }, b: { createdAt: st
 
 /** Upper-bound the two SDK entries (message + attribution), including their
  * canonical identity framing. Home chapter/session IDs are bounded to 200. */
-export function canonicalMessageBytes(message: InputMessage): number {
+function canonicalMessageBytes(message: InputMessage): number {
   const identity = "x".repeat(200);
   const framing = { id: identity, parentId: identity, timestamp: new Date().toISOString() };
   return Buffer.byteLength(JSON.stringify({ ...framing, type: "custom_message", ...message })) + 1

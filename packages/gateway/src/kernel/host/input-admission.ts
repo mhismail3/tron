@@ -5,7 +5,7 @@ import type { ExtensionToolOrigin } from "../../protocol/types.js";
 
 export type InputDelivery = "user" | "wake";
 /** Gateway-owned trigger sources, never maintainer authority. */
-export type InputTriggerSource = "automation";
+type InputTriggerSource = "automation";
 export interface InputTriggerAttribution {
   kind: InputTriggerSource; sourceId: string; eventId: string; title: string;
 }

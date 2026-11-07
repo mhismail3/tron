@@ -11,7 +11,7 @@ import type { StoreLayer } from "./settings-types.js";
  */
 
 /** A section's `description` is the one line a client shows beside its title. */
-export interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
+interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
 
 export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "model", title: "Model", description: "Model and thinking", order: 10, harness: true, chatInline: true },

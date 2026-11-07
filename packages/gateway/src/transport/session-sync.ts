@@ -16,7 +16,7 @@ export interface BufferedSessionEncoding {
   readonly fallback: boolean;
 }
 
-export interface SessionSyncBaseline {
+interface SessionSyncBaseline {
   runtimeGeneration: string;
   eventSequence: number;
 }
@@ -30,13 +30,13 @@ interface Synchronization {
   overflowed: boolean;
 }
 
-export interface CompletedSessionSync {
+interface CompletedSessionSync {
   events: BufferedSessionEvent[];
   overflowed: boolean;
 }
 
 /** Per-connection admission for bytes retained by concurrent quarantines. */
-export interface SessionSynchronizationByteBudget {
+interface SessionSynchronizationByteBudget {
   reserve(bytes: number): boolean;
   release(bytes: number): void;
 }

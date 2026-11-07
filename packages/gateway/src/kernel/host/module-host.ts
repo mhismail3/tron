@@ -115,7 +115,7 @@ export interface SessionContext {
  * (decision D5). A `read` is disposable and admitted while the Gateway drains; a
  * `mutation` runs once per `commandId` under the transport's command receipt and
  * is refused while draining. `handle` validates its own parameters. */
-export interface RpcContext {
+interface RpcContext {
   readonly identity: string;
   readonly isLocal: boolean;
   /** Disconnect only cancels disposable reads, never accepted commands. */
@@ -130,7 +130,7 @@ export interface RpcHandler {
  * one implementer; a second fails at start. `observers` hooks run every
  * implementer in composition order. Each signature is typed by the extraction
  * step that wires its call site. */
-export const KERNEL_HOOKS = {
+const KERNEL_HOOKS = {
   profileDecision: "policy",
   resourceRoot: "policy",
   extensionAdmission: "policy",

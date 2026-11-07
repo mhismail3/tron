@@ -9,11 +9,11 @@ const RUN_STATES = new Set(["queued", "running", "paused"]);
 const TERMINAL_STATES = new Set(["complete", "failed", "partial", "stopped", "rejected"]);
 const TERMINAL_PROOF = new Set(["observed"]);
 
-export interface DelegatedRootMigrationOptions {
+interface DelegatedRootMigrationOptions {
   readonly legacyRoots: readonly string[];
   readonly destinationRoot: string;
 }
-export interface DelegatedRootInventory {
+interface DelegatedRootInventory {
   readonly root: string;
   readonly entries: number;
   readonly bytes: number;
@@ -21,7 +21,7 @@ export interface DelegatedRootInventory {
   readonly resumabilityRefusals: readonly string[];
   readonly absoluteReferences: readonly string[];
 }
-export interface DelegatedRootPreflight {
+interface DelegatedRootPreflight {
   readonly status: "not-required" | "migration-required" | "conflict";
   readonly destinationRoot: string;
   readonly roots: readonly DelegatedRootInventory[];

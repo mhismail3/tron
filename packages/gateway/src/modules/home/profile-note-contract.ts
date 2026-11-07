@@ -5,9 +5,9 @@ import { validateProfileMetadata } from "./profile-placement.js";
 export const PROFILE_NOTE_SCHEMA_VERSION = 1 as const;
 
 export type ProfileNoteScope = "personal" | "research";
-export type ProfileNoteRecordKind = "note";
+type ProfileNoteRecordKind = "note";
 
-export interface ProfileNoteSessionEntryCitation {
+interface ProfileNoteSessionEntryCitation {
   sessionId: string;
   branchId?: string;
   entryId: string;
@@ -36,7 +36,7 @@ export interface ProfileNoteProvenance {
   evidence: ProfileNoteEvidenceRef[];
 }
 
-export interface ProfileNoteTemporalQualification {
+interface ProfileNoteTemporalQualification {
   eventAt?: string;
   validFrom?: string;
   validTo?: string;
@@ -138,7 +138,7 @@ export function assertProfileNoteId(value: unknown, label = "profile-note id"): 
 }
 
 /** Project identity is a bounded workspace reference, not a record ID. */
-export function assertProfileNoteProjectId(value: unknown, label = "project id"): asserts value is string {
+function assertProfileNoteProjectId(value: unknown, label = "project id"): asserts value is string {
   if (typeof value !== "string" || value.length < 1 || value.length > 4_096 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`Invalid ${label}`);
   if (value.startsWith("/")) {
     if (value.includes("\\") || value.split("/").some(component => component === "..")) throw new Error(`Invalid ${label}`);

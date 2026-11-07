@@ -20,10 +20,10 @@ const OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const TERMINAL = new Set(["succeeded", "failed", "rolled-back", "rollback-failed"]);
 const execFileAsync = promisify(execFile);
 
-export interface MacReplaceWorker { taskId: string; sessionId: string; title: string; stoppedAt?: string }
-export type MacReplaceWorkerState = "resumable" | "resumed" | "stopping" | "unavailable";
+interface MacReplaceWorker { taskId: string; sessionId: string; title: string; stoppedAt?: string }
+type MacReplaceWorkerState = "resumable" | "resumed" | "stopping" | "unavailable";
 
-export interface MacReplaceDependencies {
+interface MacReplaceDependencies {
   tronHome: string;
   channel: "stable" | "dev";
   /** The configured source repository whose scripts plan and start a replacement. */

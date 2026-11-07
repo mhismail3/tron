@@ -377,7 +377,7 @@ export function extensionReceiptActivity(receipt: ExtensionActivityReceipt): Ext
  * the JSON byte budget, and the omission rule: a row that only exhausts this
  * page's remainder belongs at the next cursor, while a row too large for an
  * otherwise empty page is consumed and counted as omitted. */
-export interface BoundedHistoryPage<Row> {
+interface BoundedHistoryPage<Row> {
   activities: Row[];
   nextCursor?: string;
   omissions?: { count: number; bytes: number; reason: "bytes" | "countAndBytes" };

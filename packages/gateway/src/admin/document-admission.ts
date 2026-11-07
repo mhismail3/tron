@@ -41,7 +41,7 @@ export function admittedFailure(value: unknown, line: FailureLine): string {
   return boundedFailureText(value, line);
 }
 
-export interface TimestampAdmission {
+interface TimestampAdmission {
   /** Rejection for an absent value or one that is not an admitted ISO-8601 instant. */
   rejection: string;
   /** Rejection for a value that is not a bounded, control-free string; defaults to `rejection`. */
@@ -75,7 +75,7 @@ export async function admitTronSourceRoot(value: unknown): Promise<string> {
   });
 }
 
-export interface TrustedDirectoryAdmission {
+interface TrustedDirectoryAdmission {
   /** Subject of every rejection, for example `Gateway update sourceRoot`. */
   subject: string;
   /** Root-relative files that must exist as regular, non-linked files. */

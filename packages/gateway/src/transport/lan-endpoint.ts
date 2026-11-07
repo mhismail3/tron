@@ -49,7 +49,7 @@ const OID_KEY_USAGE = "2.5.29.15";
 /** A `lan.listener` record names the state and, while bound, the address
  * family and port. Never the address: the record exists to say whether the LAN
  * leg is up, not to publish the home network. */
-export type LanListenerReason = "setting_off" | "no_private_address" | "bind_failed" | "certificate_incomplete" | "certificate_unreadable" | "certificate_mismatched" | "certificate_generation_failed";
+type LanListenerReason = "setting_off" | "no_private_address" | "bind_failed" | "certificate_incomplete" | "certificate_unreadable" | "certificate_mismatched" | "certificate_generation_failed";
 
 export interface LanEndpointConfig {
   readonly enabled: boolean;
@@ -61,7 +61,7 @@ export interface LanEndpointConfig {
   readonly reconcileIntervalMs?: number;
 }
 
-export interface LanEndpointHandlers {
+interface LanEndpointHandlers {
   readonly onConnection: (socket: Duplex) => void;
   /** The TLS socket a completed handshake produced. The upgrade handler is
    * handed that same socket later, so the accept time the listener recorded at
@@ -99,7 +99,7 @@ export function httpListenerOptions(limits: LanListenerLimits): HttpsServerOptio
   };
 }
 
-export interface LanEndpointOptions extends LanEndpointConfig, LanEndpointHandlers {
+interface LanEndpointOptions extends LanEndpointConfig, LanEndpointHandlers {
   readonly logger: GatewayLogger;
   /** The listener's port. The LAN leg serves the same route surface as the main
    * listener, so it uses the same port on the other address. */

@@ -45,7 +45,7 @@ export function abortAwareStream(stream: StreamFn): StreamFn {
 
 type RequestSettings = ReturnType<SettingsManager["getSettings"]>;
 
-export interface RunRequestPipelineOptions {
+interface RunRequestPipelineOptions {
   applySettings(): Promise<RequestSettings | undefined>;
   settingsApplied(): void;
   compactionStream(stream: StreamFn): StreamFn;

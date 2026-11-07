@@ -22,7 +22,7 @@ const ENVELOPE_BYTES_PER_ATTACHMENT = 6 * (160 * 4 + 200 + 1_024) + 128;
  * byte, and its envelope lists the attachments. Callers pass the configured limits,
  * so the bound follows them rather than a second copy of the numbers.
  */
-export function maximumPromptLineBytes(maximumUploadBytes: number, maximumTextBytes: number): number {
+function maximumPromptLineBytes(maximumUploadBytes: number, maximumTextBytes: number): number {
   const inlineImages = Math.max(
     4 * Math.ceil(maximumUploadBytes / 3) + 4 * MAXIMUM_PROMPT_ATTACHMENTS,
     MAXIMUM_PROMPT_ATTACHMENTS * INLINE_IMAGE_BASE64_LIMIT_BYTES,

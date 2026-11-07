@@ -29,7 +29,7 @@ export interface HomeTaskWorkerChoice {
  * designation: routing runs on the canonical transcript, which a worker does not own. A
  * registered model without credentials is refused too, since the worker's own model
  * change would be refused only after its session exists. */
-export async function admitTaskWorkerChoice(runtime: WorkerModelCatalog | undefined, choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
+async function admitTaskWorkerChoice(runtime: WorkerModelCatalog | undefined, choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
   if (choice.model === undefined) {
     if (choice.thinking !== undefined) {
       throw refusal("thinking-requires-model", "thinking needs a model: name the model the worker runs with, or omit thinking to keep the Gateway default");

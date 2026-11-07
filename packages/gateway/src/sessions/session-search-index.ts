@@ -38,7 +38,7 @@ export interface SearchIndexStamp {
 }
 
 /** One indexed session's stored facts, for the owner's warm-up decision. */
-export interface SearchIndexSessionFacts {
+interface SearchIndexSessionFacts {
   sessionId: string;
   fileIdentity: string;
   branchDigest: string;

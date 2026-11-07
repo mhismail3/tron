@@ -31,7 +31,7 @@ const INBOX_CHANGED_DEBOUNCE_MS = 250;
 const INBOX_CURSOR = /^(-?\d{1,16})\.([A-Za-z0-9_-]{8,160})$/u;
 
 export type NotificationAdmissionStatus = "queued" | "suppressed" | "rate_limited" | "unavailable";
-export interface NotificationStatus {
+interface NotificationStatus {
   available: boolean;
   registered: boolean;
   deviceRegistered: boolean;
@@ -56,7 +56,7 @@ export interface NotificationInboxItem {
   isUnread: boolean;
   outcome: NotificationInboxOutcome;
 }
-export interface NotificationInboxPage {
+interface NotificationInboxPage {
   notifications: NotificationInboxItem[];
   revision: string;
   unreadCount: number;
@@ -65,7 +65,7 @@ export interface NotificationInboxPage {
 /** The coalesced `notification.inbox.changed` payload: the committed state the
  * client can compare against its cache and project onto the bell immediately. */
 export type NotificationInboxChanged = { revision: string; unreadCount: number };
-export type NotificationInboxFilter = "all" | "unread";
+type NotificationInboxFilter = "all" | "unread";
 /** One keyset position in the canonical inbox order: newest `createdAt` first,
  * then ascending id. */
 interface InboxOrderKey { createdAt: number; id: string }
@@ -187,7 +187,7 @@ function retainRevocationAuthority(document: NotificationDocument, now: number):
   return document;
 }
 
-export interface PushRegistrationInput {
+interface PushRegistrationInput {
   deviceId: string;
   installationId: string;
   grantId: string;

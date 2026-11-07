@@ -11,7 +11,7 @@ export interface ProcessActivityExpiryFrame {
   expiredProcessIds: string[];
 }
 
-export type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void;
+type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void;
 
 const terminalStates = new Set(["completed", "failed", "stopped", "rejected", "interrupted"]);
 const MAX_TERMINAL_TOMBSTONES = 2_048;
