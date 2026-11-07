@@ -72,6 +72,7 @@
       "kind": "exec",
       "consumers": [
         "gateway/admin",
+        "gateway/foundation",
         "gateway/package",
         "gateway/run",
         "gateway/security",
@@ -87,6 +88,7 @@
         "repo/budgets",
         "repo/dev",
         "repo/docs-index",
+        "repo/home-layout",
         "repo/ios",
         "repo/layers",
         "repo/mac",

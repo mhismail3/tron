@@ -8,6 +8,7 @@ import { PROFILE_AREAS, profilePath } from "./profile-placement.js";
 import { DEFAULT_PROFILE_NOTE_CONFIG, validateProfileNoteConfig, validateProfileNoteRecord, type ProfileNoteConfig, type ProfileNoteRecord } from "./profile-note-contract.js";
 import type { SubjectAuditReference, SubjectContext } from "../../kernel/settings/settings-change.js";
 import type { ProfilePartitionRequest } from "./profile-notes.js";
+import { tronWorkspacePath } from "../../foundation/tron-home-layout.js";
 
 export const PROFILE_FILE_BYTES = 64 * 1_048_576;
 const ROOTS = [...Object.keys(PROFILE_AREAS), "inferred", "prior"];
@@ -175,7 +176,7 @@ export function readProfileFileRecord(file: ProfileFile, id: string, revisionId?
 async function location(workspace: Pick<ResourceRoot, "describe">, create: boolean): Promise<string | undefined> {
   const descriptor = await workspace.describe();
   if (!descriptor.available) throw new GatewayError("conflict", "Tron workspace is unavailable");
-  const directory = join(descriptor.root, "files");
+  const directory = tronWorkspacePath(descriptor.root, "files");
   if (create) await mkdir(directory, { recursive: true, mode: 0o700 });
   const info = await lstat(directory).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
   if (!info) return undefined;

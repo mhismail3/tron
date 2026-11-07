@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 export interface IOSBuildRecord {
   id: string; title: string; notes: string; commit: string; branch: string; mode: string;
@@ -92,7 +92,7 @@ export async function readIOSBuildsFeed(tronHome: string): Promise<IOSBuildsFeed
   try { home = await realpath(tronHome); }
   catch { return { status: "unavailable", builds: [], message: "The configured Gateway home is unavailable." }; }
   return new Promise(resolve => {
-    execFile("/usr/bin/python3", ["-c", snapshot, join(home, "ios-builds")],
+    execFile("/usr/bin/python3", ["-c", snapshot, tronHomePath(home, "ios-builds")],
       { timeout: 5_000, maxBuffer: 256_000, encoding: "utf8", env: { PATH: "/usr/bin:/bin", PYTHONNOUSERSITE: "1" } }, (error, stdout) => {
         if (error) { resolve({ status: "unavailable", builds: [], message: "Published builds could not be read safely. Refresh after publication finishes." }); return; }
         try { resolve(JSON.parse(stdout) as IOSBuildsFeed); }

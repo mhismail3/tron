@@ -89,6 +89,11 @@ Commands:
                                     which only shrinks; undeclared pairs are reported only
                                     (tools/layers); never a gate
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
+  home-layout check|audit|retention|prune|migrate
+                                    Tron-home path registry (docs/tron-home.md): check
+                                    source literals; audit, retention and prune --plan
+                                    read a home; prune --apply and migrate are the
+                                    maintainer's (tools/home-layout)
   docs modules [<path>]|signals|rpc|settings
                                     Print a generated Markdown index (module map, module
                                     README Signals, Gateway RPCs, settings keys); docs
@@ -222,6 +227,9 @@ case "$cmd" in
     ;;
   budgets)
     exec python3 "$ROOT/tools/budgets/budgets.py" "$@"
+    ;;
+  home-layout)
+    exec python3 "$ROOT/tools/home-layout/home_layout.py" "$@"
     ;;
   layers)
     exec python3 "$ROOT/tools/layers/layers.py" "$@"

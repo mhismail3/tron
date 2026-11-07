@@ -11,6 +11,7 @@
       "consumers": [
         "repo/cli",
         "repo/docs-index",
+        "repo/home-layout",
         "repo/layers",
         "repo/metrics",
         "repo/verify"

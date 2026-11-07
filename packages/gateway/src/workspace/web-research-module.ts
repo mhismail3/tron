@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ModuleDescriptor } from "../kernel/host/module-host.js";
 import { webResearchTool, type WebResearchRequest } from "./web-research-contract.js";
 import { WebResearch, type WebResearchTransport } from "./web-research.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 /** Start once per Gateway, resolve the same service at every call and reload.
  * Child grants carry only a local scoped capability, never provider credentials. */
@@ -15,7 +16,7 @@ export function createWebResearchModule(transport: () => WebResearchTransport | 
       const service = new WebResearch(transport);
       const grants = new Map<string, { token: string; path: string }>();
       const tokens = new Map<string, string>();
-      const childDirectory = join(host.tronHome, "gateway", "web-research-children");
+      const childDirectory = tronHomePath(host.tronHome, "gateway/web-research-children");
       let directory: string | undefined;
       let server: Server | undefined;
       let opening: Promise<void> | undefined;
