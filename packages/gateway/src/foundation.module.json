@@ -11,5 +11,8 @@
     "tron-home-environment-policy.mjs",
     "tron-home.ts",
     "version.ts"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/admin/source-repository.integration.test.ts src/client/gateway-client.integration.test.ts src/sessions/blob-store.lock.integration.test.ts src/machine/filesystem-service.integration.test.ts"
   ]
 }

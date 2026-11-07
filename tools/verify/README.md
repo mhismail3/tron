@@ -1,8 +1,8 @@
 # Verify
 
 `scripts/tron verify` runs the fast affected checks before merge; `verify --batch` runs full
-coverage asynchronously on landed main and causally reverts a proven culprit. The manifests and their dependency
-and dynamic-edge graph are the selection authority. No merge queue, landing gate or hosted
+coverage asynchronously on landed main and causally reverts a proven culprit. The manifests (owners, `verify`
+declarations and `dynamicEdges`) are the selection authority. No merge queue, landing gate or hosted
 CI is involved ([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md).
@@ -11,7 +11,7 @@ this change's affected checks; only stamped build products are reused. See the
 scripts/tron verify [--base <ref>]             # affected checks since merge-base(<ref>, HEAD)
 scripts/tron verify --plan                     # tier, paths, reasons and exact commands; dirty trees allowed
 scripts/tron verify --changed [--base <ref>]   # explicit diff selection, also used by mutation sampling
-scripts/tron verify --module <id>               # scoped baseline: owner tests + transitive consumer locks
+scripts/tron verify --module <id>               # scoped baseline: owner tests + declarations + launching UI locks
 scripts/tron verify --all                       # all locks + serial files deferred by this base..HEAD diff
 scripts/tron verify --batch --base <main-anchor> # initialize coverage in a dedicated clean main worktree
 scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun every lane at the green HEAD
@@ -115,12 +115,14 @@ base). Each module contributes its owned tests:
 - `test-*.py` and `test-*.sh`;
 - Swift `*Tests.swift` under test targets.
 
-Recorders under `test-fixtures/` are never run. For `--changed` and `--module`,
-modules whose `dependsOn` or `dynamicEdges` reach a selected module add their
-locks, transitively. A source-only module baseline can therefore run its existing
-hosted consumer locks without owning a second test list or selecting the consumers'
-ordinary journeys. `--module` does not widen to unrelated kernel locks;
-`--update-locks` remains confined to the named owner's locks.
+Recorders under `test-fixtures/` are never run. A change is gated by its own
+modules' tests ([principles P1](../../docs/PRINCIPLES.md#p1-a-module-owns-its-code-and-its-tests)):
+`--changed` and `--module` add no `dependsOn` consumer's tests; those run in the
+batch. The one consumer added is a module whose `dynamicEdges` name a selected
+module (today only the iOS UI tests' spawn edges to the hosted app): its locks are
+that module's rendered tests. A module with no test of its own declares the tests that prove it
+(`verify`, below), usually its `gateway/e2e` journeys. `--module` does not widen to
+unrelated kernel locks; `--update-locks` remains confined to the named owner's locks.
 
 Small changes run only what can catch a regression in them:
 - **Documentation** (Markdown or assets owned by `repo/docs`, except module manifests)
@@ -139,7 +141,7 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 | Tier | Changed inputs | Evidence before landing |
 |---|---|---|
 | **none** | Empty diff or documentation only | Static/documentation checks; no executable tests |
-| **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests + transitive consumer locks/declarations |
+| **partial** | Tests/goldens only, or ordinary owned code (including Swift UI) | Changed tests; golden owner's locks; otherwise owner tests, owner declarations and launching UI locks |
 | **full** | Production changes in L0–L2, `gateway/package`, `gateway/test-support`, `gateway/pi-sdk`; declared kernel/contracts/persistence/security/lifecycle/mac-installer risk; manifest/layer-baseline/toolchain/project configuration; unknown ownership | The same affected checks **now**, plus all-lock/full-lane coverage in the next batch |
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
@@ -152,7 +154,7 @@ them too. It is not limited to the one nested lock. Explicit `--module` baseline
 the complete scoped set. A serial-only selection may pass its affected static checks
 while explicitly reporting deferred tests; it is not a test pass or a green batch. `ios-ui` risk alone does not widen beyond the affected UI build
 and journeys. Renames include both paths; deleted paths use base ownership. Retired
-owners retain consumer closure and risk, but cannot declare commands. Risk is read
+owners retain risk, but cannot declare commands. Risk is read
 from each changed producer's manifest, not inferred from every reverse consumer.
 An unowned tracked path still fails ownership, not a green partial run. A new module
 without executable evidence still fails; a tier never turns missing evidence into a pass.
@@ -183,7 +185,7 @@ evidence.
 
 ## Manifest `verify` declarations
 
-Modules may declare extra consumer verification using explicit tracked inputs:
+Modules may declare extra verification using explicit tracked inputs:
 
 ```json
 "verify": [
@@ -201,8 +203,8 @@ files; method selectors, broad runs, build flags, unknown classes/paths and
 other command forms fail selection (exit 2). Harnessed classes retain their
 `ios-lanes` classification. There is no implicit install or alternate runner.
 
-Changed/module selection includes declarations of selected modules and their
-reverse dependency closure; full batch coverage and `--all` include every declaration.
+Changed/module selection includes the declarations of the selected modules (and of a
+launching module); full batch coverage and `--all` include every declaration.
 Markdown/test-only narrowing and lock-only `--update-locks` remain unchanged.
 Files are deduplicated across ownership and declarations, then use normal
 counts, explicit skips and incomplete verdicts. A zero-test Python suite fails

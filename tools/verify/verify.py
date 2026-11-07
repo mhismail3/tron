@@ -340,19 +340,19 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                 reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
             selected |= set(owned)
     if mode in ("changed", "module"):
-        # Reverse closure: modules that declare a dependency or a dynamic edge on a selected one.
-        reached = frontier = chosen - narrow
-        while frontier:
-            dependents = {key for key, module in modules.items() if key not in reached
-                          and (set(module.get("dependsOn", [])) | set(module.get("dynamicTargets", []))) & frontier}
-            for key in sorted(dependents):
-                dependent_locks = [path for path in modules[key]["owned"] if is_test(path) and is_lock(path)]
-                selected |= set(dependent_locks)
-                reasons.append(f"{key}: depends on a selected module; its {len(dependent_locks)} lock file(s)")
-            reached, frontier = reached | dependents, dependents
-        chosen |= reached
-        # Risk belongs to the changed producer, not every consumer in the reverse closure.
-        # Consumer locks still run now; unrelated global locks run once in the next batch.
+        # A change is gated by its own modules' tests (docs/PRINCIPLES.md P1). The one consumer
+        # added is a module whose dynamic edge names a selected one (today only the iOS UI
+        # tests' spawn edges to the hosted app): its locks are that module's rendered tests. `dependsOn` consumers'
+        # locks run in the batch.
+        sources = chosen - narrow
+        spawners = {key for key, module in modules.items() if key not in sources
+                    and set(module.get("dynamicTargets", [])) & sources}
+        for key in sorted(spawners):
+            spawned = [path for path in modules[key]["owned"] if is_test(path) and is_lock(path)]
+            selected |= set(spawned)
+            reasons.append(f"{key}: launches a selected module; its {len(spawned)} lock file(s)")
+        chosen |= spawners
+        # Risk belongs to the changed producer; the locks a full tier adds run in the next batch.
         if mode == "changed":
             for key in sorted(set(changes) - narrow):
                 module = modules.get(key)
@@ -372,7 +372,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             if full_reasons:
                 batch_tests |= set(locks)
                 reasons.append(f"full batch required; widened to every lock ({len(locks)} files) in batch: {', '.join(full_reasons)}")
-        # Retired owners still seed consumers/full risk above, but only live
+        # Retired owners still seed full risk above, but only live
         # modules own verification commands that can execute now.
         declared |= (chosen - narrow) & modules.keys()
     for key in sorted(declared):
