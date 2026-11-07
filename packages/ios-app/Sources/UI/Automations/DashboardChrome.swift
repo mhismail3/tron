@@ -8,7 +8,22 @@ final class DashboardHeaderState {
     static let stretchDistance: CGFloat = 120
     static let initialDrop: CGFloat = 25
     static let titleSize: CGFloat = 34
+    static let inlineTitleSize: CGFloat = 22
     private(set) var offset: CGFloat = 0
+    /// The system window controls' footprint in the top-leading corner
+    /// (`containerCornerInsets`, which only a windowed iPad scene reports); zero
+    /// full screen and on iPhone. Windowed, the title sits inline beside the lights.
+    private(set) var windowControls: CGSize = .zero
+
+    var isInline: Bool { windowControls.height > 0 }
+
+    /// The window's top safe-area inset, which the inline row starts below.
+    private(set) var safeTop: CGFloat = 0
+
+    func update(windowControls: CGSize, safeTop: CGFloat) {
+        if windowControls != self.windowControls { self.windowControls = windowControls }
+        if safeTop != self.safeTop { self.safeTop = safeTop }
+    }
 
     var progress: CGFloat { max(0, offset / Self.blurFadeDistance) }
 
@@ -18,12 +33,12 @@ final class DashboardHeaderState {
     }
 
     func verticalOffset(reduceMotion: Bool) -> CGFloat {
-        reduceMotion ? 0 : Self.initialDrop * (1 - Self.ease(progress))
+        reduceMotion || isInline ? 0 : Self.initialDrop * (1 - Self.ease(progress))
     }
 
     // Two base font points of shrink, or at most six percent of pull stretch.
     func titleScale(reduceMotion: Bool) -> CGFloat {
-        guard !reduceMotion else { return 1 }
+        guard !reduceMotion, !isInline else { return 1 }
         let pull = max(0, -offset / Self.stretchDistance)
         return 1 - (2 / Self.titleSize) * Self.ease(progress) + 0.06 * Self.ease(pull)
     }
@@ -104,7 +119,60 @@ struct DashboardChrome<Content: View>: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
-            DashboardTitle(state: header)
+            DashboardTitleRow(state: header)
+        }
+        // Read at the chrome's own top-leading corner, outside the title row's
+        // safe-area inset, so the footprint is the window's, not shrunk by the row.
+        .onGeometryChange(for: DashboardWindowCorner.self) { geometry in
+            var controls = geometry.containerCornerInsets.topLeading
+            #if HOSTED_TEST
+            if let fixture = DashboardWindowCorner.fixtureControls { controls = fixture }
+            #endif
+            return DashboardWindowCorner(controls: controls, safeTop: geometry.safeAreaInsets.top)
+        } action: { corner in
+            header.update(windowControls: corner.controls, safeTop: corner.safeTop)
+        }
+    }
+}
+
+struct DashboardWindowCorner: Equatable {
+    var controls: CGSize
+    var safeTop: CGFloat
+
+    #if HOSTED_TEST
+    /// Layout fixture: a simulator window cannot be put in Stage Manager, so a
+    /// test supplies the corner footprint the system would report.
+    static let fixtureControls: CGSize? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-tron-window-controls-inset"), arguments.indices.contains(index + 1) else { return nil }
+        let parts = arguments[index + 1].split(separator: ",").compactMap { Double($0) }
+        return parts.count == 2 ? CGSize(width: parts[0], height: parts[1]) : nil
+    }()
+    #endif
+}
+
+/// The title's row. Full screen and on iPhone it is the large header. Windowed,
+/// the system draws its window controls over the top-leading corner; the title
+/// then sits inline to the right of the lights, vertically centred with them,
+/// and no extra inset is reserved above it.
+private struct DashboardTitleRow: View {
+    let state: DashboardHeaderState
+
+    var body: some View {
+        if state.isInline {
+            let controls = state.windowControls
+            // The row's own footprint ends at the lights' bottom edge; the title is
+            // drawn from the window's top edge, above the safe-area inset.
+            Color.clear
+                .frame(height: max(controls.height - state.safeTop, 0))
+                .overlay(alignment: .topLeading) {
+                    DashboardTitle(state: state)
+                        .frame(height: controls.height, alignment: .leading)
+                        .padding(.leading, controls.width + 8)
+                        .offset(y: -state.safeTop)
+                }
+        } else {
+            DashboardTitle(state: state)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 20)
         }
@@ -117,7 +185,7 @@ struct DashboardTitle: View {
 
     var body: some View {
         Text("Tron")
-            .font(TronTypography.sans(size: DashboardHeaderState.titleSize, weight: .bold))
+            .font(TronTypography.sans(size: state.isInline ? DashboardHeaderState.inlineTitleSize : DashboardHeaderState.titleSize, weight: .bold))
             .foregroundStyle(Color.tronPrimary)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
@@ -148,7 +216,7 @@ private struct DashboardScrollModifier: ViewModifier {
         content
             // A constant content margin scrolls away naturally. Translating the
             // UIScrollView itself changes UIKit's safe-area insets mid-gesture.
-            .contentMargins(.top, topMargin + (reduceMotion ? 0 : DashboardHeaderState.initialDrop), for: .scrollContent)
+            .contentMargins(.top, topMargin + (reduceMotion || header.isInline ? 0 : DashboardHeaderState.initialDrop), for: .scrollContent)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 DashboardHeaderState.boundedOffset(geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in

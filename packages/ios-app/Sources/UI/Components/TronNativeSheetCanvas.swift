@@ -100,18 +100,27 @@ private struct NativeSheetCanvasContent: View {
     }
 }
 
+/// The presenter of every managed sheet in its surface, so the one place an
+/// iPad sheet is sized before UIKit presents it.
+private final class NativeSheetHostingController: UIHostingController<NativeSheetCanvasContent> {
+    override func present(_ presented: UIViewController, animated: Bool, completion: (() -> Void)? = nil) {
+        if let window = view.window { TronPadSheetMode.prepare(presented, in: window) }
+        super.present(presented, animated: animated, completion: completion)
+    }
+}
+
 /// The hosting controller itself must survive reconstruction: retaining child
 /// controllers under a disposable UIKit container still dismisses their sheets.
 @MainActor
 final class NativeSheetCanvas: PresentationScopedResource {
     private var sources: [RetainedNativeSheetHost] = []
-    private var hostingController: UIHostingController<NativeSheetCanvasContent>?
+    private var hostingController: NativeSheetHostingController?
     private var retired = false
     var isAttached: Bool { hostingController?.viewIfLoaded?.window != nil }
 
     var controller: UIViewController {
         if let hostingController { return hostingController }
-        let controller = UIHostingController(rootView: renderedContent)
+        let controller = NativeSheetHostingController(rootView: renderedContent)
         controller.view.backgroundColor = .clear
         controller.view.isUserInteractionEnabled = false
         controller.view.accessibilityElementsHidden = true
@@ -175,19 +184,34 @@ private struct NativeSheetCanvasView: UIViewControllerRepresentable {
     }
 }
 
+/// The surface a canvas serves. Only the scene root reflows, so the navigation
+/// chrome moves with the content; a route's sheets report upward to it, and a
+/// sheet's own surface keeps its sheets stacked over it as on iPhone.
+enum TronSheetSurfaceRole {
+    case scene, route, sheet
+}
+
 /// One native mounting point per scene/surface, outside its controls. Sources
 /// are render inputs, not a route registry: scoped resources still own lifetime.
 struct TronNativeSheetCanvas: ViewModifier {
+    var role: TronSheetSurfaceRole = .sheet
     @PresentationState private var canvas = NativeSheetCanvas()
+    @Environment(\.tronPadSheetScene) private var padSheetScene
+    @State private var presentsSheet = false // presentation read of this scene's sheets
 
     func body(content: Content) -> some View {
         let canvas = canvas
-        return content.overlayPreferenceValue(NativeSheetSources.self) { sources in
-            NativeSheetCanvasView(canvas: canvas, sources: sources)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
-        }
-        // A nested surface owns its sources; an ancestor must not remount them.
-        .transformPreference(NativeSheetSources.self) { $0 = [] }
+        let reflows = role == .scene && presentsSheet && padSheetScene?.mode == .sideColumn
+        return content
+            .modifier(TronSideColumnPanel(isOpen: reflows))
+            .onPreferenceChange(TronPadSheetPresented.self) { presentsSheet = $0 }
+            .overlayPreferenceValue(NativeSheetSources.self) { sources in
+                NativeSheetCanvasView(canvas: canvas, sources: sources)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+            // A nested surface owns its sources; an ancestor must not remount them.
+            .transformPreference(NativeSheetSources.self) { $0 = [] }
+            .transformPreference(TronPadSheetPresented.self) { if role != .route { $0 = false } }
     }
 }

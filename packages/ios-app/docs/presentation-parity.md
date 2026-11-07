@@ -109,6 +109,12 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   sections/groups/rows and flat code inset, not a second sheet or card style.
 - **Detents.** Progressive and Home sub-sheets open at medium and drag to large; a presentation's
   managed scope owns its chosen detent, so refreshes and child round trips do not reset it.
+- **iPad sheets.** On iPadOS 27 `TronPadSheetMode` replaces every managed sheet's detents (iPhone
+  and earlier iPadOS keep them). A scene at least 1100 pt wide (every full-screen landscape iPad)
+  shows a full-height 420 pt trailing column without dimming; the scene or route surface that
+  presented it reflows beside it, so the chat keeps taking taps and text, and a sheet opened from
+  the column stacks on it in the same column. A narrower scene (portrait, split, windowed) shows
+  one large centered page sheet. `TronPadSheetPresentationUITests` runs on an iPad lane.
 
 ## Confirmations, entry and notices
 
