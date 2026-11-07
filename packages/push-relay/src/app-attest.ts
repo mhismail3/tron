@@ -1,3 +1,6 @@
+// @peculiar/x509 resolves its parsers through tsyringe, which needs the Reflect metadata API
+// installed before x509 is evaluated; this import must stay ahead of the x509 import.
+import "reflect-metadata";
 import { decode } from "cbor-x";
 import { BasicConstraintsExtension, KeyUsageFlags, KeyUsagesExtension, X509Certificate, cryptoProvider } from "@peculiar/x509";
 import { APPLE_APP_ATTESTATION_ROOT_PEM } from "./apple-app-attestation-root";

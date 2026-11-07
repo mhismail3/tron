@@ -11,8 +11,9 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@peculiar/x509": "1.14.3",
-    "cbor-x": "1.6.9"
+    "@peculiar/x509": "3.1.0",
+    "cbor-x": "1.6.9",
+    "reflect-metadata": "0.2.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",
