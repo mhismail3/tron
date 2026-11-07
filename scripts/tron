@@ -97,9 +97,6 @@ Commands:
                                     README Signals, Gateway RPCs, settings keys); docs
                                     check [--base <ref>]|update: stale <!-- tron docs -->
                                     blocks (tools/docs)
-  health [--sha <main-sha>] [--verify-report <json>] [--cleanup]
-                                    On-demand local five-field scorecard; missing evidence
-                                    stays unavailable; no suites, scheduler or deployment
   ownership [<rev>] [--modules|--ledger]
                                     Read-only check that every tracked path has exactly
                                     one module owner and follows the layout
@@ -210,9 +207,6 @@ case "$cmd" in
     ;;
   metrics)
     exec python3 "$ROOT/tools/metrics/metrics.py" "$@"
-    ;;
-  health)
-    exec python3 "$ROOT/tools/verify/health.py" "$@"
     ;;
   docs)
     exec python3 "$ROOT/tools/docs/docs.py" "$@"
