@@ -2,12 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { AgentSession, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
-import { disposeFixtures, dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { HOME_TASK_RESULT_MESSAGE } from "./home-wake-inbox.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { invocationReceipts } from "../../kernel/receipts/invocation-receipts.js";
+import { disposeFixtures, dispatch, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { HOME_TASK_RESULT_MESSAGE } from "../../../modules/home/home-wake-inbox.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { invocationReceipts } from "../../../kernel/receipts/invocation-receipts.js";
 
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
 

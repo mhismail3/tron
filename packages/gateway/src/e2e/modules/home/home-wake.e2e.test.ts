@@ -1,14 +1,14 @@
 import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { BlobStore } from "../../sessions/blob-store.js";
-import { projectTranscriptPage } from "../../kernel/projection/projection.js";
-import { disposeFixtures, dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import type { GatewayError } from "../../errors.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { BlobStore } from "../../../sessions/blob-store.js";
+import { projectTranscriptPage } from "../../../kernel/projection/projection.js";
+import { disposeFixtures, dispatch, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import type { GatewayError } from "../../../errors.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();

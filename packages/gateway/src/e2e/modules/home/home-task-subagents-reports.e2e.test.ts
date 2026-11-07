@@ -3,13 +3,13 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../../test-support/home-task-subagent-child.js";
-import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "../../kernel/delegation/task-worker-extension.js";
-import * as subagentSettlement from "../../kernel/delegation/subagent-settlement.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { closeSubagentFixtures, bound, childModel, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, entryText, launchedAsyncDir, type FauxContext } from "../../../test-support/home-task-subagents-support.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { dispatch, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT } from "../../../../test-support/home-task-subagent-child.js";
+import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "../../../kernel/delegation/task-worker-extension.js";
+import * as subagentSettlement from "../../../kernel/delegation/subagent-settlement.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { closeSubagentFixtures, bound, childModel, launchResults, asyncState, holdingWorkflowLaunch, workflowChildRunId, holdingAsyncLaunch, waitBetweenTurns, toolResultText, entryText, launchedAsyncDir, type FauxContext } from "../../../../test-support/home-task-subagents-support.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 afterEach(closeSubagentFixtures);
 

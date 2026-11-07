@@ -291,7 +291,7 @@ canonical-byte equality and post-retirement extension-event silence, not fixture
 Backlog fixtures budget the full current Home catalog plus output reserve; the
 never-fit case must still prove a large report is referenced, its small successor
 arrives inline in order, and bounded immutable pages reconstruct the exact report.
-`input-admission.integration.test.ts` locks unpersisted trigger release to pending before terminal settlement; `session-profile.integration.test.ts` locks one-shot creation and live append classification.
+The `src/e2e/modules/home/input-admission.integration.test.ts` journey locks unpersisted trigger release to pending before terminal settlement; `src/e2e/modules/home/session-profile.integration.test.ts` locks one-shot creation and live append classification.
 
 ## Not here
 

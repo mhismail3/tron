@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { disposeFixtures, fixture, TASK_VIRTUAL_MODEL_ID } from "../../../test-support/home-task-fixture.js";
-import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { disposeFixtures, fixture, TASK_VIRTUAL_MODEL_ID } from "../../../../test-support/home-task-fixture.js";
+import { createTestRegistry, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 const evidence: unknown[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });

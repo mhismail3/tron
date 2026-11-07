@@ -6,12 +6,12 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { setModelQueue } from "../../../test-support/settings-dependencies.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { closeSubagentFixtures, launchResults } from "../../../test-support/home-task-subagents-support.js";
-import { modelQueueProjectionPath } from "../../providers/model-queue.js";
-import { homeOwnerOf, queueOwnerOf } from "../../../test-support/gateway-registry.js";
+import { dispatch, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { setModelQueue } from "../../../../test-support/settings-dependencies.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { closeSubagentFixtures, launchResults } from "../../../../test-support/home-task-subagents-support.js";
+import { modelQueueProjectionPath } from "../../../providers/model-queue.js";
+import { homeOwnerOf, queueOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 /** A scripted OpenAI-compatible provider with two models: `limited` answers every
  * request with OpenCode Go's plan-limit 429, `fallback` answers `CHILD-DONE`. */

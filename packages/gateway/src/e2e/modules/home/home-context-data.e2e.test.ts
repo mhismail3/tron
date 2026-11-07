@@ -1,14 +1,14 @@
-import { workspaceModule } from "../../workspace/workspace-module.js";
+import { workspaceModule } from "../../../workspace/workspace-module.js";
 import { basename, join } from "node:path";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { disposeFixtures, dispatch, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import type { HomeContextBreakdown } from "../../protocol/types.js";
+import { disposeFixtures, dispatch, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../../test-support/home-task-fixture.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import type { HomeContextBreakdown } from "../../../protocol/types.js";
 
-import { ProfileStore } from "./profile-store.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { ProfileStore } from "../../../modules/home/profile-store.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();

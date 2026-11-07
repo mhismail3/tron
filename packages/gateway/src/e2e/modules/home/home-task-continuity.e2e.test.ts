@@ -2,7 +2,7 @@
  * Stopped or restarted Home workers never block the maintainer (#929). Real RuntimeRegistry,
  * GatewayService and GatewayServer with a faux model.
  */
-import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { displayOwnerOf, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
@@ -10,15 +10,15 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { DeviceStore } from "../../security/device-store.js";
-import { GatewayServer } from "../../transport/server.js";
-import { GatewayService, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
-import { CommandReceiptStore } from "../../transport/command-receipts.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { TRON_ASK_USER_INTERRUPTED } from "../../extensions/tron-ask-user-contract.js";
-import { GatewayProtocolClient } from "../../client/gateway-client.js";
-import { readLocalCredential } from "../../client/local-credential.js";
+import { DeviceStore } from "../../../security/device-store.js";
+import { GatewayServer } from "../../../transport/server.js";
+import { GatewayService, type GatewayServiceDependencies } from "../../../transport/gateway-service.js";
+import { CommandReceiptStore } from "../../../transport/command-receipts.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { TRON_ASK_USER_INTERRUPTED } from "../../../extensions/tron-ask-user-contract.js";
+import { GatewayProtocolClient } from "../../../client/gateway-client.js";
+import { readLocalCredential } from "../../../client/local-credential.js";
 
 const REPO = resolve(process.cwd(), "../..");
 const evidence: Array<Record<string, unknown>> = [];
@@ -103,7 +103,7 @@ describe("resuming a stopped Home worker in place", () => {
     const app = await maintainerClient(f, port);
     // Delay only the real completion stamp, never its result. This puts the
     // later reply's marker collision after agent_settled, as on the live worker.
-    const markers = (f.registry as unknown as { markers: import("../../kernel/run/run-markers.js").RunMarkerStore }).markers;
+    const markers = (f.registry as unknown as { markers: import("../../../kernel/run/run-markers.js").RunMarkerStore }).markers;
     const stamp = markers.reassertAssistantCompletion.bind(markers);
     let releaseStamp!: () => void;
     const stampGate = new Promise<void>(resolve => { releaseStamp = resolve; });
@@ -198,7 +198,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("projects one current row per resumed lineage without merging separate same-title delegations", async () => {
     const f = await fixture(false, true);
     const { service } = await listen(f);
-    const client = { clientId: "lineage-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "lineage-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     const owner = homeOwnerOf(f.registry);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("report", { resultId: "first-result", outcome: "needs-input", text: "Awaiting approval", evidence: ["Retained work"] })], { stopReason: "toolUse" })]);
     const first = await owner.dispatchTask(f.home.sessionId, { taskId: "lineage", intent: "Same title", target: f.cwd });
@@ -227,7 +227,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("pages every canonical check-in and every operation across resumes, beyond the recent-record limit", async () => {
     const f = await fixture(false, true);
     const { service } = await listen(f);
-    const client = { clientId: "history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "history-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     const owner = homeOwnerOf(f.registry);
     const request = { step: "Readable progress", done: "Clean 99a69ce97\nrc65 uncapped 289.538s", next: "Same 4 light/dark captures" };
     f.faux.setResponses([fauxAssistantMessage(Array.from({ length: 14 }, (_, index) => fauxToolCall("checkin", { ...request, step: `Milestone ${index}` })), { stopReason: "toolUse" }), fauxAssistantMessage([reportCall("history-initial")], { stopReason: "toolUse" })]);
@@ -268,7 +268,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("does not present an inherited blocker as the current resumed operation's check-in", async () => {
     const f = await fixture();
     const { service } = await listen(f);
-    const client = { clientId: "current-operation-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "current-operation-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     const owner = homeOwnerOf(f.registry);
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("checkin", { step: "Earlier review", done: "Work retained", next: "Approve", blocker: "Old approval", needsAttention: true })], { stopReason: "toolUse" }),
@@ -284,7 +284,7 @@ describe("resuming a stopped Home worker in place", () => {
     expect(page.items[0]).toMatchObject({ taskId: resumed.taskId, lifecycle: "active", attention: false, checkins: [] });
     expect((await owner.taskStatus(first.taskId)).checkins).toHaveLength(1);
     const retro = await owner.taskTool(f.home.sessionId, { action: "metrics", taskId: resumed.taskId }) as
-      import("./home-task-metrics.js").HomeTaskMetrics;
+      import("../../../modules/home/home-task-metrics.js").HomeTaskMetrics;
     // The resumed record copies the earlier check-in. Count its attributed ID
     // once, retain the blocker verbatim, and never call an active cohort complete.
     expect(retro.tasks[0]).toMatchObject({ taskId: first.taskId, resumes: 1,
@@ -304,7 +304,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("does not number refused resume admissions as worker operations in history", async () => {
     const f = await fixture();
     const { service } = await listen(f);
-    const client = { clientId: "refused-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "refused-history-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     const owner = homeOwnerOf(f.registry);
     f.faux.setResponses([fauxAssistantMessage([reportCall("admitted-first")], { stopReason: "toolUse" }),
       fauxAssistantMessage([reportCall("admitted-next")], { stopReason: "toolUse" })]);
@@ -321,7 +321,7 @@ describe("resuming a stopped Home worker in place", () => {
     expect(page.items.map((row: any) => [row.taskId, row.operationNumber])).toEqual([[resumed.taskId, 2], [first.taskId, 1]]);
     expect((await owner.taskStatus("refused-history.resume-1")).operationId).toBeNull();
     const retro = await owner.taskTool(f.home.sessionId, { action: "metrics", taskId: first.taskId }) as
-      import("./home-task-metrics.js").HomeTaskMetrics;
+      import("../../../modules/home/home-task-metrics.js").HomeTaskMetrics;
     expect(retro.tasks[0]).toMatchObject({ taskId: first.taskId, resumes: 1, operationRecords: 3,
       tokens: { status: "recorded", admittedOperations: 2, recordedOperations: 2 } });
     expect(retro.tasks[0]!.operations.filter(operation => operation.admitted)).toHaveLength(2);
@@ -334,7 +334,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("refuses a history read whose operation settles during canonical evidence loading", async () => {
     const f = await fixture();
     const { service } = await listen(f);
-    const client = { clientId: "racing-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "racing-history-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     let releaseModel!: () => void; let releaseRead!: () => void;
     const modelGate = new Promise<void>(resolve => { releaseModel = resolve; });
     const readGate = new Promise<void>(resolve => { releaseRead = resolve; });
@@ -359,7 +359,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("refuses contradictory persisted lineage links as a typed conflict on both read APIs", async () => {
     const f = await fixture();
     const { service } = await listen(f);
-    const client = { clientId: "invalid-lineage-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "invalid-lineage-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     f.faux.setResponses([fauxAssistantMessage([reportCall("valid-lineage-result")], { stopReason: "toolUse" })]);
     const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "invalid-lineage", intent: "Finite work", target: f.cwd });
     await task.completion;
@@ -376,7 +376,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("does not claim completeness when old nested check-ins outlive their retained evidence", async () => {
     const f = await fixture(false, true);
     const { service } = await listen(f);
-    const client = { clientId: "nested-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "nested-history-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("codemode", { code: 'for (let index = 0; index < 14; index++) await tools.checkin({step: "Nested " + index, done: "Normal spaced prose", next: "Retain history"});' })], { stopReason: "toolUse" }),
       fauxAssistantMessage([reportCall("nested-history-result")], { stopReason: "toolUse" }),
@@ -394,7 +394,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("proves retained nested check-ins complete through cold history reads and refuses foreign lineage cursors", async () => {
     const f = await fixture(false, true);
     const { service } = await listen(f);
-    const client = { clientId: "complete-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "complete-history-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     const owner = homeOwnerOf(f.registry);
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("codemode", { code: 'for (let index = 0; index < 2; index++) await tools.checkin({step: "Nested " + index, done: "Normal spaced prose", next: "Retain history"});' })], { stopReason: "toolUse" }),
@@ -419,7 +419,7 @@ describe("resuming a stopped Home worker in place", () => {
   it("honors the SDK nested-call completeness flag when calls exceed its retained catalog", async () => {
     const f = await fixture(false, true);
     const { service } = await listen(f);
-    const client = { clientId: "capped-history-reader" } as import("../../transport/gateway-service.js").ClientContext;
+    const client = { clientId: "capped-history-reader" } as import("../../../transport/gateway-service.js").ClientContext;
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("codemode", { code: 'for (let index = 0; index < 256; index++) { try { await tools.read({path: "missing-" + index}); } catch {} } await tools.checkin({step: "After the nested catalog cap", done: "Accepted after other calls", next: "Read retained evidence"});' })], { stopReason: "toolUse" }),
       fauxAssistantMessage([reportCall("capped-history-result")], { stopReason: "toolUse" }),
@@ -582,7 +582,7 @@ stopped = Runner(Fixture(), journal).stop_workers()
 journal.finish_step('drain-workers', f'stopped {len(stopped)}')
 journal.settle('succeeded')
 `, join(REPO, "scripts"), store, String(port), f.tronHome, process.execPath, join(REPO, "packages/gateway/node_modules"),
-      String((await import("../../version.js")).PROTOCOL_VERSION), operation, String(process.pid)], { encoding: "utf8" });
+      String((await import("../../../version.js")).PROTOCOL_VERSION), operation, String(process.pid)], { encoding: "utf8" });
     expect(drain.stderr).toBe("");
     expect(await running.completion).toMatchObject({ terminalEvidence: { outcome: "interrupted", reason: "task-stop" } });
     // The dispatch handle can return before the worker session binds; the task record names it.

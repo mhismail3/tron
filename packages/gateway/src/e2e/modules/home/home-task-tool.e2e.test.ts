@@ -6,17 +6,17 @@
  * on the faux model in a real RuntimeRegistry, and their stuck command is a real bash process.
  */
 import { createServer, type Server } from "node:http";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import type { AddressInfo } from "node:net";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { waitFor } from "../../../test-support/wait-for.js";
-import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
-import { disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { WakeInboxOwner } from "./home-wake-inbox.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import type { RuntimeSlot } from "../../../kernel/run/runtime-slot.js";
+import { disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { WakeInboxOwner } from "../../../modules/home/home-wake-inbox.js";
 
 const PROVIDER = "local-anthropic";
 const MODEL_ID = "home-wire";

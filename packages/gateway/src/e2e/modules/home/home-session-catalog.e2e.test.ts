@@ -1,14 +1,14 @@
 import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { CommandReceiptStore } from "../../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
-import { UploadStore } from "../../machine/upload-store.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { CommandReceiptStore } from "../../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../../transport/gateway-service.js";
+import { UploadStore } from "../../../machine/upload-store.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { displayOwnerOf, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 afterEach(disposeFixtures);
 

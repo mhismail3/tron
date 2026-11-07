@@ -1,9 +1,9 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { disposeFixtures, dispatch, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
+import { disposeFixtures, dispatch, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 /** A result that settles after Home's chapter rolled over wakes Home in the reserved
  * successor (#1518). Before the fix the wake was refused `unavailable` and the result

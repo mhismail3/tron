@@ -1,19 +1,19 @@
-import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
-import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../../../../test-support/wait-for.js";
 
 const publication = vi.hoisted(() => ({
   failAfterVisibleWrite: false,
   intercept: undefined as undefined | ((path: string, document: unknown, publish: () => Promise<void>) => Promise<void>),
 }));
-vi.mock("../../foundation/durable-json.js", async importOriginal => {
-  const actual = await importOriginal<typeof import("../../foundation/durable-json.js")>();
+vi.mock("../../../foundation/durable-json.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../../foundation/durable-json.js")>();
   return {
     ...actual,
     durablePublishBoundedJson: async (...args: Parameters<typeof actual.durablePublishBoundedJson>) => {
@@ -30,12 +30,12 @@ vi.mock("../../foundation/durable-json.js", async importOriginal => {
   };
 });
 
-import { TrustService } from "../../kernel/resources/trust-service.js";
-import { TronWorkspace } from "../../workspace/tron-workspace.js";
-import { HomeOwner, type HomeSessionPort } from "./home-owner.js";
-import { homeTaskPolicy } from "./home-task-worker-choice.js";
-import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../../kernel/session/runtime-registry.js";
-import { durableAtomicWriteJson } from "../../foundation/durable-json.js";
+import { TrustService } from "../../../kernel/resources/trust-service.js";
+import { TronWorkspace } from "../../../workspace/tron-workspace.js";
+import { HomeOwner, type HomeSessionPort } from "../../../modules/home/home-owner.js";
+import { homeTaskPolicy } from "../../../modules/home/home-task-worker-choice.js";
+import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../../../kernel/session/runtime-registry.js";
+import { durableAtomicWriteJson } from "../../../foundation/durable-json.js";
 
 const roots: string[] = [];
 const report: Array<{ cut: string; recovered: string; replayed: false }> = [];

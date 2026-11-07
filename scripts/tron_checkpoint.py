@@ -22,7 +22,7 @@ OUTCOMES = [
         "testImageOnlySteerLeavesTheQueueOnceDelivered"], []),
     ("Home continuity and current Profile", ["testHomeStatusShowsHostPressureAndWorkers"], [
         "src/sessions/home-memory-tools.e2e.test.ts",
-        "src/modules/home/home-profile-triage.integration.test.ts"]),
+        "src/e2e/modules/home/home-profile-triage.integration.test.ts"]),
     ("Controls: settings persistence and exact native review", [
         "testSettingsOutsideChangesAndBuiltinExtensionPersist"], [
         "src/e2e/admin/native-change.e2e.test.ts"]),

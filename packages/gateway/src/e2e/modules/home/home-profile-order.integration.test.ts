@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { fixture, readProfilePage } from "../../../test-support/home-profile-fixture.js";
-import { readHomeProfile } from "./home-profile.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
+import { fixture, readProfilePage } from "../../../../test-support/home-profile-fixture.js";
+import { readHomeProfile } from "../../../modules/home/home-profile.js";
 
 it("SQL profile record pages retain native kind/creation/ID ordering across a cursor, not random UUID order", async () => {
   const f = await fixture("profile-order");
