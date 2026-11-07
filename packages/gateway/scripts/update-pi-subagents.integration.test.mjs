@@ -259,6 +259,7 @@ test("fixture Git children never start automatic maintenance", () => {
     writeLooseBlobs(join(target, ".git"), "17", 2);
     const guarded = join(root, "guarded.trace");
     command("git", ["-C", target, "commit", "--allow-empty", "-qm", "guarded"], { env: { ...env, GIT_TRACE2_EVENT: guarded } });
+    assert.ok(existsSync(guarded), "the guarded commit wrote no trace2 events");
     assert.deepEqual(startedGitCommands(guarded).filter((name) => ["maintenance", "gc", "repack"].includes(name)), [], "fixture commit started automatic maintenance");
     // Negative control: the same eligible repository, without the fixture configuration, repacks.
     const unguarded = join(root, "unguarded.trace");
