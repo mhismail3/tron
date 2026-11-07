@@ -969,14 +969,21 @@ export async function publishSelection(paths, next) {
   return { previous: prior, current: next };
 }
 
-export async function rollbackSelection(paths) {
+export async function rollbackSelection(paths, { pendingAttempt = false } = {}) {
   const state = await captureSelectionState(paths);
   if (state.previous === undefined) throw new Error("no previous Gateway selection is available for rollback");
   const prior = selection(JSON.parse(state.previous), paths.channel);
   const current = state.current === undefined ? undefined : selection(JSON.parse(state.current), paths.channel);
+  // A crash between the two writes must leave a state the launcher can start from.
+  // Without a pending-attempt marker nothing else records the target, so it is
+  // selected first. With one, current.json is rewritten last: a `launched` marker
+  // then restores its previous selection while current.json still names its
+  // candidate, `pending` and `committed` markers run the candidate as before, and
+  // any mismatch is refused (tron-gateway-launcher.c).
+  const writes = [[paths.current, prior], ...(current ? [[paths.previous, current]] : [])];
+  if (pendingAttempt) writes.reverse();
   try {
-    if (current) await atomicJson(paths.previous, current);
-    await atomicJson(paths.current, prior);
+    for (const [path, value] of writes) await atomicJson(path, value);
   } catch (error) {
     try { await restoreSelectionState(paths, state); } catch (restoreError) {
       error.message += `; selection restoration failed: ${restoreError.message}`;
@@ -988,8 +995,13 @@ export async function rollbackSelection(paths) {
 
 export async function rollbackSelectionAndClearAttempt(paths) {
   return withPendingAttemptLock(paths, async () => {
-    const result = await rollbackSelection(paths);
-    await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true });
+    const pending = paths.pending ?? join(paths.channelRoot, "pending-attempt.json");
+    const pendingAttempt = await lstat(pending).then(() => true, (error) => {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    });
+    const result = await rollbackSelection(paths, { pendingAttempt });
+    await rm(pending, { force: true });
     return result;
   });
 }
