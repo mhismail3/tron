@@ -182,5 +182,5 @@ ten kept); it never takes a client path or reads session content. RPC records ke
 `method`, `requestID`, `outcome`, `code`, `durationMs`; catalog stages add a
 process-local `workID`; reasons are fixed codes, never exception text or parameters.
 
-Verify: `server-capacity`, `server-revocation`, `server-upload`,
-`server-http-lifecycle` and `sync-protocol` integration tests in this directory.
+Verify: `server-capacity`, `server-upload`, `server-http-lifecycle` and `sync-protocol`
+integration tests in this directory, and the `src/e2e/transport/server-revocation` journey.

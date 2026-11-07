@@ -1,4 +1,4 @@
-import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,16 +6,16 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import WebSocket from "ws";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { AuthBroker } from "../admin/auth-broker.js";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { DeviceStore } from "../security/device-store.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService } from "./gateway-service.js";
-import { GatewayServer } from "./server.js";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { sessionSettingChange, changedRevision, type SessionSetting } from "../../test-support/session-settings-change.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { AuthBroker } from "../../admin/auth-broker.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { DeviceStore } from "../../security/device-store.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService } from "../../transport/gateway-service.js";
+import { GatewayServer } from "../../transport/server.js";
+import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { sessionSettingChange, changedRevision, type SessionSetting } from "../../../test-support/session-settings-change.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle

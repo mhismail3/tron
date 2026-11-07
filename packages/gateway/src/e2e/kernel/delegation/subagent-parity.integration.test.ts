@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,13 +8,13 @@ import { ChildProcess } from "node:child_process";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { TrustService } from "../resources/trust-service.js";
-import { PackageService } from "../../admin/package-service.js";
-import { contextDeliveryMetadataByEntry } from "../receipts/context-delivery-receipts.js";
-import { subagentProcessesFromActivity } from "../projection/process-activity.js";
-import { RuntimeRegistry } from "../session/runtime-registry.js";
-import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../../kernel/resources/trust-service.js";
+import { PackageService } from "../../../admin/package-service.js";
+import { contextDeliveryMetadataByEntry } from "../../../kernel/receipts/context-delivery-receipts.js";
+import { subagentProcessesFromActivity } from "../../../kernel/projection/process-activity.js";
+import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "../../../kernel/delegation/delegated-provider.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 type ParityResourceRow = { name: string; path?: string; [key: string]: unknown };
 type ParityReport = Record<string, unknown> & {
@@ -63,12 +63,12 @@ it("drives managed subagents through single, workflow, question and steering che
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.TRON_TEST_PROCESS_OWNER = root;
     process.env.TRON_TEST_PROCESS_OWNER_FAILURE = join(root, "join-failure.jsonl");
-    process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --import=${fileURLToPath(new URL("../../../test-support/fixture-process-owner.mjs", import.meta.url))}`.trim();
+    process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --import=${fileURLToPath(new URL("../../../../test-support/fixture-process-owner.mjs", import.meta.url))}`.trim();
     await ensureDelegatedArtifactRoot(delegatedArtifactRoot(tronHome));
     delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
     let managedSubagents;
     let managedSource: string | undefined;
-    const modulePath = "./managed-subagents.js";
+    const modulePath = "../../../kernel/delegation/managed-subagents.js";
     const { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } = await import(modulePath);
     managedSubagents = ManagedSubagents.activateForStartup(tronHome);
     managedSource = MANAGED_SUBAGENTS_SOURCE;
@@ -214,7 +214,7 @@ it("drives managed subagents through single, workflow, question and steering che
       // Native process rows above own activity facts/timing. These additional
       // child fields own task and exact child/control admission; aggregate
       // extension counters are not consumed by the native process renderer.
-      const childIdentity = (child: import("../../protocol/types.js").ExtensionRunChild): unknown => normalize({
+      const childIdentity = (child: import("../../../protocol/types.js").ExtensionRunChild): unknown => normalize({
         id: child.id, producerId: child.producerId, label: child.label,
         task: child.task, childSessionRef: child.childSessionRef,
         sessionOwnerId: child.sessionOwnerId,
@@ -334,7 +334,7 @@ it("drives managed subagents through single, workflow, question and steering che
     // producer's wake stays a typed, hidden normal input.
     const api = globals.parityPi!;
     const sender = await (async () => {
-      const { managedProducerAPI } = await import("./managed-producer.js");
+      const { managedProducerAPI } = await import("../../../kernel/delegation/managed-producer.js");
       const owner = { id: "parity-managed-owner", source: managedSource!, title: "Subagents", kind: "subagent" as const };
       return managedProducerAPI(api, owner, (...args) => slot.admitSubagentWake(...args));
     })();
