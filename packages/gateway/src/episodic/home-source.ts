@@ -18,11 +18,12 @@ interface CompactEntry {
   edit?: { targetId: string; projected: EpisodicProjectedMessage };
 }
 
-// A persisted cursor outlives the mount it was taken on, and macOS renumbers a
-// volume's st_dev across reboots and OS updates under byte-identical files.
-// Comparisons with a persisted cursor therefore use inode, size and times (and
-// the content digests the readers prove); `dev` is compared only within one
-// process (one read's stats, or the in-process proof cache).
+// A persisted cursor's file identity (inode, size, times) is a cache key, not
+// evidence: it lets an unchanged chapter skip a read. A copied or restored home
+// holds byte-identical transcripts under new inodes and change times (#2314),
+// and macOS renumbers st_dev across mounts (#2311), so a key mismatch is settled
+// by the admitted prefix's content digest (`holdsAdmittedPrefix`), never by
+// identity alone. `dev` is compared only within one process.
 function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
   return info.ino === cursor.ino && info.size === cursor.size
     && info.mtimeMs === cursor.mtimeMs && info.ctimeMs === cursor.ctimeMs;
@@ -64,6 +65,34 @@ async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, e
   // once complete, as the episodic reader does.
 }
 
+/** Whether a handle holds a cursor's admitted prefix byte for byte: its digest is
+ * re-derived from the first byte, so a rewrite anywhere in it is detected. */
+async function holdsAdmittedPrefix(handle: Awaited<ReturnType<typeof open>>, cursor: EpisodicChapterSourceCursor, size: number, maxLineBytes: number): Promise<boolean> {
+  if (size < cursor.completeBytes) return false;
+  let prefix = COMPLETE_PREFIX_SEED;
+  for await (const bytes of lines(handle, 0, cursor.completeBytes, maxLineBytes)) prefix = extendPrefixDigest(prefix, bytes);
+  return prefix === cursor.completePrefixDigest;
+}
+
+/** A chapter whose cache key changed but whose bytes are the cursor's (same size,
+ * same admitted prefix) is the same chapter at a new file identity: the cursor is
+ * re-keyed to it without re-projecting anything. Otherwise undefined. */
+async function rekeyedCursor(chapter: HomeSourceChapter, cursor: EpisodicChapterSourceCursor, limits: EpisodicLimits): Promise<EpisodicChapterSourceCursor | undefined> {
+  const handle = await open(chapter.path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => fail("Home canonical source cannot be opened"));
+  try {
+    const start = await handle.stat();
+    if (!start.isFile()) fail("Home canonical source is not a regular file");
+    if (start.size !== cursor.size) return undefined;
+    let held: boolean;
+    try { held = await holdsAdmittedPrefix(handle, cursor, start.size, limits.maxSourceLineBytes); } catch (error) {
+      if (error instanceof EpisodicMemoryError && error.kind === "source") held = false; else throw error;
+    }
+    const end = await handle.stat();
+    if (!sameSnapshot(start, end)) throw new EpisodicSourceChangedError();
+    return held ? { ...cursor, sealed: chapter.sealed, dev: end.dev, ino: end.ino, mtimeMs: end.mtimeMs, ctimeMs: end.ctimeMs } : undefined;
+  } finally { await handle.close(); }
+}
+
 function singleProjection(entry: EpisodicCanonicalEntry, limits: EpisodicLimits, sourceSessionId: string): EpisodicProjectedMessage | undefined {
   return projectBranch([entry], limits, sourceSessionId)[0];
 }
@@ -77,7 +106,10 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
   try {
     const start = await handle.stat();
     if (!start.isFile()) fail("Home canonical source is not a regular file");
-    if (previous && (start.ino !== previous.ino || start.size < previous.completeBytes)) {
+    // A new identity (a copy, a restore) extends the cursor only if its whole
+    // admitted prefix is unchanged; the same file needs only its boundary line.
+    if (previous && (start.size < previous.completeBytes
+      || (start.ino !== previous.ino && !await holdsAdmittedPrefix(handle, previous, start.size, limits.maxSourceLineBytes)))) {
       if (chapter.sealed) fail("Home canonical source no longer matches its cursor");
       previous = undefined;
     }
@@ -182,7 +214,8 @@ async function validateSnapshot(snapshot: HomeSourceSnapshot, cursor: EpisodicSo
     if (prior[index] && prior[index]!.sessionId !== chapter.sessionId) fail("Home source chapter order changed");
     const info = await lstat(chapter.path).catch(() => fail("Home canonical source is unavailable"));
     if (!info.isFile()) fail("Home canonical source is not a regular file");
-    if (prior[index]?.sealed && (!chapter.sealed || !unchanged(info, prior[index]!))) fail("Sealed Home source changed since ingestion");
+    // A sealed chapter never grows or shrinks; its bytes are proven where they are read.
+    if (prior[index]?.sealed && (!chapter.sealed || info.size !== prior[index]!.size)) fail("Sealed Home source changed since ingestion");
     stats.push(info);
   }
   return stats;
@@ -209,6 +242,12 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
       chapters[index] = { ...previous, sealed: chapter.sealed };
       continue;
     }
+    const rekeyed = previous && stats[index]!.size === previous.size && await rekeyedCursor(chapter, previous, limits);
+    if (rekeyed) {
+      chapters[index] = rekeyed;
+      continue;
+    }
+    if (previous?.sealed) fail("Sealed Home source changed since ingestion");
     const cut = await compactChapter(chapter, limits, previous);
     chapters[index] = cut.cursor;
     const branchIds = new Set(cut.branch.map(entry => entry.id));
@@ -299,7 +338,8 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
   try {
     const start = await handle.stat();
     if (!start.isFile()) fail("Home canonical source is not a regular file");
-    if (start.ino !== admitted.ino || start.size < admitted.completeBytes) fail("Home canonical source no longer matches its cursor");
+    // Identity is not compared: the admitted digest below is re-derived from bytes.
+    if (start.size < admitted.completeBytes) fail("Home canonical source no longer matches its cursor");
     if (cached && sameStat(cached.stat, start) && provenAt(cached, admitted)) return cached;
     // Only an appended active chapter extends; a sealed one must be unchanged.
     const base = cached && !chapter.sealed && cached.stat.dev === start.dev && cached.stat.ino === start.ino

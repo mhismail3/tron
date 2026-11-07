@@ -33,12 +33,17 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   and drains the pump; `ingestForRead` refreshes only catalog and cursor (no model
   spend; Home's browser uses it with `withBrowserRead`). The memory never opens or
   subscribes to a session file: Home's source streams chapter deltas and a compact
-  ID/parent index for exact cuts. A delta continues from the chapter cursor (inode,
-  size, times, complete offset, last line digest, complete-prefix digest; it records
-  `dev` but never compares it, because macOS renumbers a volume across reboots and
-  OS updates under unchanged files), verifying only an
-  8 KiB window (a same-length rewrite outside it can go unseen); navigation, context
-  edits or a new identity re-read the chapter. A parse failure on a changing file
+  ID/parent index for exact cuts. A chapter cursor holds the complete offset, last
+  line digest and complete-prefix digest, plus a file-identity cache key (inode,
+  size, times; `dev` is recorded but never compared, because macOS renumbers a
+  volume across mounts). An unchanged key skips the chapter. A changed key with the
+  same size and a re-derived prefix digest is the same chapter at a new identity (a
+  copied or restored home): the cursor is re-keyed with no re-projection or spend
+  (bytes after the last newline are never admitted, so they are not proven).
+  The same file appends from the cursor, verifying only an 8 KiB window (a
+  same-length rewrite outside it can go unseen); a new identity extends only after
+  its whole prefix is re-proven. Any other change re-reads an active chapter and
+  refuses a sealed one; navigation and context edits re-read the chapter. A parse failure on a changing file
   leaves the cursor for retry; a stable malformed file blocks `source-unavailable`.
   Partial lines wait for their newline. The Home cursor is strict version 2.
 - **Reads.** `whenReady(cut)` resolves when every view part before `cut` is built
