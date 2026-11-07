@@ -1,13 +1,14 @@
 import type { ExtensionFactory } from "../pi/coding-agent.js";
 
-/** Reviewed provider contract at fork commit 09311618017294453a6689ee187011f7b0c705d4
- * (tron.10 changes only the research role definitions/docs and package version;
- * action, supervisor and blocking-wait semantics are unchanged from tron.9).
+/** Reviewed provider contract at fork commit f72b623067cdfd797db5dd3a6729cef430c54dbf
+ * (tron.11 changes only how a foreground child its parent's stop ended is classified,
+ * stopped rather than failed; action, supervisor and blocking-wait semantics are
+ * unchanged from tron.10).
  * A pin bump must re-review this gate: until then every action of the new
  * version is refused as unverified. async:false is NOT a foreground guarantee:
  * forceTopLevelAsync overrides it, so the task settles any async run it started
  * (HomeTaskDispatcher). */
-const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.10";
+const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.11";
 /** The gate's refusal text. A call it blocks never reaches the provider. It names only what a
  * task still refuses: work that outlives the task, and control of runs the task did not start. */
 export const HOME_TASK_PRODUCER_REFUSAL_REASON = "Home tasks can't schedule work, launch or attach a mission, subscribe to a wake, control a run the task did not start, or use an unverified producer; do the work directly or report back.";
