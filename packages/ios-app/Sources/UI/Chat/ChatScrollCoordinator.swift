@@ -121,6 +121,11 @@ final class ChatScrollCoordinator {
     private(set) var targetReleaseGeneration = 0
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
+    #if HOSTED_TEST
+    /// The distance above the newest end that the last staged catch-up frame
+    /// showed before its smooth final step; read by hosted journeys.
+    private(set) var hostedStagedCatchUpGap: CGFloat?
+    #endif
     private var catchUpUnreadBeforeJump = false
     private var layoutRestore: LayoutRestore?
     private var prepend: PrependContext?
@@ -741,6 +746,9 @@ extension ChatScrollCoordinator {
                     }
                     guard let self, self.presentation == admittedPresentation,
                           self.catchUpPhase == .staged, !self.isUserInteracting else { return }
+                    #if HOSTED_TEST
+                    self.hostedStagedCatchUpGap = self.geometry.distanceFromBottom
+                    #endif
                     self.catchUpTask = nil
                     self.catchUpPhase = .final
                     self.publish(.tail, animation: ChatMotion.catchUpScroll(reduceMotion: false), origin: .catchUp)
