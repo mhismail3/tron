@@ -50,6 +50,9 @@ extension Color {
     /// Subagent seafoam identity; darker light-mode ink keeps sheet controls readable.
     static let tronSubagent = Color(lightHex: "#007D6C", darkHex: "#03C3A8")
     static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
+    /// Automation teal: the chat Automation chip identity (approved chip-category palette).
+    static let tronAutomation = Color(lightHex: "#31889A", darkHex: "#74CBDC")
+    static let tronAutomationText = Color(lightHex: "#1F6675", darkHex: "#8BD8E4")
     /// Knowledge identity: readable deep violet in light mode and lavender in dark mode.
     static let tronKnowledge = Color(lightHex: "#6D3BB8", darkHex: "#C4B5FD")
     static let tronKnowledgeText = Color(lightHex: "#54258F", darkHex: "#DDD6FE")
