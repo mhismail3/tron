@@ -26,7 +26,8 @@ final class TronChatAnnotationUITests: XCTestCase {
         let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
         chip.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
-        let quote = app.otherElements["chat.annotation.quote"]
+        // The sheet's combined quote can surface as either element type.
+        let quote = app.descendants(matching: .any)["chat.annotation.quote"]
         XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(quote.label.contains("Retry policy"), quote.label)
         XCTAssertTrue(quote.label.contains("Accepted prompts continue on the Mac."), quote.label)
