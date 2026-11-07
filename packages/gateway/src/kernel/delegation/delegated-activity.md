@@ -182,7 +182,9 @@ not depend on the Transport logger implementation. Optional logging and metadata
 
 Extension runs keep coarse `status` plus a lifecycle (`queued`, `running`, `paused`,
 `completed`, `failed`, `stopped`, `rejected`, `unknown`); Gateway sequence and terminal latches
-own ordering. Terminal rows get `terminalAt`/`recentUntil` and stay recent 15 minutes (only they
+own ordering. A proven foreground pi-subagents result list whose every result reports `stopped: true` (a
+child its parent's stop ended) is a stopped run with stopped children, not a failure, although
+the tool call ends in error. Terminal rows get `terminalAt`/`recentUntil` and stay recent 15 minutes (only they
 carry `remainingMs`); heartbeats publish one `session.extensionActivity` delta, not a snapshot.
 `extension-activity-history.v1`: `session.extensionActivity.list|get` page reserved
 `tron.extension-activity.v1` receipts (exactly once per activity; identity, label, lifecycle,

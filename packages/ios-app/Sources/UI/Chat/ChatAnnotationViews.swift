@@ -248,10 +248,25 @@ struct ChatAnnotationBubbleHost: View {
     /// its bottom edge as the keyboard rises, so the selection moves by the
     /// same amount and the bubble follows it.
     @State private var capturedRegionMaxY: CGFloat?
+    @State private var selection: TextSelection?
+    /// The comment Shift+Return produced; its newline is an edit, not a save.
+    @State private var lineBreakComment: String?
+    /// A hardware Return also ends the vertical field's editing; after
+    /// Shift+Return's line break the comment takes focus back once.
+    @State private var refocusAfterLineBreak = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let margin: CGFloat = 12
+    private static var returnSaves: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    /// `new` is `old` with exactly one newline typed into it.
+    private static func isTypedNewline(from old: String, to new: String) -> Bool {
+        guard new.count == old.count + 1 else { return false }
+        let old = Array(old), new = Array(new)
+        let index = zip(old, new).prefix { $0 == $1 }.count
+        return new[index] == "\n" && Array(new[(index + 1)...]) == Array(old[index...])
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -279,6 +294,8 @@ struct ChatAnnotationBubbleHost: View {
         .animation(ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion), value: presenter.pending?.id)
         .onChange(of: presenter.pending?.id) { _, id in
             comment = ""
+            selection = nil
+            refocusAfterLineBreak = false
             capturedRegionMaxY = id == nil ? nil : region.maxY
             // Only claim focus. Clearing it on close would resign whichever
             // responder holds the keyboard by then, i.e. the composer after Save.
@@ -299,12 +316,42 @@ struct ChatAnnotationBubbleHost: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("chat.annotation.bubble.quote")
             HStack(alignment: .bottom, spacing: 4) {
-                TextField("Add a comment", text: $comment, axis: .vertical)
+                commentField
                     .font(TronFont.body())
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1...4)
                     .focused($focused)
                     .submitLabel(.done)
+                    // iPad: Return saves like the check. A hardware Return would
+                    // otherwise end editing, so Shift+Return inserts the multi-line
+                    // comment's newline here. iPhone Return stays a newline.
+                    .onKeyPress(.return, phases: .all) { press in
+                        guard Self.returnSaves else { return .ignored }
+                        // Consume the whole press; the field acts on more than key-down.
+                        guard press.phase == .down else { return .handled }
+                        if press.modifiers.contains(.shift) {
+                            insertLineBreak()
+                        } else {
+                            save(comment)
+                        }
+                        return .handled
+                    }
+                    .onChange(of: focused) { _, isFocused in
+                        guard refocusAfterLineBreak else { return }
+                        refocusAfterLineBreak = false
+                        if !isFocused { focused = true }
+                    }
+                    // The on-screen Return key arrives as one typed newline;
+                    // dictation's "new line" stays text.
+                    .onChange(of: comment) { old, new in
+                        guard Self.returnSaves else { return }
+                        defer { lineBreakComment = nil }
+                        if new != lineBreakComment { refocusAfterLineBreak = false }
+                        guard new != lineBreakComment, Self.isTypedNewline(from: old, to: new),
+                              !ChatTextInputFocus.isDictating else { return }
+                        comment = old
+                        save(old)
+                    }
                     .padding(.vertical, 8)
                     .accessibilityLabel("Annotation comment")
                 Button { presenter.cancel() } label: {
@@ -316,12 +363,7 @@ struct ChatAnnotationBubbleHost: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Cancel annotation")
-                Button {
-                    // UIKit moves the keyboard's input target directly from the
-                    // still-installed comment field, so it is never dismissed.
-                    _ = composer.becomeFirstResponder()
-                    presenter.save(comment: comment)
-                } label: {
+                Button { save(comment) } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.sans(size: ComposerControlMetrics.symbolSize, weight: .semibold))
                         .foregroundStyle(accent)
@@ -342,6 +384,53 @@ struct ChatAnnotationBubbleHost: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("chat.annotation.bubble")
     }
+
+    /// Only iPad edits at the selection (Shift+Return); iPhone keeps the
+    /// field without a selection binding.
+    @ViewBuilder private var commentField: some View {
+        if Self.returnSaves {
+            TextField("Add a comment", text: $comment, selection: $selection, axis: .vertical)
+        } else {
+            TextField("Add a comment", text: $comment, axis: .vertical)
+        }
+    }
+
+    private func insertLineBreak() {
+        let range: Range<String.Index> = switch selection?.indices {
+        case .selection(let range)? where range.upperBound <= comment.endIndex: range
+        default: comment.endIndex..<comment.endIndex
+        }
+        let offset = comment.distance(from: comment.startIndex, to: range.lowerBound)
+        comment.replaceSubrange(range, with: "\n")
+        lineBreakComment = comment
+        selection = TextSelection(insertionPoint: comment.index(comment.startIndex, offsetBy: offset + 1))
+        refocusAfterLineBreak = true
+    }
+
+    private func save(_ comment: String) {
+        // UIKit moves the keyboard's input target directly from the
+        // still-installed comment field, so it is never dismissed.
+        _ = composer.becomeFirstResponder()
+        presenter.save(comment: comment)
+    }
+}
+
+/// Whether the focused text input is taking dictation, read from the first
+/// responder that `sendAction` reaches.
+@MainActor
+private enum ChatTextInputFocus {
+    static weak var responder: UIResponder?
+
+    static var isDictating: Bool {
+        responder = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.tronReportFirstResponder), to: nil, from: nil, for: nil)
+        defer { responder = nil }
+        return responder?.textInputMode?.primaryLanguage == "dictation"
+    }
+}
+
+private extension UIResponder {
+    @objc func tronReportFirstResponder() { ChatTextInputFocus.responder = self }
 }
 
 enum ChatAnnotationBubbleLayout {

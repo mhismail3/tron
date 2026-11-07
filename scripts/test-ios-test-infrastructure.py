@@ -1642,6 +1642,21 @@ shutil.copytree(source, clone)
         self.assertEqual(len(self.simctl_calls("create")), 1)
         self.assertEqual(json.loads((lane / "simulator.json").read_text())["udid"], marker["udid"])
 
+    def test_a_named_lane_device_type_survives_the_lease_reexec(self) -> None:
+        """Failure mode 1: an iPad lane provisions an iPad, not the canonical iPhone."""
+        ipad = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB"
+        document = json.loads(self.simulator_inventory.read_text())
+        document["devicetypes"].append({"name": "iPad Pro 13-inch (M5)", "identifier": ipad, "isAvailable": True})
+        for runtime in document["runtimes"]:
+            runtime.setdefault("supportedDeviceTypes", []).append({"name": "iPad Pro 13-inch (M5)", "identifier": ipad})
+        self.simulator_inventory.write_text(json.dumps(document))
+
+        result = self.invoke(lane="ipad", extra_args=["--device-type", "iPad Pro 13-inch (M5)", "--only-testing", "TronMobileUITests/StubTests"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        marker = json.loads((self.root / "ios-test-ipad" / "simulator.json").read_text())
+        self.assertEqual((marker["device_type_name"], marker["device_type_identifier"]), ("iPad Pro 13-inch (M5)", ipad))
+        self.assertEqual(len(self.simctl_calls("create")), 1)
+
     # T-3: one lane's lease must cover every run on that lane's simulator.
     # Failure modes these two cases target, written before the code:
     #
@@ -3027,6 +3042,17 @@ class LaneFixture(LaneHarness, unittest.TestCase):
         self.assertEqual(target.returncode, 74, target.stderr)
         self.assertIn("lane name", target.stderr)
         self.assertEqual(sorted(path.name for path in self.discovery_root.iterdir()), ["ios-test"])
+
+    def test_a_device_type_override_requires_an_explicit_named_lane(self) -> None:
+        """Failure mode 1: another device type never lands in the default or implicit lane."""
+        for arguments in ((), ("--lane", "default")):
+            with self.subTest(arguments=arguments):
+                refused = self.runner("lanes", *arguments, "--device-type", "iPad Pro 13-inch (M5)")
+                self.assertEqual(refused.returncode, 74, refused.stderr)
+                self.assertIn("--device-type requires an explicit named --lane", refused.stderr)
+        environment = {key: value for key, value in self.environment.items() if key != "TRON_IOS_TEST_STATE_DIR"}
+        named = self.runner("lanes", "--lane", "ipad", "--device-type", "iPad Pro 13-inch (M5)", environment=environment)
+        self.assertEqual(named.returncode, 0, named.stderr)
 
     def test_lane_removal_refuses_a_directory_outside_the_lane_root(self) -> None:
         """Failure mode 1: a marker cannot make a lane command remove anything else."""

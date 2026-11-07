@@ -595,11 +595,23 @@ function attention(value: unknown): ExtensionRunAttention {
   return "none";
 }
 
+/** The run state its producer reported. For a proven foreground pi-subagents
+ * result (`piForeground`), a child its parent's stop ended carries `stopped: true`
+ * (pi-subagents' own renderers read it the same way), so a result list whose every
+ * result was stopped reports a stopped run. Other producers report only state/status. */
+function reportedRunState(details: Record<string, unknown> | undefined, foregroundSubagent: boolean): unknown {
+  const explicit = details?.state ?? details?.status;
+  if (explicit !== undefined || !foregroundSubagent) return explicit;
+  const results = Array.isArray(details?.results) ? details.results : [];
+  return results.length > 0 && results.every((result) => record(result)?.stopped === true) ? "stopped" : undefined;
+}
+
 function lifecycleFrom(
   details: Record<string, unknown> | undefined,
+  foregroundSubagent: boolean,
   base: { status: ExtensionRunStatus; updatedAt: string; completedAt?: string; previous?: ExtensionRunActivity; sequence?: number; observedAt?: string; terminalAt?: string; recentUntil?: string },
 ): ExtensionRunLifecycle {
-  const explicit = details?.state ?? details?.status;
+  const explicit = reportedRunState(details, foregroundSubagent);
   const fallback = base.status === "failed" ? "failed" : base.status === "completed" ? "completed" : "running";
   const candidateState = explicit === undefined ? fallback : extensionLifecycleState(explicit);
   const prior = base.previous?.lifecycle;
@@ -699,7 +711,7 @@ function child(
     .slice(0, MAX_EXTENSION_RUN_CHILDREN)
     .map((item, nestedIndex) => child(item, nestedIndex, fallbackStatus, depth + 1, budget, identityStrategy))
     .filter((item): item is ExtensionRunChild => Boolean(item));
-  const childLifecycle = extensionLifecycleState(progress?.state ?? progress?.status ?? source.state ?? source.status,
+  const childLifecycle = identityStrategy === "piForeground" && source.stopped === true ? "stopped" : extensionLifecycleState(progress?.state ?? progress?.status ?? source.state ?? source.status,
     fallbackStatus === "failed" ? "failed" : fallbackStatus === "completed" ? "completed" : "running");
   const childAttention = attention(progress?.attention ?? progress?.attentionState ?? source.attention ?? source.attentionState);
   const task = text(progress?.task ?? source.task ?? source.description ?? source.summary, 2_048);
@@ -747,7 +759,7 @@ function child(
     id: producerId ?? `${label}:${index}`,
     ...(producerId ? { producerId } : {}),
     label,
-    status: status(progress?.status ?? source.status, fallbackStatus),
+    status: childLifecycle === "stopped" ? "completed" : status(progress?.status ?? source.status, fallbackStatus),
     lifecycle: childLifecycle,
     attention: childAttention,
     ...(task ? { task } : {}),
@@ -855,18 +867,21 @@ export function hasStructuredExtensionRunActivity(value: unknown): boolean {
 export function extensionActivityStatusFromTool(
   value: unknown,
   fallback: "running" | "completed" | "failed",
+  foregroundSubagent = false,
 ): { status: "running" | "completed" | "failed"; terminal: boolean; reportedTerminal: boolean } {
   const details = detailsFrom(value);
-  const reported = extensionLifecycleState(details?.state ?? details?.status);
+  const reported = extensionLifecycleState(reportedRunState(details, foregroundSubagent));
   const reportedTerminal = ["completed", "failed", "stopped", "rejected"].includes(reported);
   const reportedCurrent = ["queued", "running", "paused"].includes(reported);
   // asyncDir is an explicit detached-run receipt. The outer extension tool has
   // returned, but the delegated workflow has not reached a terminal state.
   const detachedCurrent = extensionRunAsyncDir(value) !== undefined && !reportedTerminal;
   const terminal = reportedTerminal || (!reportedCurrent && !detachedCurrent && fallback !== "running");
+  // A reported stop is not a failure, even when it ended the tool call in error.
   const status = reportedCurrent || detachedCurrent
     ? "running"
-    : reported === "failed" || fallback === "failed" ? "failed" : terminal ? "completed" : "running";
+    : reported === "failed" ? "failed" : reported === "stopped" ? "completed"
+      : fallback === "failed" ? "failed" : terminal ? "completed" : "running";
   return { status, terminal, reportedTerminal };
 }
 
@@ -916,7 +931,8 @@ export function projectExtensionRunActivity(
       : stepValues.length > 0
         ? stepValues
         : childValues;
-  const explicitStatus = details?.state ?? details?.status;
+  const foregroundSubagent = base.childIdentityStrategy === "piForeground";
+  const explicitStatus = reportedRunState(details, foregroundSubagent);
   const explicitLifecycleState = extensionLifecycleState(explicitStatus);
   const terminalStatus = explicitLifecycleState === "failed"
     ? "failed"
@@ -994,7 +1010,7 @@ export function projectExtensionRunActivity(
         : {};
     })()),
     children: children.length > 0 ? children : previous?.children ?? [],
-    lifecycle: lifecycleFrom(details, {
+    lifecycle: lifecycleFrom(details, foregroundSubagent, {
       status: activityStatus,
       updatedAt: base.updatedAt,
       ...(completedAt ? { completedAt } : {}),
