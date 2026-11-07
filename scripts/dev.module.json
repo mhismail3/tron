@@ -12,55 +12,5 @@
     "tron-dev-state.mjs",
     "tron-dev-state.test.mjs",
     "tron-fsevents-guard"
-  ],
-  "interfaces": [
-    {
-      "name": "scripts/gateway-install-inputs.mjs",
-      "kind": "exec",
-      "consumers": [
-        "mac-app/gateway-payload",
-        "repo/mac"
-      ]
-    },
-    {
-      "name": "scripts/gateway-payload-deploy.mjs",
-      "kind": "exec",
-      "consumers": [
-        "mac-app/gateway-payload",
-        "mac-app/integration-tests",
-        "repo/cli",
-        "repo/ios",
-        "repo/profile",
-        "repo/protocol-contract"
-      ]
-    },
-    {
-      "name": "scripts/tron-dev",
-      "kind": "exec",
-      "consumers": [
-        "mac-app/app",
-        "mac-app/integration-tests",
-        "mac-app/wizard",
-        "repo/cli",
-        "repo/mac"
-      ]
-    },
-    {
-      "name": "scripts/tron-fsevents-guard",
-      "kind": "exec",
-      "consumers": [
-        "repo/mac"
-      ]
-    }
-  ],
-  "uses": [
-    {
-      "name": ".tron-dev",
-      "kind": "fs"
-    },
-    {
-      "name": "deploy.jsonl",
-      "kind": "fs"
-    }
   ]
 }

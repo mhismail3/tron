@@ -133,11 +133,10 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 - `root.module.json` `layout` fixes root entries, `scripts/` top level and frozen paths; its lists only shrink, and
   `scripts/tron ownership` (verify's first step) names each fix. Code, tests and fixtures sit together; repo tooling
   lives beside its tests in `tools/<tool>/` or `scripts/`, runs as `scripts/tron <command>` and opens with a purpose line.
-- Every module carries a [purpose card](tools/ownership/README.md#purpose-cards) (exemptions in `layout.uncarded` only
-  shrink): purpose, interfaces with their consumers, guardians. Read `scripts/tron ownership --card <path>` before editing; a file, module or cross-module reference the card
-  does not declare fails ownership. Move or delete a unit only with its card and callers.
+- A module manifest may state a one-line `purpose` (`scripts/tron ownership --ledger` prints it). Move or delete
+  a unit together with its callers.
 - You own your residue: scratch only in `.scratch/`; before `report` or parking, `scripts/tron tidy --here` exits 0
-  (verify already refuses untracked and unnamed ignored files). Remove a tool with its tests, card entry and `scripts/tron` arm.
+  (verify already refuses untracked and unnamed ignored files). Remove a tool with its tests and `scripts/tron` arm.
 
 ## Documentation
 - Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, `packages/gateway/README.md` (local lanes and hazards in its `AGENTS.md`), `packages/ios-app/docs/`, `packages/mac-app/docs/`,

@@ -1,52 +1,7 @@
 {
   "layer": "L5",
-  "purpose": "The one ownership authority: module manifests, purpose cards, the repository layout and workspace hygiene (tidy).",
+  "purpose": "The one ownership authority: module manifests, the repository layout and workspace hygiene (tidy).",
   "owns": [
     "**"
-  ],
-  "interfaces": [
-    {
-      "name": "tools/ownership",
-      "kind": "import",
-      "consumers": [
-        "repo/cli",
-        "repo/docs-index",
-        "repo/home-layout",
-        "repo/layers",
-        "repo/metrics",
-        "repo/verify"
-      ]
-    },
-    {
-      "name": "tools/ownership/cards.py",
-      "kind": "import",
-      "consumers": [
-        "repo/metrics"
-      ]
-    },
-    {
-      "name": "tools/ownership/layout.py",
-      "kind": "import",
-      "consumers": [
-        "repo/metrics"
-      ]
-    },
-    {
-      "name": "tools/ownership/ownership.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli",
-        "repo/docs-index",
-        "repo/layers",
-        "repo/metrics"
-      ]
-    },
-    {
-      "name": "tools/ownership/tidy.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    }
   ]
 }

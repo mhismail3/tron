@@ -1,47 +1,7 @@
 {
   "layer": "L5",
-  "purpose": "Pre-merge verification, the async full-main batch with causal revert, and on-demand measurements (mutate, probe, health).",
+  "purpose": "Pre-merge verification, the async full-main batch with causal revert, and on-demand measurements (mutate, health).",
   "owns": [
     "**"
-  ],
-  "interfaces": [
-    {
-      "name": "tools/verify/gateway.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    },
-    {
-      "name": "tools/verify/health.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    },
-    {
-      "name": "tools/verify/mutate.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    },
-    {
-      "name": "tools/verify/verify.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    }
-  ],
-  "uses": [
-    {
-      "name": "TRON_FULL_GATEWAY_LOCK_HELD",
-      "kind": "env"
-    },
-    {
-      "name": "/tmp/tron-full-gateway.lock",
-      "kind": "fs"
-    }
   ]
 }

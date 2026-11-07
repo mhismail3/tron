@@ -86,7 +86,7 @@ the build that stamped it). Python unittest counts exclude skipped and expected-
 cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 ## Static checks (existing tools only)
-1. `scripts/tron ownership`, including each module's [purpose card](../ownership/README.md#purpose-cards)
+1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer
 3. `scripts/tron budgets HEAD` (sizes are reported; few cases fail)
 4. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check

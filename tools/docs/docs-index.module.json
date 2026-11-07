@@ -3,22 +3,5 @@
   "purpose": "Generated documentation blocks (indexes, settings keys, signals) and their check.",
   "owns": [
     "**"
-  ],
-  "interfaces": [
-    {
-      "name": "tools/docs",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli",
-        "repo/verify"
-      ]
-    },
-    {
-      "name": "tools/docs/docs.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    }
   ]
 }

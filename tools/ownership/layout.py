@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-KEYS = {"root", "scriptsTop", "frozen", "uncarded"}
+KEYS = {"root", "scriptsTop", "frozen"}
 TEST_NAME = re.compile(r"(^test[-_].+\.(py|sh|js|mjs)$)|(\.test\.(ts|mjs|js)$)|(Tests?\.swift$)")
 SWIFT_TEST_DIRS = {"UITests", "E2ETests", "ProfilingTests", "SwiftAppUITests", "Tests"}
 NO_TESTS = {"docs", "config", ".agents", ".github"}
@@ -98,9 +98,8 @@ def problems(layout: dict, paths: list[str], modes: dict[str, str], read, base: 
                            "SwiftAppUITests/, Tests/), not app sources")
 
     if base is not None and not schema(base):
-        for key in ("root", "scriptsTop", "uncarded"):
-            fix = "card the module instead (tools/ownership/README.md, \"Purpose cards\")" if key == "uncarded" \
-                else f"put the file where it belongs instead ({WHERE})"
+        for key in ("root", "scriptsTop"):
+            fix = f"put the file where it belongs instead ({WHERE})"
             for entry in sorted(set(layout[key]) - set(base[key])):
                 out.append(f"layout: root.module.json layout.{key} gained {entry!r} since origin/main; these lists only "
                            f"shrink: {fix}")

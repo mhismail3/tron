@@ -3,37 +3,5 @@
   "purpose": "GitHub issue, Project and comment writes through one audited, privacy-guarded owner (scripts/tron work).",
   "owns": [
     "**"
-  ],
-  "interfaces": [
-    {
-      "name": "tools/work",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli",
-        "repo/ios",
-        "repo/verify"
-      ]
-    },
-    {
-      "name": "tools/work/cli.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    },
-    {
-      "name": "tools/work/work.json",
-      "kind": "read",
-      "consumers": [
-        "repo/cli",
-        "repo/verify"
-      ]
-    }
-  ],
-  "uses": [
-    {
-      "name": "gh",
-      "kind": "cli"
-    }
   ]
 }

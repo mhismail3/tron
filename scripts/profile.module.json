@@ -15,46 +15,5 @@
     "tron-profile-relay.mjs",
     "tron_profile_attribution.py",
     "tron_profile_report.py"
-  ],
-  "interfaces": [
-    {
-      "name": "scripts/tron-profile",
-      "kind": "exec",
-      "consumers": [
-        "ios-app/package",
-        "ios-app/profiling",
-        "repo/ios",
-        "repo/verify"
-      ],
-      "external": "maintainer and agents profiling (packages/ios-app/docs/performance.md)"
-    },
-    {
-      "name": "scripts/tron-profile-gateway",
-      "kind": "exec",
-      "consumers": [
-        "gateway/lifecycle"
-      ]
-    },
-    {
-      "name": "scripts/tron-profile-gateway-driver.mjs",
-      "kind": "read",
-      "consumers": [
-        "repo/protocol-contract"
-      ]
-    },
-    {
-      "name": "scripts/tron-profile-ios",
-      "kind": "exec",
-      "consumers": [
-        "ios-app/profiling",
-        "repo/ios"
-      ]
-    }
-  ],
-  "uses": [
-    {
-      "name": "xctrace",
-      "kind": "cli"
-    }
   ]
 }

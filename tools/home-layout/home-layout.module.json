@@ -3,22 +3,5 @@
   "purpose": "Checks tracked source and Tron homes against the one Tron-home path registry; reports retention, plans prunes and runs the offline layout migration.",
   "owns": [
     "**"
-  ],
-  "interfaces": [
-    {
-      "name": "tools/home-layout",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli",
-        "repo/verify"
-      ]
-    },
-    {
-      "name": "tools/home-layout/home_layout.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    }
   ]
 }
