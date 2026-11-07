@@ -208,9 +208,12 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> UITextView {
+        // The subclass uses its designated initializer, which runs its stored
+        // property initializers; `init(usingTextLayoutManager:)` does not on
+        // iOS 27. A nil container selects TextKit 2.
         let view: UITextView = messageBlocks == nil
             ? UITextView(usingTextLayoutManager: true)
-            : ChatSelectableMessageTextView(usingTextLayoutManager: true)
+            : ChatSelectableMessageTextView(frame: .zero, textContainer: nil)
         view.isEditable = false
         view.isSelectable = isSelectable
         view.isScrollEnabled = false
