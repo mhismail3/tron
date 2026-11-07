@@ -291,7 +291,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
 private struct ChatSelectableAccessibilitySegment: Equatable {
     let label: String
     let range: NSRange
-    let isHeading: Bool
 }
 
 @MainActor
@@ -307,7 +306,7 @@ private final class ChatSelectableMessageTextView: UITextView {
             segmentElements = segments.map { segment in
                 let element = UIAccessibilityElement(accessibilityContainer: self)
                 element.accessibilityLabel = segment.label
-                element.accessibilityTraits = segment.isHeading ? [.staticText, .header] : .staticText
+                element.accessibilityTraits = .staticText
                 return element
             }
             accessibilityElements = segmentElements
@@ -371,17 +370,17 @@ enum ChatSelectableTextLayout {
             switch block.kind {
             case .paragraph(let inline):
                 let length = renderedString(inline).utf16.count
-                segments.append(.init(label: inline.accessibilitySource, range: NSRange(location: offset, length: length), isHeading: false))
+                segments.append(.init(label: inline.accessibilitySource, range: NSRange(location: offset, length: length)))
                 offset += length
             case .heading(_, let inline):
                 let length = renderedString(inline).utf16.count
-                segments.append(.init(label: inline.accessibilitySource, range: NSRange(location: offset, length: length), isHeading: true))
+                segments.append(.init(label: inline.accessibilitySource, range: NSRange(location: offset, length: length)))
                 offset += length
             case .list(let items):
                 for (itemIndex, item) in items.enumerated() {
                     if itemIndex > 0 { offset += 1 }
                     let length = (item.marker + " " + renderedString(item.inline)).utf16.count
-                    segments.append(.init(label: item.inline.accessibilitySource, range: NSRange(location: offset, length: length), isHeading: false))
+                    segments.append(.init(label: "\(item.marker) \(item.inline.accessibilitySource)", range: NSRange(location: offset, length: length)))
                     offset += length
                 }
             default:
@@ -418,16 +417,18 @@ enum ChatSelectableTextLayout {
                 for item in items {
                     if result.length > start { result.append(NSAttributedString(string: "\n")) }
                     let itemStart = result.length
-                    result.append(NSAttributedString(string: "\(item.marker) ", attributes: [
+                    let marker = NSAttributedString(string: "\(item.marker) ", attributes: [
                         .font: scaledFont(size: style.size, weight: style.weight, traits: traits),
                         .foregroundColor: UIColor(style.color).resolvedColor(with: traits),
-                    ]))
+                    ])
+                    result.append(marker)
                     result.append(attributedText(item.inline, style: style, highlights: [], traits: traits))
                     let range = NSRange(location: itemStart, length: result.length - itemStart)
                     let paragraph = NSMutableParagraphStyle()
                     paragraph.lineBreakMode = .byWordWrapping
                     paragraph.firstLineHeadIndent = CGFloat(item.depth) * 14
-                    paragraph.headIndent = CGFloat(item.depth) * 14 + 16
+                    // Wrapped lines align with the item's text, after its marker.
+                    paragraph.headIndent = CGFloat(item.depth) * 14 + ceil(marker.size().width)
                     paragraph.paragraphSpacing = 5
                     result.addAttribute(.paragraphStyle, value: paragraph, range: range)
                 }

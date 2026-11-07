@@ -62,7 +62,6 @@ struct TronMarkdownView: View {
                                 itemID: annotationSource.itemID,
                                 blockKey: blockKey
                             ),
-                            isSelectable: !dynamicTypeSize.isAccessibilitySize,
                             onAnnotate: { quote, selectedRange, rect in
                                 annotationPresenter.begin(ChatAnnotationRequest(
                                     quote: quote,
