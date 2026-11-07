@@ -19,6 +19,7 @@ import { type ChangeOutcome, type ChangeRequest, type SettingsTarget, QUALIFIER_
 import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { SECTIONS, recordSubject } from "../kernel/settings/settings-schema.js";
 import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, HomeProfileItems, type HomeProfileRequest } from "../modules/home/home-profile.js";
+import { profilePath } from "../modules/home/profile-placement.js";
 import type { ObservedStore } from "../kernel/settings/settings-types.js";
 import { presentHistoryEntry, presentResolution } from "../admin/settings-presentation.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, rejectUnknownFields, string, text as boundedText } from "../util/validation.js";
@@ -152,8 +153,9 @@ function profileChangeOp(raw: unknown, label: string): HomeProfileRequest {
     return { action, assignments: value.assignments.map((raw, index) => {
       const assignment = object(raw, `${label}.assignments[${index}]`);
       rejectUnknownFields(assignment, ["id", "expectedRevision", "path"], label);
-      return { id: string(assignment.id, "id", { max: 200 }), expectedRevision: string(assignment.expectedRevision, "expectedRevision", { min: 16, max: 80 }),
-        path: string(assignment.path, "path", { min: 1, max: 131 }) };
+      const path = string(assignment.path, "path", { min: 1, max: 131 });
+      try { profilePath(path); } catch (error) { throw new GatewayError("invalid_request", (error as Error).message); }
+      return { id: string(assignment.id, "id", { max: 200 }), expectedRevision: string(assignment.expectedRevision, "expectedRevision", { min: 16, max: 80 }), path };
     }) };
   }
   const allowed = {
