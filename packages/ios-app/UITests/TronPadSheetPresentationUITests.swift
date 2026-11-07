@@ -183,6 +183,34 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         XCTAssertEqual(gear.frame.minX, gearClosed.minX, accuracy: 1, "The gear returns with it")
     }
 
+    /// Window widths across the 1100 pt threshold (simulated: the mode resolves
+    /// from `-tron-scene-width-override`, the window itself stays full screen).
+    /// At and above it Manage Home is a trailing column; below it one centered
+    /// card. Neither strands the sheet off screen or clips its content.
+    @MainActor
+    func testSheetModeFollowsSimulatedWindowWidthAcrossTheThreshold() {
+        for (width, column) in [(1210, true), (1100, true), (1099, false), (900, false), (700, false)] {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-tron-scene-width-override", "\(width)"]
+            app.launch()
+            let window = app.windows.firstMatch.frame
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            let sheet = sheetFrame(app, title: "Manage Home", done: app.buttons["home-sheet-done-manage"])
+            keepScreenshot(app, "simulated-width-\(width)")
+            if column {
+                assertTrailingColumn(sheet, in: window)
+            } else {
+                XCTAssertEqual(sheet.midX, window.midX, accuracy: 6, "\(width) pt: a centered card: \(sheet) in \(window)")
+            }
+            XCTAssertGreaterThanOrEqual(sheet.minX, window.minX, "\(width) pt: not stranded off the leading edge")
+            XCTAssertLessThanOrEqual(sheet.maxX, window.maxX + 1, "\(width) pt: not clipped at the trailing edge")
+            app.terminate()
+        }
+    }
+
     /// Portrait full screen is narrower than the side-column threshold: one
     /// large centered sheet that a title drag does not resize.
     @MainActor

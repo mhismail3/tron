@@ -7,25 +7,32 @@ import XCTest
 /// windowed iPad scene fills.
 @MainActor
 final class TronDashboardWindowedHeaderUITests: XCTestCase {
-    private func launch(_ extra: [String]) -> XCUIApplication {
-        XCUIDevice.shared.orientation = .landscapeLeft
+    private func launch(_ extra: [String], _ orientation: UIDeviceOrientation = .landscapeLeft) -> XCUIApplication {
+        XCUIDevice.shared.orientation = orientation
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-dashboard-view-home"] + extra
         app.launch()
         return app
     }
 
-    func testWindowedTitleSitsInlineBesideTheLightsWithNoExtraInset() throws {
+    func testWindowedTitleSitsInlineBesideTheLightsAtSeveralControlSizes() throws {
+        for (inset, orientation) in [("72,40", UIDeviceOrientation.landscapeLeft), ("96,44", .landscapeLeft), ("72,40", .portrait)] {
+            try windowed(inset, orientation)
+        }
+    }
+
+    private func windowed(_ inset: String, _ orientation: UIDeviceOrientation) throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "Windowed mode is an iPad scene state")
-        let app = launch(["-tron-window-controls-inset", "72,40"])
+        let app = launch(["-tron-window-controls-inset", inset], orientation)
         defer { app.terminate() }
         let title = app.staticTexts["dashboard.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 15), app.debugDescription)
         Thread.sleep(forTimeInterval: 1.5)
         let frame = title.frame
         keep(app, "windowed-header-rest", "title=\(frame)")
-        XCTAssertGreaterThanOrEqual(frame.minX, 72, "The title sits right of the window controls: \(frame)")
-        XCTAssertEqual(frame.midY, 20, accuracy: 4, "The title is vertically centred with the lights: \(frame)")
+        XCTAssertGreaterThanOrEqual(frame.minX, Double(inset.split(separator: ",")[0])!, "The title sits right of the window controls: \(frame)")
+        let centre = Double(inset.split(separator: ",")[1])! / 2
+        XCTAssertEqual(frame.midY, centre, accuracy: 4, "The title is vertically centred with the lights: \(frame)")
         let list = app.collectionViews.firstMatch
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session-row'")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
@@ -33,7 +40,7 @@ final class TronDashboardWindowedHeaderUITests: XCTestCase {
         list.swipeUp(velocity: .slow)
         Thread.sleep(forTimeInterval: 1)
         keep(app, "windowed-header-scrolled", "title=\(title.frame)")
-        XCTAssertEqual(title.frame.midY, 20, accuracy: 4, "The inline title stays centred with the lights when scrolled")
+        XCTAssertEqual(title.frame.midY, centre, accuracy: 4, "The inline title stays centred with the lights when scrolled")
     }
 
     func testFullScreenKeepsTheLargeHeader() throws {

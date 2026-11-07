@@ -72,12 +72,25 @@ struct TronPadSheetPresented: PreferenceKey {
 
 /// Resolves the scene's iPad sheet mode from its width. Scene roots apply it once.
 struct TronPadSheetSceneMode: ViewModifier {
+    #if HOSTED_TEST
+    /// Simulated windowed width: a simulator cannot be put in Stage Manager, so a
+    /// test names the width the mode resolves from (`-tron-scene-width-override`).
+    /// Layout still uses the real window; only the mode decision is simulated.
+    private static let widthOverride: CGFloat? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-tron-scene-width-override"), arguments.indices.contains(index + 1) else { return nil }
+        return Double(arguments[index + 1]).map { CGFloat($0) }
+    }()
+    #else
+    private static let widthOverride: CGFloat? = nil
+    #endif
+
     @State private var scene = TronPadSheetScene()
 
     func body(content: Content) -> some View {
         content
             .environment(\.tronPadSheetScene, scene)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scene.width = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scene.width = Self.widthOverride ?? $0 }
     }
 }
 
@@ -123,7 +136,11 @@ struct TronSideColumnPanel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background { Color.clear.accessibilityElement().accessibilityIdentifier("tron-scene-panel").allowsHitTesting(false) }
-            .clipShape(RoundedRectangle(cornerRadius: isOpen ? TronPadSheetMode.panelCornerRadius : 0, style: .continuous))
+            // A mask, not a clip: a clip cuts at the layout frame, which excludes the
+            // safe areas, so the scene's background stopped at the status bar and
+            // home indicator and the window behind showed as black bars. The mask
+            // extends under them and only rounds the corners while a column is open.
+            .mask { RoundedRectangle(cornerRadius: isOpen ? TronPadSheetMode.panelCornerRadius : 0, style: .continuous).ignoresSafeArea() }
             .padding(.trailing, isOpen ? TronPadSheetMode.sideColumnReflowInset : 0)
             .background(isOpen ? Color(uiColor: .systemGroupedBackground) : .clear)
             .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 1), value: isOpen)
