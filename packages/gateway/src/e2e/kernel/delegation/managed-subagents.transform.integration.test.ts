@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
 import { chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -6,10 +6,10 @@ import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { TrustService } from "../resources/trust-service.js";
-import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
-import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import type { RuntimeRegistry } from "../session/runtime-registry.js";
+import { TrustService } from "../../../kernel/resources/trust-service.js";
+import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../../../kernel/delegation/managed-subagents.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../../../kernel/delegation/delegated-provider.js";
+import type { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 
 /** Real Gateway session starts from a fresh install root, so the closure's
  * TypeScript has never been transformed for this build. */

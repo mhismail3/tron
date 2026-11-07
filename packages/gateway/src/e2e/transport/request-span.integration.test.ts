@@ -1,5 +1,5 @@
-import { TEST_SETTINGS_SCHEMA } from "../../test-support/settings-schema.js";
-import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
+import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
+import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -11,21 +11,21 @@ import WebSocket from "ws";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { AuthBroker } from "../admin/auth-broker.js";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { SettingsStoreAdapter } from "../admin/settings-model.js";
-import { SettingsModel } from "../kernel/settings/settings-model.js";
-import { UploadStore } from "../machine/upload-store.js";
-import { DeviceStore } from "../security/device-store.js";
-import { MacTerminalService } from "../security/mac-terminal-service.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { PROTOCOL_VERSION } from "../version.js";
-import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService, type GatewayServiceDependencies } from "./gateway-service.js";
-import { GatewayLogger, type LogRecord } from "./logger.js";
-import { GatewayServer } from "./server.js";
-import { RequestSpan, runInRequestSpan } from "../util/request-span.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { AuthBroker } from "../../admin/auth-broker.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { SettingsStoreAdapter } from "../../admin/settings-model.js";
+import { SettingsModel } from "../../kernel/settings/settings-model.js";
+import { UploadStore } from "../../machine/upload-store.js";
+import { DeviceStore } from "../../security/device-store.js";
+import { MacTerminalService } from "../../security/mac-terminal-service.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { PROTOCOL_VERSION } from "../../version.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { GatewayLogger, type LogRecord } from "../../transport/logger.js";
+import { GatewayServer } from "../../transport/server.js";
+import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * Proves the request span's breakdown reaches the real log writer: every
@@ -37,7 +37,7 @@ import { waitFor } from "../../test-support/wait-for.js";
  *
  * The exact breakdown and its request attribution are retained at
  * `packages/gateway/test-results/request-span.integration.json`, gitignored and
- * regenerated with `node_modules/.bin/vitest run src/transport/request-span.integration.test.ts`.
+ * regenerated with `node_modules/.bin/vitest run src/e2e/transport/request-span.integration.test.ts`.
  * This gating test proves the structural contract only. The >=95% accounted-share
  * benchmark is tracked by #157; host scheduling under load contributes to that
  * ratio, so it is not a timing gate here.

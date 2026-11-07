@@ -1,4 +1,4 @@
-import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,15 +7,15 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import WebSocket from "ws";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { DeviceStore } from "../security/device-store.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { SessionSearchIndex } from "../sessions/session-search-index.js";
-import { SessionSearchService } from "../sessions/session-search-service.js";
-import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService } from "./gateway-service.js";
-import { GatewayServer } from "./server.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { DeviceStore } from "../../security/device-store.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { SessionSearchIndex } from "../../sessions/session-search-index.js";
+import { SessionSearchService } from "../../sessions/session-search-service.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService } from "../../transport/gateway-service.js";
+import { GatewayServer } from "../../transport/server.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored so an operator can inspect exactly what the archive contract
@@ -650,7 +650,7 @@ describe("session archive over the real Gateway", () => {
     const session = await f.coldSession("recovered-automation");
     // A recovered automation run's marker is restored at startup, and a row
     // with no live summary and no slot reads its phase from that set alone.
-    const { RunMarkerStore } = await import("../kernel/run/run-markers.js");
+    const { RunMarkerStore } = await import("../../kernel/run/run-markers.js");
     const operationId = "automation:10000000-0000-4000-8000-0000000000a9";
     await new RunMarkerStore(f.root).mark(session.id, operationId);
     const restarted = await f.restart();
@@ -2189,7 +2189,7 @@ describe("command-driven session replacement over the real Gateway", () => {
     // Both origin writes start while the origin is bound; forcing them to fail
     // until the rebind has committed makes each succeed only on a retry after
     // the identity changed, which must still target the origin.
-    const { RunMarkerStore } = await import("../kernel/run/run-markers.js");
+    const { RunMarkerStore } = await import("../../kernel/run/run-markers.js");
     let rebound = false;
     const append = SessionManager.prototype.appendCustomEntry;
     vi.spyOn(SessionManager.prototype, "appendCustomEntry").mockImplementation(function (this: SessionManager, customType, data) {

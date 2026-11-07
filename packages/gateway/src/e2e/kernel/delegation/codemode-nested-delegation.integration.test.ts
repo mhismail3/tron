@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,10 +6,10 @@ import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../resources/trust-service.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "../receipts/extension-activity-history.js";
-import { RuntimeRegistry } from "../session/runtime-registry.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../../kernel/resources/trust-service.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "../../../kernel/receipts/extension-activity-history.js";
+import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];

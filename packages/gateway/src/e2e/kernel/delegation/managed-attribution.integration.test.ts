@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
@@ -6,21 +6,21 @@ import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager, type AgentSession, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { TrustService } from "../resources/trust-service.js";
-import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
-import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
-import { RuntimeRegistry } from "../session/runtime-registry.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { managedProducerAPI } from "./managed-producer.js";
-import { producerIdentity } from "../host/extension-registration.js";
-import { withExtensionOwner } from "../host/extension-execution-context.js";
+import { TrustService } from "../../../kernel/resources/trust-service.js";
+import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../../../kernel/delegation/managed-subagents.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "../../../kernel/delegation/delegated-provider.js";
+import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { managedProducerAPI } from "../../../kernel/delegation/managed-producer.js";
+import { producerIdentity } from "../../../kernel/host/extension-registration.js";
+import { withExtensionOwner } from "../../../kernel/host/extension-execution-context.js";
 import { AsyncResource } from "node:async_hooks";
 import { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "../receipts/context-delivery-receipts.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
-import { invocationProjection, invocationReceipts } from "../receipts/invocation-receipts.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "../receipts/extension-activity-history.js";
+import { makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "../../../kernel/receipts/context-delivery-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../../../kernel/receipts/delivery-tags.js";
+import { invocationProjection, invocationReceipts } from "../../../kernel/receipts/invocation-receipts.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "../../../kernel/receipts/extension-activity-history.js";
 
 it("attributes real workflow completion and supervisor delivery to their managed producer", async ({ task }) => {
   const root = await mkdtemp(join(tmpdir(), "tron-managed-attribution-"));
@@ -59,7 +59,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.TRON_TEST_PROCESS_OWNER = root;
     process.env.TRON_TEST_PROCESS_OWNER_FAILURE = join(root, "process-owner-failure.jsonl");
-    const preload = fileURLToPath(new URL("../../../test-support/fixture-process-owner.mjs", import.meta.url));
+    const preload = fileURLToPath(new URL("../../../../test-support/fixture-process-owner.mjs", import.meta.url));
     process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --import=${preload}`.trim();
     await ensureDelegatedArtifactRoot(delegatedArtifactRoot(tronHome));
     delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));

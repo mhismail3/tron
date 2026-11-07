@@ -1,4 +1,4 @@
-import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { request } from "node:http";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,14 +8,14 @@ import WebSocket from "ws";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { DeviceStore } from "../security/device-store.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService } from "./gateway-service.js";
-import { GatewayServer } from "./server.js";
-import type { AsyncMutex } from "../util/async-mutex.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { DeviceStore } from "../../security/device-store.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService } from "../../transport/gateway-service.js";
+import { GatewayServer } from "../../transport/server.js";
+import type { AsyncMutex } from "../../util/async-mutex.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 function gate() {
   let resolve!: () => void;

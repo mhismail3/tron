@@ -1,17 +1,17 @@
-import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
-import { TrustService } from "../resources/trust-service.js";
-import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { ManagedSubagents } from "./managed-subagents.js";
-import { RuntimeRegistry } from "../session/runtime-registry.js";
-import type { RuntimeSlot } from "../run/runtime-slot.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../../kernel/resources/trust-service.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../../../kernel/delegation/delegated-provider.js";
+import { ManagedSubagents } from "../../../kernel/delegation/managed-subagents.js";
+import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
+import type { RuntimeSlot } from "../../../kernel/run/runtime-slot.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 // Failure modes: managed loader/admission leaks into Home, or its resource read
 // still discovers external agents. Exercise real profile owners and SDK reloads.
