@@ -166,6 +166,9 @@ describe("WorkspaceInspectionService", () => {
     expect(registered.toString("utf8")).toBe("let value = 1\n");
     await expect(service.list(root, "linked")).rejects.toMatchObject({ code: "invalid_request" });
     await expect(service.file(root, "../outside")).rejects.toMatchObject({ code: "invalid_request" });
+    for (const read of [() => service.list(root, "Sources/gone"), () => service.file(root, "Sources/gone.swift"), () => service.file(root, "gone/File.swift")]) {
+      await expect(read()).rejects.toMatchObject({ code: "not_found", message: "Workspace path does not exist" });
+    }
   });
 
   it("rejects directory listings above the bounded entry ceiling", async () => {
