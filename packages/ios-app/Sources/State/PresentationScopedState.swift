@@ -164,7 +164,7 @@ struct TronPresentationStateRoot: ViewModifier {
     @State private var lifetime = PresentationStateLifetime()
 
     func body(content: Content) -> some View {
-        content.modifier(TronNativeSheetCanvas(reflowsBesideSideColumn: true))
+        content.modifier(TronNativeSheetCanvas(role: .scene))
             .environment(\.tronPresentationStateStore, lifetime.store)
             .modifier(TronPadSheetSceneMode())
     }

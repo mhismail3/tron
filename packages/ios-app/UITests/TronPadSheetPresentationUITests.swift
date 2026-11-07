@@ -5,6 +5,8 @@ import XCTest
 /// the chat interactive, and a narrower scene shows one large centered sheet. iPhone keeps native detent sheets
 /// (`TronSmokeUITests.testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings`).
 /// Run on an iPad lane: `scripts/tron-ios-test run --lane ipad --device-type "iPad Pro 13-inch (M5)"`.
+private enum TronPadGeometry { static let gap: CGFloat = 12 }
+
 final class TronPadSheetPresentationUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -71,6 +73,66 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         keepScreenshot(app, "ipad-landscape-manage-home-home-settings-stacked")
         assertChatInteractive(app, beside: child, typing: "Typed beside Home Settings")
         XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].exists, "Using the chat must not dismiss Home Settings")
+    }
+
+    /// A session chat's own sheet follows the same owner as Home's.
+    @MainActor
+    func testWideLandscapeSessionSheetIsATrailingColumn() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(window.width, 1100, "Full-screen landscape iPad is wide")
+        let stop = app.descendants(matching: .any)["Stop session"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 10), app.debugDescription)
+        stop.tap()
+        let done = app.navigationBars.containing(.staticText, identifier: "Manage Session").buttons["Done"].firstMatch
+        let sheet = sheetFrame(app, title: "Manage Session", done: done)
+        assertTrailingColumn(sheet, in: window)
+        keepScreenshot(app, "ipad-landscape-manage-session")
+    }
+
+    /// The dashboard's New Session sheet follows the same owner as Manage Home:
+    /// a trailing column pinned to the window's trailing edge, the dashboard
+    /// panel narrowed beside it, and nothing clipped or overlapping.
+    @MainActor
+    func testWideLandscapeDashboardNewSessionIsAPinnedColumnBesideTheShrunkenList() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(window.width, 1100)
+        let menuButton = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menuButton.waitForExistence(timeout: 15), app.debugDescription)
+        let listBefore = app.collectionViews.firstMatch.frame
+        menuButton.press(forDuration: 0.3)
+        let item = app.buttons["New Session"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), app.debugDescription)
+        item.tap()
+        let title = app.staticTexts["New Session"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 8), app.debugDescription)
+        Thread.sleep(forTimeInterval: 1.5)
+        keepScreenshot(app, "ipad-landscape-dashboard-new-session")
+        let panel = app.descendants(matching: .any)["tron-scene-panel"].firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5), app.debugDescription)
+        let sheet = sheetFrame(app, title: "New Session", done: app.buttons["Create"].firstMatch)
+        assertTrailingColumn(sheet, in: window)
+        let list = app.collectionViews.firstMatch.frame
+        XCTAssertLessThan(list.width, listBefore.width - 300, "The dashboard list narrows beside the column: \(list) from \(listBefore)")
+        XCTAssertLessThanOrEqual(list.maxX, sheet.minX, "The list does not sit under the sheet: \(list) vs \(sheet)")
+        XCTAssertLessThanOrEqual(panel.frame.maxX, sheet.minX, "The panel and column do not overlap")
+        // The column is 420 pt wide with its title centered: its leading edge is exact where `sheetFrame` is estimated.
+        let columnMinX = title.frame.midX - 210
+        XCTAssertEqual(columnMinX - panel.frame.maxX, TronPadGeometry.gap, accuracy: 3, "A constant gap separates the panels")
+        XCTAssertLessThanOrEqual(sheet.maxX, window.maxX + 1, "The column is not clipped by the window")
+        let chips = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'new-session-card.'")).allElementsBoundByIndex
+        for chip in chips where chip.exists {
+            XCTAssertLessThanOrEqual(chip.frame.maxX, sheet.maxX + 1, "\(chip.identifier) is not clipped at the column edge: \(chip.frame) in \(sheet)")
+        }
     }
 
     /// Portrait full screen is narrower than the side-column threshold: one

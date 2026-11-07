@@ -287,7 +287,7 @@ struct TronPresentationSurface<Content: View>: View {
         content()
             .environment(\.tronSettingsSectionCount, nil)
             .modifier(TronSheetLoadingHostModifier())
-            .modifier(TronNativeSheetCanvas(reflowsBesideSideColumn: registersLifecycle))
+            .modifier(TronNativeSheetCanvas(role: registersLifecycle ? .route : .sheet))
             #if HOSTED_TEST
             .background { HostedPresentationProbe.nativeView?(token.id) }
             // Native sheets host this content in a new transaction root. The

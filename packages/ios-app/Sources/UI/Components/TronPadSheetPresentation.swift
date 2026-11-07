@@ -19,8 +19,14 @@ enum TronPadSheetMode: Equatable, Sendable {
 
     static let sideColumnMinimumWidth: CGFloat = 1100
     static let sideColumnWidth: CGFloat = 420
-    /// The column plus the system's trailing sheet margin.
-    static let sideColumnReflowInset: CGFloat = sideColumnWidth + 16
+    /// The system's margin between a trailing sheet and the window edge (measured: a
+    /// 420 pt column spans 765–1185 pt in a 1210 pt window).
+    static let sideColumnTrailingMargin: CGFloat = 25
+    /// The column, the system's trailing sheet margin and the panel gap.
+    static let sideColumnReflowInset: CGFloat = sideColumnWidth + sideColumnTrailingMargin + panelGap
+    /// The constant gap between the shrunken scene panel and the column.
+    static let panelGap: CGFloat = 12
+    static let panelCornerRadius: CGFloat = 28
 
     /// Nil where managed sheets keep native detents: iPhone, and iPad before iPadOS 27.
     @MainActor
@@ -40,9 +46,22 @@ enum TronPadSheetMode: Equatable, Sendable {
     }
 }
 
+/// The scene's live width and the sheet mode it implies. A reference the
+/// environment hands out, never a value: a managed sheet's source captures its
+/// environment when it is installed, often before the first layout, and a copied
+/// width or mode would stay stale there (the dashboard's sheets opened as
+/// centered cards in a 1210 pt scene). Observation keeps every reader current.
+@MainActor @Observable
+final class TronPadSheetScene {
+    fileprivate(set) var width: CGFloat = 0
+
+    /// Nil until the scene has been measured, and where sheets keep native detents.
+    var mode: TronPadSheetMode? { width > 0 ? TronPadSheetMode.resolve(sceneWidth: width) : nil }
+}
+
 extension EnvironmentValues {
-    /// The scene's iPad sheet mode, set once at the scene root.
-    @Entry var tronPadSheetMode: TronPadSheetMode?
+    /// The scene's iPad sheet geometry, set once at the scene root.
+    @Entry var tronPadSheetScene: TronPadSheetScene?
 }
 
 /// Whether a managed sheet this surface presents is open.
@@ -53,22 +72,22 @@ struct TronPadSheetPresented: PreferenceKey {
 
 /// Resolves the scene's iPad sheet mode from its width. Scene roots apply it once.
 struct TronPadSheetSceneMode: ViewModifier {
-    @State private var sceneWidth: CGFloat = 0 // presentation read of the scene's width
+    @State private var scene = TronPadSheetScene()
 
     func body(content: Content) -> some View {
         content
-            .environment(\.tronPadSheetMode, TronPadSheetMode.resolve(sceneWidth: sceneWidth))
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { sceneWidth = $0 }
+            .environment(\.tronPadSheetScene, scene)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scene.width = $0 }
     }
 }
 
 /// Applied outside a managed sheet's content, so the iPad mode replaces the
 /// content's own detents.
 private struct TronPadSheetPresentationModifier: ViewModifier {
-    @Environment(\.tronPadSheetMode) private var mode
+    @Environment(\.tronPadSheetScene) private var scene
 
     func body(content: Content) -> some View {
-        if #available(iOS 27, *), let mode {
+        if #available(iOS 27, *), let mode = scene?.mode {
             switch mode {
             case .sideColumn:
                 content
@@ -91,5 +110,28 @@ private struct TronPadSheetPresentationModifier: ViewModifier {
 extension View {
     func tronPadSheetPresentation() -> some View {
         modifier(TronPadSheetPresentationModifier())
+    }
+}
+
+/// The scene beside an open side column: one rounded panel that narrows with a
+/// spring (interruptible, so a dismissal mid-open reverses from where it is),
+/// carrying its navigation chrome with it. Reduce Motion crossfades instead.
+struct TronSideColumnPanel: ViewModifier {
+    let isOpen: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .background { Color.clear.accessibilityElement().accessibilityIdentifier("tron-scene-panel").allowsHitTesting(false) }
+            .clipShape(RoundedRectangle(cornerRadius: isOpen ? TronPadSheetMode.panelCornerRadius : 0, style: .continuous))
+            .padding(.trailing, isOpen ? TronPadSheetMode.sideColumnReflowInset : 0)
+            .background(isOpen ? Color(uiColor: .systemGroupedBackground) : .clear)
+            .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 1), value: isOpen)
+            .keyframeAnimator(initialValue: 1.0, trigger: isOpen) { view, opacity in
+                view.opacity(reduceMotion ? opacity : 1)
+            } keyframes: { _ in
+                CubicKeyframe(0.55, duration: 0.12)
+                CubicKeyframe(1, duration: 0.18)
+            }
     }
 }

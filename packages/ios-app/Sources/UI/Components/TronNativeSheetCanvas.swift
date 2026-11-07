@@ -184,22 +184,26 @@ private struct NativeSheetCanvasView: UIViewControllerRepresentable {
     }
 }
 
+/// The surface a canvas serves. Only the scene root reflows, so the navigation
+/// chrome moves with the content; a route's sheets report upward to it, and a
+/// sheet's own surface keeps its sheets stacked over it as on iPhone.
+enum TronSheetSurfaceRole {
+    case scene, route, sheet
+}
+
 /// One native mounting point per scene/surface, outside its controls. Sources
 /// are render inputs, not a route registry: scoped resources still own lifetime.
-/// A scene or route surface (`reflowsBesideSideColumn`) lays its content out
-/// beside an open iPad side-column sheet it presents; a sheet's own surface does
-/// not, so a sheet stacked on it covers it as on iPhone.
 struct TronNativeSheetCanvas: ViewModifier {
-    var reflowsBesideSideColumn = false
+    var role: TronSheetSurfaceRole = .sheet
     @PresentationState private var canvas = NativeSheetCanvas()
-    @Environment(\.tronPadSheetMode) private var padSheetMode
-    @State private var presentsSheet = false // presentation read of this surface's sheets
+    @Environment(\.tronPadSheetScene) private var padSheetScene
+    @State private var presentsSheet = false // presentation read of this scene's sheets
 
     func body(content: Content) -> some View {
         let canvas = canvas
-        let reflows = reflowsBesideSideColumn && presentsSheet && padSheetMode == .sideColumn
+        let reflows = role == .scene && presentsSheet && padSheetScene?.mode == .sideColumn
         return content
-            .padding(.trailing, reflows ? TronPadSheetMode.sideColumnReflowInset : 0)
+            .modifier(TronSideColumnPanel(isOpen: reflows))
             .onPreferenceChange(TronPadSheetPresented.self) { presentsSheet = $0 }
             .overlayPreferenceValue(NativeSheetSources.self) { sources in
                 NativeSheetCanvasView(canvas: canvas, sources: sources)
@@ -208,6 +212,6 @@ struct TronNativeSheetCanvas: ViewModifier {
             }
             // A nested surface owns its sources; an ancestor must not remount them.
             .transformPreference(NativeSheetSources.self) { $0 = [] }
-            .transformPreference(TronPadSheetPresented.self) { $0 = false }
+            .transformPreference(TronPadSheetPresented.self) { if role != .route { $0 = false } }
     }
 }
