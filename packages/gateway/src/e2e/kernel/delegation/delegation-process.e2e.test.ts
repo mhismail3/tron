@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
-import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../../test-support/gateway-process.js";
+import { awaitsWithin, waitFor } from "../../../../test-support/wait-for.js";
 
 /**
  * A delegated child result and its cancellation across the client socket

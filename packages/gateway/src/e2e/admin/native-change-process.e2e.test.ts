@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { BACKGROUND_MODEL, SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../test-support/gateway-process.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { BACKGROUND_MODEL, SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * Exact-tap refusals and a once-only effect for the shared change card at the

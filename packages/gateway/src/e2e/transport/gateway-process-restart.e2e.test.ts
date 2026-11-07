@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { RunMarkerStore } from "../kernel/run/run-markers.js";
-import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../test-support/gateway-process.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { RunMarkerStore } from "../../kernel/run/run-markers.js";
+import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * An accepted prompt across a real Gateway-process restart (#2235): a source

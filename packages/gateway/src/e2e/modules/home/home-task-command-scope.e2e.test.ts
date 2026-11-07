@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
-import { bindTaskCommandScope, readProcessTable, reapTaskCommandScope, recordTaskCommandGroup, settleTaskCommandScope, taskCommandProcesses, taskCommandRoot } from "../../kernel/run/task-command-scope.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
+import { bindTaskCommandScope, readProcessTable, reapTaskCommandScope, recordTaskCommandGroup, settleTaskCommandScope, taskCommandProcesses, taskCommandRoot } from "../../../kernel/run/task-command-scope.js";
 
 /** Absent, or exited and awaiting launchd's reap (`Z`): either runs nothing. */
 function processTerminal(pid: number): boolean {

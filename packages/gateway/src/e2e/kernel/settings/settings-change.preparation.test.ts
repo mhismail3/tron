@@ -1,9 +1,9 @@
 import { afterEach, expect, it } from "vitest";
-import { fixture, disposeFixtures } from "../../../test-support/home-task-fixture.js";
-import { workspaceModule } from "../../workspace/workspace-module.js";
-import { ProfileStore } from "../../modules/home/profile-store.js";
-import { HomeProfileItems } from "../../modules/home/home-profile.js";
-import type { SubjectWrite } from "./settings-change.js";
+import { fixture, disposeFixtures } from "../../../../test-support/home-task-fixture.js";
+import { workspaceModule } from "../../../workspace/workspace-module.js";
+import { ProfileStore } from "../../../modules/home/profile-store.js";
+import { HomeProfileItems } from "../../../modules/home/home-profile.js";
+import type { SubjectWrite } from "../../../kernel/settings/settings-change.js";
 
 let knowledge: ProfileStore | undefined;
 afterEach(async () => { knowledge = undefined; await disposeFixtures(); });

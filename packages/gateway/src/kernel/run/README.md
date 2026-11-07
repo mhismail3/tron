@@ -221,7 +221,7 @@ Compaction diagnostics remain with the
 scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts src/kernel/run/agent-command-priority.integration.test.ts src/kernel/run/run-markers.lock.integration.test.ts src/kernel/run/run.store.lock.integration.test.ts
 scripts/tron test gateway src/kernel/run/compaction-policy.integration.test.ts
 scripts/tron test gateway src/e2e/sessions/runtime-control-publication.integration.test.ts
-scripts/tron test gateway src/sessions/annotation-only-steer.integration.test.ts
+scripts/tron test gateway src/e2e/sessions/annotation-only-steer.integration.test.ts
 scripts/tron test gateway src/e2e/kernel/run/task-lifecycle.conformance.integration.test.ts
 scripts/tron verify --module gateway/run
 ```

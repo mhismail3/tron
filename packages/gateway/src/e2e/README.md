@@ -2,9 +2,11 @@
 
 ## Purpose
 
-The Gateway's system journeys: test files that boot the real `RuntimeRegistry`
-(`test-support/gateway-registry.ts`) with the Pi SDK, owners and stores in one Vitest
-process. They prove behaviour across modules, so they belong to no single module.
+The Gateway's system journeys: test files that boot the Gateway, either the in-process
+`RuntimeRegistry` with the Pi SDK, owners and stores through a `test-support` harness
+(`gateway-registry.ts`, `home-task-fixture.ts`, `runtime-registry-fixture.ts`,
+`gateway-lock-harness.ts`), or a real Gateway process (`gateway-process.ts`). They prove
+behaviour across modules, so they belong to no single module.
 
 ## Contract
 

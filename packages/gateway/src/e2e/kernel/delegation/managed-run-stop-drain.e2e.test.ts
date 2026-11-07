@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { fixture } from "../../../test-support/home-task-fixture.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { closeSubagentFixtures, bound, childModel, holdingAsyncLaunch } from "../../../test-support/home-task-subagents-support.js";
-import { GatewayLogger } from "../../transport/logger.js";
-import { waitForStopDrain } from "../../sessions/restart-drain.js";
+import { fixture } from "../../../../test-support/home-task-fixture.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { closeSubagentFixtures, bound, childModel, holdingAsyncLaunch } from "../../../../test-support/home-task-subagents-support.js";
+import { GatewayLogger } from "../../../transport/logger.js";
+import { waitForStopDrain } from "../../../sessions/restart-drain.js";
 
 // #2256: liveness comes from the installed delegated provider, not result shape. A
 // real managed async run must still hold the intentional stop until it settles, and
