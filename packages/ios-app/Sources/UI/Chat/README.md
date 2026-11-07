@@ -74,7 +74,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   prompts keep their attachment content in the same card; empty typed text remains editable/sendable. `/` completes commands and
   prompts, `@` skills only (`skill-prompt.v1`). Picker secondary copy uses
   `TronTypography.settingsRowSubtext`, matching Manage Home rows; quote annotations (#899) compose `<annotation>`
-  blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). Camera, photo and file attachments stage locally (10 items, 25 MiB);
+  blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). On iPad
+  only, Return sends like an enabled Send (hardware Shift+Return, IME commits, paste and dictation
+  still edit) and saves the annotation bubble like its check (hardware Shift+Return adds a line). The `testPad*` journeys run on an iPad
+  simulator and skip elsewhere; `testPhoneReturnInsertsNewline` keeps iPhone Return a newline. Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
   nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Resting

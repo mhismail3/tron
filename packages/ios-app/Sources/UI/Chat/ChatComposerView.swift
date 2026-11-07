@@ -276,7 +276,9 @@ struct ChatComposerView: View {
                         panelPresented: resourcePicker != nil,
                         keyboardVisible: keyboardVisible
                     ),
-                    onPasteImages: attachmentActionsEnabled ? onPasteImages : nil
+                    onPasteImages: attachmentActionsEnabled ? onPasteImages : nil,
+                    // iPad keyboards send on Return; iPhone Return stays a newline.
+                    onReturn: UIDevice.current.userInterfaceIdiom == .pad ? sendFromReturn : nil
                 )
                 .padding(.horizontal, 2)
                 .padding(.vertical, 10)
@@ -288,7 +290,7 @@ struct ChatComposerView: View {
             if let trailingMode {
                 ComposerTrailingButton(
                     mode: trailingMode,
-                    isDisabled: isSending || submissionPending || hasActiveUploads || !isCommandReady,
+                    isDisabled: isSendDisabled,
                     isSending: isSending,
                     submissionPending: submissionPending,
                     offersQueueChoices: sessionFacts?.acceptsQueuedPrompts == true && !submissionPending,
@@ -314,6 +316,16 @@ struct ChatComposerView: View {
         )
         .glassEffectID("chat-composer", in: glassNamespace)
         .buttonStyle(.plain)
+    }
+
+    private var isSendDisabled: Bool {
+        isSending || submissionPending || hasActiveUploads || !isCommandReady
+    }
+
+    /// Return does exactly what tapping an enabled Send does, and nothing else.
+    private func sendFromReturn() {
+        guard trailingMode == .send, !isSendDisabled else { return }
+        onSend(nil)
     }
 
     private var attachmentButton: some View {
