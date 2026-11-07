@@ -66,8 +66,10 @@ final class TronChatCatchUpUITests: XCTestCase {
             XCTAssertGreaterThan(requested, 320, "the reader was not far enough back to stage: \(after)")
             let gap = Int(after.components(separatedBy: "staged=").last ?? "")
             XCTAssertNotNil(gap, "Catch up did not stage its reveal: \(after)")
-            XCTAssertGreaterThanOrEqual(gap ?? 0, 80,
+            // The reveal is 18% of the visible height, clamped to 80...140 points.
+            XCTAssertGreaterThanOrEqual(gap ?? 0, 79,
                 "keyboard \(keyboardUp ? "shown" : "hidden"): the staged frame lost its reveal gap to the bottom obstruction (\(after))")
+            XCTAssertLessThanOrEqual(gap ?? .max, 141, "the staged frame is the reveal above the newest end (\(after))")
         }
     }
 
