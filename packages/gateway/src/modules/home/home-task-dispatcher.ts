@@ -778,23 +778,22 @@ export class HomeTaskDispatcher {
 
   /** Settles a task whose admission failed after its pending record exists. */
   private async admissionFailed(task: HomeTaskRecord, error: unknown): Promise<void> {
-    {
-      if (error instanceof HomeTaskDispatchStageError) {
-        // The refused step may still hold the store queue, so the turn's Stop never
-        // waits for this settlement; cold recovery is its backstop if it fails.
-        void this.refuseAdmission(task, error.outcome === "timeout" ? "admission-timeout" : "admission-cancelled")
-          .catch(() => { /* A store refusal emits its own diagnostic. */ });
-        return;
-      }
-      // Accepted identity remains durable and cannot be used for prompt replay.
-      // The refusal's own message is kept, so Home and the app can say why (#959).
-      const detail = error instanceof Error && error.message.trim() ? [...error.message.trim()].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") : undefined;
-      const final: HomeTaskRecord = { ...task, revision: task.revision + 1, lifecycle: "terminal", wake: this.inbox.event(task),
-        terminalEvidence: { outcome: "unknown", sessionId: task.sessionId, entryIds: [], reason: "admission-refused", ...(detail ? { detail } : {}) } };
-      await this.store.put(final, task.revision);
-      this.transition(final, "admission-refused", error instanceof GatewayError ? error.code : "internal");
-      await this.inbox.publish(final.taskId);
+    if (error instanceof HomeTaskDispatchStageError) {
+      // The refused step may still hold the store queue, so the turn's Stop never
+      // waits for this settlement; cold recovery is its backstop if it fails.
+      void this.refuseAdmission(task, error.outcome === "timeout" ? "admission-timeout" : "admission-cancelled")
+        .catch(() => { /* A store refusal emits its own diagnostic. */ });
+      return;
     }
+    // Accepted identity remains durable and cannot be used for prompt replay.
+    // The refusal's own message is kept, so Home and the app can say why (#959).
+    const detail = error instanceof Error && error.message.trim() ? [...error.message.trim()].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") : undefined;
+    // Settle the persisted record, not the caller's copy: a refused bind write
+    // leaves `task` one revision ahead of the store.
+    const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", wake: this.inbox.event(current),
+      terminalEvidence: { outcome: "unknown", sessionId: current.sessionId, entryIds: [], reason: "admission-refused", ...(detail ? { detail } : {}) } }));
+    this.transition(final, "admission-refused", error instanceof GatewayError ? error.code : "internal");
+    await this.inbox.publish(final.taskId);
   }
 
   private releaseSlot(taskId: string): void {

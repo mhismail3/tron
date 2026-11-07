@@ -933,11 +933,9 @@ describe("Home task cold reconciliation", () => {
     expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
   }, 20_000);
 
-  // #2316 F1: when the bind write fails once, `task` already holds the unpersisted bound
-  // revision, so admissionFailed's settling put expects the wrong revision and is refused. The
-  // record stays pending with no worker until a restart recovers it. Expected to fail until the
-  // live settlement uses the persisted revision.
-  it.fails("settles a task whose bind write failed, without a restart (#2316 F1)", async () => {
+  // #2316 F1: a refused bind write leaves the caller's record one revision ahead of the store;
+  // admission still settles the persisted record live, without waiting for a restart.
+  it("settles a task whose bind write failed, without a restart (#2316 F1)", async () => {
     const f = await fixture();
     const tasks = (homeOwnerOf(f.registry) as any).tasks;
     const store = tasks.store as HomeTaskStore;
