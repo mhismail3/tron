@@ -148,7 +148,7 @@ class ExternalVerificationTests(VerifyCase):
         data = json.loads((self.repo.path / path).read_text())
         self.repo.write(path, json.dumps({**data, "verify": commands, **fields}))
 
-    def test_external_consumers_execute_once_for_changed_module_and_all(self) -> None:
+    def test_a_change_runs_its_own_declarations_once_and_all_runs_every_declaration(self) -> None:
         r = self.repo
         direct, dependent = self.external("direct"), self.external("dependent")
         self.declare("alpha", [direct])
@@ -157,17 +157,34 @@ class ExternalVerificationTests(VerifyCase):
         r.git("branch", "-f", "base")
         r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
         r.commit("producer changes")
+        # A change is gated by its own module's tests and declarations (docs/PRINCIPLES.md P1);
+        # a consumer that only `dependsOn` it runs in the batch, not before landing.
         for mode in (("--changed",), ("--module", "repo/alpha")):
             with self.subTest(mode=mode):
                 for name in ("direct", "dependent"):
                     (r.path / "test-results" / name).unlink(missing_ok=True)
                 result = r.verify(*mode)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                for name in ("direct", "dependent"):
-                    witness = r.path / "test-results" / name
-                    self.assertTrue(witness.exists(), f"declared {name} process never ran: {result.stdout}")
-                    self.assertEqual(witness.read_text().splitlines(), ["executed"], "duplicate declarations ran twice")
-                self.assertEqual(r.report()["passingTests"], 3)
+                witness = r.path / "test-results" / "direct"
+                self.assertTrue(witness.exists(), f"the declared direct process never ran: {result.stdout}")
+                self.assertEqual(witness.read_text().splitlines(), ["executed"], "a declaration ran twice")
+                self.assertFalse((r.path / "test-results" / "dependent").exists(), f"a dependent's declaration ran: {result.stdout}")
+                self.assertNotIn("repo/beta", json.dumps(r.report()["selection"]["reasons"]))
+                self.assertEqual(r.report()["passingTests"], 2)
+        # When both declarers change, the shared declaration still runs exactly once.
+        r.git("branch", "-f", "base")
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed again'\n")
+        r.write("mods/beta/beta.py", "VALUE = 'changed'\n")
+        r.commit("producer and consumer change")
+        for name in ("direct", "dependent"):
+            (r.path / "test-results" / name).unlink(missing_ok=True)
+        both = r.verify("--changed")
+        self.assertEqual(both.returncode, 0, both.stdout + both.stderr)
+        for name in ("direct", "dependent"):
+            witness = r.path / "test-results" / name
+            self.assertTrue(witness.exists(), f"declared {name} process never ran: {both.stdout}")
+            self.assertEqual(witness.read_text().splitlines(), ["executed"], "duplicate declarations ran twice")
+        self.assertEqual(r.report()["passingTests"], 4)
         # --all's declaration selection is checked without its milestone Gateway/iOS builds.
         planned = r.verify("--all", "--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
@@ -644,7 +661,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(calls.read_text().splitlines(), [
             "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
 
-    def test_source_module_baseline_reaches_transitive_consumers_locks_without_widening(self) -> None:
+    def test_source_module_baseline_runs_the_ui_locks_that_launch_it_not_its_consumers(self) -> None:
         r = self.repo
         calls = self.ios_fixture()
         ios = "packages/ios-app"
@@ -653,6 +670,17 @@ class IosLaneTests(VerifyCase):
         r.write(f"{ios}/Sources/UI/Chat/chat.module.json", json.dumps({
             "layer": "L4", "owns": ["**"], "dependsOn": ["ios-app/state"]}))
         r.commit("source-only kernel module consumed by hosted chat")
+        # A `dependsOn` consumer adds nothing: with no launching edge the module has no evidence.
+        unlaunched = r.verify("--module", "ios-app/state")
+        self.assertEqual(unlaunched.returncode, 1, unlaunched.stdout)
+        self.assertIn("zero tests ran: an empty selection is not evidence", unlaunched.stdout)
+        self.assertEqual(r.report()["selection"]["tests"], [])
+        calls.write_text("")
+        # The UI tests' spawn edge to the module makes their locks its rendered tests.
+        manifest = json.loads((r.path / f"{ios}/UITests/ui-tests.module.json").read_text())
+        manifest["dynamicEdges"].append({"to": "ios-app/state", "kind": "spawn", "via": f"{ios}/package.module.json", "why": "launches the app"})
+        r.write(f"{ios}/UITests/ui-tests.module.json", json.dumps(manifest))
+        r.commit("the UI tests launch the state module")
 
         baseline = r.verify("--module", "ios-app/state")
         self.assertEqual(baseline.returncode, 0, baseline.stdout + baseline.stderr)
@@ -661,7 +689,7 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(calls.read_text().splitlines(), [
             "build --host-slot-wait-seconds 30", "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"])
-        # Module baselines add consumer locks, not their journeys or unrelated kernel locks.
+        # Module baselines add the launching module's locks, not its journeys or unrelated kernel locks.
         self.assertNotIn("widened to every lock", baseline.stdout)
         # Recording remains confined to the explicitly named owner's locks.
         recording = r.verify("--update-locks", "ios-app/state", "--plan")

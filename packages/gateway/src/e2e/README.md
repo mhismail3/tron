@@ -13,9 +13,8 @@ process. They prove behaviour across modules, so they belong to no single module
 - **When it runs.** `verify --batch` runs every journey in its Gateway lanes (the default
   pass, and the serial `vitest.nested.config.ts` pass); `mac-terminal.e2e.test.ts` needs a
   tailnet host and runs only through `npm run test:mac-terminal`. `verify --changed` runs a
-  journey when the journey itself changes, or when the manifest of a selected module
-  (changed, or reached as a dependent) declares it as that module's verification. Modules
-  that own no test of their own (`gateway/pi`, `gateway/resources`, `gateway/projects`,
-  `gateway/run-model`) declare their journeys that way. A module's own tests stay in the module; scenario locks
+  journey when the journey itself changes, or when a changed module's manifest declares it
+  as that module's verification; a module with no test of its own declares the tests that
+  prove it that way. A module's own tests stay in the module; scenario locks
   (`*.lock.integration.test.ts`) and their goldens stay with their owner.
 - **Running one.** `scripts/tron test gateway src/e2e/<path>.test.ts`.

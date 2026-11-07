@@ -20,7 +20,7 @@ waiting after 45 minutes is uncovered naming the holder, earlier waiters and its
 Unmarked runs (the verifier's Gateway groups, verifier-step probes, the candidate's affected
 checks) wait in the same queue without a cap, like any pre-land run; no holder waits on the batch.
 Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
-required lane runs, even after failures: locks/declared consumers (`verify --all`), full
+required lane runs, even after failures: locks and every declaration (`verify --all`), full
 default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned
 shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI journeys
 (installation disabled; Mac uses scratch HOME/TMPDIR). The lanes run as two concurrent chains, each

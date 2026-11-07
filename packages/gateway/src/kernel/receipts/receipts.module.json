@@ -8,5 +8,8 @@
   "dependsOn": [
     "gateway/resources",
     "gateway/pi"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/sessions/run.lock.integration.test.ts src/sessions/session-entries.lock.integration.test.ts src/modules/home/home-wake-inbox.integration.test.ts"
   ]
 }
