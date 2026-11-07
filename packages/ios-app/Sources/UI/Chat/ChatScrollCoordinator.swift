@@ -525,9 +525,12 @@ extension ChatScrollCoordinator {
         #endif
         if !reduceMotion, geometry.distanceFromBottom > threshold {
             let reveal = min(140, max(80, geometry.containerHeight * 0.18))
-            let bottomOffset = geometry.contentHeight + geometry.bottomInset - geometry.containerHeight
+            // The pinned end's model offset, which the orientation reflects to the
+            // native origin, so the staged frame shows `reveal` points of gap
+            // whatever the composer and keyboard obstruct.
+            let pinnedOffset = geometry.offsetY + geometry.distanceFromBottom
             catchUpPhase = .staged
-            publish(.offsetY(max(0, bottomOffset - reveal)), animation: .disabled, origin: .catchUp)
+            publish(.offsetY(max(0, pinnedOffset - reveal)), animation: .disabled, origin: .catchUp)
         } else {
             catchUpPhase = .final
             publish(.tail, animation: ChatMotion.catchUpScroll(reduceMotion: reduceMotion), origin: .catchUp)

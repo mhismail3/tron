@@ -56,7 +56,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   writes) or `.anchored` (top retention, target-free). Only explicit intent changes mode.
   `ChatScrollCoordinator` owns the bounded commands: catch-up, semantic restore (within one point,
   one-second deadline) and prepend (eight-second deadline); every `ChatLayoutTransaction` ends
-  settled or abandoned. A detached reader keeps one frozen installed commit until it returns.
+  settled or abandoned. Catch up from far back first jumps to a staged frame the reveal (80–140
+  points) above the newest end, measured from the pinned end so the composer and keyboard
+  obstruction never shrink it, then scrolls smoothly (`TronChatCatchUpUITests`, #330). A detached reader keeps one frozen installed commit until it returns.
   UIKit owns keyboard motion and the composer's single first responder; the composer is the
   ScrollView's sole bottom safe-area inset. Exactly one scroll owns the status-bar gesture.
 - **Spatial roles.** User prompts right-anchored (≤ 364 points, emerald glass), agent prose and
