@@ -85,7 +85,7 @@ traits, disabled/focused state and whole-point frames. Anonymous structural
 containers are elided, fixture probes and XCTest's universal trait bit33 dropped.
 
 Pixels use the pinned simulator in `config/ci-toolchain.env` (iPhone17 Pro,
-iOS26.5): status bar62pt and adaptive home indicator160×21pt are masked.
+iOS27.2): status bar62pt and adaptive home indicator160×21pt are masked.
 A channel delta above12/255 counts; zero differing pixels are allowed.
 Two consecutive selected AX/screenshot captures must be byte-identical within10s.
 Another screen size fails before recording or comparison.
