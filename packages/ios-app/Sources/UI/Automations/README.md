@@ -95,8 +95,8 @@ scripts/tron-ios-test run \
 Explicit, non-gating: `TronAutomationsVisualUITests` captures list, detail, run detail and editor
 in light, dark and XXXL for design review; `TronAutomationsListPerformanceUITests` measures app
 CPU and memory while flinging through 400 Automations (`-automation-large`).
-`TronDashboardWindowControlsUITests` checks that the title sits below the status bar on any
-device (the canonical iPhone lane, full-screen iPad). On an iPad
+`TronDashboardWindowControlsUITests` checks that the title sits below the status bar in a
+full-screen window (the canonical iPhone lane, full-screen iPad). On an iPad
 simulator in Windowed Apps mode it also resizes the window and checks the title clears the
 controls at rest and collapsed; no lane runs iPad, so run that destination by hand.
 
