@@ -51,7 +51,7 @@ final class TronChatCatchUpUITests: XCTestCase {
             keepScreenshot(app, "330-before-catch-up-keyboard-\(keyboardUp ? "shown" : "hidden")")
             catchUp.tap()
             XCTAssertTrue(catchUp.waitForNonExistence(timeout: 10), "Catch up reached the newest end")
-            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Catch-up prompt 8")).firstMatch.waitForExistence(timeout: 5),
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "catch-up prompt 8")).firstMatch.waitForExistence(timeout: 5),
                           "the newest prompt is shown after Catch up")
             keepScreenshot(app, "330-catch-up-landed-keyboard-\(keyboardUp ? "shown" : "hidden")")
             if keyboardUp { XCTAssertTrue(app.keyboards.firstMatch.exists, "Catch up keeps the keyboard") }
