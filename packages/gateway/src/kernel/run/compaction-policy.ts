@@ -172,12 +172,11 @@ export class CompactionOperationPolicy {
  * Report a provider request-size rejection as the generic overflow Pi already
  * recovers from. A provider that enforces a request-body limit answers with
  * HTTP 413 and an opaque body (for example opencode-go: "server_error",
- * "Upstream response was not valid JSON"), which matches none of pi-ai's
- * overflow patterns. Pi then retries the identical oversized request until it
- * fails permanently, leaving the session unable to continue until it is
- * compacted. Compaction is the correct recovery for a request the provider
- * refuses to accept, so select it with the phrase `isContextOverflow` matches.
- * Provider text is preserved verbatim and the rewrite is idempotent.
+ * "Upstream response was not valid JSON"). Retrying the identical oversized
+ * request fails permanently, so compaction is the correct recovery. pi-ai also
+ * classifies a leading 413 as overflow; this rewrite additionally records the
+ * phrase `isContextOverflow` matches in the persisted error. Provider text is
+ * preserved verbatim and the rewrite is idempotent.
  */
 function oversizedRequestOverflow(message: AssistantMessage): AssistantMessage | undefined {
   if (message.stopReason !== "error") return undefined;
