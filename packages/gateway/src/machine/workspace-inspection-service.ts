@@ -91,16 +91,19 @@ async function canonicalRoot(path: string): Promise<string> {
 
 async function containedPathFromRoot(root: string, relativePath: string, finalKind?: "directory" | "file"): Promise<string> {
   const normalized = validateRelativePath(relativePath);
+  const present = (path: string) => lstat(path).catch((error: NodeJS.ErrnoException) => {
+    throw error.code === "ENOENT" || error.code === "ENOTDIR" ? new GatewayError("not_found", "Workspace path does not exist") : error;
+  });
   let candidate = root;
   for (const component of normalized ? normalized.split(sep) : []) {
     candidate = join(candidate, component);
-    const metadata = await lstat(candidate);
+    const metadata = await present(candidate);
     if (metadata.isSymbolicLink()) {
       throw new GatewayError("invalid_request", "Workspace symbolic links cannot be followed");
     }
   }
   if (!containedWithin(root, candidate)) return invalidRelativePath();
-  const metadata = await lstat(candidate);
+  const metadata = await present(candidate);
   if (finalKind === "directory" && !metadata.isDirectory()) {
     throw new GatewayError("invalid_request", "Workspace path is not a directory");
   }
