@@ -79,15 +79,12 @@ import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./kernel/delegation/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./kernel/delegation/delegated-root-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
-import { assertTronHomeLayoutCurrent, tronHomePath } from "./foundation/tron-home-layout.js";
+import { tronHomePath } from "./foundation/tron-home-layout.js";
 
 // Time since process start when this module's import graph finished loading
 // (performance.now() counts from the process time origin).
 const moduleGraphLoadedAt = performance.now();
 const config = await loadConfig();
-// A home still holding a retired location has not run the offline layout
-// migration; refuse before any store opens either place (docs/tron-home.md).
-await assertTronHomeLayoutCurrent(config.tronHome);
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 // Never switch the provider's root while retained artifacts are discoverable in
 // its legacy roots. The operator cutover is explicit and runs before Pi loads

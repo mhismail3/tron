@@ -218,10 +218,8 @@ and `scripts/tron version check` reports drift read-only when requested.
 
 ## Tron home
 
-[tron-home.md](tron-home.md) owns the `~/.tron` layout, its path registry, retention
-and layout migrations (`scripts/tron home-layout`). A Gateway that refuses a retired
-layout names the command: stop that home's Gateway and run
-`scripts/tron home-layout migrate --home <home>` (the maintainer's action for Stable).
+[tron-home.md](tron-home.md) owns the `~/.tron` layout and its path registry
+(`scripts/tron home-layout check`).
 
 ## Knowledge files
 
