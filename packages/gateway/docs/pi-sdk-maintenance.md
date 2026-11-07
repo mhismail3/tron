@@ -60,7 +60,10 @@ run start that `preflightResult("started")` can revoke, and FIFO `ModelRuntime`
 config reads. A newer awaited refresh cannot overtake an older registration-triggered
 config read and let that continuation start storage work after readiness. Each call
 still loads current config and retains its own provider selection/error; this is not
-a general downstream credential/model-store drain API.
+a general downstream credential/model-store drain API. It also pins the patched `undici`
+(8.12.3) and `minimatch` (11.0.3) that upstream ships from 1.5.0: the `pi` bin and
+`./rpc-entry` bundle their dependencies, so only a rebuild moves them, never a Gateway
+`overrides` entry.
 
 `pi-coding-agent-patch.json` owns it: upstream tag and commit, the published tarball's
 integrity, the backported proposal commit, patch SHA-256, bundled `pi-ai` model data,
@@ -68,7 +71,8 @@ toolchain and the built tarball's SHA-512, under `third_party/pi-coding-agent/` 
 `LICENSE`. `package.json` names `file:third_party/pi-coding-agent/<file>.tgz`; `check:pi-sdk`
 accepts exactly that declaration and no other `file:` dependency. `npm run reproduce:pi-coding-agent` rebuilds from the tag (the unpatched pack must equal the registry
 tarball, the patched pack the committed SHA-512; `--upstream <path>`, `--write` after a
-deliberate change). When a release ships the APIs (`removeWhen`), remove in one change: restore
+deliberate change). A patch that changes the upstream root `package-lock.json` is reinstalled
+from it before the patched build. When a release ships the APIs (`removeWhen`), remove in one change: restore
 the exact release version, delete the declaration, `third_party/pi-coding-agent/`,
 `packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its script, drop it from
 `packages/mac-app/scripts/stage-gateway-app.sh` and `BUILD_INPUT_FILES` in

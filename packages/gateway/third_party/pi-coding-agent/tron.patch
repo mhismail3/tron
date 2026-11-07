@@ -42,6 +42,10 @@ Apply with git apply at tag v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0).
    reads in admission order, so an older detached refresh cannot start store work
    after a newer awaited readiness pass. Independent targeted refreshes are retained.
 
+7. Dependency security pins (Tron #2291). Backports upstream 66c2fa3d7 and the minimatch part
+   of b4c2e92ac (both in v1.5.0): undici 8.12.3 and minimatch 11.0.3, with the root lockfile.
+   The bundled bin and rpc-entry inline them, so the build reinstalls before bundling.
+
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index 5d5eb338e22282d409fe9cb659a5eef2a21f0c6e..bb0f55b2ff58168848e944c9d77429225f1874a2 100644
 --- a/packages/coding-agent/docs/mcp.md
@@ -975,3 +979,117 @@ diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-a
  		this.configureRadiusProviders();
  		if (options.providers) {
  			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
+diff --git a/package-lock.json b/package-lock.json
+index 114762b90205cabf4db894f3a8c97b044a0d79a9..bcf3b468e278262c39440102dada583b6a1acfba 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1175,6 +1175,12 @@
+ 				}
+ 			}
+ 		},
++		"node_modules/@isaacs/nonrecursive-glob-match": {
++			"version": "1.1.0",
++			"resolved": "https://registry.npmjs.org/@isaacs/nonrecursive-glob-match/-/nonrecursive-glob-match-1.1.0.tgz",
++			"integrity": "sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==",
++			"license": "BlueOak-1.0.0"
++		},
+ 		"node_modules/@jridgewell/sourcemap-codec": {
+ 			"version": "1.5.5",
+ 			"resolved": "https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz",
+@@ -3629,21 +3635,6 @@
+ 				"url": "https://github.com/sponsors/sindresorhus"
+ 			}
+ 		},
+-		"node_modules/minimatch": {
+-			"version": "10.2.6",
+-			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.6.tgz",
+-			"integrity": "sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==",
+-			"license": "BlueOak-1.0.0",
+-			"dependencies": {
+-				"brace-expansion": "^5.0.8"
+-			},
+-			"engines": {
+-				"node": "18 || 20 || >=22"
+-			},
+-			"funding": {
+-				"url": "https://github.com/sponsors/isaacs"
+-			}
+-		},
+ 		"node_modules/minimist": {
+ 			"version": "1.2.8",
+ 			"resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz",
+@@ -4673,6 +4664,8 @@
+ 			"resolved": "https://registry.npmjs.org/undici/-/undici-8.10.2.tgz",
+ 			"integrity": "sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==",
+ 			"license": "MIT",
++			"optional": true,
++			"peer": true,
+ 			"engines": {
+ 				"node": ">=22.19.0"
+ 			}
+@@ -5191,12 +5184,12 @@
+ 				"hosted-git-info": "9.0.3",
+ 				"ignore": "7.0.8",
+ 				"jiti": "2.7.0",
+-				"minimatch": "10.2.6",
++				"minimatch": "11.0.3",
+ 				"proper-lockfile": "4.1.2",
+ 				"quickjs-wasi": "3.6.2",
+ 				"semver": "7.8.5",
+ 				"typebox": "1.3.27",
+-				"undici": "8.10.2",
++				"undici": "8.12.3",
+ 				"yaml": "2.9.0"
+ 			},
+ 			"bin": {
+@@ -5295,6 +5288,31 @@
+ 			"extraneous": true,
+ 			"license": "MIT"
+ 		},
++		"packages/coding-agent/node_modules/minimatch": {
++			"version": "11.0.3",
++			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-11.0.3.tgz",
++			"integrity": "sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==",
++			"license": "BlueOak-1.0.0",
++			"dependencies": {
++				"@isaacs/nonrecursive-glob-match": "^1.0.3",
++				"brace-expansion": "^5.0.12"
++			},
++			"engines": {
++				"node": "18 || 20 || >=22"
++			},
++			"funding": {
++				"url": "https://github.com/sponsors/isaacs"
++			}
++		},
++		"packages/coding-agent/node_modules/undici": {
++			"version": "8.12.3",
++			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz",
++			"integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
++			"license": "MIT",
++			"engines": {
++				"node": ">=22.19.0"
++			}
++		},
+ 		"packages/durable": {
+ 			"name": "@earendil-works/pi-durable",
+ 			"version": "1.3.0",
+diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
+index a23911cbf3c88f6c73aecdbb14251a9071e5a472..27e9664eb647a15af024d40f7f5d646e44f5ae6e 100644
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -55,12 +55,12 @@
+ 		"hosted-git-info": "9.0.3",
+ 		"ignore": "7.0.8",
+ 		"jiti": "2.7.0",
+-		"minimatch": "10.2.6",
++		"minimatch": "11.0.3",
+ 		"proper-lockfile": "4.1.2",
+ 		"quickjs-wasi": "3.6.2",
+ 		"semver": "7.8.5",
+ 		"typebox": "1.3.27",
+-		"undici": "8.10.2",
++		"undici": "8.12.3",
+ 		"yaml": "2.9.0"
+ 	},
+ 	"overrides": {
