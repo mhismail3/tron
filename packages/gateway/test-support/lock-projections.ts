@@ -69,6 +69,32 @@ export function shapeReferenced(value: unknown): unknown {
 }
 
 /**
+ * Assert the session shape of each provider request, in order: its tools, prompt
+ * sections and prompt hash equal that `session-shapes` shape (undefined when none does).
+ */
+export function expectRequestShapes(requests: readonly unknown[], shapes: readonly string[]): void {
+  expect(requests.map((request) => requestShape(request as { tools?: unknown; promptSections?: unknown; promptHash?: unknown })),
+    "each provider request's session shape").toEqual(shapes);
+}
+
+/** Assert the session shape (and entry index) of each system entry in a normalized canonical JSONL file, in order. */
+export function expectSystemShapes(canonicalJsonl: readonly unknown[], shapes: readonly string[]): void {
+  const found: Array<string | undefined> = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (value === null || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record.role === "system" && record.sections !== null && typeof record.sections === "object") {
+      found.push(systemShape(record as { sections: Record<string, unknown>; toolsAdded?: unknown }));
+      return;
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(withoutSharedToolSchemas(JSON.parse(JSON.stringify(canonicalJsonl))));
+  expect(found, "each system entry's session shape").toEqual(shapes);
+}
+
+/**
  * Assert a lock's normalized trace exactly against its expectation, without its
  * event schemas and with its model-visible parts checked against `session-shapes`.
  */
