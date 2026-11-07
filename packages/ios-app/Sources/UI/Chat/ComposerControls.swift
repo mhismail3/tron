@@ -55,8 +55,8 @@ struct MultilineComposerTextView: UIViewRepresentable {
         var didLayout: ((LayoutAwareTextView) -> Void)?
         var onPasteImages: (([NSItemProvider]) -> Void)?
         /// Called instead of inserting a typed Return's newline. Both keyboards
-        /// type Return through `insertText`; paste and Shift+Return's line break
-        /// do not reach this path as a Return.
+        /// type Return through `insertText`, which paste does not use;
+        /// Shift+Return's line break passes through it as text.
         var onReturn: (() -> Void)?
         private var isInsertingLineBreak = false
         private var isReportingLayout = false

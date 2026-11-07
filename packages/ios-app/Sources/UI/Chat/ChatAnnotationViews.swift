@@ -251,8 +251,8 @@ struct ChatAnnotationBubbleHost: View {
     @State private var selection: TextSelection?
     /// The comment Shift+Return produced; its newline is an edit, not a save.
     @State private var lineBreakComment: String?
-    /// A hardware Return also ends the vertical field's editing; Shift+Return
-    /// keeps the comment focused.
+    /// A hardware Return also ends the vertical field's editing; after
+    /// Shift+Return's line break the comment takes focus back once.
     @State private var refocusAfterLineBreak = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -340,11 +340,14 @@ struct ChatAnnotationBubbleHost: View {
                         refocusAfterLineBreak = false
                         if !isFocused { focused = true }
                     }
-                    // The on-screen Return key arrives as one typed newline.
+                    // The on-screen Return key arrives as one typed newline;
+                    // dictation's "new line" stays text.
                     .onChange(of: comment) { old, new in
                         guard Self.returnSaves else { return }
                         defer { lineBreakComment = nil }
-                        guard new != lineBreakComment, Self.isTypedNewline(from: old, to: new) else { return }
+                        if new != lineBreakComment { refocusAfterLineBreak = false }
+                        guard new != lineBreakComment, Self.isTypedNewline(from: old, to: new),
+                              !ChatTextInputFocus.isDictating else { return }
                         comment = old
                         save(old)
                     }
@@ -399,6 +402,24 @@ struct ChatAnnotationBubbleHost: View {
         _ = composer.becomeFirstResponder()
         presenter.save(comment: comment)
     }
+}
+
+/// Whether the focused text input is taking dictation, read from the first
+/// responder that `sendAction` reaches.
+@MainActor
+private enum ChatTextInputFocus {
+    static weak var responder: UIResponder?
+
+    static var isDictating: Bool {
+        responder = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.tronReportFirstResponder), to: nil, from: nil, for: nil)
+        defer { responder = nil }
+        return responder?.textInputMode?.primaryLanguage == "dictation"
+    }
+}
+
+private extension UIResponder {
+    @objc func tronReportFirstResponder() { ChatTextInputFocus.responder = self }
 }
 
 enum ChatAnnotationBubbleLayout {
