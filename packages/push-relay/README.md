@@ -189,11 +189,9 @@ either environment.
 The Workers Vitest pool, `@cloudflare/vitest-plugin`, pins an exact `wrangler`
 and `miniflare`. Bump it together with the top-level `wrangler`, to the plugin
 release that pins the same `wrangler`, so the tree holds one `wrangler`,
-`miniflare` and `workerd`.
-
-Remove each entry once an upstream release depends on a fixed version itself.
-Check each change with `npm audit`, `npm test` and both dry-run builds. An
-override is never a reason to skip the pool's tests.
+`miniflare` and `workerd`. The package has no `overrides`: `npm audit` is clean
+only while those exact pins carry patched transitive versions (`sharp`, `undici`,
+`zod`). Check each change with `npm audit`, `npm test` and both dry-run builds.
 
 ## Manual deployment
 
