@@ -7,7 +7,7 @@ import { ProjectLifecycle, type ProjectRequest } from "./project-lifecycle.js";
 import { nativeChangeConfirmer } from "../../kernel/host/native-change.js";
 
 function projectConfirmation(value: unknown): { digest: string; intent: unknown } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Project confirmation is invalid");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("invalid_request", "Project confirmation is invalid");
   const input = value as Record<string, unknown>;
   rejectUnknownFields(input, ["digest", "intent"], "project confirmation");
   return { digest: string(input.digest, "digest", { min: 64, max: 64 }), intent: input.intent };
