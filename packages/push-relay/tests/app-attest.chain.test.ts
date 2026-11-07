@@ -6,9 +6,10 @@ import { describe, expect, test } from "vitest";
 import { base64Url, concatBytes, ownedBuffer, sha256, utf8 } from "../src/crypto";
 
 const algorithm = { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" } as const;
-const notBefore = new Date("2026-01-01T00:00:00Z");
-const notAfter = new Date("2027-01-01T00:00:00Z");
-const now = new Date("2026-06-01T00:00:00Z");
+// x509's verify() also checks validity against the wall clock, so the fixtures are valid around it.
+const now = new Date();
+const notBefore = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+const notAfter = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
 const APP_ID = "TEAM123456.com.example.app";
 
 interface Authority { certificate: x509.X509Certificate; keys: CryptoKeyPair }
@@ -90,6 +91,6 @@ describe("App Attest certificate chain", () => {
   test("rejects a leaf certificate with bytes after its DER encoding", async () => {
     const { rootPem, chain, input } = await attestation();
     const rejection = verifyAttestationAgainstTrustedRoot(input([concatBytes(chain[0], new Uint8Array([0, 0])), chain[1]]), rootPem);
-    await expect(rejection).rejects.toBeInstanceOf(AttestationRejected);
+    await expect(rejection).rejects.toEqual(new AttestationRejected("Unexpected data after the ASN.1 structure: 2 trailing bytes"));
   });
 });
