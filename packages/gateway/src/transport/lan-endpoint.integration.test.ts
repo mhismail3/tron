@@ -94,7 +94,7 @@ interface LoggedRecord {
 }
 
 /** The `key=value` tokens a Tron record puts in its message, read the way the
- * triage tool reads them. */
+ * log reader joins them. */
 function messageFields(message: string): Record<string, string> {
   return Object.fromEntries([...message.matchAll(/([A-Za-z][A-Za-z0-9]*)=([^\s);]+)/gu)].map((match) => [match[1]!, match[2]!]));
 }
