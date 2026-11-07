@@ -12,7 +12,10 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(listItem.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertLessThan(heading.frame.midY, listItem.frame.midY, "Heading and list items keep separate accessibility frames")
         let start = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
-        let end = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.95))
+        // End inside the next item so the whole first item is selected; the
+        // native end handle settles about a line above a drag's final point.
+        let nextItem = assistantBlock(app, containing: "authoritative snapshot")
+        let end = nextItem.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
         start.press(forDuration: 1.0, thenDragTo: end)
 
         let annotate = menuAction(app, "Annotate")
@@ -38,7 +41,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         // Copy the same cross-heading/list range and paste it into the composer
         // so the journey verifies the plain-text markers and block separation.
         let startAgain = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
-        let endAgain = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.95))
+        let endAgain = nextItem.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
         startAgain.press(forDuration: 1.0, thenDragTo: endAgain)
         let copy = menuAction(app, "Copy")
         XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
