@@ -3,7 +3,6 @@
   "owns": [
     "Hosted*Fixture.swift",
     "HostedSettingsReviewSchema.swift",
-    "HostedSettingsThreeLayerPreview.swift",
     "hosted-fixtures.module.json"
   ]
 }

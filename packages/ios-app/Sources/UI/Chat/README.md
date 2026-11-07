@@ -114,11 +114,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   breakdown and first/last times; native disclosures reveal each occurrence's metadata and
   selectable `ToolDetailCodeBlock` JSON (or verbatim text). Long payload cards use the shared
   static-surface policy instead of a tall backdrop filter.
-- **Error design canvas.** Hosted `-tron-chat-errors-preview` renders synthetic single/grouped
-  error pills and detail canvases using the shared compact-pill, list-row and code-block
-  components. `TronChatErrorsPreviewTests` captures light/dark design review only; it does not
-  exercise provider classification or prove live/history grouping. `TronChatProviderErrorStyleUITests`
-  also captures actual hosted ChatView/native sheets in both appearances for visual review.
+- **Error presentation.** `TronChatProviderErrorStyleUITests` captures actual hosted ChatView
+  error pills and native sheets in both appearances for visual review.
 - **Haptics.** Live events only, through `TronHaptics`; `ChatLiveHapticLedger` tells live from restored.
 - **Extension interactions.** The mounted route is the sole sheet owner and presents pending
   interactions only after the first ready frame. Forms (one to four questions) keep a device-local
@@ -230,7 +227,7 @@ ordering. Its capture-only method provides light/dark visual review, not behavio
 
 `TronWorkerToolRegressionTests` exercises custom worker report outcomes/Markdown/evidence,
 check-in attention/Next, friendly transcript chips, aggregate navigation and extension/MCP
-humanization. `TronWorkerToolPreviewTests` captures light/dark native review surfaces only.
+humanization.
 
 `TronInteractionSheetUITests` exercises the native change card's exact scoped answer and the
 ask_user form over the hosted socket; the Gateway's `native-change.e2e.test.ts` owns
@@ -238,8 +235,7 @@ authorization, receipt recovery and Stop proof.
 
 `TronSixSmallUIRegressionTests` exercises scoped row ordering, primary toast ink, model ID/type
 metrics and retained search/selection, workspace path/status separation at standard/narrow/accessibility
-sizes, and check-in receipt content. `TronSixSmallUIPreviewTests` captures native light/dark design
-review views and both workspace layout candidates (capture only, not acceptance).
+sizes, and check-in receipt content.
 
 `TronHomeSummaryTypographyUITests` renders the production Home summary beside an independent
 `SessionSummaryTypography.usageValue` reference, comparing glyph/line metrics and Dynamic Type growth
@@ -248,7 +244,6 @@ with distinct reading/code families through `HostedHomeSummaryTypographyFixture`
 `TronQueuedSteerThemeUITests/testQueuedCardAndEditorFollowPrimaryTheme` samples native queued-card
 fill/arrow and editor glass across all primary themes in light/dark, comparing dark Burgundy's
 surface with Manage Home rather than its lifted ink. It also opens/saves the real queued editor.
-`TronThemeColorPreviewUITests/testQueuedSteerThemes` is navigation-only visual review, not regression proof.
 `TronAnnotationOnlySteerUITests` checks annotation content beneath the queue header, independent chip
 navigation and enabled editing/removal, plus photo/file-only editor validity in Home and normal chat.
 

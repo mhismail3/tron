@@ -134,9 +134,6 @@ struct HostedSettingsRendererFixture: View {
                         } else {
                             HostedSixSmallUIFixture(surface: surface)
                         }
-                    } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-settings-three-layer-preview"),
-                       ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
-                        HostedSettingsThreeLayerPreview(surface: ProcessInfo.processInfo.arguments[index + 1])
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
                         controlsReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
@@ -166,7 +163,6 @@ struct HostedSettingsRendererFixture: View {
                 .safeAreaInset(edge: .bottom) {
                     if !ProcessInfo.processInfo.arguments.contains("-settings-alignment-review")
                         && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review")
-                        && !ProcessInfo.processInfo.arguments.contains("-settings-three-layer-preview")
                         && !ProcessInfo.processInfo.arguments.contains("-six-ui-surface")
                         && !ProcessInfo.processInfo.arguments.contains("-project-lifecycle-preview") {
                     HStack {

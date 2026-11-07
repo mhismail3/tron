@@ -50,51 +50,41 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/SnapshotCachePersiste
 Each final fixture cleanup removes only its UUID root. The cold-relaunch case
 intentionally retains that root between its two processes, then cleans it.
 
-## Visual witnesses
+## Accessibility witnesses
 
 Use the smallest faithful rendered contract, not a full state × theme × size
-matrix. `TronUILockTests` retains the following explicit witnesses:
+matrix. `TronUILockTests` retains these witnesses, light and dark each:
 
-| State | Pixel witnesses | AX witnesses | Focused owner |
-|---|---|---|---|
-| Home Settings | light + dark | light + dark | Shared chrome and #1607 source/control metadata |
-| Memory-search tool detail | light + dark | light + dark | Shared chrome and #1607 source/control metadata |
-| Empty chat | light + dark | none | Shared composer placeholder uses primary ink dimmed (#2093) |
-| Settled chat | light + dark | none | Shared composer placeholder uses primary ink dimmed (#2093) |
-| Onboarding welcome | dark | none | No focused equivalent for dark appearance |
-| Session Settings | none | none | `TronSixSmallUIRegressionTests.testSessionSettingsOrder`; `TronConsolidatedUIRegressionTests.testSessionSettingsKeepsWorkerOverridesAndTrustReachable`; retained Home chrome |
-| Onboarding light | none | none | `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`: actual controls, hit geometry, historical feature-print |
+| State | Focused owner |
+|---|---|
+| Home Settings | Shared chrome and #1607 source/control metadata |
+| Memory-search tool detail | Shared chrome and #1607 source/control metadata |
 
 Chat content/tool controls retain `TronWorkerToolRegressionTests.testTranscriptChipsUseFriendlyNames`,
 `TronConsolidatedUIRegressionTests.testMemoryToolRowsAndCanonicalNavigation` and
-the retained tool-detail interaction journey. Empty chat navigation/title are
-required by `TronUILockTests.testChatEmpty`. The four chat pixel witnesses pin
-`ComposerPlaceholder`'s shared `.inputPlaceholder` color, which is primary ink
-at 60% opacity; the muted green tint is intentional in light and dark modes.
-The four Home/tool-detail AX witnesses remain; an independent permission-row
-test is not equivalent to their source metadata.
+the retained tool-detail interaction journey. Session Settings retain
+`TronSixSmallUIRegressionTests.testSessionSettingsOrder` and
+`TronConsolidatedUIRegressionTests.testSessionSettingsKeepsWorkerOverridesAndTrustReachable`;
+light onboarding retains `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`.
+There are no pixel goldens: the composer placeholder and subtitle tint (#2093) and dark onboarding
+welcome have no rendered witness, nor do the project-lifecycle fixture's `busy` and
+`trust-review` surfaces, which only the retired previews opened.
 
 ## Comparison and settling
 
-Each call explicitly passes `assertUILock(app, name, accessibility: String?)`.
-Pixels are always compared. Only the four shared-chrome calls pass an AX
-expectation: the exact `UILockTree` text, inline in `TronUILockTests`
-(`homeSettingsTree`, `memorySearchToolSheetTree`; light and dark share each).
-AX equality uses `UILockTree`: element order, nesting, type, identifier, label, value, placeholder,
-traits, disabled/focused state and whole-point frames. Anonymous structural
-containers are elided, fixture probes and XCTest's universal trait bit33 dropped.
-
-Pixels use the pinned simulator in `config/ci-toolchain.env` (iPhone17 Pro,
-iOS27.2): status bar62pt and adaptive home indicator160×21pt are masked.
-A channel delta above12/255 counts; zero differing pixels are allowed.
-Two consecutive selected AX/screenshot captures must be byte-identical within10s.
-Another screen size fails before recording or comparison.
+Each call passes `assertUILock(app, name, accessibility:)` with the exact
+`UILockTree` text, inline in `TronUILockTests` (`homeSettingsTree`,
+`memorySearchToolSheetTree`; light and dark share each). AX equality uses
+`UILockTree`: element order, nesting, type, identifier, label, value, placeholder,
+traits, disabled/focused state and whole-point frames, so the frames also pin the
+simulator in `config/ci-toolchain.env`. Anonymous structural containers are
+elided, fixture probes and XCTest's universal trait bit33 dropped. Two
+consecutive captures must be identical within 10 s.
 
 `TRON_UI_LOCK_RENDERING=1` is hosted-only static capture: UIKit animation is
 disabled, with independent SwiftUI transactions fenced at native canvases and
-content roots. Identical frames alone do not prove the correct initial inset.
-Behavior journeys keep animation. Fixtures pin English/en_US/UTC and appearance;
-hosted decorative grain and composer text are seeded.
+content roots. Behavior journeys keep animation. Fixtures pin English/en_US/UTC
+and appearance.
 
 ## Run and evidence
 
@@ -105,29 +95,10 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/TronUILockTests
 
 The module's manifest/consumer graph selects these native tests for affected
 verification. Count executed methods; an unmatched selector is no evidence.
-Captures are retained under `test-results/ui-locks/`; a failure includes AX
-line diff or highlighted pixel diff/count/bounds and the actual beside it.
-The PNG golden is always required, including recorder mode. An AX change
-prints its line diff; the rendered actual is in `test-results/ui-locks/`.
+Captures are retained under `test-results/ui-locks/`; a failure prints the AX
+line diff.
 
-## Record and storage
-
-`TRON_UPDATE_LOCKS` names owning modules (or `all`); Xcode uses its
-`TEST_RUNNER_` prefix. It rewrites PNG goldens only. These witnesses belong to `ios-app/ui-tests`.
-
-```bash
-TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronUILockTests
-scripts/tron-ios-test build
-```
-
-Qualify every exact diff before adoption. Human before/after review is for new
-design, taste or intended visible changes, not unchanged behavior or duplicate
-metadata. Never rerecord an unexplained red. Keep any witness without a faithful
-successor; native semantic checks are not lossless incidental pixel/tree parity.
-
-PNG files use Git LFS; AX expectations are Swift literals. A remaining LFS pointer
-fails with the `git lfs pull` hint. Rebuild after golden edits because they are
-source resources. New witnesses need a bounded risk, known-bad activation and
-repeatability evidence, not automatic theme/size expansion. Still images do not
-prove motion continuity; use native temporal interaction checks.
+Qualify every exact diff before adopting a new literal. Human before/after review
+is for new design, taste or intended visible changes. Never adopt an unexplained
+red. New witnesses need a bounded risk and known-bad activation, not automatic
+theme/size expansion.

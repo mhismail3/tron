@@ -27,8 +27,8 @@ from tron_rebuild_lock import inherited_fd
 
 REPO = Path(__file__).resolve().parent.parent
 # The runner's launchd PATH is the system's only. Build and git commands also need
-# Homebrew's tools: the source repository's git-lfs filter runs on checkout and on
-# `git status` of any stat-dirty LFS file (#1520, #1523).
+# Homebrew's tools: a global git-lfs filter runs on checkout and on `git status`
+# of any stat-dirty LFS file (#1520, #1523).
 BUILD_PATH = '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin'
 
 

@@ -213,9 +213,7 @@ retirement; retired Worker thinking and Transport editor cases do not define tha
 project list, error/Retry and missing-response recovery over the hosted socket; it also checks
 Global/Session value/reset order and captures both appearances. Hosted values are scripted,
 not persistence evidence. Real-UI journeys read their key inventory
-from the fixture Gateway's built schema. The [three-layer design](../../../../gateway/docs/settings-three-layer-design.md)
-has a capture-only `TronSettingsThreeLayerPreviewTests` fixture: synthetic SwiftUI layouts, not the
-implemented settings contract. Before device sign-off, change values rapidly, dismiss while saving
+from the fixture Gateway's built schema. Before device sign-off, change values rapidly, dismiss while saving
 and switch profile: no untouched inherited setting may become an override.
 
 ## Project lifecycle presentation
@@ -240,13 +238,12 @@ executor, with a fresh command ID per call. The review creates nothing and opens
 shared `ChangeReviewSheet`; its Approve resubmits the exact digest and typed intent,
 which the Gateway revalidates before effects. No agent-tool fallback is used.
 
-`TronProjectLifecyclePreviewUITests` exercises these production-owned views through
-`HOSTED_TEST`'s `HostedProjectLifecyclePreview` in light/dark at Large and XXXL.
-Sample paths, drafts, busy reasons and the preview-only disclaimer stay in the fixture.
-Untrust and Trust review reuse `ChangeReviewSheet` with synthetic reviews; the preview
-sends no command. The route journey opens and dismisses detail, approval, Add/Create
-and folder sub-sheets.
-Captures and route checks are not real-Gateway lifecycle acceptance.
+`TronProjectLifecyclePreviewUITests` routes through these production-owned views in
+`HOSTED_TEST`'s `HostedProjectLifecyclePreview`: it opens and dismisses detail, approval,
+Add/Create and folder sub-sheets. Sample paths, drafts, busy reasons and the preview-only
+disclaimer stay in the fixture. Untrust and Trust review reuse `ChangeReviewSheet` with
+synthetic reviews; the preview sends no command, so route checks are not real-Gateway
+lifecycle acceptance.
 `RealGatewayProjectLifecycleUITests` owns separate create/untrust/trust approval, denial,
 refused-approval and linked-worktree busy journeys through the real socket and canonical
 filesystem/trust store. The harness seeds only its isolated busy repository.
