@@ -166,6 +166,11 @@ describe("WorkspaceInspectionService", () => {
     expect(registered.toString("utf8")).toBe("let value = 1\n");
     await expect(service.list(root, "linked")).rejects.toMatchObject({ code: "invalid_request" });
     await expect(service.file(root, "../outside")).rejects.toMatchObject({ code: "invalid_request" });
+    const removed = join(root, "removed-workspace");
+    for (const read of [() => service.inspect(removed), () => service.list(removed), () => service.file(removed, "README.md"),
+      () => service.diff(removed, "README.md", "current")]) {
+      await expect(read()).rejects.toMatchObject({ code: "not_found", message: "The session workspace no longer exists" });
+    }
     for (const read of [() => service.list(root, "Sources/gone"), () => service.file(root, "Sources/gone.swift"), () => service.file(root, "gone/File.swift")]) {
       await expect(read()).rejects.toMatchObject({ code: "not_found", message: "Workspace path does not exist" });
     }
