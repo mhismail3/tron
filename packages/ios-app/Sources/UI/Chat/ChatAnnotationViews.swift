@@ -248,10 +248,21 @@ struct ChatAnnotationBubbleHost: View {
     /// its bottom edge as the keyboard rises, so the selection moves by the
     /// same amount and the bubble follows it.
     @State private var capturedRegionMaxY: CGFloat?
+    /// A hardware Shift+Return's newline is an edit, not a save.
+    @State private var lineBreakAllowed = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let margin: CGFloat = 12
+    private static var returnSaves: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    /// `new` is `old` with exactly one newline typed into it.
+    private static func isTypedNewline(from old: String, to new: String) -> Bool {
+        guard new.count == old.count + 1 else { return false }
+        let old = Array(old), new = Array(new)
+        let index = zip(old, new).prefix { $0 == $1 }.count
+        return new[index] == "\n" && Array(new[(index + 1)...]) == Array(old[index...])
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -305,6 +316,25 @@ struct ChatAnnotationBubbleHost: View {
                     .lineLimit(1...4)
                     .focused($focused)
                     .submitLabel(.done)
+                    // iPad: Return saves like the check and Escape cancels like the
+                    // X; hardware Shift+Return keeps its newline. iPhone Return
+                    // stays a newline.
+                    .onKeyPress(keys: [.return, .escape], phases: .down) { press in
+                        guard Self.returnSaves else { return .ignored }
+                        if press.key == .escape {
+                            presenter.cancel()
+                            return .handled
+                        }
+                        lineBreakAllowed = press.modifiers.contains(.shift)
+                        return .ignored
+                    }
+                    // Every Return, on-screen or hardware, arrives as one typed newline.
+                    .onChange(of: comment) { old, new in
+                        defer { lineBreakAllowed = false }
+                        guard Self.returnSaves, !lineBreakAllowed, Self.isTypedNewline(from: old, to: new) else { return }
+                        comment = old
+                        save(old)
+                    }
                     .padding(.vertical, 8)
                     .accessibilityLabel("Annotation comment")
                 Button { presenter.cancel() } label: {
@@ -316,12 +346,7 @@ struct ChatAnnotationBubbleHost: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Cancel annotation")
-                Button {
-                    // UIKit moves the keyboard's input target directly from the
-                    // still-installed comment field, so it is never dismissed.
-                    _ = composer.becomeFirstResponder()
-                    presenter.save(comment: comment)
-                } label: {
+                Button { save(comment) } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.sans(size: ComposerControlMetrics.symbolSize, weight: .semibold))
                         .foregroundStyle(accent)
@@ -341,6 +366,13 @@ struct ChatAnnotationBubbleHost: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("chat.annotation.bubble")
+    }
+
+    private func save(_ comment: String) {
+        // UIKit moves the keyboard's input target directly from the
+        // still-installed comment field, so it is never dismissed.
+        _ = composer.becomeFirstResponder()
+        presenter.save(comment: comment)
     }
 }
 

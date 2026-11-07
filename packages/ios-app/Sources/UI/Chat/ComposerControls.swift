@@ -46,13 +46,36 @@ struct MultilineComposerTextView: UIViewRepresentable {
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
     var onPasteImages: (@MainActor ([NSItemProvider]) -> Void)? = nil
+    /// When set, a plain Return calls this instead of inserting a newline;
+    /// Shift+Return and Return that commits IME marked text still edit.
+    var onReturn: (@MainActor () -> Void)? = nil
 
     final class LayoutAwareTextView: UITextView {
         var didLayout: ((LayoutAwareTextView) -> Void)?
         var onPasteImages: (([NSItemProvider]) -> Void)?
+        /// Set where plain Return submits: hardware Shift+Return then inserts
+        /// its newline through `insertLineBreak` instead of the submit path.
+        var submitsOnReturn = false
+        /// The newline being inserted is Shift+Return's, not Return's.
+        private(set) var isInsertingLineBreak = false
         private var isReportingLayout = false
 
+        override var keyCommands: [UIKeyCommand]? {
+            guard submitsOnReturn else { return super.keyCommands }
+            let lineBreak = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(insertLineBreak))
+            lineBreak.wantsPriorityOverSystemBehavior = true
+            return (super.keyCommands ?? []) + [lineBreak]
+        }
+
+        @objc private func insertLineBreak() {
+            isInsertingLineBreak = true
+            defer { isInsertingLineBreak = false }
+            insertText("\n")
+        }
+
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+            // Shift+Return that commits IME marked text stays the system's.
+            if action == #selector(insertLineBreak) { return isEditable && markedTextRange == nil }
             // Query only type availability while displaying editing controls;
             // clipboard contents are read solely in the user's Paste action.
             if action == #selector(paste(_:)), isEditable, onPasteImages != nil,
@@ -122,6 +145,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.keyboardAppearance = keyboardAppearance
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = "Message input"
+        view.submitsOnReturn = onReturn != nil
         context.coordinator.updateFont(on: view)
         context.coordinator.requestCaretReveal(on: view)
         responder?.attach(view)
@@ -141,6 +165,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         let fontChanged = context.coordinator.updateFont(on: view)
         view.isEditable = isEditable
         view.isSelectable = isEditable
+        view.submitsOnReturn = onReturn != nil
         if view.keyboardAppearance != keyboardAppearance {
             view.keyboardAppearance = keyboardAppearance
             if view.isFirstResponder { view.reloadInputViews() }
@@ -232,6 +257,13 @@ struct MultilineComposerTextView: UIViewRepresentable {
             hasMirroredFocus: Bool
         ) -> Bool {
             !desiredFocus && isFirstResponder && hasMirroredFocus
+        }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            guard text == "\n", let onReturn = parent.onReturn, textView.markedTextRange == nil,
+                  (textView as? LayoutAwareTextView)?.isInsertingLineBreak != true else { return true }
+            onReturn()
+            return false
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {

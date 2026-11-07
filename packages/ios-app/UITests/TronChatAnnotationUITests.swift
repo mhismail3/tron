@@ -148,6 +148,87 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual(chips.count, 1)
     }
 
+    /// On iPad, Return in the composer sends exactly like Send, and an empty
+    /// composer sends nothing. XCUITest's simulated keyboard types Return as a
+    /// newline but cannot deliver hardware Shift+Return or Escape.
+    @MainActor func testPadReturnSendsPromptLikeSend() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
+        continueAfterFailure = false
+        let app = launch(); defer { app.terminate() }
+        let composer = app.textViews["Message input"]
+        let prompt = app.staticTexts["fixture.last-prompt"]
+        composer.tap()
+        dismissKeyboardTip(app)
+
+        app.typeText("\n")
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        XCTAssertEqual(prompt.label, "none", "An empty composer sends nothing")
+        XCTAssertEqual(composer.value as? String ?? "", "", "Return in an empty composer inserts nothing")
+
+        app.typeText("Please revise the retry section.")
+        app.typeText("\n")
+        XCTAssertTrue(wait { prompt.label == "Please revise the retry section." }, prompt.label)
+        XCTAssertTrue(wait { (composer.value as? String ?? "").isEmpty }, String(describing: composer.value))
+    }
+
+    /// On iPhone, Return keeps inserting a newline in the composer and in the
+    /// annotation comment; only Send sends and only the check saves.
+    @MainActor func testPhoneReturnInsertsNewline() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone keyboard behavior")
+        continueAfterFailure = false
+        let app = launch(); defer { app.terminate() }
+        let composer = app.textViews["Message input"]
+        composer.tap()
+        dismissKeyboardTip(app)
+        app.typeText("First line\nsecond line")
+        XCTAssertEqual(composer.value as? String, "First line\nsecond line")
+        XCTAssertEqual(app.staticTexts["fixture.last-prompt"].label, "none")
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 22))
+        app.swipeDown()
+
+        let bubble = openAnnotationBubble(app)
+        app.typeText("Note\nmore")
+        let comment = bubble.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == 'Annotation comment' AND (elementType == %d OR elementType == %d)",
+                                  XCUIElement.ElementType.textView.rawValue, XCUIElement.ElementType.textField.rawValue))
+            .firstMatch
+        XCTAssertEqual(comment.value as? String, "Note\nmore", app.debugDescription)
+        XCTAssertTrue(bubble.exists, "Return does not save on iPhone")
+    }
+
+    /// On iPad, Return in the annotation bubble saves like the check and is not
+    /// kept in the comment.
+    @MainActor func testPadReturnSavesAnnotationLikeCheck() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
+        continueAfterFailure = false
+        let app = launch(); defer { app.terminate() }
+        let chips = app.otherElements.matching(identifier: "composer.staged-chip")
+
+        let bubble = openAnnotationBubble(app)
+        app.typeText("Make the cap configurable")
+        app.typeText("\n")
+        XCTAssertTrue(wait(for: bubble, exists: false), "Return saves the annotation")
+        XCTAssertTrue(wait { chips.count == 1 }, app.debugDescription)
+
+        chips.firstMatch.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+        let editor = app.textViews["Annotation comment"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(editor.value as? String, "Make the cap configurable", "Return is not part of the comment")
+    }
+
+    @MainActor private func openAnnotationBubble(_ app: XCUIApplication) -> XCUIElement {
+        let paragraph = assistantBlock(app, containing: "exponential backoff")
+        paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.12))
+            .press(forDuration: 1.0, thenDragTo: paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.83, dy: 0.12)))
+        let annotate = menuAction(app, "Annotate")
+        XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        annotate.tap()
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+        dismissKeyboardTip(app)
+        return bubble
+    }
+
     @MainActor private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-chat-annotation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
