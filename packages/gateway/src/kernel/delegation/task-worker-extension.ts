@@ -1,9 +1,7 @@
 import type { ExtensionFactory } from "../pi/coding-agent.js";
 
-/** Reviewed provider contract at fork commit f72b623067cdfd797db5dd3a6729cef430c54dbf
- * (tron.11 changes only how a foreground child its parent's stop ended is classified,
- * stopped rather than failed; action, supervisor and blocking-wait semantics are
- * unchanged from tron.10).
+/** Reviewed provider contract at fork commit f72b623067cdfd797db5dd3a6729cef430c54dbf:
+ * the action, supervisor and blocking-wait semantics this gate admits.
  * A pin bump must re-review this gate: until then every action of the new
  * version is refused as unverified. async:false is NOT a foreground guarantee:
  * forceTopLevelAsync overrides it, so the task settles any async run it started

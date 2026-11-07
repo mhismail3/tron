@@ -404,7 +404,7 @@ export function updateExtensionActivity(turns: OwnedTurnOwner,
   const requestedAsyncDir = extensionRunAsyncDir(value);
   const asyncDir = requestedAsyncDir ? turns.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
   const invalidDetachedDirectory = requestedAsyncDir !== undefined && asyncDir === undefined;
-  const derivedStatus = extensionActivityStatusFromTool(value, status);
+  const derivedStatus = extensionActivityStatusFromTool(value, status, childIdentityStrategy === "piForeground");
   // An async acknowledgement without an admitted observable directory cannot
   // author a detached live row. Settle the launcher projection instead of
   // creating unwatched runtime/drain ownership.
