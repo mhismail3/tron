@@ -521,6 +521,7 @@ extension ChatScrollCoordinator {
         let threshold = max(320, geometry.containerHeight * 0.8)
         #if HOSTED_TEST
         hostedCatchUpRequestDistance = geometry.distanceFromBottom
+        hostedStagedCatchUpGap = nil
         #endif
         if !reduceMotion, geometry.distanceFromBottom > threshold {
             let reveal = min(140, max(80, geometry.containerHeight * 0.18))
