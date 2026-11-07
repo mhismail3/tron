@@ -100,18 +100,27 @@ private struct NativeSheetCanvasContent: View {
     }
 }
 
+/// The presenter of every managed sheet in its surface, so the one place an
+/// iPad sheet is sized before UIKit presents it.
+private final class NativeSheetHostingController: UIHostingController<NativeSheetCanvasContent> {
+    override func present(_ presented: UIViewController, animated: Bool, completion: (() -> Void)? = nil) {
+        if let window = view.window { TronPadSheetMode.prepare(presented, in: window) }
+        super.present(presented, animated: animated, completion: completion)
+    }
+}
+
 /// The hosting controller itself must survive reconstruction: retaining child
 /// controllers under a disposable UIKit container still dismisses their sheets.
 @MainActor
 final class NativeSheetCanvas: PresentationScopedResource {
     private var sources: [RetainedNativeSheetHost] = []
-    private var hostingController: UIHostingController<NativeSheetCanvasContent>?
+    private var hostingController: NativeSheetHostingController?
     private var retired = false
     var isAttached: Bool { hostingController?.viewIfLoaded?.window != nil }
 
     var controller: UIViewController {
         if let hostingController { return hostingController }
-        let controller = UIHostingController(rootView: renderedContent)
+        let controller = NativeSheetHostingController(rootView: renderedContent)
         controller.view.backgroundColor = .clear
         controller.view.isUserInteractionEnabled = false
         controller.view.accessibilityElementsHidden = true
@@ -177,17 +186,28 @@ private struct NativeSheetCanvasView: UIViewControllerRepresentable {
 
 /// One native mounting point per scene/surface, outside its controls. Sources
 /// are render inputs, not a route registry: scoped resources still own lifetime.
+/// A scene or route surface (`reflowsBesideSideColumn`) lays its content out
+/// beside an open iPad side-column sheet it presents; a sheet's own surface does
+/// not, so a sheet stacked on it covers it as on iPhone.
 struct TronNativeSheetCanvas: ViewModifier {
+    var reflowsBesideSideColumn = false
     @PresentationState private var canvas = NativeSheetCanvas()
+    @Environment(\.tronPadSheetMode) private var padSheetMode
+    @State private var presentsSheet = false // presentation read of this surface's sheets
 
     func body(content: Content) -> some View {
         let canvas = canvas
-        return content.overlayPreferenceValue(NativeSheetSources.self) { sources in
-            NativeSheetCanvasView(canvas: canvas, sources: sources)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
-        }
-        // A nested surface owns its sources; an ancestor must not remount them.
-        .transformPreference(NativeSheetSources.self) { $0 = [] }
+        let reflows = reflowsBesideSideColumn && presentsSheet && padSheetMode == .sideColumn
+        return content
+            .padding(.trailing, reflows ? TronPadSheetMode.sideColumnReflowInset : 0)
+            .onPreferenceChange(TronPadSheetPresented.self) { presentsSheet = $0 }
+            .overlayPreferenceValue(NativeSheetSources.self) { sources in
+                NativeSheetCanvasView(canvas: canvas, sources: sources)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+            // A nested surface owns its sources; an ancestor must not remount them.
+            .transformPreference(NativeSheetSources.self) { $0 = [] }
+            .transformPreference(TronPadSheetPresented.self) { $0 = false }
     }
 }

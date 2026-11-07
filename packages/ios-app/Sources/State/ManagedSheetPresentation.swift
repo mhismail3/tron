@@ -191,6 +191,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                 TronPresentationSurface(token: token, parent: parent) {
                     sheetContent().environment(\.chatOwnsStatusBar, false)
                 }
+                .tronPadSheetPresentation()
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
                 .onAppear { contentAppeared(token) }
             }),
@@ -201,6 +202,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             .transformPreference(NativeSheetSources.self) { sources in
                 sources.append(source)
             }
+            .transformPreference(TronPadSheetPresented.self) { $0 = $0 || isPresented }
             // Only a live false → true request plays, once its content appears: a
             // sheet already presented when its presenter mounts (launch, reconnect,
             // rebuild) is silent, and so is a request UIKit has not presented.
@@ -334,6 +336,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                 TronPresentationSurface(token: token, parent: parent) {
                     sheetContent(value).environment(\.chatOwnsStatusBar, false)
                 }
+                .tronPadSheetPresentation()
                 .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
                 .onAppear { if lease.contentAppeared(token), let haptic { TronHaptics.shared.play(haptic) } }
             }),
@@ -344,6 +347,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             .transformPreference(NativeSheetSources.self) { sources in
                 sources.append(source)
             }
+            .transformPreference(TronPadSheetPresented.self) { $0 = $0 || item != nil }
             // Only a live nil → item request plays, once its content appears; replacing
             // a presented item is not a new presentation.
             .onChange(of: item.map(identity), initial: true) { previous, current in

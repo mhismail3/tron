@@ -158,13 +158,15 @@ extension EnvironmentValues {
     isolated deinit { store.retireAll() }
 }
 
-/// Installs the scene's one presentation-state store. Scene roots apply it once.
+/// Installs the scene's one presentation-state store and iPad sheet mode.
+/// Scene roots apply it once.
 struct TronPresentationStateRoot: ViewModifier {
     @State private var lifetime = PresentationStateLifetime()
 
     func body(content: Content) -> some View {
-        content.modifier(TronNativeSheetCanvas())
+        content.modifier(TronNativeSheetCanvas(reflowsBesideSideColumn: true))
             .environment(\.tronPresentationStateStore, lifetime.store)
+            .modifier(TronPadSheetSceneMode())
     }
 }
 
