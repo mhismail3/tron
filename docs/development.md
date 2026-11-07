@@ -269,7 +269,7 @@ Run affected checks before landing with the merge procedure in the
 [Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)).
 Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
 owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tools/verify/test-oracles.md)
-owns fail-before/pass-after and justified test edits with independent ACCEPT. Reds need
+owns fail-before/pass-after in the owning test, consolidation, and test changes with independent ACCEPT. Reds need
 root fixes or causal reverts, not exemptions; no maintainer test-text approval or retry-to-green.
 
 At most 3 simulator-heavy jobs run at once on this Mac, across all worktrees and workers. The

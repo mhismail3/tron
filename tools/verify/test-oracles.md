@@ -2,10 +2,17 @@
 
 Detect a named surviving regression through shipped logic or its actual boundary.
 For bugs, retain fail-before/pass-after evidence: action, outcome and why the broken
-implementation fails. Mocks, copied algorithms, private calls and source-text matches
-cannot prove wiring, authority, ordering, cleanup or rendering. Use few faithful oracles.
+implementation fails. Put it in the test that already owns the behaviour, extending or
+replacing its cases; add a test file only when no owner exists. Mocks, copied algorithms,
+private calls and source-text matches cannot prove wiring, authority, ordering, cleanup or
+rendering. Use few faithful oracles.
 
-## Retire a reader, not its protection
+## Retire and consolidate
+
+A replacement deletes the path it replaces, with the tests that covered only that path, in
+the same change. Two tests that catch the same fault are one too many: merge or retire one
+once the survivor is shown to catch it (fail-before on the old code, or a mutant both
+detect). That is consolidation, not weakening.
 
 A test solely exercising a deliberately retired mechanism may leave with its last
 reader. Trace actual consumers first. If user value survives elsewhere, name the
@@ -27,7 +34,10 @@ Workers may update intended-behavior assertions, fixtures, timeouts and goldens
 without maintainer test-text approval. Explain the cause and intended delta;
 re-record only the affected witness through its owner and run the comparison.
 A non-author reviewer names each surviving oracle, checks for weakening and explicitly
-ACCEPTs the final change. Never auto-bless unexplained reds or normalize away the
+ACCEPTs the final change after answering, from the `verify` delta: what did this change
+delete or retire; why does each new test file not extend its listed owner; and is any added
+compatibility wording real compat code (refuse it)? A case no rule clearly fits goes to the
+maintainer as a question, not an exception. Never auto-bless unexplained reds or normalize away the
 protected distinction. Subjective design goes to the maintainer with inline visuals;
 Home owns objective gates. A still image does not prove interaction.
 

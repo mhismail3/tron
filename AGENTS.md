@@ -50,11 +50,12 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 ## Engineering rules
 
 - **Ship together:** code, its owning doc and the smallest faithful regression proof in one change.
-- **Delete before adding;** fix root causes; leave coherent code alone; never revive
-  retired architecture (README.md, Repository). Test-only hooks stay test-only.
-- **No unrequested compatibility:** no shims, aliases, re-exports, dual schemas, fallbacks
-  or migration scaffolding; replace internal contracts atomically. Surface a live
-  external or persisted consumer as a decision; never bridge it silently.
+- **A replacement deletes what it replaces** (code, tests, fixtures, docs) in the same change.
+  Fix root causes; leave coherent code alone; never revive retired architecture (README.md, Repository).
+- **No compatibility code:** no shims, aliases, re-exports, dual schemas, fallbacks, compat readers
+  or finished-migration code; replace internal contracts atomically. Old persisted data moves once through a migration
+  (above); a live external consumer is a maintainer decision, never a bridge. Test-only hooks stay test-only.
+- **Unclear fit:** when a rule does not clearly fit a case, stop and ask the maintainer. Never guess or make a quiet exception.
 - **One authority** per state, resource and lifecycle, owning stale work, cancellation,
   bounds and cleanup; fix misplaced ownership instead of adding flags, caches, timers,
   retries or parallel state. Presentation reads are disposable and fenced to the latest
@@ -75,9 +76,12 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - **Fewest faithful oracles:** call shipped logic, not mocks, copied algorithms or private
   calls. The four bounded logic groups are #2097–#2100; wiring, authority, ordering,
   cleanup and rendering still need actual Gateway/Pi/process/socket/built/UI boundaries.
-- Bugs require fail-before/pass-after. Preserve the first failure; name a deleted check's
-  surviving oracle or file its gap. Keep rendered witnesses, not whole AX trees.
-- Intended-behavior test edits need no maintainer tap; a non-author reviewer ACCEPTs them.
+- **Strengthen before adding:** a fix's fail-before/pass-after proof extends or replaces the test
+  that owns the behaviour; a new test file only when none exists. Retiring or merging a test that
+  another is shown (fail-before or mutant) to catch the same fault is consolidation, not weakening.
+  Preserve the first failure. Keep rendered witnesses, not whole AX trees.
+- Test additions, edits and retirements need no maintainer tap; a non-author reviewer ACCEPTs them
+  against `verify`'s delta (what was deleted; why a new file is not its owner; any compat wording).
   Subjective design goes to the maintainer. See the [oracle policy](tools/verify/test-oracles.md).
 - Deterministic reds: root fix or causal revert. Flaky/unrootable reds: one ~2h attempt, then
   ship logging that catches the next occurrence and delete the case; issue stays open. Retain first-failure `test-results/` logs and raw counts.
@@ -102,8 +106,8 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push origin HEAD:main`; never
    force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. A batch red is filed
    against its owning module, which root-fixes it or reverts its change.
-3. Close the issue with the change, actual commands and results, and residual risk; link long logs (`test-results/`,
-   internal workspace). Incidents also name the one-step diagnosing signal, added with a test and a row in its module
+3. Close the issue with the change, what it deleted or retired, actual commands and results, and residual risk; link long logs (`test-results/`,
+   internal workspace). Incidents also name the one-step diagnosing signal, added to its owning test and a row in its module
    README Signals (`packages/gateway/docs/observability.md`). Each landed slice posts a 3-line #2173 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence.
 
 ## Work tracking
@@ -121,9 +125,9 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 ## Working decisions
 
 - A blocker is a bug in the system. Unblock it right away. If the same kind of failure
-  has happened before, or the fix is cheap, fix the mechanism behind it with a script,
-  a test or a rule. Otherwise record it and move on. Delete guards that cost more than they prevent.
-- Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Independent review covers test edits and security/data-loss/irreversible changes.
+  has happened before, or the fix is cheap, fix the mechanism behind it, changing an existing script,
+  test or rule before adding one. Otherwise record it and move on. Delete guards that cost more than they prevent.
+- Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Independent review covers test changes and security/data-loss/irreversible changes.
 - Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
   file-length targets or blanket base-lock runs. Build ahead on branches.
 - Default 2h tasks, 30-minute SHA/change/blocker check-ins; land green or settle in ≤25 lines.

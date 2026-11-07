@@ -271,6 +271,56 @@ def changed_paths(base: str, working: bool = False) -> list[str]:
     return sorted(names)
 
 
+def is_test_code(path: str) -> bool:
+    """Test files and the fixtures, support and goldens that exist only for them."""
+    parts = path.split("/")
+    return is_test(path) or is_golden(path) or any(part in parts for part in ("test-support", "test-fixtures", "Fixtures", "tests", "locks"))
+
+
+COMPAT_WORDS = re.compile(r"\b(legacy|compat|compatibility|shim|deprecated)\b", re.IGNORECASE)
+
+
+def test_stem(path: str) -> str:
+    name = path.rsplit("/", 1)[-1]
+    return name[:-len("Tests.swift")] if name.endswith("Tests.swift") else re.sub(r"^test-", "", name).split(".")[0]
+
+
+def delta(base: str) -> dict:
+    """What the change adds and deletes, split into source and test code. A new test file
+    whose stem an existing test file in the same directory already carries is listed with
+    that owner: the reviewer decides whether the proof belonged in it (test-oracles.md)."""
+    counts = {"source": [0, 0], "tests": [0, 0]}
+    for line in git("diff", "--numstat", "-M", f"{base}..HEAD").splitlines():
+        added, removed, path = line.split("\t", 2)
+        if added == "-":
+            continue  # binary
+        path = re.sub(r"\{[^{}]* => ([^{}]*)\}", r"\1", path).split(" => ")[-1].replace("//", "/")
+        side = counts["tests" if is_test_code(path) else "source"]
+        side[0] += int(added)
+        side[1] += int(removed)
+    status = git("diff", "--name-status", "-M", f"{base}..HEAD").splitlines()
+    added = [fields[-1] for fields in (row.split("\t") for row in status) if fields[0] == "A" and is_test(fields[-1])]
+    deleted = [fields[-1] for fields in (row.split("\t") for row in status) if fields[0] == "D" and is_test(fields[-1])]
+    beside = {}
+    for path in added:
+        directory = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        owners = [name for name in git("ls-tree", "--name-only", base, directory).splitlines()
+                  if name != path and is_test(name) and test_stem(name) == test_stem(path)]
+        if owners:
+            beside[path] = sorted(owners)
+    # Added source lines that name compatibility machinery, which AGENTS.md forbids.
+    compat, path = [], None
+    for line in git("diff", "-U0", "-M", f"{base}..HEAD").splitlines():
+        if line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else None
+            path = path if path and not is_test_code(path) and not is_doc(path) else None
+        elif path and line.startswith("+") and COMPAT_WORDS.search(line):
+            compat.append(f"{path}: {line[1:].strip()[:160]}")
+    return {"sourceLines": {"added": counts["source"][0], "removed": counts["source"][1]},
+            "testLines": {"added": counts["tests"][0], "removed": counts["tests"][1]},
+            "addedTestFiles": added, "deletedTestFiles": deleted, "besideExistingOwner": beside, "compatAdditions": compat}
+
+
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
     """The tests a run selects; `paths` stands in for the changed paths (the mutation sampler's one file)."""
     owner = {path: key for key, module in modules.items() for path in module["owned"]}
@@ -623,6 +673,7 @@ def main(argv: list[str]) -> int:
         modules = result["modules"]
         paths = changed_paths(base, working=True) if args.plan and name == "changed" else None
         selection = select(name, args.module or args.update_locks, base, modules, result["tracked"], paths=paths)
+        change = delta(base) if name == "changed" else None
     except (VerifyError, ownership.GitError) as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
@@ -652,6 +703,14 @@ def main(argv: list[str]) -> int:
         "; full coverage deferred to explicit verify --batch after landing" if selection["tier"] == "full" and name != "all" else ""), flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
+    if change:
+        source, tests = change["sourceLines"], change["testLines"]
+        print(f"  delta: source +{source['added']}/-{source['removed']}, tests +{tests['added']}/-{tests['removed']};"
+              f" test files +{len(change['addedTestFiles'])}/-{len(change['deletedTestFiles'])}", flush=True)
+        for path, owners in change["besideExistingOwner"].items():
+            print(f"  delta: new {path} beside existing owner {', '.join(owners)}: extend it or say why not", flush=True)
+        for addition in change["compatAdditions"]:
+            print(f"  delta: compatibility wording added in {addition}: no compat code (AGENTS.md); delete it or ask", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
@@ -700,7 +759,7 @@ def main(argv: list[str]) -> int:
         if selection["deferredTests"]:
             command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha)
             deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
-        print(json.dumps({"selection": selection, "groups": groups, "steps": plan_steps, "commands": commands,
+        print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "deferredCommands": deferred_commands, "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
 
@@ -734,7 +793,7 @@ def main(argv: list[str]) -> int:
                   "endedAt": datetime.now(timezone.utc).isoformat() if verdict != 'running' else None,
                   "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
-                  "selection": selection, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
+                  "selection": selection, "delta": change, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
                   # A selection, even --all, is not the complete post-land batch.
                   "checkpointEligible": False,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}
