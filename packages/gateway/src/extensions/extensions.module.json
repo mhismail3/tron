@@ -11,6 +11,6 @@
     "gateway/delegation"
   ],
   "verify": [
-    "scripts/tron test gateway src/e2e/sessions/tron-modules.integration.test.ts src/sessions/session-shapes.lock.integration.test.ts"
+    "scripts/tron test gateway src/e2e/sessions/tron-modules.integration.test.ts src/e2e/sessions/session-shapes.lock.integration.test.ts"
   ]
 }

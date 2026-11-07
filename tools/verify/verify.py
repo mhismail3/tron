@@ -27,8 +27,8 @@ GATEWAY = "packages/gateway"
 WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 # Locks not named `*.lock.integration.test.ts`: the Pi SDK seam's behavior trace and corpus.
-NAMED_LOCKS = {f"{GATEWAY}/src/sessions/sdk-behavior-trace.integration.test.ts",
-               f"{GATEWAY}/src/sessions/pi-persisted-state-corpus.integration.test.ts"}
+NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
+               f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
 SKIPPABLE = ("ios", "mac", "relay")
 IOS = "packages/ios-app"
 # The UIValidation test plan's targets, which scripts/tron-ios-test builds and runs. The Gateway E2E

@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 /**
  * Reopens the persisted-state upgrade corpus with the installed Pi SDK (#471, layer L1).
  *
@@ -39,8 +39,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import {
   CORPUS_DIR,
   CORPUS_MCP_SERVERS,
@@ -57,10 +57,10 @@ import {
   waitForRecordedServerTools,
   type CorpusObservation,
   type StagedCorpusPaths,
-} from "../../test-support/pi-persisted-state-corpus.js";
-import { waitFor } from "../../test-support/wait-for.js";
+} from "../../../test-support/pi-persisted-state-corpus.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
-const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const MCP_STDIO_FIXTURE = resolve(PACKAGE_ROOT, "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
 const MCP_OAUTH_FIXTURE = resolve(PACKAGE_ROOT, "test-support/mcp-oauth-fixture.mjs");
 
