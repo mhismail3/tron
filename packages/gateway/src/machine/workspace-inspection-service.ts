@@ -81,7 +81,9 @@ function validateRelativePath(value: string | undefined, allowEmpty = true): str
 }
 
 async function canonicalRoot(path: string): Promise<string> {
-  const root = await realpath(resolve(path));
+  const root = await realpath(resolve(path)).catch((error: NodeJS.ErrnoException) => {
+    throw error.code === "ENOENT" || error.code === "ENOTDIR" ? new GatewayError("not_found", "The session workspace no longer exists") : error;
+  });
   const metadata = await lstat(root);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new GatewayError("conflict", "The session workspace is no longer a directory", true);
