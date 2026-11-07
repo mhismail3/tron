@@ -40,6 +40,10 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         // Copy the same cross-heading/list range and paste it into the composer
         // so the journey verifies the plain-text markers and block separation.
+        // Saving hands the keyboard to the composer; put it away first so the
+        // list items are on screen for the drag.
+        if app.keyboards.firstMatch.exists { app.buttons["Dismiss keyboard"].firstMatch.tap() }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10), app.debugDescription)
         let startAgain = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
         let endAgain = nextItem.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9))
         startAgain.press(forDuration: 1.0, thenDragTo: endAgain)
