@@ -54,7 +54,7 @@ result is not a failed write: inspect `git ls-remote origin refs/heads/main` and
 ancestry before acting. Never force-push main or automatically replay uncertain writes.
 Do not run full suites after landing: the asynchronous main batch owns that coverage and
 the causal revert of a proven culprit
-([principles P2](../../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Sync tracked-clean primary main only when
+([principles P2](../../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). Sync tracked-clean primary main only when
 strictly behind with `git merge --ff-only origin/main`; preserve untracked files.
 
 ## Issues and preservation

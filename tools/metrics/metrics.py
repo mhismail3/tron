@@ -58,37 +58,19 @@ class MetricsError(Exception):
 
 
 def structure(sha: str) -> dict:
-    """M4: how much of the tree an agent can navigate by its cards (tools/ownership/README.md, "Purpose cards")."""
+    """M4: modules, root entries and files directly in scripts/ (tools/ownership/README.md)."""
     sys.path.insert(0, str(ROOT / "tools" / "ownership"))
-    import cards  # noqa: E402  (the one reference scanner)
     import ownership  # noqa: E402  (the one ownership authority)
     try:
         result, _ = ownership.check(sha)
-        paths, read = ownership.inventory(sha)
+        paths, _ = ownership.inventory(sha)
     except ownership.GitError as error:
         raise MetricsError(str(error)) from None
-    modules = result["modules"]
-    owner = {path: key for key, module in modules.items() for path in module["owned"]}
-    root = modules.get("repo/root", {}).get("manifest") == "root.module.json" and json.loads(read("root.module.json"))
-    uncarded = ((root or {}).get("layout") or {}).get("uncarded", sorted(modules))
-    refs = cards.references(paths, read, owner)
-    folders = cards.directories(paths, owner)
-    edges = cards.module_edges(refs, owner, folders)
-    reached = {target for targets in refs.values() for target in targets}
-    # Swift resolves by type within a target, not by path; its reachability is the iOS index (`scripts/tron layers ios`).
-    unreached = sorted(path for path in paths if path in owner and cards.is_source(path) and not cards.is_test(path)
-                       and not path.endswith(".swift")
-                       and not any(cards.covers(target, path) for target in reached if target in folders or target == path))
     return {
         "status": "observed",
-        "modules": len(modules),
-        "uncarded": len([key for key in uncarded if key in modules]),
+        "modules": len(result["modules"]),
         "rootEntries": len({path.split("/", 1)[0] for path in paths}),
         "scriptsTopFiles": len([path for path in paths if path.startswith("scripts/") and path.count("/") == 1]),
-        "crossModuleReferences": sum(len(targets) for consumers in edges.values() for targets in consumers.values()),
-        "modulePairs": sum(len(consumers) for consumers in edges.values()),
-        "unreachedFiles": len(unreached),
-        "unreached": unreached,
     }
 
 
@@ -448,10 +430,8 @@ def compare(base: dict, head: dict) -> str:
     return "\n".join(lines)
 
 
-STRUCTURE_ROWS = (("modules", "Modules"), ("uncarded", "Modules without a card"), ("rootEntries", "Root entries"),
-                  ("scriptsTopFiles", "Files directly in scripts/"),
-                  ("crossModuleReferences", "Cross-module file references"), ("modulePairs", "Module pairs that reference"),
-                  ("unreachedFiles", "Source files no tracked file names"))
+STRUCTURE_ROWS = (("modules", "Modules"), ("rootEntries", "Root entries"),
+                  ("scriptsTopFiles", "Files directly in scripts/"))
 
 
 def summary(result: dict) -> str:

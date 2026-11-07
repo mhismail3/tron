@@ -34,7 +34,7 @@ Home owns objective gates. A still image does not prove interaction.
 ## Reds
 
 Deterministic reds need root fixes or causal reverts. Flaky or unrootable reds follow
-the [flake policy](../../docs/PRINCIPLES.md#p3-tests-are-deterministic-or-they-are-bugs):
+the [flake policy](../../docs/PRINCIPLES.md#p6-tests-are-deterministic-and-own-their-resources):
 one timeboxed attempt, then shipped logging plus deletion of the case, issue left open.
 Preserve the first failure, exact SHA, command and raw logs/counts. A passing retry is
 nondeterminism evidence, not resolution. Diagnose an unattributed red before choosing
@@ -42,5 +42,5 @@ any revert target; never guess. The [batch owner](batch.md)
 reverts only a culprit proven by fresh controls.
 
 Run affected checks before landing; broad post-land coverage belongs to the
-[batch owner](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship), not duplicated per-worker suites. Report counts, skips,
+[batch owner](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate), not duplicated per-worker suites. Report counts, skips,
 failures and untested boundaries honestly. See [test-confidence procedures](../../.agents/skills/tron-test-confidence/SKILL.md).

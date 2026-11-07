@@ -3,29 +3,5 @@
   "purpose": "Gateway import-graph and iOS index-store layer checks against manifest layers and dependsOn.",
   "owns": [
     "**"
-  ],
-  "interfaces": [
-    {
-      "name": "tools/layers",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli",
-        "repo/verify"
-      ]
-    },
-    {
-      "name": "tools/layers/layers.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    },
-    {
-      "name": "tools/layers/swift_index.py",
-      "kind": "import",
-      "consumers": [
-        "repo/verify"
-      ]
-    }
   ]
 }

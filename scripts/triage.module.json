@@ -6,18 +6,5 @@
     "triage.module.json",
     "tron-triage",
     "tron_triage.py"
-  ],
-  "interfaces": [
-    {
-      "name": "scripts/tron-triage",
-      "kind": "exec",
-      "external": "operator after a connection incident (packages/gateway/docs/connection-resilience.md)"
-    }
-  ],
-  "uses": [
-    {
-      "name": "tailscale",
-      "kind": "cli"
-    }
   ]
 }

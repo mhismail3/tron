@@ -70,7 +70,7 @@ Fresh worktrees prepare their own pinned Gateway development dependencies before
 Gateway checks; see [verify](../verify/README.md#worktree-dependencies). No shared
 install or global compiler substitutes. Affected checks run before plain-Git push;
 broader coverage and causal reverts belong to the asynchronous main batch
-([principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)), never a queue or required receipt. Keep evidence under `test-results/`.
+([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)), never a queue or required receipt. Keep evidence under `test-results/`.
 
 Mac, iOS and Gateway lifecycle contracts stay with their development guides.
 Nothing here installs, deploys, replaces, restarts or promotes Stable. Never add an

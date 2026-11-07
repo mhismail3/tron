@@ -16,8 +16,7 @@ fixture files with fixed dates, and runs the command as a worker would:
 4. `--compare` pairs renames, subtracts deletions, reports reclassification and
    follows files over 500 lines through renames; its rows sum to the total.
 5. An unknown revision fails loudly and writes nothing.
-6. Structure counts modules, the ones `layout.uncarded` exempts, root entries, files directly
-   in `scripts/`, references between modules and source files no tracked file names.
+6. Structure counts modules, root entries and files directly in `scripts/`.
 
 The last comparison is kept in `test-results/metrics-cli/` for review.
 """
@@ -35,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "metrics-cli"
-TOOL_FILES = ("scripts/tron", "tools/metrics/metrics.py", "tools/ownership/ownership.py", "tools/ownership/cards.py",
+TOOL_FILES = ("scripts/tron", "tools/metrics/metrics.py", "tools/ownership/ownership.py",
               "tools/ownership/layout.py")
 DAY = 86400
 T0 = 1_700_000_000  # 2023-11-14: far from the wall clock, so clock anchoring fails loudly.
@@ -216,11 +215,10 @@ class ClassificationTests(RepoCase):
 
 
 class StructureTests(RepoCase):
-    def test_structure_counts_cards_references_and_unnamed_files(self) -> None:
+    def test_structure_counts_modules_root_entries_and_scripts(self) -> None:
         r = self.repo
         r.write("root.module.json", json.dumps({"layer": "L5", "owns": ["root.module.json", "scripts/**", "tools/**"],
-                                                "layout": {"root": [], "scriptsTop": [], "frozen": [],
-                                                           "uncarded": ["repo/caller"]}}))
+                                                "layout": {"root": [], "scriptsTop": [], "frozen": []}}))
         r.write("mods/tool/tool.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
         r.write("mods/tool/tool.sh", "#!/usr/bin/env bash\necho tool\n")
         r.write("mods/caller/caller.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
@@ -229,12 +227,7 @@ class StructureTests(RepoCase):
         sha = r.commit("modules", T0)
         self.measure()
         structure = json.loads(r.output(sha).read_text())["metrics"]["M4.structure"]
-        self.assertEqual({key: structure[key] for key in ("modules", "uncarded", "rootEntries", "scriptsTopFiles",
-                                                          "crossModuleReferences", "modulePairs")},
-                         {"modules": 3, "uncarded": 1, "rootEntries": 4, "scriptsTopFiles": 1,
-                          "crossModuleReferences": 1, "modulePairs": 1})
-        self.assertIn("mods/caller/orphan.sh", structure["unreached"])
-        self.assertNotIn("mods/tool/tool.sh", structure["unreached"])
+        self.assertEqual(structure, {"status": "observed", "modules": 3, "rootEntries": 4, "scriptsTopFiles": 1})
 
 
 class DeterminismTests(RepoCase):

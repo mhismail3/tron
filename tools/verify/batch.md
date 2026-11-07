@@ -2,7 +2,7 @@
 
 Pre-merge evidence is the fast [affected check](README.md). Full E2E coverage runs after landing,
 asynchronously, through `verify --batch` in a persistent clean worktree on fetched main;
-feature landings never wait for it ([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)).
+feature landings never wait for it ([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)).
 The trigger is a separate owner (Home's batch Automation); this owner never schedules,
 installs, deploys or restarts anything. Every terminal run prints one JSON `batchResult`
 line with head, report path and each repair's state and next step; the caller delivers it.

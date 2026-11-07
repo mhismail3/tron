@@ -268,7 +268,7 @@ always allowed.
 twice its budget, or the root README or AGENTS.md over theirs. [Budget rules](../tools/AGENTS.md#doc-budgets-toolsbudgets).
 
 Run affected checks before landing with the merge procedure in the
-[Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)).
+[Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)).
 Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
 owns selection and `test-results/verify/<sha>.json`; the [oracle policy](../tools/verify/test-oracles.md)
 owns fail-before/pass-after and justified test edits with independent ACCEPT. Reds need

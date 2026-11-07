@@ -3,24 +3,5 @@
   "purpose": "Refreshes the Gateway's vendored model release-date baseline from models.dev for the providers the pinned Pi catalog serves.",
   "owns": [
     "**"
-  ],
-  "interfaces": [
-    {
-      "name": "scripts/models/update-model-release-dates.mjs",
-      "kind": "exec",
-      "external": "maintainer refreshes the baseline (packages/gateway/src/admin/runtime-configuration.md)"
-    }
-  ],
-  "uses": [
-    {
-      "name": "models.dev",
-      "kind": "wire",
-      "why": "RELEASE_DATE_SOURCE, through the Gateway's normalization"
-    },
-    {
-      "name": "pi-ai/dist/providers/data",
-      "kind": "fs",
-      "why": "the providers the pinned Pi catalog serves"
-    }
   ]
 }

@@ -3,7 +3,7 @@
 `scripts/tron verify` runs the fast affected checks before merge; `verify --batch` runs full
 coverage asynchronously on landed main and causally reverts a proven culprit. The manifests and their dependency
 and dynamic-edge graph are the selection authority. No merge queue, landing gate or hosted
-CI is involved ([principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). A previous test pass never substitutes for
+CI is involved ([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md) and [on-demand health contract](health-design.md#on-demand-command).
 
@@ -44,7 +44,7 @@ Both `scripts/tron test gateway` and verify's Gateway Vitest groups use
 one test process its own temporary HOME, TMPDIR, Tron data directory and agent
 resource directory, under `/tmp` rather than the caller's TMPDIR, so fixture and socket path
 lengths do not depend on who runs the suite. It waits for Vitest before removing those directories, also
-forwarding cancellation to the owned child. Every tool that stops it (verify, batch, probe, mutate) sends
+forwarding cancellation to the owned child. Every tool that stops it (verify, batch, mutate) sends
 SIGTERM first and SIGKILL only after a grace (mutate 10 s, the others 30 s), so a root is left behind
 only by an outside SIGKILL or by a Vitest still tearing down when the grace ends.
 It never installs this checkout's missing packages.
@@ -86,7 +86,7 @@ the build that stamped it). Python unittest counts exclude skipped and expected-
 cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 ## Static checks (existing tools only)
-1. `scripts/tron ownership`, including each module's [purpose card](../ownership/README.md#purpose-cards)
+1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer
 3. `scripts/tron budgets HEAD` (sizes are reported; few cases fail)
 4. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
@@ -103,7 +103,7 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 ### No exemptions
 
 There is no known-failure registry, quarantine, waiver, expiry or qualified verdict
-([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Every
+([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). Every
 executed failure is `failed` (exit 1); it is fixed at its root or causally reverted.
 
 ## Selection
@@ -255,33 +255,8 @@ restored after each mutant, interrupt or SIGTERM. Incremental `test-results/muta
 reports retain partial results (`complete: false` until finished). Stryker remains
 deferred until a known-kill probe proves activation with pinned Vitest.
 
-## Removal probes
-
-`scripts/tron probe <path|module-id> [--move <new-path>] [--jobs 4] [--timeout 900]` asks what
-would break if a unit (file, directory or module) were removed, or moved without updating its
-callers. It checks out HEAD in a private worktree (with a copy-on-write clone of installed Gateway
-dependencies, which a guardian may reinstall), runs the unit's guardians unchanged, applies the change with the manifests kept
-true to the tree, commits it and runs them again. Guardians are the tests `verify` selects for
-the unit, every test that names it, and the tests that name a file of their own module that names
-it (one hop through a consumer; references as in [purpose cards](../ownership/README.md#purpose-cards)).
-Runners verify drives in their own lanes (iOS, Mac, push relay) are listed, not run. A guardian already red at HEAD is left out and reported
-(`baselineRed`); with none left green the probe stops before any change (exit 1).
-
-| Verdict | Meaning | What to do |
-|---|---|---|
-| precise | guardians that passed now fail and every failure names the unit | keep; the card's guardians are real |
-| cascade | some failure never names the unit | make the failing check name what it needs (structure defect) |
-| silent | nothing fails | dead: delete it; or unguarded: add a test that fails before and passes after |
-
-The static `scripts/tron ownership` findings the change adds (a half-done move, a stale card)
-are reported beside the verdict. It measures and never gates; `test-results/probe/<sha>/<unit>/`
-keeps `report.json` and each test's baseline and after logs, and the worktree is always removed. A test
-that times out, or runs when the probe is stopped, gets SIGTERM and a 30 s grace to clean up before SIGKILL.
-
 ## Verify
 
-`scripts/tron test tooling tools/verify/tests/test-probe.py` covers each verdict, a move that
-leaves its callers behind and a red baseline in a disposable repository; logs: `test-results/probe-cli/`.
 `scripts/tron test tooling tools/verify/tests/test-verify.py tools/verify/tests/test-verify-tiers.py tools/verify/tests/test-verify-batch.py`
 drives real Git/CLI fixtures: affected selection, known-bad small changes, zero-test
 refusal, reproducible digests, dirty planning, unnamed ignored residue failing the run, descendant cleanup, batch ranges/overlap,

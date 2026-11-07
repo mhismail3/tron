@@ -76,11 +76,6 @@ Commands:
                                     Seeded sampled mutation of one file against the tests
                                     verify selects for it (lock sensitivity, plan 6.6);
                                     test-results/mutate/; measures, never gates
-  probe <path|module-id> [--move <new-path>] [--jobs N]
-                                    Delete (or move, callers untouched) one unit in a
-                                    scratch worktree, run its guardians and consumers'
-                                    tests; verdict precise, cascade or silent;
-                                    test-results/probe/; measures, never gates
   layers [gateway|ios] [--update] [--base <ref>]
                                     Gateway import graph (pinned tsc) or iOS index store
                                     (fresh tron-ios-test build) against manifest layers
@@ -239,9 +234,6 @@ case "$cmd" in
     ;;
   mutate)
     exec python3 "$ROOT/tools/verify/mutate.py" "$@"
-    ;;
-  probe)
-    exec python3 "$ROOT/tools/verify/probe.py" "$@"
     ;;
   bundle)
     [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }

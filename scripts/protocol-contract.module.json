@@ -8,29 +8,5 @@
   ],
   "verify": [
     "scripts/tron test tooling scripts/verify-gateway-protocol-contract.py"
-  ],
-  "interfaces": [
-    {
-      "name": "scripts/gateway_protocol_contract.py",
-      "kind": "import",
-      "consumers": [
-        "mac-app/gateway-payload",
-        "repo/dev",
-        "repo/ios",
-        "repo/profile"
-      ]
-    },
-    {
-      "name": "scripts/verify-gateway-protocol-contract.py",
-      "kind": "exec",
-      "consumers": [
-        "ios-app/package",
-        "mac-app/gateway-payload",
-        "mac-app/package",
-        "repo/dev",
-        "repo/ios",
-        "repo/mac"
-      ]
-    }
   ]
 }

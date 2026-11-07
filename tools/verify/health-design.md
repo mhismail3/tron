@@ -1,6 +1,6 @@
 # Lightweight health reporting
 
-[P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship) owns red/green policy:
+[P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate) owns red/green policy:
 legacy verifier verdicts are diagnostics, never permission for exemptions or qualified green.
 
 The implemented scope is the on-demand `scripts/tron health` scorecard and approved

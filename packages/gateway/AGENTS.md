@@ -7,8 +7,8 @@ this file holds where to find modules, the test lanes and the local hazards.
 ## Module map
 
 Each module's README owns its contract. `scripts/tron docs modules packages/gateway` prints every
-module with its layer, manifest and README; `scripts/tron ownership --card <path>` prints one
-module's purpose, edges and guardians.
+module with its layer, manifest and README; `scripts/tron ownership --ledger` prints each path's
+module and purpose.
 
 ## Test lanes
 
