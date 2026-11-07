@@ -115,7 +115,7 @@ python3 scripts/test-ios-process-evidence.py  # owned-group timeout diagnostics;
 Repeat `--only-testing` for adjacent journeys; a class selector runs the class. Count the methods
 executed: an unmatched selector is not evidence. Screenshots stay in the reported
 `TestResults.xcresult` (`xcrun xcresulttool export attachments --path <xcresult> --output-path
-<private-dir>`), never in the source tree. Goldens: [UI locks](../UITests/Locks/README.md).
+<private-dir>`), never in the source tree. Accessibility witnesses: [UI locks](../UITests/Locks/README.md).
 
 ### Simulator lifecycle
 

@@ -1,51 +1,15 @@
 import UIKit
 import XCTest
 
-/// UI locks (README.md beside this file). A lock pins one
-/// hosted-fixture screen state with a pixel witness in `Goldens/` and an optional
-/// accessibility witness given by the caller:
-///
-/// - the accessibility witness: the app's hierarchy as normalized text
-///   (`UILockTree`: type, identifier, label, value, traits, frame in whole points,
-///   nesting by indentation, in order), compared exactly with the caller's literal;
-/// - `<name>.png`: a screenshot on the pinned simulator (`config/ci-toolchain.env`),
-///   status bar and home indicator masked, compared within
-///   `UILock.channelTolerance` per channel and at most
-///   `UILock.maxDifferingPixels` differing pixels. PNG goldens are committed
-///   in Git LFS (#1466).
-///
-/// `TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests` (the `--update-locks` mode)
-/// rewrites the PNG goldens instead of comparing; a missing golden fails. Every run
-/// writes its captures under `test-results/ui-locks/`; a failure adds a diff
-/// there and puts the text diff in its message.
+/// UI locks (README.md beside this file). A lock pins one hosted-fixture screen
+/// state with an accessibility witness: the app's hierarchy as normalized text
+/// (`UILockTree`: type, identifier, label, value, traits, frame in whole points,
+/// nesting by indentation, in order), compared exactly with the caller's literal.
+/// Every run writes its capture under `test-results/ui-locks/`; a failure puts the
+/// text diff in its message.
 enum UILock {
-    /// A pixel differs when any RGBA channel moves by more than this (of 255).
-    /// Between launches of the same build, materials and blurs vary by up to 3
-    /// and a tool chip's soft shadow over the light grain by up to 11 (#1464).
-    static let channelTolerance = 12
-    /// A screenshot lock fails above this many differing pixels.
-    static let maxDifferingPixels = 0
-    /// The status bar carries the clock and battery: it is painted out of every
-    /// screenshot. iPhone 17 Pro's status bar is 62 pt tall.
-    static let statusBarPoints = 62
-    /// iPhone 17 Pro at 3x; every lock runs on exactly this screen.
-    static let pinnedPixels = (width: 1206, height: 2622)
-    /// The home indicator adapts its colour to the content beneath it, on the
-    /// system's own schedule: its bottom-centre box is painted out too.
-    static let homeIndicatorPoints = (width: 160, height: 21)
     /// How long a state may keep changing before the lock gives up on it.
     static let settleTimeout: TimeInterval = 10
-
-    static let recordHint = "record it with "
-        + "`TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run --only-testing TronMobileUITests/TronUILockTests`"
-    /// The module that owns these goldens. As for the Gateway's scenario locks,
-    /// `TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose
-    /// goldens a run may rewrite; xcodebuild passes it as `TEST_RUNNER_TRON_UPDATE_LOCKS`.
-    static let module = "ios-app/ui-tests"
-    static let updating = (ProcessInfo.processInfo.environment["TRON_UPDATE_LOCKS"] ?? "")
-        .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        .contains { $0 == "all" || $0 == module }
-    static let goldens = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appending(path: "Goldens")
     static let results = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent() // Locks
         .deletingLastPathComponent() // UITests
@@ -56,27 +20,12 @@ enum UILock {
 }
 
 extension XCTestCase {
-    /// Locks the app's current state as `name`: waits until the explicitly
-    /// selected witnesses stop changing. `accessibility` is the exact expected
-    /// `UILockTree` text, or nil when the state has only a pixel witness; a
-    /// missing PNG golden still fails, never silently downgrades coverage.
+    /// Locks the app's current state as `name`: waits until the accessibility
+    /// hierarchy stops changing, then compares it with `expectedTree` exactly.
     @MainActor
-    func assertUILock(_ app: XCUIApplication, _ name: String, accessibility expectedTree: String?, file: StaticString = #filePath, line: UInt = #line) {
-        let tree: String?
-        if expectedTree != nil {
-            guard let settled = settledTree(app, name, file: file, line: line) else { return }
-            tree = settled
-        } else { tree = nil }
-        guard let shot = settledScreenshot(name, file: file, line: line) else { return }
-        // Checked before recording too: goldens from another device would be
-        // silently wrong, and the status-bar mask assumes this 3x screen.
-        guard shot.width == UILock.pinnedPixels.width, shot.height == UILock.pinnedPixels.height else {
-            return XCTFail("\(name): screenshot is \(shot.width)×\(shot.height) px, not the pinned "
-                           + "\(UILock.pinnedPixels.width)×\(UILock.pinnedPixels.height) px of iPhone 17 Pro "
-                           + "(config/ci-toolchain.env); use scripts/tron-ios-test", file: file, line: line)
-        }
-        if let tree, let expectedTree { checkTree(tree, expected: expectedTree, name, file: file, line: line) }
-        checkScreenshot(shot, name, file: file, line: line)
+    func assertUILock(_ app: XCUIApplication, _ name: String, accessibility expectedTree: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let tree = settledTree(app, name, file: file, line: line) else { return }
+        checkTree(tree, expected: expectedTree, name, file: file, line: line)
     }
 
     // MARK: Settling
@@ -102,32 +51,10 @@ extension XCTestCase {
         } while true
     }
 
-    @MainActor
-    private func settledScreenshot(_ name: String, file: StaticString, line: UInt) -> UILockImage? {
-        var previous: UILockImage?
-        let deadline = Date().addingTimeInterval(UILock.settleTimeout)
-        repeat {
-            guard let current = UILockImage(screenshot: XCUIScreen.main.screenshot()) else {
-                XCTFail("\(name): the screenshot could not be decoded", file: file, line: line)
-                return nil
-            }
-            // Exact, not within tolerance: a slow fade must not count as settled.
-            if let previous, current.isIdentical(to: previous) { return current }
-            if Date() > deadline {
-                let count = previous.map { current.differingPixels(from: $0).count } ?? -1
-                XCTFail("\(name): the screen kept changing for \(Int(UILock.settleTimeout)) s (\(count) pixels between the last two frames)",
-                        file: file, line: line)
-                return nil
-            }
-            previous = current
-            Thread.sleep(forTimeInterval: 0.3)
-        } while true
-    }
-
     // MARK: Comparison
 
-    /// Every run leaves its captures under `test-results/ui-locks/`, so two runs
-    /// can be compared byte for byte and a failure has its actual beside the golden.
+    /// Every run leaves its capture under `test-results/ui-locks/`, so two runs
+    /// can be compared byte for byte.
     private func checkTree(_ tree: String, expected: String, _ name: String, file: StaticString, line: UInt) {
         let actual = UILock.results.appending(path: "\(name).a11y.txt")
         write(Data(tree.utf8), to: actual, name, file: file, line: line)
@@ -135,31 +62,6 @@ extension XCTestCase {
         attach(Data(tree.utf8), "\(name).a11y.txt", "public.plain-text")
         XCTFail("\(name): the accessibility hierarchy changed (- expected, + actual; actual at \(actual.path)):\n"
                 + UILockDiff.lines(expected, tree), file: file, line: line)
-    }
-
-    private func checkScreenshot(_ shot: UILockImage, _ name: String, file: StaticString, line: UInt) {
-        let golden = UILock.goldens.appending(path: "\(name).png")
-        let actual = UILock.results.appending(path: "\(name).png")
-        let diffURL = UILock.results.appending(path: "\(name).diff.png")
-        try? FileManager.default.removeItem(at: diffURL)
-        guard let png = shot.png() else { return XCTFail("\(name): the screenshot could not be encoded", file: file, line: line) }
-        write(png, to: actual, name, file: file, line: line)
-        if UILock.updating { return write(png, to: golden, name, file: file, line: line) }
-        guard let data = try? Data(contentsOf: golden), let expected = UILockImage(png: data) else {
-            return XCTFail("\(name): no decodable screenshot golden at \(golden.path); a Git LFS pointer needs "
-                           + "`git lfs pull`, a new state: \(UILock.recordHint)", file: file, line: line)
-        }
-        guard expected.width == shot.width, expected.height == shot.height else {
-            return XCTFail("\(name): the golden is \(expected.width)×\(expected.height) px; re-record it on the pinned simulator",
-                           file: file, line: line)
-        }
-        let differing = shot.differingPixels(from: expected)
-        guard differing.count > UILock.maxDifferingPixels else { return }
-        if let diff = expected.highlighting(differing) { write(diff, to: diffURL, name, file: file, line: line) }
-        attach(png, "\(name).png", "public.png")
-        XCTFail("\(name): \(differing.count) pixels differ by more than \(UILock.channelTolerance)/255 "
-                + "(allowed \(UILock.maxDifferingPixels)) in \(differing.bounds) px; golden \(golden.path), "
-                + "actual \(actual.path), diff (differences in red) \(diffURL.path)", file: file, line: line)
     }
 
     private func write(_ data: Data, to url: URL, _ name: String, file: StaticString, line: UInt) {

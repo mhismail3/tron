@@ -321,8 +321,6 @@ targets:
         excludes:
           - "**/*.module.json"
           - "**/README.md"
-          # UI-lock goldens are read from the source tree, never bundled.
-          - "Locks/Goldens/**"
       - path: docs/assets/parity
         buildPhase: resources
         createIntermediateGroups: true
