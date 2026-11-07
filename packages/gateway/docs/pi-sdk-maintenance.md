@@ -38,7 +38,10 @@ conflict or a persisted-data migration is a maintainer decision, never applied a
 ## Version authority and checks
 
 `packages/gateway/package.json` is the sole version authority: `pi-agent-core`, `pi-ai`,
-`pi-coding-agent` and `pi-tui` exact and equal. `npm run check:pi-sdk` (offline) validates the
+`pi-coding-agent` and `pi-tui` exact and equal. pi-ai no longer re-exports TypeBox, so
+the Pi seam (`src/kernel/pi/ai.ts`) takes `Type`, `Static` and `TSchema` from the exact
+`typebox` pi-coding-agent pins and defines the TypeBox-typed `StringEnum` Pi gives
+extensions; Gateway tool schemas stay TypeBox. `npm run check:pi-sdk` (offline) validates the
 lockfile and installed tree against that cohort and requires `node_modules/.bin/pi` to link to
 `pi-coding-agent`'s `bin.pi`; staged payloads use `node scripts/check-pi-sdk.mjs --runtime-tree <app>`. The updater preflights each package (version, revision, integrity, engine), resolves
 all four in one `npm install --package-lock-only --save-exact --engine-strict`, installs with
@@ -60,10 +63,9 @@ run start that `preflightResult("started")` can revoke, and FIFO `ModelRuntime`
 config reads. A newer awaited refresh cannot overtake an older registration-triggered
 config read and let that continuation start storage work after readiness. Each call
 still loads current config and retains its own provider selection/error; this is not
-a general downstream credential/model-store drain API. It also pins the patched `undici`
-(8.12.3) and `minimatch` (11.0.3) that upstream ships from 1.5.0: the `pi` bin and
-`./rpc-entry` bundle their dependencies, so only a rebuild moves them, never a Gateway
-`overrides` entry.
+a general downstream credential/model-store drain API. The `pi` bin and `./rpc-entry`
+bundle their dependencies, so only a release or a rebuild moves a dependency there, never a
+Gateway `overrides` entry.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
 Gateway reapplies the transcript's explicit loadout over them. When that narrows the

@@ -349,7 +349,9 @@ export class ManagedSubagents {
     // returned files are the exact admitted identities for both consumers.
     const resolved = await new DefaultPackageManager({ cwd: root, agentDir: root, settingsManager: SettingsManager.inMemory() })
       .resolveExtensionSources([root]);
-    const admitted = (kind: keyof ResolvedPaths) => resolved[kind].map(resource => {
+    // A verified local build installs nothing; a skipped package means the build is not the one admitted.
+    if (resolved.installFailures?.length) throw new GatewayError("conflict", "managed pi-subagents resources failed to resolve");
+    const admitted = (kind: "extensions" | "skills" | "prompts") => resolved[kind].map(resource => {
       const inside = relative(root, resource.path);
       if (!inside || inside.startsWith(`..${sep}`) || isAbsolute(inside) || realpathSync(resource.path) !== resource.path) {
         throw new GatewayError("conflict", "managed pi-subagents resource escapes the verified root");

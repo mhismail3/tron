@@ -137,9 +137,9 @@ export const rendererContractCompatibility = {
   toolContext: {
     args: "renderer", toolCallId: "renderer", invalidate: "renderer", lastComponent: "renderer", state: "renderer", cwd: "renderer",
     executionStarted: "renderer", argsComplete: "renderer", isPartial: "renderer", expanded: "renderer", showImages: "renderer", isError: "renderer",
-    durationMs: "renderer", outputPad: "renderer",
+    durationMs: "renderer", outputPad: "renderer", keyHint: "renderer", keyText: "renderer",
   } satisfies Record<keyof PublicToolRenderContext, "renderer">,
-  messageOptions: { expanded: "renderer", outputPad: "renderer" } satisfies Record<keyof MessageRenderOptions, "renderer">,
-  entryOptions: { expanded: "renderer" } satisfies Record<keyof EntryRenderOptions, "renderer">,
-  markdownContext: { messageType: "renderer", isStreaming: "renderer", availableWidth: "renderer" } satisfies Record<keyof MarkdownTransformContext, "renderer">,
+  messageOptions: { expanded: "renderer", outputPad: "renderer", keyHint: "renderer", keyText: "renderer" } satisfies Record<keyof MessageRenderOptions, "renderer">,
+  entryOptions: { expanded: "renderer", keyHint: "renderer", keyText: "renderer" } satisfies Record<keyof EntryRenderOptions, "renderer">,
+  markdownContext: { messageType: "renderer", isStreaming: "renderer", availableWidth: "renderer", messageId: "renderer", timestamp: "renderer" } satisfies Record<keyof MarkdownTransformContext, "renderer">,
 } as const;
