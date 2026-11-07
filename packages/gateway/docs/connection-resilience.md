@@ -92,23 +92,17 @@ picks one of two by credential kind (`PAIRED_PER_MESSAGE_DEFLATE` in `src/transp
 
 ## Collect evidence before recovery
 
-1. Run `scripts/tron-triage PHONE-EXPORT...` first. It reads the exports and
-   `<tronHome>/logs/gateway.jsonl` with rotations (`--gateway-logs DIR` for another home)
-   read-only and prints one row per outage with cause `path`, `phone-background`,
-   `phone-stall`, `gateway-stall`, `gateway-capacity` or `unknown` (first matching rule in
-   `scripts/tron_triage.py`) and the evidence lines. `--json`, `--out PATH`;
-   `--tailscale-window` reads the Tailscale extension's log for the export's range as path
-   evidence, `--tailscale-peer NODEKEY` restricts it to the phone's peer.
-2. Export iOS logs; keep capture time, range, build, source freshness, profile labels and
+1. Export iOS logs; keep capture time, range, build, source freshness, profile labels and
    Gateway identity. Retained records are not a live health check.
-3. The tool joins phone and Gateway by key (`gatewayConnectionId` = `connectionId`;
-   `clientId`/`attemptId`/`epoch` = `peerClientId`/`peerAttemptId`/`peerEpoch`), else by time
-   for pre-protocol-5 logs (`joinedBy`). With a key join only key-joined and Gateway-wide
-   records count, and the connection a recovery opened is never the lost one's cause. Outages
-   split per scene phase; an attempt belongs to the stretch it began in; a relay window explains
-   an episode only if it covers the loss and ends within the recovery delay.
-4. A `satisfied` OS path proves neither Tailscale health nor reachability of the Mac.
-5. Preserve the first fault and revisions. Never clear app data, Keychain, sessions or
+2. Read `<tronHome>/logs/gateway.jsonl` and its rotations read-only. Join phone and Gateway
+   records by key (`gatewayConnectionId` = `connectionId`; `clientId`/`attemptId`/`epoch` =
+   `peerClientId`/`peerAttemptId`/`peerEpoch`), else by time for pre-protocol-5 logs. With a
+   key join only key-joined and Gateway-wide records count, and the connection a recovery
+   opened is never the lost one's cause. Split outages per scene phase; an attempt belongs to
+   the stretch it began in; a relay window explains an episode only if it covers the loss and
+   ends within the recovery delay.
+3. A `satisfied` OS path proves neither Tailscale health nor reachability of the Mac.
+4. Preserve the first fault and revisions. Never clear app data, Keychain, sessions or
    credentials; Gateway transitions stay the user's or maintainer's.
 
 ## Interpret the diagnostics
@@ -162,9 +156,8 @@ on a shared network the phone races it against the Tailscale endpoint (E-3c, E-3
   ends the socket when the close arrives (`connection.closed` with a large `lastInboundAgeMs`)
   or at about 75–100 s (`connection.heartbeat-timeout`).
 - **Triage:** an episode is `path` when its silent record carries `relay`/`offline` or its own
-  `transport-open` timed out; `--tailscale-window` names covering windows (`[cause]`) and
-  earlier ones as `[context]`, keeping them in `inputs.tailscaleWindow.relayWindows`. Re-run
-  soon after an incident: the unified log ages out.
+  `transport-open` timed out, and a covering relay/offline window explains it. Collect soon after
+  an incident: the unified log ages out.
 - **User checks:** iPhone Tailscale current and showing a **direct** connection on shared
   Wi-Fi (disabled extension → `transport-open` timeouts with no `http.upgrade`); a rotating
   Private Wi-Fi Address; router band/mesh steering and 802.11k/v/r roaming at the same times;
