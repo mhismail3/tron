@@ -335,8 +335,12 @@ final class TronChatAnnotationUITests: XCTestCase {
     }
 
     @MainActor private func assistantBlock(_ app: XCUIApplication, containing text: String) -> XCUIElement {
-        // Completed assistant blocks keep the static-text accessibility shape.
-        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        // Each completed assistant block is its own static-text accessibility
+        // element; inside the message's one text view XCUITest types it TextView.
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ AND (elementType == %d OR elementType == %d)",
+                                  text, XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.textView.rawValue))
+            .firstMatch
     }
 
     @MainActor private func menuAction(_ app: XCUIApplication, _ title: String) -> XCUIElement {
