@@ -555,6 +555,39 @@ it("real Gateway: a singleton partial input resumes with one model turn and push
   } finally { for (const owner of owners) owner.dispose(); }
 });
 
+it("real Gateway: an image-sized canonical line within the prompt bound cannot block recovery or Home prompts", async () => {
+  const setup = await preparedGateway();
+  const sessionId = setup.sessionId;
+  setup.gateway.script([() => fauxAssistantMessage("Initialize large-line Home.")]);
+  expect((await setup.phone.request("home.prompt", { commandId: setup.gateway.commandId(), text: "Initialize large-line fixture." })).ok).toBe(true);
+  await setup.gateway.settled(sessionId);
+  expect((await setup.phone.request("home.pauseMemory", { commandId: setup.gateway.commandId() })).ok).toBe(true);
+  const automation = await setup.create("Large line recovery");
+  const runId = await setup.fire(automation);
+  const recordPath = join(setup.gateway.tronHome, "gateway", "automations", `${automation.id}.json`);
+  const sessionFile = (await setup.gateway.registry.acquire(sessionId)).sessionFile!;
+  const root = setup.gateway.root;
+  await stopForCrashCut(setup.gateway);
+  const record = JSON.parse(await readFile(recordPath, "utf8"));
+  const operationId = randomUUID();
+  Object.assign(record.currentRun, { state: "admitting", homeDelivery: "wake", operationId, executionSessionId: sessionId });
+  await writeFile(recordPath, JSON.stringify(record));
+  // A prompt carrying two inline images writes one line above 8 MiB; the
+  // prompt producer's bound admits it, so the delivery proof must read it.
+  const manager = SessionManager.open(sessionFile);
+  manager.appendCustomEntry("test.large-line", { data: "x".repeat(9 * 1_024 * 1_024) });
+  const handle = await open(sessionFile, "r+"); try { await handle.sync(); } finally { await handle.close(); }
+  const gateway = await recoverCrashCut(root);
+  const phone = await gateway.connect("large-line-phone");
+  gateway.script([() => fauxAssistantMessage("Large-line wake answers."), () => fauxAssistantMessage("Large-line Home answers.")]);
+  expect((await phone.request("home.resumeMemory", { commandId: gateway.commandId() })).ok).toBe(true);
+  await waitFor(async () => (await phone.request("automation.run.get", { automationId: automation.id, runId })).result.state === "succeeded", "large-line delivery settles");
+  await gateway.settled(sessionId);
+  const prompted = await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Still reachable?" });
+  expect(prompted.ok, JSON.stringify(prompted)).toBe(true);
+  await gateway.settled(sessionId);
+});
+
 it("real Gateway: a Home-created automation wake cannot approve settings, trust, grants or sensitive profile decisions", async () => {
   const { gateway, phone, fire, sessionId } = await preparedGateway({ knowledge: true });
   // Materialize and retire the ordinary trusted-project scope through real

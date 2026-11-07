@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { syncDurably } from "../../foundation/durable-json.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { asRecord } from "../../foundation/json.js";
+import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 
 /*
  * Canonical session JSONL is read by a bounded reader that can never repair,
@@ -12,6 +13,9 @@ import { asRecord } from "../../foundation/json.js";
  * the branch from the last complete entry to the root through parentId. Home's
  * source (`home-source.ts`) owns the cursor-proven incremental reads. The
  * SDK's `SessionManager.open` is deliberately not used: it migrates.
+ * The reader owns its line bound, `CANONICAL_SOURCE_MAX_LINE_BYTES`, derived from
+ * what one prompt can write; callers cannot pass a smaller one and refuse a line
+ * the producer admitted.
  */
 
 /** The pinned SDK's current session file version. A newer file is refused
@@ -147,7 +151,6 @@ export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: nu
 export async function readCanonicalSession(options: {
   path: string;
   sessionId: string;
-  maxLineBytes: number;
 }): Promise<EpisodicCanonicalBranch> {
   const handle = await open(options.path, constants.O_RDONLY).catch((error: NodeJS.ErrnoException) => {
     throw new EpisodicMemoryError("source", `Canonical session ${options.path} cannot be read: ${error.code ?? error.message}`);
@@ -189,7 +192,6 @@ export async function readCanonicalSession(options: {
 export async function visitCanonicalSessionEntries(options: {
   path: string;
   sessionId: string;
-  maxLineBytes: number;
   visit: (entry: EpisodicCanonicalEntry) => void;
   durable?: true;
 }): Promise<void> {
@@ -216,11 +218,11 @@ export async function visitCanonicalSessionEntries(options: {
       position += bytesRead;
       let chunk = Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
       for (let newline = chunk.indexOf(0x0a); newline >= 0; newline = chunk.indexOf(0x0a)) {
-        if (newline > options.maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${options.maxLineBytes} bytes`);
+        if (newline > CANONICAL_SOURCE_MAX_LINE_BYTES) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${CANONICAL_SOURCE_MAX_LINE_BYTES} bytes`);
         accept(chunk.subarray(0, newline));
         chunk = chunk.subarray(newline + 1);
       }
-      if (chunk.length > options.maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${options.maxLineBytes} bytes`);
+      if (chunk.length > CANONICAL_SOURCE_MAX_LINE_BYTES) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${CANONICAL_SOURCE_MAX_LINE_BYTES} bytes`);
       pending = Buffer.from(chunk);
     }
     if (pending.length > 0) throw new EpisodicMemoryError("source", "Canonical session has an incomplete tail");
@@ -265,9 +267,9 @@ function checkSessionHeader(line: string, sessionId: string): void {
  */
 async function readWholeFile(
   handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> },
-  options: { path: string; sessionId: string; maxLineBytes: number; endBytes?: number },
+  options: { path: string; sessionId: string; endBytes?: number },
 ): Promise<WholeFile> {
-  const batch = await readLines(handle, options.maxLineBytes, options.endBytes);
+  const batch = await readLines(handle, CANONICAL_SOURCE_MAX_LINE_BYTES, options.endBytes);
   if (batch.lines.length === 0) throw new EpisodicMemoryError("source", "Canonical session file is empty");
   checkSessionHeader(batch.lines[0]!, options.sessionId);
   const entries: EpisodicCanonicalEntry[] = [];
@@ -287,7 +289,7 @@ async function readWholeFile(
  * report addresses survive navigation. Refuse torn/changed graphs; never open
  * the SDK's repairing/migrating SessionManager just to inspect evidence. */
 export async function readCanonicalSessionFile(options: {
-  path: string; sessionId: string; maxLineBytes: number;
+  path: string; sessionId: string;
   /** Accept an append to the same file during the read: the entries are then the
    * exact prefix that existed when the read began, proven unchanged by a second read. */
   appendStable?: boolean;

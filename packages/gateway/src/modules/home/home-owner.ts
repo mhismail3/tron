@@ -260,7 +260,7 @@ export class HomeOwner {
       const items = new Map<string, import("./home-obligations.js").ObligationItem>();
       let count = 0;
       for (const chapter of (await this.readHomeSource()).chapters) {
-        const entries = chapter.sessionId === sessionId ? branch : (await readCanonicalSession({ ...chapter, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes })).branch.map(entry => entry.raw as unknown as SessionEntry);
+        const entries = chapter.sessionId === sessionId ? branch : (await readCanonicalSession(chapter)).branch.map(entry => entry.raw as unknown as SessionEntry);
         count += entries.filter(entry => entry.type === "custom" && entry.customType === HOME_OBLIGATION).length;
         if (count > 10000) throw new GatewayError("conflict", "Home obligation history exceeds 10000 events; no partial list is available");
         replayObligations(entries, chapter.sessionId, items);
@@ -778,7 +778,7 @@ export class HomeOwner {
       try { await syncDurably(handle); } finally { await handle.close(); }
     }
     const entries: HomeWakeEvidence[] = [];
-    await visitCanonicalSessionEntries({ path, sessionId: scope.sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, visit: entry => {
+    await visitCanonicalSessionEntries({ path, sessionId: scope.sessionId, visit: entry => {
       const evidence = { ...entry.raw, type: entry.type, id: entry.id, sessionId: scope.sessionId } as HomeWakeEvidence;
       if (isWakeEvidence(scope, evidence)) entries.push(evidence);
     } });
