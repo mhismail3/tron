@@ -244,7 +244,7 @@ struct MCPServersSettingsView: View {
     }
 
     private func statusColor(_ server: MCPServerList.Server) -> Color {
-        if MCPServerPresentationPolicy.isNeedsAuth(server.state) { return .tronWarning }
+        if MCPServerPresentationPolicy.isNeedsAuth(server.state) { return .tronAmber }
         if server.state == "failed" || server.error != nil { return .tronError }
         if server.state == "connected" { return .tronEmerald }
         return .tronTextSecondary

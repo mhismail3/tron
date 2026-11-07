@@ -11,7 +11,8 @@ extension ChatNotificationTone {
         case .command: ChatCompactPillPalette.commandPrimary
         case .tool: .tronAccentText
         case .information: ChatCompactPillPalette.informationPrimary
-        case .purple: ChatCompactPillPalette.purplePrimary
+        case .automation: .tronAutomationText
+        case .worker: ChatCompactPillPalette.workerPrimary
         case .subagent: ChatCompactPillPalette.subagentPrimary
         case .warning: ChatCompactPillPalette.warningPrimary
         case .success: ChatCompactPillPalette.successPrimary
@@ -26,7 +27,8 @@ extension ChatNotificationTone {
         case .command: ChatCompactPillPalette.commandSecondary
         case .tool: .tronPrimary
         case .information: ChatCompactPillPalette.informationSecondary
-        case .purple: ChatCompactPillPalette.purpleSecondary
+        case .automation: ChatCompactPillPalette.automationSecondary
+        case .worker: ChatCompactPillPalette.workerSecondary
         case .subagent: ChatCompactPillPalette.subagentSecondary
         case .warning: ChatCompactPillPalette.warningSecondary
         case .success: ChatCompactPillPalette.successSecondary
@@ -41,7 +43,8 @@ extension ChatNotificationTone {
         case .command: .tronIndigo
         case .tool: .tronPrimary
         case .information: .tronBlue
-        case .purple: .tronPurple
+        case .automation: .tronAutomation
+        case .worker: .tronSteel
         case .subagent: .tronSubagent
         case .warning: .tronAmber
         case .success: .tronSuccess
@@ -56,7 +59,7 @@ extension ChatNotificationTone {
 private enum ChatCompactPillPalette {
     static let commandPrimary = Color(lightHex: "#4338CA", darkHex: "#C7D2FE")
     static let informationPrimary = Color(lightHex: "#0369A1", darkHex: "#38BDF8")
-    static let purplePrimary = Color(lightHex: "#6D28D9", darkHex: "#C4B5FD")
+    static let workerPrimary = Color(lightHex: "#2F4C63", darkHex: "#A9C4D8")
     static let subagentPrimary = Color(lightHex: "#006657", darkHex: "#5DE0CE")
     static let warningPrimary = Color(lightHex: "#92400E", darkHex: "#FBBF24")
     static let successPrimary = Color(lightHex: "#166534", darkHex: "#86EFAC")
@@ -64,7 +67,8 @@ private enum ChatCompactPillPalette {
 
     static let commandSecondary = Color(lightHex: "#3730A3", darkHex: "#E0E7FF")
     static let informationSecondary = Color(lightHex: "#075985", darkHex: "#7DD3FC")
-    static let purpleSecondary = Color(lightHex: "#5B21B6", darkHex: "#DDD6FE")
+    static let automationSecondary = Color(lightHex: "#17525E", darkHex: "#B8EAF1")
+    static let workerSecondary = Color(lightHex: "#263F53", darkHex: "#CFDEEA")
     static let subagentSecondary = Color(lightHex: "#00594D", darkHex: "#A0EFE3")
     static let warningSecondary = Color(lightHex: "#78350F", darkHex: "#FDE68A")
     static let successSecondary = Color(lightHex: "#14532D", darkHex: "#BBF7D0")
@@ -73,19 +77,24 @@ private enum ChatCompactPillPalette {
 }
 
 /// Stable semantic palette for compact transcript chrome. Producer identity is
-/// text; category owns color, and warning/error may override that category.
+/// text; the message category owns color, never the producer's origin kind, and
+/// warning/error may override that category. Prompt templates share the
+/// command resource identity; generic inbound context stays neutral.
 enum ChatSemanticPillRole: Hashable, Sendable {
     case command
     case prompt
     case context
+    case automation
+    case worker
     case tool
     case notification
 
     var tone: ChatNotificationTone {
         switch self {
-        case .command: .command
-        case .prompt: .purple
-        case .context: .purple
+        case .command, .prompt: .command
+        case .context: .neutral
+        case .automation: .automation
+        case .worker: .worker
         case .tool: .tool
         case .notification: .information
         }
@@ -98,6 +107,8 @@ enum ChatSemanticPillRole: Hashable, Sendable {
         case .command: "Command"
         case .prompt: "Prompt"
         case .context: "Context"
+        case .automation: "Automation"
+        case .worker: "Worker"
         case .tool: "Tool"
         case .notification: "Notification"
         }
