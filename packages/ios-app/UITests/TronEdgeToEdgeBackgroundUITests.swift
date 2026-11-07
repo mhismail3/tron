@@ -60,6 +60,15 @@ final class TronEdgeToEdgeBackgroundUITests: XCTestCase {
         }
         let band = 120 ... 220 // skip the corners and the status bar's leading glyphs
         func horizontal(_ y: Int) -> [(Int, Int)] { (band.lowerBound ..< (w - band.lowerBound)).filter { $0 % 3 == 0 }.map { ($0, y) } }
+        // The home indicator is system chrome drawn over the background, not a strip of
+        // the window behind. It is about 134 pt wide, about 40% of an iPhone portrait bottom
+        // line, so a median taken across it reads an upper quantile of the background's
+        // grain instead of the background. The bottom lines skip a 160 pt centre column; a
+        // clipped strip spans the whole line, so the rest of the line still shows it.
+        let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
+        let scale = Double(max(w, h)) / Double(max(screen.width, screen.height))
+        let indicator = (w / 2 - Int(80 * scale)) ..< (w / 2 + Int(80 * scale))
+        func bottom(_ y: Int) -> [(Int, Int)] { horizontal(y).filter { !indicator.contains($0.0) } }
         func vertical(_ x: Int) -> [(Int, Int)] { (band.lowerBound ..< (h - band.lowerBound)).filter { $0 % 3 == 0 }.map { (x, $0) } }
         // Only the safe-area band is read (a status bar is 26 pt, a home indicator 17 pt):
         // beyond it the composer's own pill spans the line and would be the step.
@@ -82,7 +91,7 @@ final class TronEdgeToEdgeBackgroundUITests: XCTestCase {
         }
         let edges: [(String, Double)] = [
             ("top", steps { horizontal($0) }),
-            ("bottom", steps { horizontal(h - 1 - $0) }),
+            ("bottom", steps { bottom(h - 1 - $0) }),
             ("leading", steps { vertical($0) }),
             ("trailing", steps { vertical(w - 1 - $0) }),
         ]
