@@ -93,17 +93,15 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   children. Reproduce load in-process; if slow, check swap and report foreign hogs.
 
 ## Validation and landing
-[Principles](docs/PRINCIPLES.md) own delivery policy: verification gates promotion, not authorship.
-`scripts/tron verify --plan`: **none** = docs/static; **partial** = affected owner/consumer checks;
-**full** = affected now, the post-land batch covers the rest. The [selector](tools/verify/README.md)
-owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the batch auto-reverts.
+[Principles](docs/PRINCIPLES.md) own delivery policy: a commit is gated by the local tests of the modules
+it touches (P1); the full suite and E2E journeys are batch and checkpoint signals (P2). No merge queue.
 1. Commit in your own worktree; enable rerere. Fetch main into private `FETCH_HEAD` and merge
    deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
-   Run affected checks before landing; obtain independent ACCEPT
-   where required. Do not repeat broad main baselines per worker or retry-to-green.
+   Run `scripts/tron verify --changed` (the changed modules' tests) plus the E2E journeys that prove
+   any behaviour you delete; obtain independent ACCEPT where required. Never retry-to-green.
 2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push origin HEAD:main`; never
-   force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. Workers never run full suites or
-   ABBA reruns; a batch red is causally reverted or stays red with its issue, and the owner root-fixes before relanding.
+   force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. A batch red is filed
+   against its owning module, which root-fixes it or reverts its change.
 3. Close the issue with the change, actual commands and results, and residual risk; link long logs (`test-results/`,
    internal workspace). Incidents also name the one-step diagnosing signal, added with a test and a row in its module
    README Signals (`packages/gateway/docs/observability.md`). Each landed slice posts a 3-line #2173 retro: biggest time cost; one proposed process/architecture fix; SHA/evidence.
@@ -125,8 +123,7 @@ owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the 
 - A blocker is a bug in the system. Unblock it right away. If the same kind of failure
   has happened before, or the fix is cheap, fix the mechanism behind it with a script,
   a test or a rule. Otherwise record it and move on. Delete guards that cost more than they prevent.
-- Home decides objective gates; [P2](docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)
-  forbids exemptions. Independent review covers test edits and security/data-loss/irreversible changes.
+- Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Independent review covers test edits and security/data-loss/irreversible changes.
 - Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
   file-length targets or blanket base-lock runs. Build ahead on branches.
 - Default 2h tasks, 30-minute SHA/change/blocker check-ins; land green or settle in ≤25 lines.

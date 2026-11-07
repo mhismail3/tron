@@ -1,6 +1,6 @@
 # Core-journey coverage map
 
-The six core journeys of [principles P4](../../docs/PRINCIPLES.md#p4-coverage-follows-behavior-and-grows-with-it)
+The six core journeys of [principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)
 mapped to the tests that actually exercise them. A file's existence or an old pass is
 not proof: every row names what the test drives, what is real and what is controlled.
 Run results belong in `test-results/` and reports, not in this map. Gap fixes belong to

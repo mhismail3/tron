@@ -3,7 +3,7 @@
 `scripts/tron verify` runs the fast affected checks before merge; `verify --batch` runs full
 coverage asynchronously on landed main and causally reverts a proven culprit. The manifests and their dependency
 and dynamic-edge graph are the selection authority. No merge queue, landing gate or hosted
-CI is involved ([principles P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). A previous test pass never substitutes for
+CI is involved ([principles P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). A previous test pass never substitutes for
 this change's affected checks; only stamped build products are reused. See the
 [oracle policy](test-oracles.md) and [on-demand health contract](health-design.md#on-demand-command).
 
@@ -103,7 +103,7 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 ### No exemptions
 
 There is no known-failure registry, quarantine, waiver, expiry or qualified verdict
-([P2](../../docs/PRINCIPLES.md#p2-verification-gates-promotion-not-authorship)). Every
+([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)). Every
 executed failure is `failed` (exit 1); it is fixed at its root or causally reverted.
 
 ## Selection

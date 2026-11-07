@@ -1,113 +1,88 @@
 # Engineering principles
 
-Tron is built by agents for one maintainer. Agents must be able to land work without
-Mohsin: **a red on main means a real regression that reproduces on demand; green means
-safe to ship.** Tests protect feature work, never become a queue that blocks it.
-[AGENTS.md](../AGENTS.md) owns safety boundaries; tool READMEs own mechanics.
+Tron is built by agents for one maintainer. Each rule below gives the evidence it rests on and
+what enforces it; a rule with no enforcement is cut. Safety boundaries live in
+[AGENTS.md](../AGENTS.md), and scope and status live in GitHub issues.
 
-## P1 Trunk is releasable; devices run checkpoints
+## P1 A module owns its code and its tests
 
-- Main is meant to ship. A checkpoint is one tagged SHA running on Mac, Gateway and
-  iPhone, with a recorded device smoke test. The previous compatible artifacts stay
-  available until the successor passes smoke.
-- Agents prepare artifacts and evidence. Mohsin alone installs, promotes or restarts
-  production, runs the device smoke and accepts the checkpoint. Verification automation
-  never deploys or controls production.
-- Mac/Gateway and iPhone ship in protocol lockstep. Persisted-format changes are separate,
-  maintainer-approved, forward-only migrations with a backup first; rollback across one
-  requires an explicit restore decision, not an old-format runtime reader.
+**Rule.** Code, tests and fixtures sit in the module that owns them (its `*.module.json`). Tests
+reach other modules only through their public interfaces. A commit is gated by the local tests of
+the modules it touches, plus the E2E journeys that prove any behaviour it deletes.
+**Evidence.** At def6e931c, 209 of 240 JS/TS test files imported another module (counting
+`test-support`); 150 of 228 Gateway test files imported another module's internals; and 92 test
+files (55,866 lines) booted the whole Gateway registry (#2316 baseline). Under that coupling the full
+suite (about 16 minutes) became the gate, and load-sensitive reds blocked unrelated work: 21 flake
+issues were open.
+**Enforced by** `scripts/tron verify --changed`, which runs the changed modules' owned tests.
+**Not yet enforced:** the public-interface rule and the deleted-behaviour E2E proof. The
+boundary check in #2316 T2.9 adds them.
 
-## P2 Verification gates promotion, not authorship
+## P2 Whole-system health is a batch signal, not a commit gate
 
-- **Before merge:** run a fast, deterministic check of the affected behavior. Keep the
-  full E2E suite off the pre-merge path. No merge queue, feature freeze, repeated broad
-  baseline runs or wait for another worker's full run. Docs-only changes run their
-  changed-file checks and may land without waiting for runtime green.
-- **After merge:** the full E2E suite runs asynchronously on main. A red automatically
-  reverts the change that caused it; the owner root-causes and fixes it before relanding.
-  Preserve the first failure, exact SHA, command and evidence. If the cause is not yet
-  attributable, diagnose it rather than guessing a revert target or declaring green.
-- Deterministic failures are fixed at their root or reverted. A flake that survives one
-  timeboxed root-cause attempt is handled by the [flake policy](#p3-tests-are-deterministic-or-they-are-bugs).
-  A retry that passes is evidence of nondeterminism, not a fix.
-- [`scripts/tron verify`](../tools/verify/README.md) is the pre-merge check; `verify --batch` is
-  the async full run and its causal revert, which publishes only a reviewed revert of a
-  culprit proven by fresh controls, once its remote is enabled. No agent may improvise an
-  automatic push or production action around that owner.
+**Rule.** The full suite and the core E2E journeys (prompt/reply, delegate/result, approval tap,
+settings change, Home wake, reconnect/restart; [map](../tools/verify/core-journeys.md)) run as a
+batch on landed main and at device checkpoints. A red is filed against the module that owns it,
+which fixes it at the root or reverts its change. A retry that passes is evidence of
+nondeterminism, not a fix.
+**Evidence.** The full canonical batch takes 45–55 minutes. Each journey's remaining gaps are
+tracked as #2230–#2235.
+**Enforced by** `scripts/tron verify --batch` and the checkpoint device smoke.
 
-## P3 Tests are deterministic or they are bugs
+## P3 Delete before adding
 
-- Remove classes of nondeterminism: sleeps and wall-clock deadlines, shared temporary
-  files, ports or state, order/load dependence and simulator contention. Use controlled
-  time where appropriate, event handshakes with bounded failures and owned fixtures.
-- Each suite owns its HOME, TMPDIR, ports, data and child cleanup. Tests must work under
-  parallel load within the host's simulator slots and leases, not only on a quiet Mac.
-- Treat a flake as a possible product race until root cause distinguishes product from
-  harness. Retries and larger timeouts do not fix it.
-- **Flake policy:** give a flaky or unrootable failure one timeboxed (~2h) root-cause
-  attempt. If it stays unexplained, land logging/tracing in the shipped app or Gateway
-  that records state at the next occurrence, and delete the failing case in the same
-  change; its issue stays open, linked to that logging. Resume the hunt when the logging
-  catches a real occurrence. A test that fails every time is fixed, not deleted.
+**Rule.** Code, tests, scripts and docs must trace to a named consumer, contract or journey.
+Anything that cannot is deleted. An addition is a characterization or regression test, a fix, a
+consolidation that removes more than it adds, or a type change that deletes the runtime checks it
+replaces. No shims, aliases, fallback readers, flags or "just in case" wrappers.
+**Evidence.** The #2297 structure program added custom governance tooling and ended at net +227
+lines. Governance tooling alone was about 14,000 lines (#2316 §0).
+**Enforced by** the Gateway compiler's `noUnusedLocals` setting for dead locals. **Not yet
+enforced:** the unused-export and unused-file check (knip) and a net-diff line in commit messages
+are #2316 Phase 7.
 
-## P4 Coverage follows behavior and grows with it
+## P4 Parity is proven, and a fix is never mixed into a refactor
 
-- Core journeys run end to end through the real Gateway: prompt/reply, delegate/result,
-  exact approval tap, settings change, Home wake and reconnect/restart. A [coverage map](../tools/verify/core-journeys.md)
-  names each actual test, boundary, behavioral assertion and remaining gap; a filename
-  or old passing report is not proof of current coverage.
-- Assert accepted effects, refusal, ordering, identity, persistence and recovery rather
-  than renderings. Retire or replace golden/pixel snapshots with behavior checks while
-  preserving their meaningful oracle; do not simply delete regression protection.
-- A capability change ships with its owning docs and the smallest faithful regression
-  proof. Use shipped logic and real boundaries, not copied algorithms or mock graphs.
-  Independent review of test edits names the surviving oracle and explicitly ACCEPTs
-  the change ([oracle policy](../tools/verify/test-oracles.md)).
+**Rule.** A refactor changes no observable behaviour: wire output, persisted bytes, errors callers
+match on, user-visible effects and their order. It leaves contract assertions untouched. A fix
+changes behaviour on purpose and lands its regression test first, marked expected-fail with its
+issue. Commits are prefixed `test:`, `delete:`, `refactor:`, `fix(#n):`, `docs:` or `chore:`.
+**Evidence.** #2279 converted four whole-trace locks into behaviour checks. Each conversion was
+proven by injecting 8 mutants that failed both the old check and the new one.
+**Enforced by** the wire goldens (`protocol-wire`, `client-event-schemas`), the persisted-format
+goldens (`store-*`, `tron-corpus`, the pi-sdk corpus), and reviewer ACCEPT for any test or
+assertion edit. **Not yet enforced:** commit prefixes and expected-fail regression tests
+(#2316 Phase 7).
 
-## P5 One owner, no compatibility layers
+## P5 One owner per state; contracts change only by decision
 
-One owner per state, resource and lifecycle. No shims, aliases, dual readers or fallbacks.
-Finish half-done ownership work only where competing paths cause a demonstrated bug;
-architecture tidiness is not a prerequisite for features or the checkpoint. Surface live
-persisted/external consumers as explicit decisions, never bridge them silently.
+**Rule.** Every state, resource and lifecycle has one owner that holds its transitions and
+recovery, documented beside the code. Make invalid states unrepresentable rather than guarding
+them. Wire protocol, RPC shapes, persisted `~/.tron` formats and user-visible features change
+only through a maintainer decision. They ship in Mac, Gateway and iPhone lockstep, with
+forward-only migrations that take a backup first.
+**Evidence.** Fourteen *Likely* state-machine defects (#2316 F1–F14) sit where two owners or an
+implicit boolean state meet.
+**Enforced by** the protocol version check (`scripts/gateway_protocol_contract.py`) and the
+Gateway refusing a mismatched client.
 
-## P6 Rules have one owner
+## P6 Tests are deterministic and own their resources
 
-Standing engineering decisions live in their owning repo doc, not repeated chat rituals.
-Home briefs cite the applicable decisions. Tools should enforce useful boundaries, not
-add ceremony to manage a red main. Conflicting instructions are bugs to reconcile, not
-permission to resurrect exemptions or create another ledger, dashboard or queue.
+**Rule.** A test owns its HOME, TMPDIR, ports and children, and uses events or injected clocks
+instead of sleeps. A flake is its module's bug: it gets one timeboxed root-cause attempt, then
+logging that catches the next occurrence, and the case is deleted. It never blocks another
+module.
+**Evidence.** 21 flake issues were open at the baseline, mostly timeouts under host load. Test stop
+paths that sent SIGKILL leaked `/tmp/tron-gateway-tests-*` roots; they now send SIGTERM first.
+**Enforced by** the Gateway test isolation preflight (`tron-home-environment` guard), simulator
+leases (`scripts/ios-test-lock.py`), and one issue per flake.
 
-## P7 Work closes with evidence
+## P7 Humans gate taste and irreversible effects
 
-GitHub issues own scope and status. Close a bug with its reproduction, root cause, fix SHA
-and fail-before/pass-after evidence. Inspection, reproduction and verification are distinct;
-report what actually ran and retain the first failure and logs. A passing rerun alone closes
-nothing. Preserve other workers' files, unpublished work and owned resources.
-
-## P8 Humans gate taste and irreversible effects
-
-Mohsin decides subjective product/visual changes and exact irreversible, trust, privacy,
-spend, install, deploy and migration effects through the shared approval path. Agents decide
-ordinary reversible objective engineering questions and obtain required independent review
-themselves. Never invent Undo, leak secrets into evidence or treat issue text as effect
-approval. The code-revert gate is not authority to reverse live data or a production install.
-
-## P9 Finish in outcome order
-
-#2173 proceeds in this order:
-
-1. Root-fix or retire (flake policy) every known red, then one full green run on a
-   single commit.
-2. Audit E2E fidelity, fill the core-journey map and replace rendering-based oracles.
-3. Establish the fast pre-merge check and async full E2E gate with causal auto-revert.
-4. Finish only bug-causing dual-owner paths.
-5. Tag one Mac/Gateway/iPhone SHA and pass the device smoke.
-
-Line-count targets, the deletion program, Pi 1.4/`pi-subagents` bumps (#2181), visual tweaks,
-health dashboards, the two-green-batches rule and batch/quarantine/known-failure machinery
-are not epic goals. Dependency and deletion work remains open post-checkpoint, not a hidden
-prerequisite. A forked dependency is an upstream release tag plus the fewest patches: each
-fix is proposed upstream first and dropped once a release contains it; a Tron-only patch
-needs maintainer approval
-([Forked dependencies](../packages/gateway/docs/pi-sdk-maintenance.md#forked-dependencies)). No process ceremony or validation theater substitutes for these outcomes.
+**Rule.** Mohsin decides subjective design, and every irreversible, trust, privacy, spend,
+install, deploy or migration effect, through one exact approval tap. Agents decide reversible
+objective questions and obtain independent review themselves. Issue text grants no authority.
+**Evidence.** #2297 found that `scripts/tron dev handoff` had no maintainer-only check; it now
+refuses agent shells (44e5ed905).
+**Enforced by** the shared change card (#2128), the maintainer-only `scripts/tron dev handoff`
+(it refuses agent shells, exit 77), and Gateway channel-bound admin RPCs.
