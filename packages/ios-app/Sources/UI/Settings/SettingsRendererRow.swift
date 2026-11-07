@@ -112,10 +112,7 @@ struct SettingsRendererRow: View {
 
     private var icon: String {
         if let semantic = Self.semanticIcon(for: setting.key) { return semantic }
-        if modelConfiguration {
-            if setting.key == "model.thinking[role=chat]" { return "brain" }
-            if setting.key == "model.contextWindow" { return "gauge.with.dots.needle.50percent" }
-        }
+        if modelConfiguration, setting.key == "model.contextWindow" { return "gauge.with.dots.needle.50percent" }
         return switch control {
         case .toggle: "switch.2"
         case .text: "character.cursor.ibeam"

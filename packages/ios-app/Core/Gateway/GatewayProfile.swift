@@ -294,15 +294,6 @@ package struct GatewayPairer: Sendable {
             )
         }
         let paired = try JSONDecoder.gateway.decode(PairingResponse.self, from: data)
-        let expectedChannel = invitation.port == 9848 ? "dev" : "stable"
-        guard paired.gatewayChannel == expectedChannel else {
-            throw GatewayFailure(
-                code: "identity_mismatch",
-                message: "The paired Gateway channel does not match this endpoint.",
-                retryable: false,
-                details: nil
-            )
-        }
         let profile = GatewayProfile(
             id: uuidSource(),
             label: invitation.label ?? paired.machineName,
@@ -314,6 +305,15 @@ package struct GatewayPairer: Sendable {
             lanEndpoints: paired.lanEndpoints,
             lanPin: paired.lanPin
         )
+        // The endpoint's channel (`gatewayChannel`, the one port mapping) must be the one the Gateway asserts.
+        guard paired.gatewayChannel == profile.gatewayChannel else {
+            throw GatewayFailure(
+                code: "identity_mismatch",
+                message: "The paired Gateway channel does not match this endpoint.",
+                retryable: false,
+                details: nil
+            )
+        }
         return (profile, paired.token)
     }
 }
