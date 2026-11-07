@@ -1,4 +1,5 @@
-import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -218,6 +219,71 @@ it("keeps memory running when a restart remounts its volume under a new device n
   // Frozen cuts prove every admitted chapter against its persisted cursor.
   expect(await restarted.cutAtEntry("b")).toBe(1);
   expect(await restarted.cutAtEntry("e")).toBe(3);
+});
+
+// A copied or restored Tron home (an APFS clone, a backup restore) holds byte-identical
+// transcripts under new inodes and change times (#2314). The persisted cursor's file
+// identity is only a cache key: content proves the admitted prefix, so the copy keeps
+// working without new summaries, while a copy whose history was rewritten still refuses.
+async function copiedHome(fx: Awaited<ReturnType<typeof fixture>>, memory: EpisodicMemory, edit?: (root: string) => Promise<void>) {
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+  await fx.workspace.dispose(); workspaces.splice(workspaces.indexOf(fx.workspace), 1);
+  const root = fx.root + "-copy"; roots.push(root);
+  execFileSync("cp", ["-pR", fx.root, root]);
+  await edit?.(root);
+  const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
+  const chapters = fx.chapters.map(chapter => ({ ...chapter, path: join(root, chapter.sessionId + ".jsonl") }));
+  const source: EpisodicSessionSource = {
+    read: (cursor, limits) => readCanonicalHomeDeltas({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
+    branchAtCursor: (cursor, limits) => readCanonicalHomeIndex({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
+  };
+  const summaries: string[] = [];
+  const copy = await EpisodicMemory.open({ workspace, sessionId: "home", sessionSource: source,
+    summarizer: async request => { summaries.push(request.turns.at(-1)!.text); return fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200)); },
+    diagnostic: () => {}, limits: { viewBytes: 4096, jobs: 2, retryMs: 0 } });
+  memories.push(copy);
+  return { root, chapters, copy, summaries };
+}
+
+it("keeps memory on a copied Home whose transcripts have new inodes, without re-summarizing", async () => {
+  const fx = await fixture(); const memory = await fx.open(); await memory.entriesCommitted("home");
+  const { chapters, copy, summaries } = await copiedHome(fx, memory);
+  expect((await stat(chapters[0]!.path)).ino).not.toBe((await stat(fx.chapters[0]!.path)).ino);
+  await copy.entriesCommitted("home");
+  expect(copy.status().blocked ?? null).toBeNull();
+  expect(copy.status().messages).toBe(2);
+  expect(summaries).toEqual([]);
+  expect(await copy.cutAtEntry("b")).toBe(1);
+  expect(await copy.cutAtEntry("d")).toBe(2);
+  // The copy's cursor now names the copy's files, so the next delta is an append.
+  await appendFile(chapters[1]!.path, entry("e", "d", "after the copy teal fact"));
+  await copy.entriesCommitted("home");
+  expect(copy.status().blocked ?? null).toBeNull();
+  expect(copy.status().messages).toBe(3);
+  expect(copy.searchMessages("teal", 0, 10)?.matches).toBe(1);
+  expect(await copy.cutAtEntry("e")).toBe(3);
+});
+
+it.each([["sealed", 0, "violet", "orange"], ["active", 1, "amber", "green!"]] as const)(
+  "still refuses a copied Home whose %s history was rewritten", async (_kind, index, from, to) => {
+  const fx = await fixture(); const memory = await fx.open(); await memory.entriesCommitted("home");
+  const { copy } = await copiedHome(fx, memory, async root => {
+    const path = join(root, fx.chapters[index]!.sessionId + ".jsonl");
+    await writeFile(path, (await readFile(path, "utf8")).replace(from, to));
+  });
+  // A frozen cut proves every admitted chapter's bytes, whatever its identity.
+  expect(await copy.cutAtEntry("d")).toBeUndefined();
+  await copy.entriesCommitted("home");
+  if (index === 0) {
+    expect(copy.status().blocked?.reason).toBe("source-unavailable");
+    expect(copy.searchMessages("orange", 0, 10)?.matches).toBe(0);
+  } else {
+    // An active chapter's rewrite is re-read, never extended from the old prefix.
+    expect(copy.status().blocked ?? null).toBeNull();
+    expect(copy.searchMessages("green!", 0, 10)?.matches).toBe(1);
+    expect(copy.searchMessages("amber", 0, 10)?.matches).toBe(0);
+  }
+  expect(copy.searchMessages("violet", 0, 10)?.matches).toBe(1);
 });
 
 it("keeps the next delta incremental when the chapter's last line is longer than the cursor's prefix window", async () => {
