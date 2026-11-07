@@ -441,6 +441,12 @@ describe("Tron Home learned profile", () => {
       { action: "refine", id: stale.id, expectedRevision: stale.revisionId, text: "The review happens on Thursday." },
     ] })).rejects.toMatchObject({ code: "conflict" });
     expect((await f.record.page({ limit: 200, filter: entry => entry.commandId === zeroWriteId })).entries).toEqual([]);
+    // A destination outside the profile's roots is the caller's mistake, refused before any write.
+    const badPathId = command("bad-profile-path");
+    await expect(f.service.invoke(maintainer, "home.profileChange", { commandId: badPathId, changes: [
+      { action: "reorganize", assignments: [{ id: current.id, expectedRevision: current.revisionId, path: "bogus" }] },
+    ] })).rejects.toMatchObject({ code: "invalid_request", message: "Profile path must use one of seven personal roots (depth 1–4), or an explicit unsorted bucket" });
+    expect((await f.record.page({ limit: 200, filter: entry => entry.commandId === badPathId })).entries).toEqual([]);
     recordCase("partial-profile-failure", { note: restored.id, status: failed.status, grouped: failed.group !== undefined, zeroWriteEntries: 0 });
   });
 
