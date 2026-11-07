@@ -5,7 +5,11 @@ import XCTest
 /// the chat interactive, and a narrower scene shows one large centered sheet. iPhone keeps native detent sheets
 /// (`TronSmokeUITests.testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings`).
 /// Run on an iPad lane: `scripts/tron-ios-test run --lane ipad --device-type "iPad Pro 13-inch (M5)"`.
-private enum TronPadGeometry { static let gap: CGFloat = 12 }
+private enum TronPadGeometry {
+    static let gap: CGFloat = 12
+    /// 420 pt column + 25 pt system margin + the gap.
+    static let reflowInset: CGFloat = 457
+}
 
 final class TronPadSheetPresentationUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -133,6 +137,50 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         for chip in chips where chip.exists {
             XCTAssertLessThanOrEqual(chip.frame.maxX, sheet.maxX + 1, "\(chip.identifier) is not clipped at the column edge: \(chip.frame) in \(sheet)")
         }
+    }
+
+    /// The scene is one rounded panel that narrows as the column arrives: its
+    /// chrome (the Settings gear) stays inside it, nothing overlaps the column and
+    /// the gap is constant, at rest and in frames sampled while it moves.
+    @MainActor
+    func testWideLandscapePanelCarriesItsChromeAndKeepsAConstantGapThroughTheTransition() {
+        let app = launchHomeChat(orientation: .landscapeLeft)
+        defer { app.terminate() }
+        let window = app.windows.firstMatch.frame
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 5), app.debugDescription)
+        let panel = app.descendants(matching: .any)["tron-scene-panel"].firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertEqual(panel.frame.maxX, window.maxX, accuracy: 1, "The closed scene fills the window")
+        let gearClosed = gear.frame
+
+        let ring = app.buttons["session-context-button"]
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true AND label CONTAINS 'Manage Home'"), object: ring)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, app.debugDescription)
+        ring.tap()
+        var samples: [(gear: CGRect, panel: CGRect)] = []
+        for index in 0..<6 {
+            samples.append((gear.frame, panel.frame))
+            if index == 1 { keepScreenshot(app, "ipad-side-column-mid-transition") }
+        }
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), app.debugDescription)
+        Thread.sleep(forTimeInterval: 1.5)
+        keepScreenshot(app, "ipad-side-column-open")
+        let open = (gear: gear.frame, panel: panel.frame)
+        samples.append(open)
+        for sample in samples {
+            XCTAssertLessThanOrEqual(sample.gear.maxX, sample.panel.maxX + 1, "The Settings gear stays inside the panel: \(sample)")
+        }
+        XCTAssertLessThan(open.gear.minX, gearClosed.minX - 300, "The gear moved with the content: \(gearClosed) -> \(open.gear)")
+        XCTAssertEqual(open.panel.maxX, window.maxX - TronPadGeometry.reflowInset, accuracy: 2, "The panel ends at the column's gap")
+        let title = app.staticTexts["Manage Home"].firstMatch
+        XCTAssertEqual((title.frame.midX - 210) - open.panel.maxX, TronPadGeometry.gap, accuracy: 3, "A constant gap separates the panels")
+
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForNonExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(panel.frame.maxX, window.maxX, accuracy: 1, "The content widens back to full width on dismissal")
+        XCTAssertEqual(gear.frame.minX, gearClosed.minX, accuracy: 1, "The gear returns with it")
     }
 
     /// Portrait full screen is narrower than the side-column threshold: one
