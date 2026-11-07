@@ -16,11 +16,12 @@ final class TronChatCatchUpUITests: XCTestCase {
         let status = app.staticTexts["fixture.gateway"]
         XCTAssertTrue(wait(status, "opens:1"), status.label)
 
-        // Enough wrapped prompts and replies that the reader can scroll more
-        // than the staged threshold (at least 320 points) away from the newest end.
-        for index in 1...8 {
+        // Enough wrapped prompts and replies that the reader can scroll more than
+        // the staged threshold (80% of the visible height, at least 320 points)
+        // away from the newest end.
+        for index in 1...16 {
             composer.tap()
-            composer.typeText("Catch-up prompt \(index): a long wrapped request that fills several lines of the transcript so the reader has history to scroll back through.")
+            composer.typeText("Catch-up prompt \(index): a long wrapped request that fills several lines of the transcript so the reader has history to scroll back through, well past the staged threshold of the catch-up control.")
             let send = app.buttons["Send message"]
             XCTAssertTrue(wait(send, "isEnabled == true", predicate: true), app.debugDescription)
             send.tap()
@@ -51,7 +52,7 @@ final class TronChatCatchUpUITests: XCTestCase {
             keepScreenshot(app, "330-before-catch-up-keyboard-\(keyboardUp ? "shown" : "hidden")")
             catchUp.tap()
             XCTAssertTrue(catchUp.waitForNonExistence(timeout: 10), "Catch up reached the newest end")
-            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "catch-up prompt 8")).firstMatch.waitForExistence(timeout: 5),
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "catch-up prompt 16")).firstMatch.waitForExistence(timeout: 5),
                           "the newest prompt is shown after Catch up")
             keepScreenshot(app, "330-catch-up-landed-keyboard-\(keyboardUp ? "shown" : "hidden")")
             if keyboardUp { XCTAssertTrue(app.keyboards.firstMatch.exists, "Catch up keeps the keyboard") }
