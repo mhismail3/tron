@@ -186,26 +186,12 @@ boundary. Outbound APNs requests are intercepted locally. Run these checks direc
 there is no hosted relay gate. Both Wrangler builds are dry runs and do not deploy
 either environment.
 
-`package.json` `overrides` exist only to clear security advisories in the
-development toolchain, so that `npm audit` stays clean (#489):
-
-- `@cloudflare/vitest-pool-workers` 0.22.0 pins its own `wrangler` 4.124.0 and
-  `miniflare`, both inside vulnerable ranges. The override makes the pool use
-  the top-level `wrangler` (`$wrangler`).
-- The `miniflare` override must equal the exact `miniflare` version the
-  top-level `wrangler` pins (5.20261006.0-alpha for wrangler 4.148.0). It moves
-  with every `wrangler` bump; otherwise the new `wrangler` would run on an older
-  `miniflare`/`workerd`.
-- The current `miniflare` (5.20261006.0-alpha) pins `sharp` 0.35.4. The
-  override raises it to the patched 0.35.5.
-- It also pins `undici` 7.29.1; the override raises it to the patched 7.30.1.
-  Newer `miniflare` releases that depend on a fixed `undici` drop exports the
-  pool 0.22.0 imports, so the pool cannot move with them yet.
-- The pool 0.22.0 pins `zod` 4.4.3; the override raises it to the patched 4.6.6.
-
-Remove each entry once an upstream release depends on a fixed version itself.
-Check each change with `npm audit`, `npm test` and both dry-run builds. An
-override is never a reason to skip the pool's tests.
+The Workers Vitest pool, `@cloudflare/vitest-plugin`, pins an exact `wrangler`
+and `miniflare`. Bump it together with the top-level `wrangler`, to the plugin
+release that pins the same `wrangler`, so the tree holds one `wrangler`,
+`miniflare` and `workerd`. The package has no `overrides`: `npm audit` is clean
+only while those exact pins carry patched transitive versions (`sharp`, `undici`,
+`zod`). Check each change with `npm audit`, `npm test` and both dry-run builds.
 
 ## Manual deployment
 
