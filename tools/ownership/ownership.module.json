@@ -21,8 +21,7 @@
       "name": "tools/ownership/cards.py",
       "kind": "import",
       "consumers": [
-        "repo/metrics",
-        "repo/verify"
+        "repo/metrics"
       ]
     },
     {
@@ -39,8 +38,7 @@
         "repo/cli",
         "repo/docs-index",
         "repo/layers",
-        "repo/metrics",
-        "repo/verify"
+        "repo/metrics"
       ]
     },
     {

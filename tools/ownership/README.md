@@ -141,7 +141,6 @@ modules it names (`foundDependencies`), whether or not a card declares them yet.
 
 Outbound edges are derived, never declared twice: a module's dependencies are the
 interfaces of other modules that list it, plus `dependsOn` and `dynamicEdges`.
-`scripts/tron probe` (tools/verify/README.md) checks that the guardians actually go red.
 
 ## Layout
 

@@ -19,13 +19,6 @@
       "consumers": [
         "repo/cli"
       ]
-    },
-    {
-      "name": "tools/layers/swift_index.py",
-      "kind": "import",
-      "consumers": [
-        "repo/verify"
-      ]
     }
   ]
 }

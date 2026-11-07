@@ -27,13 +27,6 @@
       ]
     },
     {
-      "name": "tools/verify/probe.py",
-      "kind": "exec",
-      "consumers": [
-        "repo/cli"
-      ]
-    },
-    {
       "name": "tools/verify/verify.py",
       "kind": "exec",
       "consumers": [

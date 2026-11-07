@@ -138,7 +138,7 @@ owns deferred serial tests and risk; no phase/LOC gate or merge queue; only the 
   lives beside its tests in `tools/<tool>/` or `scripts/`, runs as `scripts/tron <command>` and opens with a purpose line.
 - Every module carries a [purpose card](tools/ownership/README.md#purpose-cards) (exemptions in `layout.uncarded` only
   shrink): purpose, interfaces with their consumers, guardians. Read `scripts/tron ownership --card <path>` before editing; a file, module or cross-module reference the card
-  does not declare fails ownership. Move or delete a unit only with its card, callers and `scripts/tron probe` evidence.
+  does not declare fails ownership. Move or delete a unit only with its card and callers.
 - You own your residue: scratch only in `.scratch/`; before `report` or parking, `scripts/tron tidy --here` exits 0
   (verify already refuses untracked and unnamed ignored files). Remove a tool with its tests, card entry and `scripts/tron` arm.
 
