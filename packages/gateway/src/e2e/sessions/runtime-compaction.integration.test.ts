@@ -1,20 +1,20 @@
-import { displayOwnerOf, createTestRegistry } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import type { SessionSnapshot, ExtensionRunActivity } from "../protocol/types.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { INVOCATION_RECEIPT_TYPE } from "../kernel/receipts/invocation-receipts.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import type { RunMarkerStore } from "../kernel/run/run-markers.js";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { sessionSettingChange } from "../../test-support/session-settings-change.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import type { SessionSnapshot, ExtensionRunActivity } from "../../protocol/types.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { INVOCATION_RECEIPT_TYPE } from "../../kernel/receipts/invocation-receipts.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import type { RunMarkerStore } from "../../kernel/run/run-markers.js";
+import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { sessionSettingChange } from "../../../test-support/session-settings-change.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 describe("compaction cancellation with the pinned runtime", { concurrent: false }, () => {
   it("settles one Stop during between-turn compaction without starting another summary", async () => {
@@ -954,7 +954,7 @@ describe("compaction operation admission and authoritative reconciliation", { co
   it("retires late manual Stop intent after durable marker cleanup", async () => {
     const item = await boundaryFixture();
     item.faux.setResponses(Array.from({ length: 3 }, () => fauxAssistantMessage("Preserved API contract")));
-    const internal = item.slot as unknown as { dependencies: { markers: RunMarkerStore }; runAbort: import("../kernel/run/run-abort-owner.js").RunAbortOwner };
+    const internal = item.slot as unknown as { dependencies: { markers: RunMarkerStore }; runAbort: import("../../kernel/run/run-abort-owner.js").RunAbortOwner };
     const original = internal.dependencies.markers.clear.bind(internal.dependencies.markers);
     let release!: () => void;
     let clearing = false;

@@ -1,11 +1,11 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { ORDINARY_MODULE_NAMES } from "../extensions/tron-modules.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { ORDINARY_MODULE_NAMES } from "../../extensions/tron-modules.js";
 
 /** The registered module names of one real session, without the SDK's inline path form. */
 function inlineModuleNames(resources: Record<string, any>): string[] {

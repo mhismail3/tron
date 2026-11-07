@@ -1,14 +1,14 @@
-import { upsertExtensionActivity, publishExtensionActivity, updateExtensionActivity, appendExtensionActivityReceipt, canonicalExtensionRunFacts, trimExtensionActivities } from "../kernel/delegation/subagent-activity.js";
-import { refreshExtensionActivityFromArtifact, refreshSubagentActivityFromArtifact } from "../kernel/delegation/subagent-artifact-reconcile.js";
-import { createTestRegistry, displayStoreOf, displayOwnerOf } from "../../test-support/gateway-registry.js";
-import type { RunPersistence } from "../kernel/run/run-persistence.js";
-import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
-import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
+import { upsertExtensionActivity, publishExtensionActivity, updateExtensionActivity, appendExtensionActivityReceipt, canonicalExtensionRunFacts, trimExtensionActivities } from "../../kernel/delegation/subagent-activity.js";
+import { refreshExtensionActivityFromArtifact, refreshSubagentActivityFromArtifact } from "../../kernel/delegation/subagent-artifact-reconcile.js";
+import { createTestRegistry, displayStoreOf, displayOwnerOf } from "../../../test-support/gateway-registry.js";
+import type { RunPersistence } from "../../kernel/run/run-persistence.js";
+import { ProcessTranscriptLeaseStore } from "../../transport/process-transcript-leases.js";
+import { DEFAULT_MAX_LIVE_RUNTIMES } from "../../config.js";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { Worker } from "node:worker_threads";
 import { performance as nodePerformance } from "node:perf_hooks";
-import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
+import { sealBrowserToolReference } from "../../display/browser-tool-reference.js";
 import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
@@ -19,38 +19,38 @@ import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type FauxResponseFactory, type FauxResponseStep, type ImageContent, type TextContent, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
-import { admitsAutomationAction } from "../automations/automation-contract.js";
-import { GatewayAutomationExecutor } from "../automations/automation-executor.js";
-import type { AutomationExecutionHandle } from "../automations/automation-scheduler.js";
-import type { AutomationRecord, AutomationRun } from "../automations/types.js";
-import type { NotificationService } from "../notifications/notification-service.js";
-import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
-import { GatewayWorkRegistry, type GatewayWorkHandle } from "../kernel/run/gateway-work-registry.js";
-import { RequestSpan, runInRequestSpan, stage } from "../util/request-span.js";
-import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
-import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
-import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
-import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../kernel/receipts/invocation-receipts.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "../kernel/receipts/extension-activity-history.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { SessionListPaginationStore } from "../../transport/session-list-pagination.js";
+import { admitsAutomationAction } from "../../automations/automation-contract.js";
+import { GatewayAutomationExecutor } from "../../automations/automation-executor.js";
+import type { AutomationExecutionHandle } from "../../automations/automation-scheduler.js";
+import type { AutomationRecord, AutomationRun } from "../../automations/types.js";
+import type { NotificationService } from "../../notifications/notification-service.js";
+import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../../protocol/types.js";
+import { GatewayWorkRegistry, type GatewayWorkHandle } from "../../kernel/run/gateway-work-registry.js";
+import { RequestSpan, runInRequestSpan, stage } from "../../util/request-span.js";
+import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "../../sessions/catalog-discovery.js";
+import { CatalogMetadataIndex } from "../../sessions/catalog-metadata-index.js";
+import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "../../sessions/session-catalog.js";
+import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "../../kernel/receipts/extension-activity-history.js";
 import {
   HEAP_REFUSAL_RETRY_AFTER_MS,
   LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
   RuntimeRegistry,
   type CapacityShedRecord,
   type RuntimeLifecycleRecord,
-} from "../kernel/session/runtime-registry.js";
-import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
-import { RuntimeSlot } from "../kernel/run/runtime-slot.js";
-import { invocationReceipts } from "../kernel/receipts/invocation-receipts.js";
-import { RunMarkerCompletionConflictError, type RunMarkerStore } from "../kernel/run/run-markers.js";
-import { toolSegmentId } from "../kernel/projection/projection.js";
-import { AutomationService } from "../automations/automation-service.js";
-import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
-import { syntheticOversizedJpeg, syntheticPng } from "../../test-fixtures/synthetic-image.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../test-support/runtime-registry-fixture.js";
+} from "../../kernel/session/runtime-registry.js";
+import type { ExtensionArtifactDiscoveryCounts } from "../../sessions/extension-artifact-discovery.js";
+import { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
+import { invocationReceipts } from "../../kernel/receipts/invocation-receipts.js";
+import { RunMarkerCompletionConflictError, type RunMarkerStore } from "../../kernel/run/run-markers.js";
+import { toolSegmentId } from "../../kernel/projection/projection.js";
+import { AutomationService } from "../../automations/automation-service.js";
+import { pngDimensions } from "../../../test-fixtures/pi-sdk/computer-use-image.js";
+import { syntheticOversizedJpeg, syntheticPng } from "../../../test-fixtures/synthetic-image.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
 
 /** Test-owned producer for one deterministic status.json replacement.
  *
@@ -4743,7 +4743,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         await mkdir(asyncDir, { recursive: true });
         // Derive the workflow/child documents from the producer capture, retaining
         // its real header and lifecycle shape rather than mocking the read owner.
-        const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "frozen-real-active.json"), "utf8"));
+        const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "../../sessions/fixtures", "frozen-real-active.json"), "utf8"));
         const started = captured.startedAt as number;
         const edge = { agent: "worker", label: "Worker", status: "running", async: true, runId: childRun,
           workflowKey: "worker", sessionOwnerId: childRun, sessionFile: childFile };
@@ -4852,7 +4852,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     manager.appendMessage(fauxAssistantMessage("Child transcript"));
     const childFile = join(childSessionDir, "session.jsonl");
     await rename(manager.getSessionFile()!, childFile);
-    const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "frozen-real-active.json"), "utf8"));
+    const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "../../sessions/fixtures", "frozen-real-active.json"), "utf8"));
     const started = captured.startedAt as number;
     const edge = { agent: "worker", label: "Worker", status: "running", async: true, runId: childRun,
       workflowKey: "worker", sessionOwnerId: childRun, sessionFile: childFile };
@@ -5068,7 +5068,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const childFile = await makeChildSession("run-0", "frozen-child-session");
     const nestedFile = await makeChildSession("run-1", "frozen-nested-session");
     await mkdir(asyncDir, { recursive: true });
-    const fixturePath = (name: "active" | "terminal") => join(dirname(fileURLToPath(import.meta.url)), "fixtures", `frozen-real-${name}.json`);
+    const fixturePath = (name: "active" | "terminal") => join(dirname(fileURLToPath(import.meta.url)), "../../sessions/fixtures", `frozen-real-${name}.json`);
     const loadFixture = async (name: "active" | "terminal"): Promise<string> => {
       const parsed = JSON.parse(await readFile(fixturePath(name), "utf8")) as {
         lifecycleProjection: { sessionId?: string };
@@ -5140,7 +5140,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+    const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), "../../sessions/fixtures");
     const loadHeader = async (name: string): Promise<Record<string, unknown>> => {
       const parsed = JSON.parse(await readFile(join(fixtureDirectory, name), "utf8")) as { lifecycleProjection: Record<string, unknown> };
       return structuredClone(parsed.lifecycleProjection);
@@ -7438,7 +7438,7 @@ export default function (pi) {
       phase: "running" | "compacting";
       activeOperationId?: string;
       operation?: { id?: string; kind: "prompt" | "compaction"; startedAt: string };
-      runAbort: import("../kernel/run/run-abort-owner.js").RunAbortOwner;
+      runAbort: import("../../kernel/run/run-abort-owner.js").RunAbortOwner;
       onEvent: (event: unknown) => void;
       runtime: { session: { readonly isStreaming: boolean } };
     };
@@ -7474,7 +7474,7 @@ export default function (pi) {
     const internal = slot as unknown as {
       phase: "idle" | "running" | "compacting";
       operation?: { id?: string; kind: "prompt" | "compaction"; startedAt: string };
-      runAbort: import("../kernel/run/run-abort-owner.js").RunAbortOwner;
+      runAbort: import("../../kernel/run/run-abort-owner.js").RunAbortOwner;
       runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
     };
     vi.spyOn(internal.runtime.session, "compact").mockImplementation(async () => {
@@ -8132,7 +8132,7 @@ export default function (pi) {
       phase: "running" | "idle";
       activeOperationId?: string;
       operation?: { id?: string; kind: "prompt"; startedAt: string };
-      runQueue: import("../kernel/run/run-queue-owner.js").RunQueueOwner;
+      runQueue: import("../../kernel/run/run-queue-owner.js").RunQueueOwner;
       runtime: { session: {
         readonly isStreaming: boolean;
         prompt: (text: string, options?: {
@@ -11435,7 +11435,7 @@ export default function (pi) {
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
       pendingPrompt?: { id: string; createdAt: string; text: string; attachmentCount: number };
-      runWork: import("../kernel/run/run-work-owner.js").RunWorkOwner;
+      runWork: import("../../kernel/run/run-work-owner.js").RunWorkOwner;
       runtime: { session: { readonly isStreaming: boolean } };
       dependencies: { markers: { mark: (sessionId: string, operationId: string) => Promise<void> } };
     };
@@ -11484,7 +11484,7 @@ export default function (pi) {
       phase: "idle" | "running";
       activeOperationId?: string;
       operation?: { id?: string; kind: "prompt"; startedAt: string };
-      runWork: import("../kernel/run/run-work-owner.js").RunWorkOwner;
+      runWork: import("../../kernel/run/run-work-owner.js").RunWorkOwner;
       dependencies: { markers: {
         mark: (sessionId: string, operationId: string) => Promise<void>;
         clear: (sessionId: string, operationId?: string) => Promise<void>;
@@ -11572,7 +11572,7 @@ export default function (pi) {
       pendingPrompt?: {
         id: string; createdAt: string; text: string; attachmentCount: number;
       };
-      runWork: import("../kernel/run/run-work-owner.js").RunWorkOwner;
+      runWork: import("../../kernel/run/run-work-owner.js").RunWorkOwner;
     };
     internal.pendingPrompt = {
       id: "settled-operation",

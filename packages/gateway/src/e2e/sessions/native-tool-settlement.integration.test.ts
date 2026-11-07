@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
@@ -7,10 +7,10 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { GatewayWorkRegistry } from "../../kernel/run/gateway-work-registry.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../../test-support/wait-for.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

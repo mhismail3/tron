@@ -1,19 +1,19 @@
-import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { existsSync } from "node:fs";
-import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { settingsDependencies, setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import type { HomeDesignation, HomeStatus } from "../protocol/types.js";
-import type { GatewayConfig } from "../config.js";
-import type { NotificationService } from "../notifications/notification-service.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import type { HomeDesignation, HomeStatus } from "../../protocol/types.js";
+import type { GatewayConfig } from "../../config.js";
+import type { NotificationService } from "../../notifications/notification-service.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const PROVIDER = "tron-home-fixture";
 const MODEL_ID = "home-model";

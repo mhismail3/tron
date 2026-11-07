@@ -1,22 +1,22 @@
-import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { homeMemoryChange } from "../../test-support/session-settings-change.js";
+import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { fileURLToPath } from "node:url";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import type { GatewayConfig } from "../config.js";
-import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
-import type { HomeStatus } from "../protocol/types.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import type { GatewayConfig } from "../../config.js";
+import type { EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import type { HomeStatus } from "../../protocol/types.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
-import { OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { OpenAIModelEligibility, openAIModelEligibility } from "../../providers/openai-model-eligibility.js";
 
 // #480 A1-A4, found live: Home's chat reached Pi's built-in Anthropic provider
 // instead of the user's CortexKit package. A user package registers its provider
@@ -31,7 +31,7 @@ const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
 const summarizer: EpisodicSummarizer = async () => ({ role: "assistant", content: [{ type: "text", text: "user: summarized" }],
   api: "faux", provider: "faux", model: "summarizer", usage: zero, stopReason: "stop", timestamp: Date.now() }) as AssistantMessage;
 
-const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const GATEWAY_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const REPORT_PATH = join(GATEWAY_ROOT, "test-results/home-provider-runtime/report.json");
 type CaseReport = { name: string; status: "not-run" | "passed" | "failed"; observations?: Record<string, string | number | boolean | null> };
 const report: { generatedAt: string; cases: CaseReport[] } = { generatedAt: new Date().toISOString(), cases: [

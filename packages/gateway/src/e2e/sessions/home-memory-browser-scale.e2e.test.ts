@@ -1,4 +1,4 @@
-import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 /**
  * Manage Home → Memory at a real Home's scale (#940): three chapters, 1200+
  * messages and tens of megabytes of canonical JSONL, built through the real
@@ -18,17 +18,17 @@ import { performance } from "node:perf_hooks";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { homeMemoryChange } from "../../test-support/session-settings-change.js";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
-import { HomeSourceProofs } from "../episodic/home-source.js";
-import type { HomeMemoryEvidencePage, HomeMemoryView, HomeStatus } from "../protocol/types.js";
-import type { GatewayConfig } from "../config.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
+import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import type { EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import { HomeSourceProofs } from "../../episodic/home-source.js";
+import type { HomeMemoryEvidencePage, HomeMemoryView, HomeStatus } from "../../protocol/types.js";
+import type { GatewayConfig } from "../../config.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const PROVIDER = "tron-home-scale";
 const MODEL = { provider: PROVIDER, id: "chat" };

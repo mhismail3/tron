@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
-import type { RunPersistence } from "../kernel/run/run-persistence.js";
-import type { SettingsChangePath } from "../kernel/settings/settings-change.js";
+import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import type { RunPersistence } from "../../kernel/run/run-persistence.js";
+import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
 /**
  * Tron Home's request seam inside the real Gateway runtime (`RuntimeRegistry` +
  * `RuntimeSlot`), with the pinned Pi SDK, a faux provider and the real episodic
@@ -44,7 +44,7 @@ import type { SettingsChangePath } from "../kernel/settings/settings-change.js";
  * Home is designated.
  */
 import { existsSync } from "node:fs";
-import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -54,14 +54,14 @@ import {
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import type { SessionSnapshot } from "../protocol/types.js";
-import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
-import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
-import type { HomeRecord } from "../modules/home/home-owner.js";
-import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../modules/home/home-request-policy.js";
-import { ModuleHost } from "../kernel/host/module-host.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import type { SessionSnapshot } from "../../protocol/types.js";
+import type { EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
+import type { HomeRecord } from "../../modules/home/home-owner.js";
+import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
+import { ModuleHost } from "../../kernel/host/module-host.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const PROVIDER = "tron-home-seam";
 const MODEL_ID = "fixture";

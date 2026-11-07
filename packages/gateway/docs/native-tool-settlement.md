@@ -25,7 +25,7 @@ promise rejection cannot hide it behind a successful Stop or completed drain.
 
 ## Executable boundary and negative control
 
-`src/sessions/native-tool-settlement.integration.test.ts` loads a real trusted
+`src/e2e/sessions/native-tool-settlement.integration.test.ts` loads a real trusted
 Pi extension into the production `RuntimeRegistry`, with a private canonical
 session, an in-memory credential store, and the SDK's faux model. Its loopback
 peer models independently accepted work; it deliberately remains active after a
@@ -48,7 +48,7 @@ Run the focused boundary with the repository's Node/npm toolchain:
 
 ```sh
 cd packages/gateway
-npx vitest run src/sessions/native-tool-settlement.integration.test.ts
+npx vitest run src/e2e/sessions/native-tool-settlement.integration.test.ts
 ```
 
 ## Evidence limits
