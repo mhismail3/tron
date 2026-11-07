@@ -66,7 +66,7 @@ deliveries retired as failed with one `schema_upgrade` signal).
   rows; a fork or new session does not. Removing delivered iOS notifications is native
   work, not proven by an inbox read. The K3 `sessionNotifications` policy returns
   the existing service for these two kernel calls; it adds no persistence or retry owner.
-- **Registration.** `push.registration.upsert|remove|status`. Upsert derives `deviceId`
+- **Registration.** `push.registration.upsert|remove`. Upsert derives `deviceId`
   from the connection and takes an installation ID, endpoint-scoped grant ID/secret,
   the issuing relay origin and preview/policy booleans (preview defaults off); an
   identical registration writes nothing. `hello`/`system.info` carry
