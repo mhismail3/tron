@@ -234,7 +234,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.taskHistory", "home.taskPermissions", "home.stopTask", "home.memory.view", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.taskHistory", "home.taskPermissions", "home.stopTask", "home.memory.view", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -972,11 +972,6 @@ export class GatewayService {
           if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
           return { revoked };
         }));
-      }
-      case "push.registration.status": {
-        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Push registration status accepts no parameters");
-        const notifications = this.requireNotifications();
-        return safeJson(await notifications.status(client.isLocal ? undefined : client.identity));
       }
       case "notification.inbox.list": {
         if (Object.keys(params).some((key) => key !== "filter" && key !== "cursor" && key !== "limit")) {
@@ -2166,8 +2161,6 @@ export class GatewayService {
         }
       }
 
-      case "filesystem.home":
-        return { path: this.dependencies.filesystem.root };
       case "filesystem.list":
         return safeJson(await this.dependencies.filesystem.list(optionalString(params.path, "path", 4_096)));
       case "filesystem.mkdir":

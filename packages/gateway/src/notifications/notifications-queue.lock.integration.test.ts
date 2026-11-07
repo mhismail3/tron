@@ -440,6 +440,14 @@ describe("gateway/notifications delivery locks", () => {
     expect(inbox, "the phone's inbox lists both, newest first, unread").toEqual({ notifications: [entry(stoppedMessage), entry(finishedMessage)], revision: expect.stringMatching(/^[0-9a-f]{32}$/u), unreadCount: 2 });
   }, 60_000);
 
+  it("refuses the deleted read-only methods push.registration.status and filesystem.home as unknown", async () => {
+    const { phone } = await pushLock("notifications-deleted-methods");
+    for (const method of ["push.registration.status", "filesystem.home"]) {
+      expect(answer(await phone.request(method, {})), method)
+        .toEqual({ ok: false, result: null, error: expect.objectContaining({ code: "not_found", message: `Unknown gateway method: ${method}` }) });
+    }
+  }, 60_000);
+
   it("notifications-queued-cancel: removing the registration cancels a queued push and revokes the grant once the relay is back", async () => {
     const lock = await pushLock("notifications-queued-cancel");
     const { gateway, phone, relay, sessionId } = lock;
