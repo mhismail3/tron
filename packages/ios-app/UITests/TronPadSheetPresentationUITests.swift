@@ -136,9 +136,12 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         return CGRect(x: center - halfWidth, y: doneFrame.minY - 12, width: halfWidth * 2, height: app.windows.firstMatch.frame.maxY - doneFrame.minY)
     }
 
+    /// A tall trailing column: at the trailing edge, right of center, and opened
+    /// at full height (its top within the window's top fifth, not a medium detent).
     private func assertTrailingColumn(_ sheet: CGRect, in window: CGRect, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertGreaterThan(sheet.minX, window.midX, "The sheet occupies a trailing column, not the middle: \(sheet) in \(window)", file: file, line: line)
         XCTAssertGreaterThan(sheet.maxX, window.maxX - 48, "The sheet sits at the trailing edge: \(sheet) in \(window)", file: file, line: line)
+        XCTAssertLessThan(sheet.minY, window.minY + window.height * 0.2, "The column is full height, not a medium detent: \(sheet) in \(window)", file: file, line: line)
     }
 
     /// The chat beside the sheet is not covered and still takes a tap and text.

@@ -29,9 +29,10 @@ enum TronPadSheetMode: Equatable, Sendable {
         return sceneWidth >= sideColumnMinimumWidth ? .sideColumn : .centeredCard
     }
 
-    /// Sizes a side-column sheet before UIKit presents it. A form-sized sheet
-    /// follows its controller's preferred size, the one size UIKit also honors for
-    /// a sheet stacked on another sheet.
+    /// Sizes a side-column sheet the surface canvas presents: a form-sized sheet
+    /// follows its controller's preferred size. A sheet stacked on a column sheet is
+    /// presented by SwiftUI's own sheet host, so its column width comes from the
+    /// `.form` sizing alone (`testWideLandscapeSubSheetStacksInsideTheSideColumn`).
     @MainActor
     static func prepare(_ presented: UIViewController, in window: UIWindow) {
         guard resolve(sceneWidth: window.bounds.width) == .sideColumn else { return }
