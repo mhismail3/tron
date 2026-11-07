@@ -417,6 +417,7 @@ class SelectionTests(VerifyCase):
         self.assertEqual(report["selection"]["tests"], ["mods/alpha/test-alpha.py"])
         self.assertEqual(report["verdict"], "passed")
         self.assertEqual(report["delta"], {"sourceLines": {"added": 1, "removed": 1}, "testLines": {"added": 0, "removed": 0},
+                                           "docLines": {"added": 0, "removed": 0},
                                            "addedTestFiles": [], "deletedTestFiles": [], "besideExistingOwner": {}, "compatAdditions": []})
         self.assertEqual([step["name"] for step in report["steps"]][:9],
                          ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy",

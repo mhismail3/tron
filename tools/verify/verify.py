@@ -289,13 +289,13 @@ def delta(base: str) -> dict:
     """What the change adds and deletes, split into source and test code. A new test file
     whose stem an existing test file in the same directory already carries is listed with
     that owner: the reviewer decides whether the proof belonged in it (test-oracles.md)."""
-    counts = {"source": [0, 0], "tests": [0, 0]}
+    counts = {"source": [0, 0], "tests": [0, 0], "docs": [0, 0]}
     for line in git("diff", "--numstat", "-M", f"{base}..HEAD").splitlines():
         added, removed, path = line.split("\t", 2)
         if added == "-":
             continue  # binary
         path = re.sub(r"\{[^{}]* => ([^{}]*)\}", r"\1", path).split(" => ")[-1].replace("//", "/")
-        side = counts["tests" if is_test_code(path) else "source"]
+        side = counts["docs" if is_doc(path) else "tests" if is_test_code(path) else "source"]
         side[0] += int(added)
         side[1] += int(removed)
     status = git("diff", "--name-status", "-M", f"{base}..HEAD").splitlines()
@@ -309,16 +309,17 @@ def delta(base: str) -> dict:
         if owners:
             beside[path] = sorted(owners)
     # Added source lines that name compatibility machinery, which AGENTS.md forbids.
-    compat, path = [], None
+    bridges, path = [], None
     for line in git("diff", "-U0", "-M", f"{base}..HEAD").splitlines():
         if line.startswith("+++ "):
             path = line[6:] if line.startswith("+++ b/") else None
             path = path if path and not is_test_code(path) and not is_doc(path) else None
         elif path and line.startswith("+") and COMPAT_WORDS.search(line):
-            compat.append(f"{path}: {line[1:].strip()[:160]}")
+            bridges.append(f"{path}: {line[1:].strip()[:160]}")
     return {"sourceLines": {"added": counts["source"][0], "removed": counts["source"][1]},
             "testLines": {"added": counts["tests"][0], "removed": counts["tests"][1]},
-            "addedTestFiles": added, "deletedTestFiles": deleted, "besideExistingOwner": beside, "compatAdditions": compat}
+            "docLines": {"added": counts["docs"][0], "removed": counts["docs"][1]},
+            "addedTestFiles": added, "deletedTestFiles": deleted, "besideExistingOwner": beside, "compatAdditions": bridges}
 
 
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
@@ -705,7 +706,9 @@ def main(argv: list[str]) -> int:
         print(f"  why: {reason}", flush=True)
     if change:
         source, tests = change["sourceLines"], change["testLines"]
-        print(f"  delta: source +{source['added']}/-{source['removed']}, tests +{tests['added']}/-{tests['removed']};"
+        docs = change["docLines"]
+        print(f"  delta: source +{source['added']}/-{source['removed']}, tests +{tests['added']}/-{tests['removed']},"
+              f" docs +{docs['added']}/-{docs['removed']};"
               f" test files +{len(change['addedTestFiles'])}/-{len(change['deletedTestFiles'])}", flush=True)
         for path, owners in change["besideExistingOwner"].items():
             print(f"  delta: new {path} beside existing owner {', '.join(owners)}: extend it or say why not", flush=True)
