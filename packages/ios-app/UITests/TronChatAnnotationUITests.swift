@@ -223,8 +223,7 @@ final class TronChatAnnotationUITests: XCTestCase {
 
     /// On iPad, a hardware Shift+Return inserts the multi-line comment's newline
     /// at the caret and keeps editing; hardware Return then saves. Hardware keys
-    /// go to the first bubble of a launch: hardware typing into a second bubble
-    /// can keep the app from idling for minutes.
+    /// go to the first bubble of a launch.
     @MainActor func testPadHardwareShiftReturnAddsLineAndReturnSavesAnnotation() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
         continueAfterFailure = false

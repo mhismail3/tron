@@ -295,6 +295,7 @@ struct ChatAnnotationBubbleHost: View {
         .onChange(of: presenter.pending?.id) { _, id in
             comment = ""
             selection = nil
+            refocusAfterLineBreak = false
             capturedRegionMaxY = id == nil ? nil : region.maxY
             // Only claim focus. Clearing it on close would resign whichever
             // responder holds the keyboard by then, i.e. the composer after Save.
@@ -315,7 +316,7 @@ struct ChatAnnotationBubbleHost: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("chat.annotation.bubble.quote")
             HStack(alignment: .bottom, spacing: 4) {
-                TextField("Add a comment", text: $comment, selection: $selection, axis: .vertical)
+                commentField
                     .font(TronFont.body())
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1...4)
@@ -382,6 +383,16 @@ struct ChatAnnotationBubbleHost: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("chat.annotation.bubble")
+    }
+
+    /// Only iPad edits at the selection (Shift+Return); iPhone keeps the
+    /// field without a selection binding.
+    @ViewBuilder private var commentField: some View {
+        if Self.returnSaves {
+            TextField("Add a comment", text: $comment, selection: $selection, axis: .vertical)
+        } else {
+            TextField("Add a comment", text: $comment, axis: .vertical)
+        }
     }
 
     private func insertLineBreak() {
