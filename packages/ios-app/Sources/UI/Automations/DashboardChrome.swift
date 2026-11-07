@@ -107,7 +107,29 @@ struct DashboardChrome<Content: View>: View {
             DashboardTitle(state: header)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 20)
+                .modifier(DashboardWindowControlsClearance())
         }
+    }
+}
+
+/// The hidden navigation bar no longer reserves room for iPadOS window
+/// controls, which the system draws over the window's top-leading corner
+/// inside the top safe area. The title row drops below them, as a system large
+/// title does. Without controls (iPhone, full-screen iPad) the corner inset is
+/// zero and the layout is unchanged.
+private struct DashboardWindowControlsClearance: ViewModifier {
+    @State private var cornerHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.top, cornerHeight)
+            // Measured outside the padding: the row's top edge, and so the
+            // corner inset it reads, does not move when the padding changes.
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.containerCornerInsets.topLeading.height
+            } action: { height in
+                cornerHeight = height
+            }
     }
 }
 

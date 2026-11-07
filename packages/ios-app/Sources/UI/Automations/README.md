@@ -17,6 +17,10 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   the one floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold
   (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
   presenter.
+- **Dashboard title.** `DashboardChrome` hides the navigation bar and draws the "Tron" title in
+  the top safe-area inset. In iPadOS windowed mode the title row drops by the window's top-leading
+  container corner inset (`containerCornerInsets`) so the system window controls never overlap it,
+  at rest or collapsed. Without window controls that inset is zero and the layout is unchanged.
 - **Automations sheet.** Medium and large detents; every identity-qualified, connected Gateway
   advertising `automations.v2` contributes rows (others are absent, never a warning). Active
   Automations list first, then paused, drafts and finished ones (attention, running, next
@@ -90,6 +94,8 @@ scripts/tron-ios-test run \
 Explicit, non-gating: `TronAutomationsVisualUITests` captures list, detail, run detail and editor
 in light, dark and XXXL for design review; `TronAutomationsListPerformanceUITests` measures app
 CPU and memory while flinging through 400 Automations (`-automation-large`).
+`TronDashboardWindowControlsUITests` proves the title clears the window controls; it needs an
+iPad simulator in Windowed Apps mode, which the canonical iPhone lane is not, so there it skips.
 
 ## Not here
 
