@@ -933,6 +933,32 @@ describe("Home task cold reconciliation", () => {
     expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
   }, 20_000);
 
+  // #2316 F1: when the bind write fails once, `task` already holds the unpersisted bound
+  // revision, so admissionFailed's settling put expects the wrong revision and is refused. The
+  // record stays pending with no worker until a restart recovers it. Expected to fail until the
+  // live settlement uses the persisted revision.
+  it.fails("settles a task whose bind write failed, without a restart (#2316 F1)", async () => {
+    const f = await fixture();
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
+    const store = tasks.store as HomeTaskStore;
+    await store.initialize();
+    const epoch = await store.restoreEpoch();
+    await issueGrant(tasks.authorization, { intentDigest: taskIntentDigest("Finite work"),
+      target: f.cwd, authorizationScope: "full-work", restoreEpoch: epoch },
+      { decisionId: "single-use", expiresAt: Date.now() + 60_000 });
+    const put = store.put.bind(store);
+    let failed = false;
+    vi.spyOn(store, "put").mockImplementation(async (task, expected) => {
+      if (!failed && task.lifecycle === "active") { failed = true; throw new Error("bind write refused once"); }
+      return put(task, expected);
+    });
+    const calls = vi.fn(() => fauxAssistantMessage("Never prompted")); f.faux.setResponses([calls]);
+    await expect(dispatch(f)).rejects.toThrow();
+    expect(failed).toBe(true);
+    expect(calls).not.toHaveBeenCalled();
+    expect(await store.read("task-one")).toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "admission-refused" } });
+  }, 20_000);
+
   it.each(["pending", "grant-consumed", "worker-created", "operation-bound"])("retires the %s admission cut without replay or renewing grants", async cut => {
     const f = await fixture();
     const tasks = (homeOwnerOf(f.registry) as any).tasks;

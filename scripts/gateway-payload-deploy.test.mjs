@@ -437,3 +437,40 @@ for (const scenario of [
     }
   });
 }
+
+// #2316 F8: rollback rewrites previous.json before current.json. A crash between the two writes
+// leaves both pointers on the failed version, so the version being rolled back to is no longer
+// selected by either pointer. Inside a pending deploy attempt the launcher still restores from
+// pending-attempt.json; the explicit `rollback` command after a ready deploy has no other record.
+// Expected to fail, only for that reason, until the rollback is crash-ordered.
+test("a crash inside rollbackSelection keeps the rollback target selected (#2316 F8)",
+  { expectFailure: { label: "#2316 F8", match: /rollback target lost/ } }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-rollback-crash-"));
+  try {
+    const channelRoot = join(root, "gateway", "payloads", "dev");
+    await mkdir(channelRoot, { recursive: true });
+    const pointer = (version, digit) => ({ schema: 1, kind: "tron-gateway-selection", channel: "dev", version, payloadFingerprint: digit.repeat(64) });
+    const paths = { channel: "dev", channelRoot, current: join(channelRoot, "current.json"), previous: join(channelRoot, "previous.json") };
+    await writeFile(paths.previous, `${JSON.stringify(pointer("good", "a"))}\n`);
+    await writeFile(paths.current, `${JSON.stringify(pointer("failed", "b"))}\n`);
+    // The child dies at the instant it would rename the new current.json into place.
+    const preload = join(root, "crash-before-current.mjs");
+    await writeFile(preload, [
+      'import fs from "node:fs";',
+      'import { syncBuiltinESMExports } from "node:module";',
+      "const rename = fs.promises.rename;",
+      'fs.promises.rename = async (from, to) => { if (String(to).endsWith("current.json")) process.kill(process.pid, "SIGKILL"); return rename(from, to); };',
+      "syncBuiltinESMExports();",
+    ].join("\n"));
+    const module = new URL("./gateway-payload-deploy.mjs", import.meta.url).href;
+    const child = spawn(process.execPath, ["--import", preload, "--input-type=module", "-e",
+      `const { rollbackSelection } = await import(${JSON.stringify(module)}); await rollbackSelection(${JSON.stringify(paths)});`],
+      { stdio: "ignore" });
+    const [, signal] = await once(child, "exit");
+    assert.equal(signal, "SIGKILL", "the fault fired between the two pointer writes");
+    const versions = await Promise.all([paths.current, paths.previous].map(async (path) => JSON.parse(await readFile(path, "utf8")).version));
+    assert.ok(versions.includes("good"), `rollback target lost: current=${versions[0]} previous=${versions[1]}`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
