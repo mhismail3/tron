@@ -87,15 +87,18 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsListActiveBeforePaused \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
-  --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates
+  --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates \
+  --only-testing TronMobileUITests/TronDashboardWindowControlsUITests
 ```
 
 `TronAccessibilityUITests` drives the real dashboard destinations and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
 Explicit, non-gating: `TronAutomationsVisualUITests` captures list, detail, run detail and editor
 in light, dark and XXXL for design review; `TronAutomationsListPerformanceUITests` measures app
 CPU and memory while flinging through 400 Automations (`-automation-large`).
-`TronDashboardWindowControlsUITests` proves the title clears the window controls; it needs an
-iPad simulator in Windowed Apps mode, which the canonical iPhone lane is not, so there it skips.
+`TronDashboardWindowControlsUITests` checks that the title sits below the status bar on any
+device (the canonical iPhone lane, full-screen iPad). On an iPad
+simulator in Windowed Apps mode it also resizes the window and checks the title clears the
+controls at rest and collapsed; no lane runs iPad, so run that destination by hand.
 
 ## Not here
 

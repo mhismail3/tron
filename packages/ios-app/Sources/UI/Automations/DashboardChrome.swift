@@ -112,11 +112,11 @@ struct DashboardChrome<Content: View>: View {
     }
 }
 
-/// The hidden navigation bar no longer reserves room for iPadOS window
-/// controls, which the system draws over the window's top-leading corner
-/// inside the top safe area. The title row drops below them, as a system large
-/// title does. Without controls (iPhone, full-screen iPad) the corner inset is
-/// zero and the layout is unchanged.
+/// With the navigation bar hidden, nothing reserves room for the iPadOS
+/// window controls, which the system draws over the window's top-leading
+/// corner inside the top safe area. The title row drops below them, as a
+/// system large title does. Without controls (iPhone, full-screen iPad) the
+/// corner inset is zero and the row keeps its place.
 private struct DashboardWindowControlsClearance: ViewModifier {
     @State private var cornerHeight: CGFloat = 0
 
