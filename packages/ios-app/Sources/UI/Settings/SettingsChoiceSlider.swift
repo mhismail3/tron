@@ -90,7 +90,7 @@ struct SettingsChoiceSelectionRow: View {
     private var canEdit: Bool { options.contains { $0.disabledReason == nil && $0.value != value } }
 
     var body: some View {
-        AgentConfigurationValueRow(icon: icon, title: title, information: information, value: display, accent: accent) {
+        TronValueRow(icon: icon, title: title, detail: information, accent: accent) {
             Button {
                 guard canEdit, isEnabled, activity.allowsPresentationPublication, sliderPresentation?.session == nil else { return }
                 sliderPresentation?.open(owner: ownerID, surface: surfaceToken)
