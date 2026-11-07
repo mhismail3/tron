@@ -1,6 +1,6 @@
-pi-coding-agent 1.3.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
+pi-coding-agent 1.4.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
 
-Apply with git apply at tag v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0).
+Apply with git apply at tag v1.4.0 (4a080252f06caf63a525d7873c5d94d3c23887e0).
 
 1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
    A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
@@ -46,6 +46,107 @@ Apply with git apply at tag v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0).
    of b4c2e92ac (both in v1.5.0): undici 8.12.3 and minimatch 11.0.3, with the root lockfile.
    The bundled bin and rpc-entry inline them, so the build reinstalls before bundling.
 
+8. Explicit pending loadout names (Tron #2181). Reapplying a saved selection may remove
+   newly autoactivated direct tools before MCP servers register. When that narrows the
+   loadout, preserve pending restored names explicitly requested by the same call, while
+   discarding unrequested ones. Addition-only discovery updates still keep pending names.
+   Upstream 1.4 auto-activation remains enabled; Tron still reapplies the recorded selection.
+
+diff --git a/package-lock.json b/package-lock.json
+index 898afd386b243ddf9c408abc9fbe05fc412de2c7..710a12f300b7b2d61439b4322610e17c987ed6f1 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1887,6 +1887,12 @@
+ 				"url": "https://opencollective.com/libvips"
+ 			}
+ 		},
++		"node_modules/@isaacs/nonrecursive-glob-match": {
++			"version": "1.1.0",
++			"resolved": "https://registry.npmjs.org/@isaacs/nonrecursive-glob-match/-/nonrecursive-glob-match-1.1.0.tgz",
++			"integrity": "sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==",
++			"license": "BlueOak-1.0.0"
++		},
+ 		"node_modules/@jridgewell/resolve-uri": {
+ 			"version": "3.1.2",
+ 			"resolved": "https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz",
+@@ -4520,21 +4526,6 @@
+ 				"node": ">=20.18.1"
+ 			}
+ 		},
+-		"node_modules/minimatch": {
+-			"version": "10.2.6",
+-			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.6.tgz",
+-			"integrity": "sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==",
+-			"license": "BlueOak-1.0.0",
+-			"dependencies": {
+-				"brace-expansion": "^5.0.8"
+-			},
+-			"engines": {
+-				"node": "18 || 20 || >=22"
+-			},
+-			"funding": {
+-				"url": "https://github.com/sponsors/isaacs"
+-			}
+-		},
+ 		"node_modules/minimist": {
+ 			"version": "1.2.8",
+ 			"resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz",
+@@ -5634,6 +5625,8 @@
+ 			"resolved": "https://registry.npmjs.org/undici/-/undici-8.10.2.tgz",
+ 			"integrity": "sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==",
+ 			"license": "MIT",
++			"optional": true,
++			"peer": true,
+ 			"engines": {
+ 				"node": ">=22.19.0"
+ 			}
+@@ -6245,12 +6238,12 @@
+ 				"hosted-git-info": "9.0.3",
+ 				"ignore": "7.0.8",
+ 				"jiti": "2.7.0",
+-				"minimatch": "10.2.6",
++				"minimatch": "11.0.3",
+ 				"proper-lockfile": "4.1.2",
+ 				"quickjs-wasi": "3.6.2",
+ 				"semver": "7.8.5",
+ 				"typebox": "1.3.27",
+-				"undici": "8.10.2",
++				"undici": "8.12.3",
+ 				"yaml": "2.9.0"
+ 			},
+ 			"bin": {
+@@ -6349,6 +6342,31 @@
+ 			"extraneous": true,
+ 			"license": "MIT"
+ 		},
++		"packages/coding-agent/node_modules/minimatch": {
++			"version": "11.0.3",
++			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-11.0.3.tgz",
++			"integrity": "sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==",
++			"license": "BlueOak-1.0.0",
++			"dependencies": {
++				"@isaacs/nonrecursive-glob-match": "^1.0.3",
++				"brace-expansion": "^5.0.12"
++			},
++			"engines": {
++				"node": "18 || 20 || >=22"
++			},
++			"funding": {
++				"url": "https://github.com/sponsors/isaacs"
++			}
++		},
++		"packages/coding-agent/node_modules/undici": {
++			"version": "8.12.3",
++			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz",
++			"integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
++			"license": "MIT",
++			"engines": {
++				"node": ">=22.19.0"
++			}
++		},
+ 		"packages/durable": {
+ 			"name": "@earendil-works/pi-durable",
+ 			"version": "1.4.0",
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index 5d5eb338e22282d409fe9cb659a5eef2a21f0c6e..bb0f55b2ff58168848e944c9d77429225f1874a2 100644
 --- a/packages/coding-agent/docs/mcp.md
@@ -81,6 +182,25 @@ index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa031
  `session.dispose()` aborts active work, invalidates extension contexts, disconnects from the agent, and removes event listeners. Call it when the session is no longer needed.
  
  `AgentSessionRuntime` adds `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. Each operation replaces the active `AgentSession` and recreates services for the target working directory.
+diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
+index e0955b0e7827d5c119a7dc96bbac70bc8a11e9c5..bf7070baea91f5f57366bde767bdafcdc4fcac48 100644
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -56,12 +56,12 @@
+ 		"hosted-git-info": "9.0.3",
+ 		"ignore": "7.0.8",
+ 		"jiti": "2.7.0",
+-		"minimatch": "10.2.6",
++		"minimatch": "11.0.3",
+ 		"proper-lockfile": "4.1.2",
+ 		"quickjs-wasi": "3.6.2",
+ 		"semver": "7.8.5",
+ 		"typebox": "1.3.27",
+-		"undici": "8.10.2",
++		"undici": "8.12.3",
+ 		"yaml": "2.9.0"
+ 	},
+ 	"overrides": {
 diff --git a/packages/coding-agent/src/core/agent-session-services.ts b/packages/coding-agent/src/core/agent-session-services.ts
 index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca085834e102 100644
 --- a/packages/coding-agent/src/core/agent-session-services.ts
@@ -147,7 +267,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc9a2ca093 100644
+index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325840fe65f 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -139,6 +139,7 @@ import {
@@ -167,7 +287,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -438,6 +441,7 @@ export class AgentSession {
+@@ -437,6 +440,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -175,7 +295,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -491,6 +495,7 @@ export class AgentSession {
+@@ -490,6 +494,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -183,7 +303,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1122,20 +1127,22 @@ export class AgentSession {
+@@ -1121,20 +1126,22 @@ export class AgentSession {
  		// This ensures the UI sees the updated queue state
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
@@ -219,7 +339,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  				}
  			}
  		}
-@@ -1470,9 +1477,17 @@ export class AgentSession {
+@@ -1485,9 +1492,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -239,7 +359,27 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1840,8 +1855,13 @@ export class AgentSession {
+@@ -1538,10 +1553,16 @@ export class AgentSession {
+ 	setActiveToolsByName(toolNames: string[]): void {
+ 		const previous = this.getActiveToolNames();
+ 		this._setActiveTools(toolNames);
+-		// A loadout that deactivates a tool replaces the restored one, whose pending tools are dropped.
+-		// One that only adds tools, like activating tool_search, keeps them.
++		// A loadout that deactivates a tool replaces the restored one. Keep its explicitly
++		// requested pending names: MCP servers may still be connecting when a host reapplies it.
++		// One that only adds tools, like activating tool_search, keeps all pending names.
+ 		const active = new Set(this.getActiveToolNames());
+-		if (previous.some((name) => !active.has(name))) this._pendingToolNames.clear();
++		if (previous.some((name) => !active.has(name))) {
++			const requested = new Set(toolNames);
++			for (const name of this._pendingToolNames) {
++				if (!requested.has(name)) this._pendingToolNames.delete(name);
++			}
++		}
+ 	}
+ 
+ 	private _setActiveTools(toolNames: string[]): void {
+@@ -1876,8 +1897,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
  			messages = await this._prepareRun(trigger);
@@ -253,7 +393,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  			this._flushPendingBashMessages();
  			this._flushPendingCustomMessages();
  			this._resolveIdleWaitIfIdle();
-@@ -1851,7 +1871,6 @@ export class AgentSession {
+@@ -1887,7 +1913,6 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -261,7 +401,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2099,20 +2118,26 @@ export class AgentSession {
+@@ -2133,20 +2158,26 @@ export class AgentSession {
  			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  		}
  
@@ -295,7 +435,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  		}
  
  		// Validate model
-@@ -2221,10 +2246,11 @@ export class AgentSession {
+@@ -2255,10 +2286,11 @@ export class AgentSession {
  		let expandedText = this._expandSkillCommand(processedInput.text);
  		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  
@@ -309,7 +449,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  		}
  		return "queued";
  	}
-@@ -2263,15 +2289,12 @@ export class AgentSession {
+@@ -2297,15 +2329,12 @@ export class AgentSession {
  	}
  
  	/**
@@ -328,7 +468,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  		this.agent.steer({
  			role: "user",
  			content,
-@@ -2280,18 +2303,30 @@ export class AgentSession {
+@@ -2314,18 +2343,30 @@ export class AgentSession {
  	}
  
  	/**
@@ -365,7 +505,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  	/**
  	 * Throw an error if the text is an extension command.
  	 */
-@@ -2454,6 +2489,11 @@ export class AgentSession {
+@@ -2488,6 +2529,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -377,7 +517,7 @@ index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3670,6 +3710,7 @@ export class AgentSession {
+@@ -3700,6 +3746,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -438,6 +578,33 @@ index 60388c0eb6ddc8c46fd44191b7d872a14a53decd..292f59fdf5398086bb9583e13b0a2ab3
  	/** Session manager (read-only) */
  	sessionManager: ReadonlySessionManager;
  	/** Model registry for API key resolution */
+diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
+index 8e03f4d1f4d5166db8a10265f34602f4b542ff4e..b284be2bc1b1e6b53acb1a11064a48fffc2f7103 100644
+--- a/packages/coding-agent/src/core/model-runtime.ts
++++ b/packages/coding-agent/src/core/model-runtime.ts
+@@ -184,6 +184,9 @@ export class ModelRuntime implements Models {
+ 	private readonly modelsPath: string | undefined;
+ 	private readonly modelNetworkEnabled: boolean;
+ 	private config: ModelConfig;
++	// A later readiness pass must not overtake an older config read and leave
++	// that detached registration refresh able to start storage work afterwards.
++	private configLoadTail: Promise<void> = Promise.resolve();
+ 	private snapshot: ModelRuntimeSnapshot = {
+ 		all: [],
+ 		available: [],
+@@ -854,7 +857,11 @@ export class ModelRuntime implements Models {
+ 	}
+ 
+ 	async refresh(options: ModelsRefreshOptions = {}): Promise<ModelsRefreshResult> {
+-		this.config = await ModelConfig.load(this.modelsPath);
++		const configLoad = this.configLoadTail.then(() => ModelConfig.load(this.modelsPath));
++		// Keep the sequencing tail usable after a failed read; this invocation
++		// still observes its own failure through the original configLoad promise.
++		this.configLoadTail = configLoad.then(() => undefined, () => undefined);
++		this.config = await configLoad;
+ 		this.configureRadiusProviders();
+ 		if (options.providers) {
+ 			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
 diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
 index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37d49ff7d6 100644
 --- a/packages/coding-agent/src/core/package-manager.ts
@@ -628,7 +795,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  			return projectPath;
  		}
 diff --git a/packages/coding-agent/src/core/sdk.ts b/packages/coding-agent/src/core/sdk.ts
-index f678ba43ca80a9dfb40dc5f5b05055952590bb1d..936cccf635e0927af0079f82e0c09fd0dd3c7933 100644
+index 0bf874fff7817d1e13e93d6af53285b019ba19c5..9fc1a0b456df3a5611f9f2d819564f75be84904e 100644
 --- a/packages/coding-agent/src/core/sdk.ts
 +++ b/packages/coding-agent/src/core/sdk.ts
 @@ -48,6 +48,12 @@ setDefaultStreamFn(streamSimple);
@@ -675,7 +842,7 @@ index f678ba43ca80a9dfb40dc5f5b05055952590bb1d..936cccf635e0927af0079f82e0c09fd0
  		await resourceLoader.reload();
  		time("resourceLoader.reload");
  	}
-@@ -463,6 +470,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -455,6 +462,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  		sessionManager,
  		settingsManager,
  		cwd,
@@ -796,10 +963,10 @@ index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a
  
  export default createMcpExtension();
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index ce2398475b9780cbe7063da5d6b767224a0d217a..7229d94214b57055f29055b996758647ce8b0780 100644
+index e24d150be9abfd74dc1fc5c1c74c70d963797b20..c041e8aac08d2266bcd09cd441853a899a4f256d 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2248,6 +2248,7 @@ export class InteractiveMode {
+@@ -2250,6 +2250,7 @@ export class InteractiveMode {
  			mode: "tui",
  			hasUI: true,
  			cwd: this.sessionManager.getCwd(),
@@ -953,143 +1120,3 @@ index eddd20a978a4fa8c83a9bddf10caf66591164397..a9f00dedcf32d995f84f411ae860f82b
  		agentDir,
  		modelRuntime: session.modelRuntime,
  		settingsManager: session.settingsManager,
-diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
---- a/packages/coding-agent/src/core/model-runtime.ts
-+++ b/packages/coding-agent/src/core/model-runtime.ts
-@@ -183,6 +183,9 @@
- 	private readonly modelsPath: string | undefined;
- 	private readonly modelNetworkEnabled: boolean;
- 	private config: ModelConfig;
-+	// A later readiness pass must not overtake an older config read and leave
-+	// that detached registration refresh able to start storage work afterwards.
-+	private configLoadTail: Promise<void> = Promise.resolve();
- 	private snapshot: ModelRuntimeSnapshot = {
- 		all: [],
- 		available: [],
-@@ -846,7 +849,11 @@
- 	}
- 
- 	async refresh(options: ModelsRefreshOptions = {}): Promise<ModelsRefreshResult> {
--		this.config = await ModelConfig.load(this.modelsPath);
-+		const configLoad = this.configLoadTail.then(() => ModelConfig.load(this.modelsPath));
-+		// Keep the sequencing tail usable after a failed read; this invocation
-+		// still observes its own failure through the original configLoad promise.
-+		this.configLoadTail = configLoad.then(() => undefined, () => undefined);
-+		this.config = await configLoad;
- 		this.configureRadiusProviders();
- 		if (options.providers) {
- 			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
-diff --git a/package-lock.json b/package-lock.json
-index 114762b90205cabf4db894f3a8c97b044a0d79a9..bcf3b468e278262c39440102dada583b6a1acfba 100644
---- a/package-lock.json
-+++ b/package-lock.json
-@@ -1175,6 +1175,12 @@
- 				}
- 			}
- 		},
-+		"node_modules/@isaacs/nonrecursive-glob-match": {
-+			"version": "1.1.0",
-+			"resolved": "https://registry.npmjs.org/@isaacs/nonrecursive-glob-match/-/nonrecursive-glob-match-1.1.0.tgz",
-+			"integrity": "sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==",
-+			"license": "BlueOak-1.0.0"
-+		},
- 		"node_modules/@jridgewell/sourcemap-codec": {
- 			"version": "1.5.5",
- 			"resolved": "https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz",
-@@ -3629,21 +3635,6 @@
- 				"url": "https://github.com/sponsors/sindresorhus"
- 			}
- 		},
--		"node_modules/minimatch": {
--			"version": "10.2.6",
--			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.6.tgz",
--			"integrity": "sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==",
--			"license": "BlueOak-1.0.0",
--			"dependencies": {
--				"brace-expansion": "^5.0.8"
--			},
--			"engines": {
--				"node": "18 || 20 || >=22"
--			},
--			"funding": {
--				"url": "https://github.com/sponsors/isaacs"
--			}
--		},
- 		"node_modules/minimist": {
- 			"version": "1.2.8",
- 			"resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz",
-@@ -4673,6 +4664,8 @@
- 			"resolved": "https://registry.npmjs.org/undici/-/undici-8.10.2.tgz",
- 			"integrity": "sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==",
- 			"license": "MIT",
-+			"optional": true,
-+			"peer": true,
- 			"engines": {
- 				"node": ">=22.19.0"
- 			}
-@@ -5191,12 +5184,12 @@
- 				"hosted-git-info": "9.0.3",
- 				"ignore": "7.0.8",
- 				"jiti": "2.7.0",
--				"minimatch": "10.2.6",
-+				"minimatch": "11.0.3",
- 				"proper-lockfile": "4.1.2",
- 				"quickjs-wasi": "3.6.2",
- 				"semver": "7.8.5",
- 				"typebox": "1.3.27",
--				"undici": "8.10.2",
-+				"undici": "8.12.3",
- 				"yaml": "2.9.0"
- 			},
- 			"bin": {
-@@ -5295,6 +5288,31 @@
- 			"extraneous": true,
- 			"license": "MIT"
- 		},
-+		"packages/coding-agent/node_modules/minimatch": {
-+			"version": "11.0.3",
-+			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-11.0.3.tgz",
-+			"integrity": "sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==",
-+			"license": "BlueOak-1.0.0",
-+			"dependencies": {
-+				"@isaacs/nonrecursive-glob-match": "^1.0.3",
-+				"brace-expansion": "^5.0.12"
-+			},
-+			"engines": {
-+				"node": "18 || 20 || >=22"
-+			},
-+			"funding": {
-+				"url": "https://github.com/sponsors/isaacs"
-+			}
-+		},
-+		"packages/coding-agent/node_modules/undici": {
-+			"version": "8.12.3",
-+			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz",
-+			"integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
-+			"license": "MIT",
-+			"engines": {
-+				"node": ">=22.19.0"
-+			}
-+		},
- 		"packages/durable": {
- 			"name": "@earendil-works/pi-durable",
- 			"version": "1.3.0",
-diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index a23911cbf3c88f6c73aecdbb14251a9071e5a472..27e9664eb647a15af024d40f7f5d646e44f5ae6e 100644
---- a/packages/coding-agent/package.json
-+++ b/packages/coding-agent/package.json
-@@ -55,12 +55,12 @@
- 		"hosted-git-info": "9.0.3",
- 		"ignore": "7.0.8",
- 		"jiti": "2.7.0",
--		"minimatch": "10.2.6",
-+		"minimatch": "11.0.3",
- 		"proper-lockfile": "4.1.2",
- 		"quickjs-wasi": "3.6.2",
- 		"semver": "7.8.5",
- 		"typebox": "1.3.27",
--		"undici": "8.10.2",
-+		"undici": "8.12.3",
- 		"yaml": "2.9.0"
- 	},
- 	"overrides": {

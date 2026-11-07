@@ -1518,7 +1518,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         this.applyHomeToolRecipe(created.session, profile, launchDefaults?.keys ?? []);
       } else {
         // Ordinary chats retain their canonical loadout across resume/fork/reload.
-        // Pi's explicit launch defaults otherwise bypass transcript restoration.
+        // Pi's explicit launch defaults otherwise bypass transcript restoration, and Pi
+        // may also activate newly registered extension tools; reapplying the declared
+        // selection keeps those out. The SDK retains the requested pending names until
+        // MCP registration (#2181); the public setter cannot restore an unknown name.
         const toolChoice = readSessionToolChoice(sessionManager.getBranch());
         if (toolChoice && toolChoice.fixed?.from !== "project") created.session.setActiveToolsByName(toolChoice.tools);
       }

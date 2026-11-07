@@ -65,6 +65,13 @@ a general downstream credential/model-store drain API. It also pins the patched 
 `./rpc-entry` bundle their dependencies, so only a rebuild moves them, never a Gateway
 `overrides` entry.
 
+Pi activates newly registered declarable extension tools on a resumed branch, and the
+Gateway reapplies the transcript's explicit loadout over them. When that narrows the
+loadout, the patched `setActiveToolsByName` keeps the pending names the same call requested
+(MCP tools whose servers are still connecting) and drops unrequested ones; addition-only
+updates keep every pending name. The public setter ignores unknown names and exposes no
+pending-name API, so this intent stays with the SDK's own pending-name owner.
+
 `pi-coding-agent-patch.json` owns it: upstream tag and commit, the published tarball's
 integrity, the backported proposal commit, patch SHA-256, bundled `pi-ai` model data,
 toolchain and the built tarball's SHA-512, under `third_party/pi-coding-agent/` with the MIT
