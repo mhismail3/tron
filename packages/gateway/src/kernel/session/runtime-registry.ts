@@ -67,7 +67,6 @@ import type { ModuleHost } from "../host/module-host.js";
 import { GatewayWorkRegistry } from "../run/gateway-work-registry.js";
 import { readCanonicalSessionFile } from "./canonical-reader.js";
 import { syncDurably } from "../../foundation/durable-json.js";
-import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 import {
   invocationProjection,
   invocationReceipts,
@@ -4152,7 +4151,7 @@ export class RuntimeRegistry implements SessionOperations {
       const handle = await open(durablePath, "r");
       try { await syncDurably(handle); } finally { await handle.close(); }
     }
-    const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES, appendStable });
+    const entries = await readCanonicalSessionFile({ path, sessionId, appendStable });
     const after = await lstat(path);
     const appended = appendStable && after.size >= before.size;
     if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || (!appended && (before.size !== after.size

@@ -60,7 +60,7 @@ it("returns the exact prefix of a session that the SDK appends to during an appe
   const read = (appendStable: boolean) => {
     changeDuringRead.path = path;
     changeDuringRead.change = async () => { manager.appendCustomEntry("tron-test-late-append", { appendStable }); };
-    return readCanonicalSessionFile({ path, sessionId, maxLineBytes: 1024 * 1024, appendStable });
+    return readCanonicalSessionFile({ path, sessionId, appendStable });
   };
   await expect(read(false), "an exact cut still refuses any change").rejects.toBeInstanceOf(EpisodicSourceChangedError);
   const prefix = before.concat(manager.getEntries().at(-1)!.id);
@@ -79,7 +79,7 @@ it("refuses an append-stable read when the bytes it read were rewritten in place
     await writeFile(path, bytes.replace("Settled", "Changed"));
     await appendFile(path, "\n");
   };
-  await expect(readCanonicalSessionFile({ path, sessionId, maxLineBytes: 1024 * 1024, appendStable: true }))
+  await expect(readCanonicalSessionFile({ path, sessionId, appendStable: true }))
     .rejects.toBeInstanceOf(EpisodicSourceChangedError);
 });
 
@@ -93,6 +93,6 @@ it("reports a malformed rewrite of already-read bytes as a changed source, not a
     await writeFile(path, bytes.replace(/"type":"message"/, '"type":"message"\u0000'));
     await appendFile(path, bytes.split("\n").at(-2)!.replace(/"id":"[^"]+"/, '"id":"late0000"') + "\n");
   };
-  await expect(readCanonicalSessionFile({ path, sessionId, maxLineBytes: 1024 * 1024, appendStable: true }))
+  await expect(readCanonicalSessionFile({ path, sessionId, appendStable: true }))
     .rejects.toBeInstanceOf(EpisodicSourceChangedError);
 });

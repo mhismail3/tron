@@ -196,7 +196,7 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
     const expected = this.message(record, run);
     let messageId: string | undefined, attributed = false;
     try {
-      await visitCanonicalSessionEntries({ path, sessionId: run.executionSessionId, maxLineBytes: 8 * 1024 * 1024, durable: true, visit: entry => {
+      await visitCanonicalSessionEntries({ path, sessionId: run.executionSessionId, durable: true, visit: entry => {
         const raw = entry.raw as Record<string, any>;
         if (entry.type === "custom_message" && raw.details?.eventId === expected.details.eventId) {
           if (messageId || raw.customType !== expected.customType || digest(raw.content) !== digest(expected.content)

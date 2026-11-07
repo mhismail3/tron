@@ -33,7 +33,7 @@ import type { HomeOwnerOptions } from "./home-owner.js";
 import type { HomeMemoryDiagnostic } from "./home-memory.js";
 import type { HomeRequestRecord } from "./home-request-policy.js";
 import type { NotificationService } from "../../notifications/notification-service.js";
-import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import type { EpisodicSummarizer } from "../../episodic/episodic-contract.js";
 import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
 import type { ModelRuntime } from "../../kernel/pi/coding-agent.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
@@ -156,7 +156,7 @@ function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCompositio
           }
           if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) return false;
           const cut = await readCanonicalSession({
-            path: expectedPath, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+            path: expectedPath, sessionId,
           });
           const hasConversation = cut.branch.some(entry => {
             if (entry.type !== "message") return false;
