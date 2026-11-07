@@ -2,10 +2,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, expect, it } from "vitest";
-import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
-import { startScriptedChild, type ChildModelServer } from "../../../test-support/home-task-subagent-child.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { ProcessTranscriptLeaseStore } from "../../transport/process-transcript-leases.js";
+import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
+import { startScriptedChild, type ChildModelServer } from "../../../../test-support/home-task-subagent-child.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { ProcessTranscriptLeaseStore } from "../../../transport/process-transcript-leases.js";
 
 const servers: ChildModelServer[] = [];
 afterEach(async () => {

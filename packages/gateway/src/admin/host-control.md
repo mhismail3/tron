@@ -29,7 +29,7 @@ development](../../../mac-app/docs/development.md).
   checked by each builder. The device keeps its own source/target binding; no
   persisted configuration is merged or rewritten. Rejections name the path and
   missing/linked marker, and Mac replacement preserves that diagnosis rather than
-  treating invalid configuration as absent. `source-repository.integration.test.ts`
+  treating invalid configuration as absent. `src/e2e/admin/source-repository.integration.test.ts`
   proves admission against the real checkout and filesystem plus the Gateway/Mac
   RPC error parity over a real socket.
 - Source mode imports `buildSourcePayload` from the configured checkout's

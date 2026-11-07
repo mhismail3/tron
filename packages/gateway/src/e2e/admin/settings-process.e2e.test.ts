@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../test-support/gateway-process.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * A settings change reaches the next operation at the real Gateway-process

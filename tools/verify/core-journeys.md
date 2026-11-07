@@ -37,7 +37,7 @@ canonical-message check; the Process/Native rows assert presence, not exactly-on
 | `packages/gateway/src/kernel/delegation/delegation.lock.integration.test.ts` › gateway/delegation kernel locks › subagent: a foreground subagent runs a real child… | Child (foreground) | "delegate the lock task" → non-error subagent result containing child answer; parent idle, no active child; 2 parent requests; child JSONL has task | Success only |
 | `packages/gateway/src/e2e/modules/home/home-task-subagents-settlement.e2e.test.ts` (11 cases, e.g. "stops a running async run when the task is stopped, and no turn starts after settlement") | Child | Home task launches real runs → task settles only after runs join; counts | Stop, error, 24 h deadline, bounded stop join → `unknown` |
 | `…/home-task-subagents-controls.e2e.test.ts`, `…/home-task-subagents-reports.e2e.test.ts` (26 cases) | Child | Waits/wakes, steer, supervisor reply, report refused while run live | Foreign-run control refused; restart finds live run → `detached-work-outlived-task` |
-| `packages/gateway/src/kernel/delegation/process-transcript-stop.integration.test.ts` › stops only the exact connection-owned child transcript… | Child | Stop targets exact child only | Other children untouched |
+| `packages/gateway/src/e2e/kernel/delegation/process-transcript-stop.integration.test.ts` › stops only the exact connection-owned child transcript… | Child | Stop targets exact child only | Other children untouched |
 
 `TronSubagentParityUITests` uses hosted fixture data: projection only, not this journey.
 **GAP #2231:** no socket or native test delegates and cancels from a client.

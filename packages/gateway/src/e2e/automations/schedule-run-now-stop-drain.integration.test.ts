@@ -2,10 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { GatewayLogger } from "../transport/logger.js";
-import { waitForStopDrain } from "../sessions/restart-drain.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { GatewayLogger } from "../../transport/logger.js";
+import { waitForStopDrain } from "../../sessions/restart-drain.js";
 
 // #2256: a Home `schedule runNow` result carries `details.runId` and `state: "queued"`.
 // Projected as delegated-run shaped activity, it stayed live work for the life of the

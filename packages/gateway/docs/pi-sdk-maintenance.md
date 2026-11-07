@@ -82,7 +82,7 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
 
 | Signal | One-step diagnosis / surviving oracle |
 | --- | --- |
-| `ENOTEMPTY` removing a fixture's `agent` directory, or SDK files reappearing after removal | Run `scripts/tron test gateway src/sessions/model-runtime-config-lifetime.integration.test.ts`. Its real filesystem gate distinguishes an older detached config read from the later awaited Gateway readiness, then checks actual registry disposal/root removal. Other downstream lock lifetimes still require their own writer trace. |
+| `ENOTEMPTY` removing a fixture's `agent` directory, or SDK files reappearing after removal | Run `scripts/tron test gateway src/e2e/sessions/model-runtime-config-lifetime.integration.test.ts`. Its real filesystem gate distinguishes an older detached config read from the later awaited Gateway readiness, then checks actual registry disposal/root removal. Other downstream lock lifetimes still require their own writer trace. |
 
 ## Tron-owned `pi-subagents` build
 

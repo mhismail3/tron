@@ -2,8 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { startLockGateway } from "../../test-support/gateway-lock-harness.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { startLockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 // Annotation-only means no typed body, not empty wire text: the composer sends
 // the quote/comment envelope unchanged through both prompt admission routes.

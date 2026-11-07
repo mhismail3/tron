@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../test-support/gateway-process.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * Core prompt journeys at the real Gateway-process boundary (#2142): a source

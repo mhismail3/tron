@@ -202,7 +202,7 @@ extension RealGatewayPairAndChatUITests {
         // (Discrete coordinate taps can land on the dimmed backdrop while the sheet
         // settles, which closes it undecided.) The app disables the card while the
         // first answer is in flight; the Gateway's once-only consumption is proven
-        // over the socket by admin/native-change-process.e2e.test.ts.
+        // over the socket by src/e2e/admin/native-change-process.e2e.test.ts.
         approve.doubleTap()
         XCTAssertTrue(waitUntil(timeout: 60) { budget() == 200 }, "the approved raise never reached the Home store")
         XCTAssertTrue(app.textViews.matching(NSPredicate(format: "label BEGINSWITH 'Settings card journey result:'")).element(boundBy: 1)

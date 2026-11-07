@@ -1,13 +1,13 @@
 import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { fixture, disposeFixtures } from "../../test-support/home-task-fixture.js";
-import { workspaceModule } from "../workspace/workspace-module.js";
+import { fixture, disposeFixtures } from "../../../test-support/home-task-fixture.js";
+import { workspaceModule } from "../../workspace/workspace-module.js";
 
-import { ProfileStore } from "../modules/home/profile-store.js";
-import { HomeProfileItems } from "../modules/home/home-profile.js";
-import type { SubjectWrite } from "../kernel/settings/settings-change.js";
-import * as durability from "../foundation/durable-json.js";
+import { ProfileStore } from "../../modules/home/profile-store.js";
+import { HomeProfileItems } from "../../modules/home/home-profile.js";
+import type { SubjectWrite } from "../../kernel/settings/settings-change.js";
+import * as durability from "../../foundation/durable-json.js";
 
 const evidence: unknown[] = [];
 let knowledge: ProfileStore | undefined;

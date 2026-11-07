@@ -1,8 +1,8 @@
 import { chmod, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { startGatewayProcess, type GatewayProcess } from "../../../test-support/gateway-process.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { startGatewayProcess, type GatewayProcess } from "../../../../test-support/gateway-process.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 /**
  * The managed pi-subagents closure's TypeScript is transformed once per build

@@ -2,11 +2,11 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { drainDurableWriteStats } from "../foundation/durable-json.js";
-import { GatewayUpdateService } from "./gateway-update-service.js";
-import { IosDeviceInstallService } from "./ios-device-install-service.js";
-import { MacReplaceService } from "./mac-replace-service.js";
-import { startLockGateway } from "../../test-support/gateway-lock-harness.js";
+import { drainDurableWriteStats } from "../../foundation/durable-json.js";
+import { GatewayUpdateService } from "../../admin/gateway-update-service.js";
+import { IosDeviceInstallService } from "../../admin/ios-device-install-service.js";
+import { MacReplaceService } from "../../admin/mac-replace-service.js";
+import { startLockGateway } from "../../../test-support/gateway-lock-harness.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -24,7 +24,7 @@ async function fixture() {
 
 it("Gateway and iPhone configuration admit the actual checkout without retired implementation markers", async () => {
   const { update, install } = await fixture();
-  const sourceRoot = await realpath(resolve(import.meta.dirname, "../../../.."));
+  const sourceRoot = await realpath(resolve(import.meta.dirname, "../../../../.."));
   expect((await update.configure({ sourceRoot })).sourceRoot).toBe(sourceRoot);
   expect((await install.configure({ deviceId, sourceRoot })).sourceRoot).toBe(sourceRoot);
   expect((await update.configStatus())?.sourceRoot).toBe(sourceRoot);
@@ -33,7 +33,7 @@ it("Gateway and iPhone configuration admit the actual checkout without retired i
 
 it("the Gateway update configuration is synchronized before configure returns, as compact owner-only JSON", async () => {
   const { tronHome, update } = await fixture();
-  const sourceRoot = await realpath(resolve(import.meta.dirname, "../../../.."));
+  const sourceRoot = await realpath(resolve(import.meta.dirname, "../../../../.."));
   drainDurableWriteStats();
   const config = await update.configure({ sourceRoot });
   expect(drainDurableWriteStats().count).toBe(2); // the document, then its directory entry

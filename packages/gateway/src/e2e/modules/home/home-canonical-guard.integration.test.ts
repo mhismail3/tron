@@ -1,14 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
-import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
-import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
+import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 // Calibrate the real canonical crossing, not a projected entry-count getter.
 const limits = vi.hoisted(() => ({ entries: 100 }));
-vi.mock("./home-chapter-state.js", async importOriginal => ({
-  ...await importOriginal<typeof import("./home-chapter-state.js")>(),
+vi.mock("../../../modules/home/home-chapter-state.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../../modules/home/home-chapter-state.js")>(),
   get HOME_HARD_ENTRIES() { return limits.entries; },
 }));
 

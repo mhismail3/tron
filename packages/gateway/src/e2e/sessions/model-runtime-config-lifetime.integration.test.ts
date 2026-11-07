@@ -1,7 +1,7 @@
 import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { afterEach, expect, it } from "vitest";
-import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
+import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
 
 // Gate the real filesystem continuation, not a fake ModelRuntime/store. The
 // Registry fixture registers its provider and then awaits offline readiness.

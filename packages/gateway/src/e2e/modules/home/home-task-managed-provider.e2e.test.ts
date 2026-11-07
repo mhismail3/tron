@@ -1,6 +1,6 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dispatch, disposeFixtures, fixture, reportCall } from "../../../test-support/home-task-fixture.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
 
 // The managed pi-subagents provider is loaded from a fresh install root per
 // fixture. Its first load transpiles the whole extension graph (jiti's cache is

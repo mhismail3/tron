@@ -1,16 +1,16 @@
 import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { crashProfilePartition } from "../../../test-support/profile-partition-crash.js";
-import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
-import { fixture, disposeFixtures } from "../../../test-support/home-task-fixture.js";
-import { workspaceModule } from "../../workspace/workspace-module.js";
-import { ProfileStore } from "./profile-store.js";
-import { HomeProfileItems } from "./home-profile.js";
-import { profileFileRecords, readProfileFile } from "./profile-file.js";
-import type { ProfileNoteRecord } from "./profile-note-contract.js";
-import * as durability from "../../foundation/durable-json.js";
-import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
+import { crashProfilePartition } from "../../../../test-support/profile-partition-crash.js";
+import { legacyProfileFixture } from "../../../../test-support/profile-v1-fixture.js";
+import { fixture, disposeFixtures } from "../../../../test-support/home-task-fixture.js";
+import { workspaceModule } from "../../../workspace/workspace-module.js";
+import { ProfileStore } from "../../../modules/home/profile-store.js";
+import { HomeProfileItems } from "../../../modules/home/home-profile.js";
+import { profileFileRecords, readProfileFile } from "../../../modules/home/profile-file.js";
+import type { ProfileNoteRecord } from "../../../modules/home/profile-note-contract.js";
+import * as durability from "../../../foundation/durable-json.js";
+import type { SettingsChangePath } from "../../../kernel/settings/settings-change.js";
 
 let knowledge: ProfileStore | undefined;
 afterEach(async () => { vi.restoreAllMocks(); knowledge = undefined; await disposeFixtures(); });

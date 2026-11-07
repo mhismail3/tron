@@ -1,13 +1,13 @@
-import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
+import { legacyProfileFixture } from "../../../../test-support/profile-v1-fixture.js";
 import * as fs from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
-import { crashProfilePartition } from "../../../test-support/profile-partition-crash.js";
-import { fixture, disposeFixtures } from "../../../test-support/home-task-fixture.js";
-import { workspaceModule } from "../../workspace/workspace-module.js";
+import { crashProfilePartition } from "../../../../test-support/profile-partition-crash.js";
+import { fixture, disposeFixtures } from "../../../../test-support/home-task-fixture.js";
+import { workspaceModule } from "../../../workspace/workspace-module.js";
 
-import { ProfileStore } from "./profile-store.js";
-import { HomeProfileItems } from "./home-profile.js";
-import type { ProfileNoteRecord } from "./profile-note-contract.js";
+import { ProfileStore } from "../../../modules/home/profile-store.js";
+import { HomeProfileItems } from "../../../modules/home/home-profile.js";
+import type { ProfileNoteRecord } from "../../../modules/home/profile-note-contract.js";
 
 type Note = Extract<ProfileNoteRecord, { kind: "note" }>;
 let knowledge: ProfileStore | undefined;

@@ -11,11 +11,11 @@ import {
   type CatalogMetadataIndexFailureStage,
   type CatalogMetadataIndexPressure,
   type CatalogMetadataIndexRow,
-} from "./catalog-metadata-index.js";
-import { realisticCatalogRow, realisticCatalogRows, sortedCatalogRows } from "../../test-support/catalog-metadata-fixture.js";
-import { catalogOwner, createColdRegistryFixture, settleCatalog, temporaryRoot } from "../../test-support/runtime-registry-fixture.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+} from "../../sessions/catalog-metadata-index.js";
+import { realisticCatalogRow, realisticCatalogRows, sortedCatalogRows } from "../../../test-support/catalog-metadata-fixture.js";
+import { catalogOwner, createColdRegistryFixture, settleCatalog, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 /**
  * `gateway/session-catalog` sharded catalog metadata store (#2164) over real
@@ -277,8 +277,8 @@ describe("catalog metadata store (#2164)", () => {
     const { root, gateway, base } = await storeFixture("sigkill");
     const count = 1_500;
     const cuts = [sortedCatalogRows(realisticCatalogRows(root, count, 1)), sortedCatalogRows(realisticCatalogRows(root, count, 2))];
-    const preload = pathToFileURL(fileURLToPath(new URL("../../test-support/home-ledger-crash-preload.mjs", import.meta.url))).href;
-    const program = fileURLToPath(new URL("../../test-support/catalog-metadata-crash-child.ts", import.meta.url));
+    const preload = pathToFileURL(fileURLToPath(new URL("../../../test-support/home-ledger-crash-preload.mjs", import.meta.url))).href;
+    const program = fileURLToPath(new URL("../../../test-support/catalog-metadata-crash-child.ts", import.meta.url));
     const outcomes = { whole: 0, none: 0 };
     for (let kill = 0; kill < 12; kill += 1) {
       const marker = join(base, `saving-${kill}`);
