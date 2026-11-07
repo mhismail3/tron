@@ -36,9 +36,10 @@ final class TronChatCatchUpUITests: XCTestCase {
             // Read back with the keyboard down: an interactive drag over the
             // keyboard would dismiss it. The keyboard then opens over the
             // reader's position, which keeps Catch up.
-            let scroll = app.scrollViews.containing(NSPredicate(format: "label CONTAINS %@", "Catch-up prompt")).firstMatch
-            let from = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
-            let to = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            // The transcript fills the window between the title bar and the composer.
+            let window = app.windows.firstMatch
+            let from = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+            let to = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
             let catchUp = app.buttons["Catch up"]
             for _ in 0..<6 { from.press(forDuration: 0.05, thenDragTo: to) }
             XCTAssertTrue(catchUp.waitForExistence(timeout: 10), "the reader left the newest end: \(app.debugDescription)")
