@@ -399,6 +399,9 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(metrics.scorecard.resumesPerTask).toMatchObject({ status: "partial", value: 1, denominator: 1, admittedResumes: 1 });
     for (const field of ["approvalToMain", "deployLag", "mainReds", "flakeRate"])
       expect(metrics.scorecard[field]).toMatchObject({ status: "unavailable", value: null });
+    // The record-only view names no other tool for the fields it cannot compute.
+    for (const field of ["deployLag", "mainReds", "flakeRate"])
+      expect(metrics.scorecard[field]).toMatchObject({ reason: "unavailable in this record-only view" });
     expect(JSON.stringify(metrics)).not.toContain("Finite work");
     expect(JSON.stringify(metrics)).not.toContain(f.cwd);
     expect(await Promise.all(files.map(file => readFile(join(taskDirectory, file), "utf8")))).toEqual(beforeMetrics);

@@ -43,7 +43,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
-HEALTH_ARTIFACTS = ROOT / "test-results" / "health-cli"
 COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", "tools/work/work.json",
           *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
@@ -113,13 +112,6 @@ class Repo:
         with (ARTIFACTS / "runs.txt").open("a") as log:
             log.write(f"$ scripts/tron verify {' '.join(args)}\nexit {result.returncode}\n{result.stdout}{result.stderr}\n")
         return result
-
-    def health(self, *args: str) -> dict:
-        result = subprocess.run([str(self.path / 'scripts/tron'), 'health', '--sha', 'HEAD', *args],
-                                cwd=self.path, env=self.env, capture_output=True, text=True)
-        if result.returncode:
-            raise AssertionError(result.stdout + result.stderr)
-        return json.loads(result.stdout)
 
     def report(self) -> dict:
         sha = self.git("rev-parse", "HEAD")
@@ -255,7 +247,6 @@ class ExternalVerificationTests(VerifyCase):
         incomplete = r.verify("--module", "repo/alpha")
         self.assertEqual(incomplete.returncode, 1, incomplete.stdout + incomplete.stderr)
         self.assertEqual(r.report()["verdict"], "incomplete")
-        self.assertEqual(r.health()['fields']['mainReds']['verifierOutcomes'], {'incomplete': 1})
         skipped = r.verify("--module", "repo/alpha", "--skip", "ios")
         self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
         self.assertEqual(r.report()["groups"]["ios-lanes"], ["packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift"])
@@ -353,134 +344,6 @@ class GatewayFailureTests(VerifyCase):
                 self.assertNotIn("expiredEntries", report)
                 if change != "missing-report":
                     self.assertTrue((r.path / "packages/gateway/test-results/executed").exists())
-                card = r.health()['fields']['mainReds']
-                self.assertEqual(card['verifierOutcomes'], {'failed': 1})
-                self.assertNotEqual(card['status'], 'available')
-
-    def test_health_reports_git_publication_cycle_and_missing_goal_evidence(self):
-        r = self.repo
-        remote = self.temp.name + '/origin.git'
-        subprocess.run(['git', 'init', '--bare', '-q', remote], env=r.env, check=True)
-        r.git('remote', 'add', 'origin', remote)
-        r.git('push', '-q', 'origin', 'HEAD:main')
-        r.write('mods/alpha/alpha.py', 'VALUE = 2\n')
-        r.commit('real change')
-        self.assertEqual(r.verify().returncode, 0)
-        report = r.report()
-        r.git('push', '-q', 'origin', 'HEAD:main')
-        card = r.health()
-        self.assertEqual(list(card['goals']), ['requestToMain', 'mainGreenRate', 'rework', 'escapedRegressions'])
-        self.assertEqual(card['goals']['requestToMain']['status'], 'unavailable')
-        self.assertEqual(card['goals']['mainGreenRate']['status'], 'unavailable')
-        row = card['landedChanges'][0]
-        self.assertEqual(row['commit'], r.git('rev-parse', 'HEAD'))
-        self.assertEqual(row['firstCommit'], row['commit'])
-        self.assertEqual(row['commitToPublication']['status'], 'partial')
-        self.assertGreaterEqual(row['commitToPublication']['seconds'], 0)
-        seconds = sum(s['seconds'] for s in report['steps'] if s['name'].startswith('tests:'))
-        self.assertAlmostEqual(row['testMinutes']['minutes'], seconds / 60)
-        self.assertEqual(row['testMinutes']['status'], 'partial')
-        self.assertIsNone(card['context']['conceptCount']['numerator'])
-        # Copies of one attempt do not count as rework or test time twice.
-        copy = r.path / 'test-results/copied.json'
-        copy.write_text(json.dumps(report))
-        duplicated = r.health('--verify-report', str(copy), '--verify-report', str(copy))
-        self.assertEqual(duplicated['landedChanges'][0]['testMinutes'], row['testMinutes'])
-        # A fetched tip has no observed publication timestamp in this clone.
-        r.git('reflog', 'expire', '--expire=all', 'refs/remotes/origin/main')
-        missing = r.health()
-        self.assertEqual(missing['landedChanges'][0]['commitToPublication']['status'], 'unavailable')
-        self.assertIsNone(missing['landedChanges'][0]['commitToPublication']['seconds'])
-        self.assertIsNone(missing['landedChanges'][0]['introducedCommits'])
-
-    def test_health_repeated_attempts_privacy_identity_and_owned_cleanup(self):
-        r = self.repo
-        self.fixture()
-        # Environmental producer input lives in the module's evidence directory: SHA/config stay identical.
-        runner = (r.path / 'tools/verify/gateway.py').read_text()
-        r.write('tools/verify/gateway.py', runner.replace("Path('report-input.json')", "Path('test-results/report-input.json')"))
-        r.write('packages/gateway/test-results/report-input.json', (r.path / 'packages/gateway/report-input.json').read_text())
-        (r.path / 'packages/gateway/report-input.json').unlink()
-        r.commit('external report producer inputs')
-        raw = json.loads((r.path / 'packages/gateway/test-results/report-input.json').read_text())
-        self.assertEqual(r.verify('--module', 'gateway/sample').returncode, 1)
-        first = r.report()
-        r.write('test-results/first.json', json.dumps(first))
-        raw['numPassedTests'], raw['numFailedTests'] = 2, 0
-        raw['testResults'][0]['status'] = 'passed'
-        raw['testResults'][0]['assertionResults'][0].update(status='passed', failureMessages=[])
-        r.write('packages/gateway/test-results/report-input.json', json.dumps(raw))
-        # Producer exit remains an observed harness failure, not a clean pass.
-        r.verify('--module', 'gateway/sample')
-        second = r.report()
-        self.assertEqual(first['commit'], second['commit'])
-        self.assertEqual(first['configDigest'], second['configDigest'])
-        r.write('test-results/second.json', json.dumps(second))
-        args = ('--verify-report', 'test-results/first.json', '--verify-report', 'test-results/second.json')
-        card = r.health(*args)
-        flake = card['fields']['flakeRate']
-        self.assertEqual((flake['numerator'], flake['denominator']), (1, 2))
-        self.assertEqual((flake['failingAttempts'], flake['totalAttempts']), (1, 4))
-        duplicate = r.health('--verify-report', 'test-results/first.json', '--verify-report', 'test-results/first.json')
-        self.assertIsNone(duplicate['fields']['flakeRate']['rate'])
-        r.write('test-results/identities.json', json.dumps({'sourceRevision': first['commit'], 'payloadFingerprint': 'a' * 64, 'protocolVersion': '1',
-            'query': 'PRIVATE_SENTINEL', 'prompt': 'PRIVATE_SENTINEL', 'credentials': 'PRIVATE_SENTINEL'}))
-        card = r.health(*args, '--mac-identity', 'test-results/identities.json')
-        self.assertEqual(card['fields']['deployLag']['status'], 'partial')
-        self.assertEqual(card['fields']['deployLag']['denominator'], 2)
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
-        rows = [
-            {'event': 'home.task.history-summary', 'taskHash': 'a' * 16,
-             'counts': {'lineages': 1, 'operations': 3, 'resumes': 2, 'complete': 1, 'rootCreatedAtMs': int(now.timestamp() * 1000)}},
-            {'event': 'home.task.history-summary', 'taskHash': 'b' * 16,
-             'counts': {'lineages': 1, 'operations': 2, 'resumes': 1, 'complete': 0, 'rootCreatedAtMs': int(now.timestamp() * 1000)}},
-            {'event': 'home.response-timing', 'counts': {'calls': 1, 'complete': 1, 'firstVisibleMs': 20, 'terminalMs': 50, 'queueMs': 5, 'modelMs': 20, 'toolMs': 10}},
-            *[{'event': 'capability.usage', 'step': 'read', 'outcome': status, 'stage': 'unknown', 'counts': {'calls': 1}} for status in ('ok', 'refused', 'error', 'unknown')],
-        ]
-        # Repeated history pages contain the same source-owned root summary.
-        rows.append(rows[0])
-        r.write('test-results/owner.json', json.dumps({'records': [{**row, 'timestamp': now.isoformat(), 'prompt': 'PRIVATE_SENTINEL', 'arguments': {'query': 'PRIVATE_SENTINEL'}} for row in rows]}))
-        card = r.health(*args, '--owner-summary', 'test-results/owner.json')
-        lineage = card['fields']['resumesPerTask']
-        self.assertEqual((lineage['numerator'], lineage['denominator'], lineage['status']), (2, 1, 'partial'))
-        self.assertEqual(lineage['observedLineages'], 2)
-        self.assertEqual(card['supplemental']['homeResponseTiming']['firstVisibleMs']['median'], 20)
-        self.assertEqual(len(card['supplemental']['capabilityUsage']), 4)
-        # A new failure signature at the same SHA/config is not merged into a
-        # flaky case. The unchanged repeatedly-passing case remains comparable.
-        raw['numPassedTests'], raw['numFailedTests'] = 1, 1
-        raw['testResults'][0]['assertionResults'][0].update(status='failed', failureMessages=['Error: different signature'])
-        r.write('packages/gateway/test-results/report-input.json', json.dumps(raw))
-        r.verify('--module', 'gateway/sample')
-        r.write('test-results/third.json', json.dumps(r.report()))
-        changed = r.health(*args, '--verify-report', 'test-results/third.json')['fields']['flakeRate']
-        self.assertEqual(changed['changedSignatureCases'], 1)
-        self.assertEqual((changed['numerator'], changed['denominator']), (0, 1))
-        self.assertEqual(changed['status'], 'partial')
-        directory = r.path / 'test-results/health'
-        old = {**card, 'runId': 'expired', 'expiresAt': '2000-01-01T00:00:00+00:00'}
-        r.write('test-results/health/aggregate-expired.json', json.dumps(old))
-        r.write('test-results/health/foreign.json', json.dumps(old))
-        r.write('test-results/health/aggregate-foreign.json', '{"schema":"foreign"}')
-        r.health('--cleanup')
-        self.assertFalse((directory / 'aggregate-expired.json').exists())
-        self.assertTrue((directory / 'foreign.json').exists())
-        self.assertTrue((directory / 'aggregate-foreign.json').exists())
-        for path in directory.glob('aggregate-*.json'):
-            text = path.read_text()
-            for forbidden in ('PRIVATE_SENTINEL', 'failureMessages', 'fullName', 'arguments', 'prompt', 'credentials', str(r.path), 'packages/gateway/src/'):
-                self.assertNotIn(forbidden, text)
-        r.write('test-results/malformed.json', json.dumps({'schema': 'tron.verify.v1', 'commit': first['commit'],
-            'steps': [{'caseOutcomes': [{'caseDigest': 42, 'status': 'failed'}]}], 'prompt': 'PRIVATE_SENTINEL'}))
-        malformed = subprocess.run([str(r.path / 'scripts/tron'), 'health', '--sha', 'HEAD',
-                                   '--verify-report', 'test-results/malformed.json'], cwd=r.path,
-                                  env=r.env, capture_output=True, text=True)
-        self.assertEqual(malformed.returncode, 1)
-        self.assertEqual(json.loads(malformed.stdout)['status'], 'unavailable')
-        self.assertNotIn('PRIVATE_SENTINEL', malformed.stdout + malformed.stderr)
-        HEALTH_ARTIFACTS.mkdir(parents=True, exist_ok=True)
-        (HEALTH_ARTIFACTS / 'health-sample.json').write_text(json.dumps(card, indent=2))
 
 
 class GatewayDependenciesTests(VerifyCase):

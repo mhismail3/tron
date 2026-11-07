@@ -12,7 +12,7 @@ tool. **Slice 2 is design only:** Home-owned self-check Automation and brief cha
 Nothing here creates an Automation, modifies live Profile/AGENTS, restarts or installs.
 It becomes available only after the maintainer's next rebuild.
 
-## Signal: one record projection, existing health joins
+## Signal: one record projection
 
 `home-task-metrics.ts` reads the existing `HomeTaskStore`; `HomeOwner.taskTool` admits
 `task {action:"metrics", from?, to?, taskId?, limit?}` under Home's existing identity
@@ -38,10 +38,9 @@ The TypeScript result type is exported as `HomeTaskMetrics`. The projection incl
 
 Five #2135 scorecard fields are present: approval→main, deploy lag, main reds,
 flake rate and resumes/task. The first four remain unavailable in this record-only
-view, with pointers to the existing `scripts/tron health` owner rather than a copied
-Git/verify/install classifier. Resumes/task exposes the mean and denominator of terminal
+view; it does not copy a Git/verify/install classifier. Resumes/task exposes the mean and denominator of terminal
 recorded root lineages, **partial** because canonical history completeness is not checked.
-It is not the complete-history aggregate consumed by health, nor resumes per landed slice.
+It is not a complete-history aggregate, nor resumes per landed slice.
 
 One store pass validates all records and resume links; the existing namespace epoch and
 write counter fence awaits. Any change refuses rather than merging snapshots. There is
@@ -66,7 +65,7 @@ attributed self-check objective at an agreed cadence/expiry. No cadence or defin
 is installed by this slice. A trigger cannot create/mutate other schedules, grant
 file/shell rights, renew task grants, approve changes or override pauses.
 
-On that wake, Home reads metrics and existing health evidence where available, then:
+On that wake, Home reads the task metrics, then:
 
 1. Reports the bounded window, denominators, missingness and top repeated cost.
 2. Opens only the relevant `task status`/`task report` and Profile revisions for context;

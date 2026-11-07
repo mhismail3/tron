@@ -94,7 +94,7 @@ else `(root)`.
 
 - **`M4.structure`** (from `scripts/tron ownership`, on the commit's objects): `modules`;
   `rootEntries`; `scriptsTopFiles`, files directly in `scripts/`. The
-  schema stays `tron-metrics/1`, whose `M3.size` `scripts/tron health` reads.
+  schema stays `tron-metrics/1`.
 
 ## Not measured here
 
