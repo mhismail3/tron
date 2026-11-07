@@ -17,6 +17,10 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   the one floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold
   (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
   presenter.
+- **Dashboard title.** `DashboardChrome` hides the navigation bar and draws the "Tron" title in
+  the top safe-area inset. In iPadOS windowed mode the title row drops by the window's top-leading
+  container corner inset (`containerCornerInsets`) so the system window controls never overlap it,
+  at rest or collapsed. Without window controls that inset is zero and the layout is unchanged.
 - **Automations sheet.** Medium and large detents; every identity-qualified, connected Gateway
   advertising `automations.v2` contributes rows (others are absent, never a warning). Active
   Automations list first, then paused, drafts and finished ones (attention, running, next
@@ -83,13 +87,18 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsListActiveBeforePaused \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
-  --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates
+  --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates \
+  --only-testing TronMobileUITests/TronDashboardWindowControlsUITests
 ```
 
 `TronAccessibilityUITests` drives the real dashboard destinations and checks that Knowledge is absent from the menu and Connected Services in Light/Dark/large type. The parent-update menu journey retains its Automations selection and thirty-update witness. The Automations fixture accepts no mutations.
 Explicit, non-gating: `TronAutomationsVisualUITests` captures list, detail, run detail and editor
 in light, dark and XXXL for design review; `TronAutomationsListPerformanceUITests` measures app
 CPU and memory while flinging through 400 Automations (`-automation-large`).
+`TronDashboardWindowControlsUITests` checks that the title sits below the status bar in a
+full-screen window (the canonical iPhone lane, full-screen iPad). On an iPad
+simulator in Windowed Apps mode it also resizes the window and checks the title clears the
+controls at rest and collapsed; no lane runs iPad, so run that destination by hand.
 
 ## Not here
 
