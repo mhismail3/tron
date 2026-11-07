@@ -358,11 +358,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // 80-point floor, under the composer and keyboard obstruction.
         for _ in 0..<4 { readerStart.press(forDuration: 0.1, thenDragTo: readerEnd) }
         let stagedGap = app.otherElements["chat.hosted.catch-up-staged-gap"]
-        XCTAssertEqual(stagedGap.value as? String, "none")
+        XCTAssertEqual(stagedGap.value as? String, "requested=none staged=none")
         app.buttons["Catch up"].tap()
         XCTAssertTrue(waitForHittable(sameRouteReply, timeout: 30))
         keepScreenshot(app, name: "330-simulator-catch-up-landed")
-        let gap = try XCTUnwrap(Int(stagedGap.value as? String ?? ""), "Catch up did not stage its reveal")
+        let readout = stagedGap.value as? String ?? ""
+        let gap = try XCTUnwrap(readout.components(separatedBy: "staged=").last.flatMap { Int($0) },
+                                "Catch up did not stage its reveal: \(readout)")
         XCTAssertGreaterThanOrEqual(gap, 80, "the staged catch-up frame lost its reveal gap to the bottom obstruction")
 
         // A real background and foreground, the transitions a phone performs.

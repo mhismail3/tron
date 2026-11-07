@@ -176,7 +176,10 @@ struct ChatView: View {
                     .accessibilityElement()
                     .accessibilityLabel("Hosted catch-up staged gap")
                     .accessibilityIdentifier("chat.hosted.catch-up-staged-gap")
-                    .accessibilityValue(scrollCoordinator.hostedStagedCatchUpGap.map { "\(Int($0.rounded()))" } ?? "none")
+                    .accessibilityValue([
+                        scrollCoordinator.hostedCatchUpRequestDistance.map { "requested=\(Int($0.rounded()))" } ?? "requested=none",
+                        scrollCoordinator.hostedStagedCatchUpGap.map { "staged=\(Int($0.rounded()))" } ?? "staged=none",
+                    ].joined(separator: " "))
             }
             .onChange(of: sessionPresentation.open.phase) { previous, current in
                 if previous == .ready, current != .ready { hostedReadyExits += 1 }
