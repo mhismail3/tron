@@ -88,7 +88,7 @@ only the selected server and credential retire, while the other scope and
 neighboring servers remain unchanged. This does not access or qualify the host
 Keychain parser; its quoting contract remains separately guarded. Sign-in relay outcomes and callback safety are
 covered by `src/admin/auth-broker.integration.test.ts`, and the local OAuth fixture in
-`src/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
+`src/e2e/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
 challenge, dynamic client registration, loopback callback relay, token
 persistence and refresh through the Gateway's `mcp.auth.start` operation. That
 fixture serves the resource-metadata URL named by `WWW-Authenticate` and not the

@@ -1525,9 +1525,9 @@ class BrowserForkProvisionTests(unittest.TestCase):
 
     def test_a_run_naming_the_browser_test_receives_it_and_other_selections_do_not(self):
         selections = {
-            ('src/sessions/browser-fork-receipts.integration.test.ts',): True,
-            ('src/sessions/browser-fork-receipts.integration.test.ts:48',): True,
-            (str(self.root / 'packages/gateway/src/sessions/browser-fork-receipts.integration.test.ts'),): True,
+            ('src/e2e/sessions/browser-fork-receipts.integration.test.ts',): True,
+            ('src/e2e/sessions/browser-fork-receipts.integration.test.ts:48',): True,
+            (str(self.root / 'packages/gateway/src/e2e/sessions/browser-fork-receipts.integration.test.ts'),): True,
             ('src/admin/package-updates.lock.integration.test.ts',): False,
             ('--testTimeout', '5000', 'src/admin/package-updates.lock.integration.test.ts'): False,
             ('--config', 'vitest.nested.config.ts'): False,

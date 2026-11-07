@@ -78,8 +78,8 @@ scripts/tron verify --module gateway/pi
 
 The seam is exercised by every lock: the Pi SDK behavior trace and persisted-state
 corpus, the `run-*` locks and `delegation-subagent`; `home-activation-wake` records the
-request pipeline's order. Kernel contract: `pi-theme.integration.test.ts` (a runtime
-extension finds Pi's global theme initialized).
+request pipeline's order. Kernel contract: the `src/e2e/kernel/pi/pi-theme.integration.test.ts` journey (a
+runtime extension finds Pi's global theme initialized), this module's declared verification.
 
 ## Not here
 

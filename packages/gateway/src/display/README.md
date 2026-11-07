@@ -131,16 +131,16 @@ Projection reads the persisted details live and after cold reload.
 
 | Signal | One-step diagnosis / boundary |
 | --- | --- |
-| Maintenance durable-write work | Run `scripts/tron test gateway src/display/display-image-lifetime.integration.test.ts -t 'durably removes unowned'`: the real fsync counter must record two retained metadata publications plus one deletion-directory sync, independent of the removed set's size. The same journey checks reader lifetime and cold-reopen authority. |
+| Maintenance durable-write work | Run `scripts/tron test gateway src/e2e/display/display-image-lifetime.integration.test.ts -t 'durably removes unowned'`: the real fsync counter must record two retained metadata publications plus one deletion-directory sync, independent of the removed set's size. The same journey checks reader lifetime and cold-reopen authority. |
 
 ## Verify
 
 ```bash
 scripts/tron test gateway src/display/runtime-retirement.lock.integration.test.ts \
   src/display/display.store.lock.integration.test.ts \
-  src/display/display-image-lifetime.integration.test.ts \
+  src/e2e/display/display-image-lifetime.integration.test.ts \
   src/transport/server-live-view.integration.test.ts \
-  src/kernel/projection/codemode-nested-presentation.integration.test.ts
+  src/e2e/kernel/projection/codemode-nested-presentation.integration.test.ts
 ```
 
 Canonical-branch cases: `runtime-registry.integration.test.ts`.

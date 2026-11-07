@@ -114,7 +114,7 @@ state before retry.
 ## Verify
 
 ```bash
-scripts/tron test gateway src/modules/projects/project-lifecycle.e2e.test.ts
+scripts/tron test gateway src/e2e/modules/projects/project-lifecycle.e2e.test.ts
 ```
 
 The real Gateway/Registry/Pi/faux-model journey retains a regenerable transcript in

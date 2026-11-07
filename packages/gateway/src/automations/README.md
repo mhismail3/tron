@@ -137,7 +137,7 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
 
 ```bash
 scripts/tron verify --module gateway/automations
-scripts/tron test gateway src/automations/automation-scheduler.integration.test.ts src/automations/automation-home.e2e.test.ts
+scripts/tron test gateway src/e2e/automations/automation-scheduler.integration.test.ts src/e2e/automations/automation-home.e2e.test.ts
 ```
 
 `automation-scheduler.integration.test.ts` uses the real executor, SDK and canonical

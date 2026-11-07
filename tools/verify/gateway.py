@@ -30,7 +30,7 @@ def hold_full_gateway_lock():
 # commit once per clone and the engine version it declares once per version, so every run
 # that selects the test (a batch's Gateway lane included) covers it instead of skipping it.
 BROWSER_FORK_COPY = 'TRON_P99_17_BROWSER_FORK_COPY'
-BROWSER_FORK_TEST = 'src/sessions/browser-fork-receipts.integration.test.ts'
+BROWSER_FORK_TEST = 'src/e2e/sessions/browser-fork-receipts.integration.test.ts'
 BROWSER_FORK_REPOSITORY = 'https://github.com/fitchmultz/pi-agent-browser-native.git'
 # Vitest options whose value is the next word, so that word is not a file filter.
 VALUE_OPTIONS = {'--config', '-c', '--project', '--reporter', '--outputFile', '-t', '--testNamePattern', '--root', '-r', '--dir', '--shard',

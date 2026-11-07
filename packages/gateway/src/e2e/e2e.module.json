@@ -1,0 +1,7 @@
+{
+  "layer": "L5",
+  "purpose": "Gateway system journeys: tests that boot the real RuntimeRegistry; batch and checkpoint signals, not a per-commit gate",
+  "owns": [
+    "**"
+  ]
+}

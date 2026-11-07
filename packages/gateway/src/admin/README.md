@@ -153,10 +153,10 @@ are installed; schema access never evaluates their late-bound service getter.
 
 ```bash
 scripts/tron verify --module gateway/admin
-scripts/tron test gateway src/admin/settings-model.integration.test.ts \
-  src/admin/settings-change.integration.test.ts src/admin/settings-gate.e2e.test.ts
+scripts/tron test gateway src/e2e/admin/settings-model.integration.test.ts \
+  src/e2e/admin/settings-change.integration.test.ts src/e2e/admin/settings-gate.e2e.test.ts
 scripts/tron docs check
-scripts/tron test gateway src/admin/settings-change.integration.test.ts -t 'reconciles missed global MCP drift'
+scripts/tron test gateway src/e2e/admin/settings-change.integration.test.ts -t 'reconciles missed global MCP drift'
 ```
 
 Behavior locks: `admin.lock.integration.test.ts` and

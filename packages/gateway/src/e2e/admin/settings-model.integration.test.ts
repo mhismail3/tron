@@ -1,0 +1,724 @@
+import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
+import { displayOwnerOf, createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { fauxProvider, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { ModelQueueOwner } from "../../providers/model-queue.js";
+import { ProviderUsageOwner } from "../../providers/provider-usage.js";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { createSettingsManager } from "../../kernel/settings/settings-sdk-manager.js";
+import { SettingsStoreAdapter } from "../../admin/settings-model.js";
+import { SettingsChangePath } from "../../kernel/settings/settings-change.js";
+import { SettingsModel } from "../../kernel/settings/settings-model.js";
+import { SettingsChangeRecord, type ChangeEntry } from "../../kernel/settings/settings-record.js";
+import { maintainerChange as maintainerRpc } from "../../../test-support/native-change.js";
+const { KEYS } = TEST_SETTINGS_SCHEMA;
+import type { Resolution, ResolvedKey, SettingsTarget } from "../../kernel/settings/tool-contract.js";
+import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "../../admin/settings-presentation.js";
+import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "../../kernel/settings/settings-types.js";
+import { ScopeToolCatalog } from "../../admin/tool-catalog.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+
+/**
+ * settings.resolve at its real boundaries (docs/settings-model.md F1, F4):
+ * the Gateway RPC over real stores, a real RuntimeRegistry chat, pi's own
+ * SettingsManager as the oracle and a real git linked worktree. The resolved
+ * report, including fallback after the store values are removed, is retained.
+ */
+const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-resolve.json");
+const RENDERER_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-renderer.integration.json");
+const roots: string[] = [];
+const registries: RuntimeRegistry[] = [];
+afterEach(async () => {
+  await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
+
+function subscribed(sessionIds: string[] = []): ClientContext {
+  return { id: "settings-client", identity: "device:settings-client", isLocal: false, isSubscribed: (id: string) => sessionIds.includes(id), isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
+}
+
+function row(resolution: Resolution, key: string, qualifiers?: Record<string, string>): ResolvedKey {
+  const found = resolution.keys.find(candidate => candidate.key === key
+    && (!qualifiers || Object.entries(qualifiers).every(([name, value]) => candidate.qualifiers?.[name as "model"] === value)));
+  if (!found) throw new Error(`${key} was not resolved`);
+  return found;
+}
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "tron-settings-model-"));
+  roots.push(root);
+  const tronHome = join(root, "tron");
+  const agentDir = join(tronHome, "agent");
+  const sessionDir = join(root, "sessions");
+  const project = join(root, "project");
+  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(join(project, ".pi"), { recursive: true })]);
+  const faux = fauxProvider({
+    provider: "tron-settings-model", tokensPerSecond: 10_000,
+    models: [{ id: "reasoner", name: "Reasoner Pro", reasoning: true, contextWindow: 200_000 }, { id: "plain", reasoning: false }],
+  });
+  // A real virtual API entry makes queue catalog/admission exclusions observable.
+  const virtual = fauxProvider({ provider: "tron", api: "pi-virtual", models: [{ id: "subagent" }] });
+  const model = faux.getModel();
+  const modelKey = `${model.provider}/${model.id}`;
+  const runtimeFactory = async () => {
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    runtime.registerNativeProvider(virtual.provider);
+    return runtime;
+  };
+  const modelRuntime = await runtimeFactory();
+  // Global scope.
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+    sessionDir,
+    defaultProvider: model.provider,
+    defaultModel: model.id,
+    defaultThinkingLevel: "high",
+    steeringMode: "all",
+    retry: { maxRetries: 5 },
+    defaultTools: ["read", "bash"],
+    compaction: { reserveTokens: 20_000 },
+    httpProxy: "http://proxy.invalid:8080",
+  }));
+  // Project layer, including a key the Project layer may not set.
+  await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({
+    retry: { maxRetries: 7 },
+    transport: "sse",
+    defaultTools: ["+write"],
+    defaultProjectTrust: "always",
+    compaction: { modelOverrides: { [modelKey]: { reserveTokens: 30_000 } } },
+  }));
+  const trust = new TrustService(agentDir);
+  const scopeTools = new ScopeToolCatalog(agentDir, trust);
+  const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
+    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+  });
+  registries.push(registry);
+  await registry.initialize();
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
+    agentDir, tronHome, trust, modelRuntime,
+    // Production wiring (gateway-main): a chat's live registry, else the scope's.
+    toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
+      : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
+  }));
+  const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), {
+    setTrust: async (project, decision) => trust.setAndApply(project, decision,
+      async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
+      async inspection => { await registry.commitProjectReload(inspection.projectDir); },
+      async inspection => { await registry.abortProjectReload(inspection.projectDir); }),
+  });
+  const service = new GatewayService({ display: displayOwnerOf(registry),
+    config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
+    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
+    broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+  } as unknown as GatewayServiceDependencies);
+  return { root, tronHome, agentDir, project, trust, registry, service, settingsModel, settingsChanges, modelRuntime, model, modelKey, faux };
+}
+
+/** What pi's own SettingsManager resolves for each key it owns: the oracle. */
+function piEffective(manager: SettingsManager, model: { provider: string; id: string }): Record<string, unknown> {
+  return {
+    "model.thinking[role=chat]": manager.getModelThinkingLevel(model.provider, model.id) ?? manager.getDefaultThinkingLevel(),
+    "run.retry.maxRetries": manager.getRetrySettings().maxRetries,
+    "run.retry.enabled": manager.getRetrySettings().enabled,
+    "run.retry.baseDelayMs": manager.getRetrySettings().baseDelayMs,
+    "run.retry.provider.maxRetryDelayMs": manager.getProviderRetrySettings().maxRetryDelayMs,
+    "run.transport": manager.getTransport(),
+    "run.queue.steeringMode": manager.getSteeringMode(),
+    "run.queue.followUpMode": manager.getFollowUpMode(),
+    "run.httpIdleTimeoutMs": manager.getHttpIdleTimeoutMs(),
+    "run.cacheWarming": manager.getCacheWarmingMode(),
+    "tools.active": manager.getDefaultTools(),
+    "context.compaction.enabled": manager.getCompactionSettings(model as never).enabled,
+    "context.compaction.reserveTokens": manager.getCompactionSettings(model as never).reserveTokens,
+    "context.compaction.keepRecentTokens": manager.getCompactionSettings(model as never).keepRecentTokens,
+    "context.branchSummary.reserveTokens": manager.getBranchSummarySettings().reserveTokens,
+    "context.images.autoResize": manager.getImageAutoResize(),
+    "context.images.block": manager.getBlockImages(),
+    "permissions.defaultProjectTrust": manager.getDefaultProjectTrust(),
+    "setup.installTelemetry": manager.getEnableInstallTelemetry(),
+  };
+}
+
+describe("settings.resolve", () => {
+  it("keeps agent-directory-only SDK settings independent of a trusted repository", async () => {
+    // Exercise the SDK's real file boundary rather than checking reference text
+    // or comparing declaration tables to each other.
+    const root = await mkdtemp(join(tmpdir(), "tron-settings-agent-dir-only-"));
+    try {
+      const agentDir = join(root, "agent");
+      const project = join(root, "project");
+      await mkdir(agentDir, { recursive: true });
+      await mkdir(join(project, ".pi"), { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ cacheWarming: "off", defaultProjectTrust: "never", httpProxy: "http://mac.invalid" }));
+      await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ cacheWarming: "idle", defaultProjectTrust: "always", httpProxy: "http://project.invalid" }));
+      const pi = SettingsManager.create(project, agentDir, { projectTrusted: true });
+      expect([pi.getCacheWarmingMode(), pi.getDefaultProjectTrust(), pi.getGlobalSettings().httpProxy]).toEqual(["off", "never", "http://mac.invalid"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it("changes bounded Home profile fields through the canonical change path and reads them from profile.json", async () => {
+    const f = await fixture();
+    const target = { kind: "home" };
+    const response = await f.service.invoke(subscribed(), "settings.change", {
+      commandId: "home-profile-worker-thinking", target,
+      changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "high" }],
+    }) as { status: string };
+    expect(response.status).toBe("applied");
+    const profile = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"));
+    expect(profile).toEqual({ thinking: { worker: "high" } });
+    const resolution = await f.service.invoke(subscribed(), "settings.resolve", { target }) as Resolution;
+    expect(row(resolution, "model.thinking[role=worker]")).toMatchObject({ value: "high", layer: "session" });
+
+    await expect(f.service.invoke(subscribed(), "settings.change", {
+      commandId: "home-profile-invalid-thinking", target,
+      changes: [{ key: "model.thinking[role=worker]", layer: "session", op: "set", value: "unbounded" }],
+    })).rejects.toThrow();
+    expect(JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"))).toEqual(profile);
+
+    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "unbounded" } }));
+    await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile value for model.thinking[role=worker] is invalid");
+    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ oversized: "x".repeat(256 * 1024) }));
+    await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile exceeds its 262144-byte limit");
+  });
+  it("resolves three scopes for every target, shows an untrusted project as not applied, and matches pi and a live chat", async () => {
+    const { service, project, registry, model, modelKey, tronHome, agentDir, trust } = await fixture();
+    const client = subscribed();
+    const resolve = (target: Record<string, unknown>, c = client) => service.invoke(c, "settings.resolve", { target }) as Promise<Resolution>;
+
+    const projectFile = join(await trust.canonicalDirectory(project), ".pi", "settings.json");
+    // Untrusted: the project's values are present but not applied (doc 3.5).
+    const untrusted = await resolve({ kind: "project", cwd: project });
+    const retries = row(untrusted, "run.retry.maxRetries");
+    expect(retries).toMatchObject({ value: 5, layer: "global", applied: false, reason: "untrusted", display: "5 retries" });
+    expect(retries.layers.find(layer => layer.layer === "project")).toMatchObject({ value: 7, applied: false, reason: "untrusted" });
+    expect(retries.badges).toContainEqual(expect.objectContaining({ kind: "state", label: "Not applied (untrusted)" }));
+    // Untrusted equals what pi itself applies without trust.
+    const piUntrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: false }), model);
+    for (const [key, expected] of Object.entries(piUntrusted)) expect(row(untrusted, key).value, key).toEqual(expected);
+    // A Project value for a Global-only key is a diagnostic, never applied.
+    expect(untrusted.diagnostics).toContainEqual({ key: "permissions.defaultProjectTrust", layer: "project", reason: "project-forbidden", path: "defaultProjectTrust", file: projectFile });
+    expect(row(untrusted, "permissions.defaultProjectTrust").value).toBe("ask");
+    // Redacted: shown as set, never the value.
+    expect(row(untrusted, "run.httpProxy")).toMatchObject({ display: "Set", layer: "global" });
+    expect(JSON.stringify(untrusted)).not.toContain("proxy.invalid");
+
+    // Trusting flips the project's values to applied with no other change.
+    await trust.set(project, true);
+    const trusted = await resolve({ kind: "project", cwd: project });
+    expect(row(trusted, "run.retry.maxRetries")).toMatchObject({ value: 7, layer: "project", applied: true, display: "7 retries" });
+    const strip = (resolution: Resolution) => resolution.keys.filter(key => key.key !== "permissions.projectTrust").map(key => ({
+      key: key.key, qualifiers: key.qualifiers,
+      layers: key.layers.map(({ applied: _applied, reason: _reason, ...rest }) => rest),
+    }));
+    expect(strip(trusted)).toEqual(strip(untrusted));
+    expect(row(trusted, "permissions.projectTrust")).toMatchObject({ value: true, display: "Trusted", qualifiers: { project: trusted.keys.find(k => k.key === "permissions.projectTrust")!.qualifiers!.project } });
+
+    // Keep raw SDK parity for every other key. Tools cross the production
+    // admission boundary: the repository cannot widen the executable ceiling.
+    const piTrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: true }), model);
+    const admittedTools = (await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, true)).getDefaultTools();
+    piTrusted["tools.active"] = admittedTools;
+    for (const [key, expected] of Object.entries(piTrusted)) {
+      const qualifiers = key.startsWith("context.compaction.") && key !== "context.compaction.enabled" ? { model: modelKey } : undefined;
+      expect(row(trusted, key, qualifiers).value, key).toEqual(expected);
+    }
+    expect(admittedTools).toEqual(["read", "bash"]);
+    expect(row(trusted, "tools.active").value).toEqual(admittedTools);
+    expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey })).toMatchObject({ value: 30_000, layer: "project" });
+    // Project metadata points to the exact repository field, including the
+    // qualified model; retired source badges are not another authority.
+    expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey })).toMatchObject({
+      layer: "project", projectSetting: { file: projectFile, path: `compaction.modelOverrides["${modelKey}"].reserveTokens` },
+    });
+
+    // Global includes SDK defaults without exposing a separate built-in scope.
+    const mac = await resolve({ kind: "global" });
+    expect(mac.layers).toEqual(["global"]);
+    expect(row(mac, "run.retry.maxRetries")).toMatchObject({ value: 5, layer: "global" });
+    expect(row(mac, "run.retry.baseDelayMs")).toMatchObject({ value: 2_000, layer: "global" });
+    expect(row(mac, "run.retry.maxRetries").layer).toBe("global");
+    expect(row(mac, "run.retry.baseDelayMs").layer).toBe("global");
+
+    // Session target: a live chat in the project. Its Session scope is what the
+    // runtime actually uses, and a fresh runtime used the resolver's values.
+    const slot = await registry.create(project);
+    const session = await resolve({ kind: "session", sessionId: slot.id }, subscribed([slot.id]));
+    expect(session.layers).toEqual(["project", "session", "global"]);
+    const context = await slot.context() as { activeTools: string[] };
+    const snapshot = slot.snapshot();
+    expect(row(session, "model.ref[role=chat]")).toMatchObject({ value: { provider: model.provider, id: model.id }, layer: "session" });
+    expect(row(session, "model.ref[role=chat]").layer).toBe("session");
+    expect(snapshot.model).toEqual(row(trusted, "model.ref[role=chat]").value);
+    expect(row(session, "model.thinking[role=chat]", { model: modelKey }).value).toBe(snapshot.thinkingLevel);
+    expect(snapshot.thinkingLevel).toBe(row(trusted, "model.thinking[role=chat]").value);
+    expect([...row(session, "tools.active").value as string[]].sort()).toEqual([...context.activeTools].sort());
+    for (const tool of row(trusted, "tools.active").value as string[]) expect(context.activeTools).toContain(tool);
+    // A Run key with no Session value follows the project for this chat.
+    expect(row(session, "run.retry.maxRetries")).toMatchObject({ value: 7, layer: "project" });
+    // Home-only profile keys never appear on an ordinary chat (doc 3.3).
+    expect(session.keys.some(key => key.key === "model.thinking[role=worker]")).toBe(false);
+
+    // Home has Session/Global scopes and no Project; empty worker choice means Same as Home.
+    await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
+    await writeFile(join(tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
+    const home = await resolve({ kind: "home" });
+    expect(home.layers).toEqual(["session", "global"]);
+    expect(row(home, "model.queue[role=worker]")).toMatchObject({ value: [], layer: "global", display: "Same as Home" });
+    expect(row(home, "model.queue[role=background]")).toMatchObject({ value: [], layer: "global", display: "Subagent queue" });
+    expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "session", overridden: true });
+
+    // Removing stored values must reveal the SDK defaults at the real read
+    // boundary, not merely make two declaration tables agree.
+    await writeFile(join(agentDir, "settings.json"), "{}");
+    const defaults = await resolve({ kind: "global" });
+    const piDefaults = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: false }), model);
+    for (const [key, expected] of Object.entries(piDefaults)) {
+      if (expected !== undefined) expect(row(defaults, key), key).toMatchObject({ value: expected, layer: "global" });
+    }
+    await mkdir(dirname(ARTIFACT), { recursive: true });
+    await writeFile(ARTIFACT, `${JSON.stringify({ untrusted, trusted, mac, session, home, defaults }, null, 2)}\n`);
+  });
+
+  it("clamps a thinking level the resolved model does not support, with a Clamped badge", async () => {
+    const { service, agentDir } = await fixture();
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const plain = runtime.getModels().find(candidate => !candidate.reasoning);
+    if (!plain) throw new Error("the pinned catalog has no non-reasoning model");
+    const document = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ ...document, defaultProvider: plain.provider, defaultModel: plain.id }));
+    const mac = await service.invoke(subscribed(), "settings.resolve", { target: { kind: "global" } }) as Resolution;
+    const thinking = row(mac, "model.thinking[role=chat]");
+    expect(thinking.value).toBe("off");
+    expect(thinking.badges).toContainEqual(expect.objectContaining({ kind: "state", label: "Clamped" }));
+  });
+
+  it("resolves a linked worktree's own .pi, not the main checkout's", async () => {
+    const { root, service, trust } = await fixture();
+    const main = join(root, "repo");
+    const linked = join(root, "repo-linked");
+    await mkdir(join(main, ".pi"), { recursive: true });
+    const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
+    git(main, "init", "-q", "-b", "main");
+    await writeFile(join(main, ".pi", "settings.json"), JSON.stringify({ retry: { maxRetries: 9 } }));
+    git(main, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", ".");
+    git(main, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init");
+    git(main, "worktree", "add", "-q", "-b", "linked", linked);
+    await writeFile(join(linked, ".pi", "settings.json"), JSON.stringify({ retry: { maxRetries: 2 } }));
+    await trust.set(main, true);
+    await trust.set(linked, true);
+    const resolveFor = async (cwd: string) => row(await service.invoke(subscribed(), "settings.resolve", { target: { kind: "project", cwd } }) as Resolution, "run.retry.maxRetries");
+    expect(await resolveFor(linked)).toMatchObject({ value: 2, layer: "project" });
+    expect(await resolveFor(main)).toMatchObject({ value: 9, layer: "project" });
+  });
+});
+
+describe("settings renderer contract", () => {
+  const transcript: Array<{ case: string; response: unknown }> = [];
+
+  it("offers canonical queue editors at Global and Home, preserving ordered saves, empty overrides and inheritance", async () => {
+    const f = await fixture();
+    const evidence: unknown[] = [];
+    const chatModels = await f.service.invoke(subscribed(), "settings.options", {
+      target: { kind: "global" }, key: "model.ref[role=chat]", query: "tron", limit: 200,
+    }) as unknown as { options: Array<{ value: { provider: string; id: string } }> };
+    expect(chatModels.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(true);
+    f.registry.setSettings(f.settingsModel, f.settingsChanges);
+    const queue = new ModelQueueOwner({ runtime: f.modelRuntime, usage: new ProviderUsageOwner(),
+      queue: role => f.registry.modelQueueOf(role, "home") });
+    f.faux.setResponses(Array.from({ length: 3 }, () => async (_context, _options, _state, model) =>
+      fauxAssistantMessage(`Queue editor provider request: ${model.id}`)));
+    for (const role of ["worker", "subagent", "background"] as const) {
+      const key = `model.queue[role=${role}]`;
+      const resolve = async (target: { kind: "global" | "home" }) => await f.service.invoke(subscribed(), "settings.resolve", {
+        target, keys: [key], renderer: { version: 1, controls: [...CONTROLS] },
+      }) as unknown as PresentedResolution;
+      for (const kind of ["global", "home"] as const) {
+        const initial = await resolve({ kind });
+        expect(initial.keys.find(candidate => candidate.key === key), `${kind} ${role} editor`).toMatchObject({
+          presentation: { control: "list", editable: true, valueKind: "stringList", optionsSource: { name: "catalog.models" } },
+        });
+        await expect(f.service.invoke(subscribed(), "settings.change", {
+          commandId: `queue-virtual-${role}-${kind}`, target: { kind },
+          changes: [{ key, layer: kind === "home" ? "session" : "global", op: "set", value: ["tron/subagent"] }],
+        })).rejects.toMatchObject({ code: "invalid_request" });
+        expect(row(await resolve({ kind }), key).value).toEqual([]);
+      }
+      const options = await f.service.invoke(subscribed(), "settings.options", { target: { kind: "global" }, key, query: "tron" }) as unknown as {
+        options: Array<{ value: { provider: string; id: string }; disabledReason?: string }>;
+      };
+      const available = options.options.filter(option => option.value.provider === f.model.provider && !option.disabledReason);
+      expect(available).toHaveLength(2);
+      expect(options.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(false);
+      const values = available.map(option => `${option.value.provider}/${option.value.id}`);
+      const change = async (kind: "global" | "home", op: "set" | "unset", value?: string[]) => {
+        const result = await f.service.invoke(subscribed(), "settings.change", { commandId: `queue-editor-${role}-${kind}-${op}-${evidence.length}`,
+          target: { kind }, changes: [{ key, layer: kind === "home" ? "session" : "global", op, ...(value ? { value } : {}) }],
+        });
+        evidence.push(result);
+      };
+      await change("global", "set", values);
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual(values);
+      await change("home", "set", [...values].reverse());
+      expect(await f.registry.modelQueueOf(role, "home")).toEqual([...values].reverse());
+      const completion = await queue.complete(role, () => ({ context: {
+        messages: [{ role: "user", content: "Verify saved queue routing", timestamp: Date.now() }],
+      } }));
+      expect(`${completion.model.provider}/${completion.model.id}`).toBe(values[1]);
+      expect(completion.message.content).toContainEqual({ type: "text", text: `Queue editor provider request: ${completion.model.id}` });
+      evidence.push({ role, effectiveModel: completion.model.id, message: completion.message });
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual([...values].reverse());
+      expect(row(await resolve({ kind: "global" }), key).value).toEqual(values);
+      await change("home", "set", [values[1]!]);
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual([values[1]!]);
+      await change("home", "set", []);
+      expect(row(await resolve({ kind: "home" }), key)).toMatchObject({ value: [], overridden: true });
+      await change("home", "unset");
+      expect(row(await resolve({ kind: "home" }), key).value).toEqual(values);
+      const file = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"));
+      expect(file.modelQueue?.[role]).toBeUndefined();
+      evidence.push(await resolve({ kind: "home" }));
+    }
+    transcript.push({ case: "queue editor ordered save and inheritance", response: evidence });
+  });
+
+  it("summarizes queues and tools without losing ordered values or full change-history detail", async () => {
+    const f = await fixture();
+    const target = { kind: "global" } as const;
+    const queue = "model.queue[role=worker]";
+    const first = `${f.model.provider}/plain`;
+    const second = f.modelKey;
+    const resolve = async () => await f.service.invoke(subscribed(), "settings.resolve", {
+      target, keys: [queue, "tools.active"], renderer: { version: 1, controls: [...CONTROLS] },
+    }) as unknown as PresentedResolution;
+    const initial = await resolve();
+    expect(row(initial, queue)).toMatchObject({ value: [], display: "Same as Home", presentation: { control: "list" } });
+    expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
+    const change = async (id: string, key: string, value: unknown) => await maintainerRpc(f.service, subscribed(), "settings.change", {
+      commandId: id, target, changes: [{ key, layer: "global", op: "set", value }],
+    });
+    await change("queue-two", queue, [first, second]);
+    const configured = await resolve();
+    expect(row(configured, queue)).toMatchObject({ display: "2 models", value: [first, second], group: "workers" });
+    const history = await f.service.invoke(subscribed(), "settings.history", { key: queue }) as unknown as { entries: ChangeEntry[] };
+    expect(history.entries[0]).toMatchObject({ after: [first, second],
+      presentation: { section: "workers", display: { after: `${first} → ${second}` } } });
+    await change("queue-one", queue, [second]);
+    await change("tools-one", "tools.active", ["read"]);
+    const singular = await resolve();
+    expect(row(singular, queue)).toMatchObject({ display: "1 model", value: [second] });
+    expect(row(singular, "tools.active")).toMatchObject({ display: "1 tool", value: ["read"] });
+    await f.service.invoke(subscribed(), "settings.change", {
+      commandId: "queue-unset", target, changes: [{ key: queue, layer: "global", op: "unset" }],
+    });
+    expect(row(await resolve(), queue)).toMatchObject({ value: [], overridden: false, display: "Same as Home" });
+    transcript.push({ case: "count summaries preserve full values", response: { initial, configured, singular, history } });
+  });
+  afterAll(async () => {
+    await mkdir(dirname(RENDERER_ARTIFACT), { recursive: true });
+    await writeFile(RENDERER_ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
+  });
+
+  let command = 0;
+  const commandId = () => `settings-renderer-${String(++command).padStart(4, "0")}`;
+  const macTarget: SettingsTarget = { kind: "global" };
+  type Fixture = Awaited<ReturnType<typeof fixture>>;
+  type Options = { key: string; source: string; dependsOn: string[]; options: Array<{ value: unknown; label: string; detail?: string; disabledReason?: string; resource?: Record<string, unknown> }>; range?: unknown; nextCursor?: string };
+
+  /** The presented resolution for a target, with the renderer the client names (if any). */
+  const resolveWith = (f: Fixture, target: Record<string, unknown>, renderer?: Record<string, unknown>) =>
+    f.service.invoke(subscribed(), "settings.resolve", { target, ...(renderer ? { renderer } : {}) }) as unknown as Promise<PresentedResolution>;
+  const presentedRow = (resolution: PresentedResolution, key: string, qualifiers?: Record<string, string>): PresentedKey =>
+    row(resolution, key, qualifiers) as PresentedKey;
+  const section = (resolution: PresentedResolution, id: string) => {
+    const found = resolution.sections.find(candidate => candidate.id === id);
+    if (!found) throw new Error(`section ${id} was not presented`);
+    return found;
+  };
+  /** A maintainer's change through the RPC: the iPhone's own tap, as the Mac target. */
+  const maintainerChange = (f: Fixture, changes: unknown[], dryRun = false) =>
+    maintainerRpc(f.service, subscribed(), "settings.change", { commandId: commandId(), target: macTarget, changes, ...(dryRun ? { dryRun: true } : {}) });
+  const options = (f: Fixture, request: Record<string, unknown>, target: Record<string, unknown> = macTarget) =>
+    f.service.invoke(subscribed(), "settings.options", { target, ...request }) as Promise<Options>;
+
+  it("offers a tool selection's real tools and keeps a relative Project selection relative", async () => {
+    const f = await fixture();
+    await f.trust.set(f.project, true);
+    const changeAt = async (target: Record<string, unknown>, value: string[]) => {
+      if (target.kind !== "project") return maintainerRpc(f.service, subscribed(), "settings.change", {
+        commandId: commandId(), target, changes: [{ key: "tools.active", layer: target.kind, op: "set", value }],
+      });
+      // Repository composition remains available to logged agent requests, not app editors.
+      const result = await f.settingsChanges.change({ kind: "project", cwd: String(target.cwd) },
+        [{ key: "tools.active", layer: "project", op: "set", value }],
+        { actor: { kind: "agent", id: "repository-agent" }, reason: "Choose repository tools" });
+      if (result.status === "review") return f.settingsChanges.change({ kind: "project", cwd: String(target.cwd) },
+        [{ key: "tools.active", layer: "project", op: "set", value }],
+        { actor: { kind: "ui", id: "device:settings-client" }, reason: "Choose repository tools", confirmationDigest: result.review!.digest });
+      return result;
+    };
+    const projectTarget = { kind: "project", cwd: f.project };
+
+    // Global and Project offer pi's built-ins, then opt-in extension tools such as codemode.
+    const scope = await options(f, { key: "tools.active" }, projectTarget);
+    expect(scope.source).toBe("catalog.tools");
+    expect(scope.options.slice(0, PI_BUILTIN_TOOL_NAMES.length).map(option => option.value)).toEqual(PI_BUILTIN_TOOL_NAMES);
+    expect(scope.options.map(option => option.value)).toContain("codemode");
+    const read = scope.options.find(option => option.value === "read")!;
+    expect(read.resource).toMatchObject({ name: "read", label: expect.any(String), description: expect.any(String), parameters: { type: "object", properties: expect.any(Object) } });
+    const codemode = scope.options.find(option => option.value === "codemode")!;
+    expect(codemode.resource).toMatchObject({ name: "codemode", description: expect.any(String), parameters: { type: "object" } });
+    transcript.push({ case: "tools catalog: project", response: scope });
+
+    // The built-in names are pi's own: a plain pi session registers exactly these.
+    const piDir = join(f.root, "pi-only");
+    await mkdir(piDir, { recursive: true });
+    const piSettings = SettingsManager.create(piDir, piDir);
+    const loader = new DefaultResourceLoader({ cwd: piDir, agentDir: piDir, settingsManager: piSettings, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true });
+    await loader.reload();
+    const { session: piSession } = await createAgentSession({ cwd: piDir, agentDir: piDir, sessionManager: SessionManager.inMemory(), settingsManager: piSettings, resourceLoader: loader });
+    expect(piSession.getAllTools().map(tool => tool.name)).toEqual(PI_BUILTIN_TOOL_NAMES);
+    piSession.dispose();
+    const slot = await f.registry.create(f.project);
+    const context = await slot.context() as { activeTools: string[] };
+    // A chat offers its own registry, which includes every active tool.
+    const chat = await f.service.invoke(subscribed([slot.id]), "settings.options", {
+      target: { kind: "session", sessionId: slot.id }, key: "tools.active",
+    }) as unknown as Options;
+    for (const name of context.activeTools) expect(chat.options.map(option => option.value)).toContain(name);
+
+    // Project is an inspector, not another writer. Preserve every byte,
+    // including repository-owned relative syntax and unrelated fields.
+    const before = await readFile(join(f.project, ".pi", "settings.json"), "utf8");
+    await expect(changeAt(projectTarget, ["read", "bash", "write", "codemode"]))
+      .rejects.toThrow("Project settings are read-only");
+    expect(await readFile(join(f.project, ".pi", "settings.json"), "utf8")).toBe(before);
+  });
+
+  it("omits the twenty-six retired routine controls but preserves explicit, Project and non-renderer inspection", async () => {
+    const f = await fixture();
+    await f.trust.set(f.project, true);
+    const routine = new Set([
+      "context.branchSummary.reserveTokens",
+      "context.compaction.enabled",
+      "context.compaction.instructions",
+      "context.compaction.keepRecentTokens",
+      "context.compaction.reserveTokens",
+      "context.images.autoResize",
+      "model.contextWindow",
+      "model.thinkingBudgets",
+      "model.thinking[role=summarizer]",
+      "model.thinking[role=worker]",
+      "run.cacheWarming",
+      "run.httpIdleTimeoutMs",
+      "run.queue.followUpMode",
+      "run.queue.steeringMode",
+      "run.retry.baseDelayMs",
+      "run.retry.enabled",
+      "run.retry.maxRetries",
+      "run.retry.provider.maxRetries",
+      "run.retry.provider.maxRetryDelayMs",
+      "run.retry.provider.timeoutMs",
+      "run.transport",
+      "run.websocketConnectTimeoutMs",
+      "sources.prompts",
+      "sources.skills",
+      "sources.themes",
+      "tools.codemode.inlineBudget"
+]);
+    const slot = await f.registry.create(f.project);
+    const caller = subscribed([slot.id]);
+    const targets = [macTarget, { kind: "session", sessionId: slot.id }, { kind: "project", cwd: f.project }];
+    for (const target of targets) {
+      const raw = await f.service.invoke(caller, "settings.resolve", { target }) as unknown as PresentedResolution;
+      const exposed = await f.service.invoke(caller, "settings.resolve", {
+        target, renderer: { version: 1, controls: [...CONTROLS] },
+      }) as unknown as PresentedResolution;
+      const candidates = raw.keys.filter(key => routine.has(key.key));
+      if (target.kind === "global") expect(new Set(candidates.map(key => key.key))).toEqual(routine);
+      for (const original of candidates) {
+        const shown = exposed.keys.find(key => key.key === original.key && JSON.stringify(key.qualifiers) === JSON.stringify(original.qualifiers));
+        const inspect = original.overridden || original.projectSetting !== undefined || target.kind === "project";
+        expect(shown !== undefined, target.kind + ": " + original.key).toBe(inspect);
+        expect(original.presentation.control).toBeUndefined();
+        if (shown) {
+          expect(shown.value).toEqual(original.value);
+          expect(shown.presentation.control).toBeUndefined();
+          expect(shown.presentation.options).toBeUndefined();
+          expect(shown.presentation.range).toBeUndefined();
+          expect(shown.presentation.optionsSource).toBeUndefined();
+        }
+      }
+      transcript.push({ case: "routine inspection " + target.kind, response: { raw, exposed } });
+    }
+    const surface = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(presentedRow(surface, "permissions.budget.task").presentation).toMatchObject({ control: "list", valueKind: "numberMap" });
+    expect(presentedRow(surface, "model.ref[role=chat]").presentation.control).toBe("catalog");
+    expect(presentedRow(surface, "model.thinking[role=chat]", { model: f.modelKey }).presentation.control).toBe("choice");
+    expect(presentedRow(surface, "run.httpProxy").presentation.control).toBe("secret");
+    expect(surface.keys.some(key => key.key === "permissions.floor")).toBe(false);
+  });
+
+  it("keeps false overrides resettable and Changes undoable without publishing a routine editor", async () => {
+    const f = await fixture();
+    const key = "context.compaction.enabled";
+    const resolve = () => resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect((await resolve()).keys.some(row => row.key === key)).toBe(false);
+    expect((await maintainerChange(f, [{ key, layer: "global", op: "set", value: false }])).status).toBe("applied");
+    expect(presentedRow(await resolve(), key)).toMatchObject({
+      value: false, overridden: true, presentation: { editable: true },
+    });
+    expect(presentedRow(await resolve(), key).presentation.control).toBeUndefined();
+    const reset = await maintainerChange(f, [{ key, layer: "global", op: "unset" }]);
+    expect((await resolve()).keys.some(row => row.key === key)).toBe(false);
+    const history = await f.service.invoke(subscribed(), "settings.history", { key }) as unknown as { entries: ChangeEntry[] };
+    expect(history.entries.some(entry => entry.before === false)).toBe(true);
+    await f.service.invoke(subscribed(), "settings.undo", { commandId: commandId(), changeId: reset.changes[0]!.changeId });
+    expect(presentedRow(await resolve(), key)).toMatchObject({ value: false, overridden: true });
+    expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).compaction.enabled).toBe(false);
+    transcript.push({ case: "routine false reset and undo", response: { reset, history, restored: await resolve() } });
+  });
+
+  it("refuses option requests for retired controls while retaining the restored queue catalog", async () => {
+    const f = await fixture();
+    for (const key of ["model.contextWindow", "run.transport"]) {
+      await expect(options(f, { key, ...(key === "model.contextWindow" ? { qualifiers: { model: f.modelKey } } : {}) }))
+        .rejects.toMatchObject({ code: "invalid_request" });
+    }
+  });
+
+  it("negotiates retained controls, redacts secrets and keeps no-control inspection intrinsic", async () => {
+    const f = await fixture();
+    const everything = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    const writable = everything.keys.filter(key => key.presentation.control === "text"
+      || (key.presentation.control === "list" && key.presentation.valueKind === "stringList"));
+    expect(writable.map(key => key.key)).toEqual(expect.arrayContaining(["sources.npmCommand", "sources.extensions", "tools.shell.path"]));
+    for (const key of writable) {
+      if (key.presentation.optionsSource?.name === "catalog.models") {
+        expect(key.presentation.entry, key.key).toBeUndefined();
+      } else {
+        expect(key.presentation.entry, key.key).toEqual({
+          hint: expect.stringMatching(/\S/), example: expect.stringMatching(/\S/),
+        });
+      }
+    }
+    expect(presentedRow(everything, "run.retry.maxRetries").presentation.control).toBeUndefined();
+    const labelOwners = new Map<string, Set<string>>();
+    for (const row of everything.keys) labelOwners.set(row.presentation.label, (labelOwners.get(row.presentation.label) ?? new Set()).add(row.key));
+    expect([...labelOwners].filter(([, owners]) => owners.size > 1)).toEqual([]);
+    await maintainerChange(f, [
+      { key: "sources.extensions", layer: "global", op: "set", value: ["beta", "gamma"] },
+      { key: "run.httpProxy", layer: "global", op: "set", value: "http://replacement.invalid:8080" },
+    ]);
+    const edited = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(presentedRow(edited, "sources.extensions")).toMatchObject({ value: ["beta", "gamma"], presentation: { control: "list", valueKind: "stringList" } });
+    expect(presentedRow(edited, "run.httpProxy")).toMatchObject({ value: null, presentation: { control: "secret", redacted: true } });
+    expect(JSON.stringify(edited)).not.toContain("replacement.invalid");
+    expect(JSON.stringify(await f.service.invoke(subscribed(), "settings.history", {}))).not.toContain("replacement.invalid");
+    const toggles = await resolveWith(f, macTarget, { version: 1, controls: ["hologram", "toggle"] });
+    expect(presentedRow(toggles, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });
+    expect(presentedRow(toggles, "context.images.block").presentation.control).toBe("toggle");
+    expect(presentedRow(toggles, "run.retry.maxRetries").presentation.control).toBeUndefined();
+    const declared = new Map(KEYS.map(key => [key.id, key.control]));
+    const plain = await resolveWith(f, macTarget);
+    for (const key of plain.keys) {
+      expect(typeof key.display, key.key).toBe("string");
+      if (!declared.get(key.key)) {
+        expect(key.presentation.control, key.key).toBeUndefined();
+        expect(key.presentation.note, key.key).toBeUndefined();
+      } else {
+        expect(key.presentation.control, key.key).toBe("readOnly");
+        expect(key.presentation.note, key.key).toBe(declared.get(key.key) === "readOnly" ? undefined : UPDATE_TRON_NOTE);
+      }
+    }
+    for (const renderer of [{ version: 1, controls: [], extra: true }, { version: 0, controls: [] }]) {
+      await expect(f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, renderer }))
+        .rejects.toMatchObject({ code: "invalid_request" });
+    }
+    transcript.push({ case: "retained negotiation", response: { everything, edited, toggles, plain } });
+  });
+
+  it("serves each section with its title, one-line description and order, only where the target has keys", async () => {
+    const f = await fixture();
+    const before = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(section(before, "model")).toMatchObject({ id: "model", title: "Model", order: 10, chatInline: true });
+    expect(before.sections.filter(section => section.chatInline).map(section => section.id)).toEqual(["model", "workers"]);
+    const groups = (...keys: string[]) => keys.map(key => before.keys.find(row => row.key === key)?.group);
+    expect(groups("permissions.budget.task")).toEqual(["workers"]);
+    expect(groups("run.retry.maxRetries", "run.httpProxy")).toEqual(["run", "run"]);
+    expect(groups("context.images.block", "permissions.defaultProjectTrust")).toEqual(["tools", "trust"]);
+    expect(before.keys.map(key => key.key)).not.toContain("permissions.floor");
+    expect(before.sections.map(entry => entry.id)).not.toContain("advanced");
+    expect(before.sections.map(section => section.id)).not.toContain("approvals");
+    for (const served of before.sections) expect(served.description.length, served.id).toBeGreaterThan(0);
+    // A section the target has no key in is not presented at all.
+    expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
+    // Filtering the live RPC must also prune unrelated destinations.
+    const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: [...CONTROLS] } }) as unknown as PresentedResolution;
+    expect(filtered.keys.map(key => key.key)).toEqual(["run.retry.maxRetries"]);
+    expect(filtered.sections.map(entry => entry.id)).toEqual(["run"]);
+    transcript.push({ case: "sections", response: { sections: before.sections, filtered } });
+  });
+
+  it("serves option lists that follow the target's model, page catalogs, and refuse keys with no options", async () => {
+    const f = await fixture();
+    const reasoner = f.settingsModel.owner.modelRuntime.getModel(f.model.provider, f.model.id)!;
+    const plain = f.settingsModel.owner.modelRuntime.getModel(f.model.provider, "plain")!;
+    const plainKey = `${plain.provider}/${plain.id}`;
+
+    // Thinking levels: the target's chat model's own levels, labelled as the schema labels them.
+    const levels = await options(f, { key: "model.thinking[role=chat]" });
+    expect(levels).toMatchObject({ source: "catalog.thinkingLevels", dependsOn: ["model.ref[role=chat]"] });
+    expect(levels.options.map(option => option.value)).toEqual(getSupportedThinkingLevels(reasoner));
+    expect(levels.options).toContainEqual({ value: "high", label: "High", detail: expect.any(String) });
+
+    // A named model is followed instead: a model without reasoning offers no thinking level.
+    const followed = await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: plainKey } });
+    expect(followed.options).toEqual([]);
+    // Switching the chat model re-requests: the same key now follows the new chat model.
+    await maintainerChange(f, [{ key: "model.ref[role=chat]", layer: "global", op: "set", value: { provider: plain.provider, id: plain.id } }]);
+    expect((await options(f, { key: "model.thinking[role=chat]" })).options).toEqual([]);
+    expect((await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: f.modelKey } })).options.length).toBeGreaterThan(0);
+
+    // Context-window validation remains canonical even without its retired slider.
+    const tooLarge = await maintainerChange(f, [{ key: "model.contextWindow", qualifiers: { model: f.modelKey }, layer: "global", op: "set", value: 200_001 }], true);
+    expect(tooLarge.changes[0]).toMatchObject({ status: "failed", error: { code: "invalid_request", message: expect.stringContaining("Context window must be") } });
+
+    // Models: a provider query narrows the catalog to the faux provider, and pages by an opaque cursor.
+    const all = await options(f, { key: "model.ref[role=chat]", query: f.model.provider, limit: 200 });
+    expect(all.options.map(option => option.value)).toEqual(expect.arrayContaining([{ provider: f.model.provider, id: "plain" }, { provider: f.model.provider, id: f.model.id }]));
+    expect(all.options.every(option => option.detail === f.model.provider)).toBe(true);
+    const firstPage = await options(f, { key: "model.ref[role=chat]", query: f.model.provider, limit: 1 });
+    expect(firstPage.options).toEqual([all.options[0]]);
+    expect(firstPage.nextCursor).toBe("1");
+    const secondPage = await options(f, { key: "model.ref[role=chat]", query: f.model.provider.toUpperCase(), limit: 1, cursor: firstPage.nextCursor });
+    expect(secondPage.options).toEqual([all.options[1]]);
+    expect(secondPage.nextCursor).toBeUndefined();
+    expect((await options(f, { key: "model.ref[role=chat]", query: "no-such-model-anywhere" })).options).toEqual([]);
+
+    // Refused: an unknown key, a key with neither options nor a source, and a malformed cursor.
+    await expect(options(f, { key: "no.such.key" })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(options(f, { key: "run.retry.maxRetries" })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(options(f, { key: "model.ref[role=chat]", cursor: "not-a-cursor" })).rejects.toMatchObject({ code: "invalid_request" });
+    transcript.push({ case: "options", response: { levels, followed, firstPage } });
+  });
+
+  it("refuses an out-of-range value in a dry run, names the error, and changes nothing", async () => {
+    const f = await fixture();
+    const settingsFile = join(f.agentDir, "settings.json");
+    const beforeFile = await readFile(settingsFile, "utf8");
+    const dryRun = await maintainerChange(f, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 99 }], true);
+    expect(dryRun).toMatchObject({ dryRun: true, changes: [{ key: "run.retry.maxRetries", layer: "global", status: "failed",
+      error: { code: "invalid_request", message: expect.stringContaining("run.retry.maxRetries must be an integer from 0 through 20") } }] });
+    expect(await readFile(settingsFile, "utf8")).toBe(beforeFile);
+    const history = await f.service.invoke(subscribed(), "settings.history", { limit: 50 }) as unknown as { entries: ChangeEntry[] };
+    expect(history.entries).toEqual([]);
+    transcript.push({ case: "dry run refused", response: dryRun });
+  });
+});

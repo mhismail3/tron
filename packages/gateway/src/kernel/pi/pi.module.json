@@ -5,5 +5,8 @@
   ],
   "riskClass": [
     "kernel"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/kernel/pi/pi-theme.integration.test.ts"
   ]
 }

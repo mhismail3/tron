@@ -78,14 +78,14 @@ Missing/unsafe SQLite is a restoration problem, never permission for revision ze
 
 | Signal | One-step diagnosis / boundary |
 | --- | --- |
-| Offer preparation stalls or exceeds its durable-work bound | Run `scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts`; its report records the 199-offer synchronization count. Four metadata syncs per offer plus bounded initialization are required; repeated staging/source-copy syncs identify duplicate publication. Preparation joins its producer owner, not a throughput SLA; reclamation retains its separate behavior guard. |
+| Offer preparation stalls or exceeds its durable-work bound | Run `scripts/tron test gateway src/e2e/modules/apps/apps-install.integration.test.ts`; its report records the 199-offer synchronization count. Four metadata syncs per offer plus bounded initialization are required; repeated staging/source-copy syncs identify duplicate publication. Preparation joins its producer owner, not a throughput SLA; reclamation retains its separate behavior guard. |
 | `ios-builds` unavailable | `ls -1 <configured-Gateway-home>/ios-builds/builds` identifies committed candidates. Both timestamp/commit and timestamp/UUID/commit names are valid; a retained release must not make the whole feed unavailable. Check the publisher lock and bounded record/IPA/manifest identity, not app state or reinstall. The mixed-publication RPC journey covers both names and unsafe-input refusal. |
 
 ## Verify
 
 ```bash
 scripts/tron verify --module gateway/apps
-scripts/tron test gateway src/modules/apps/apps-install.integration.test.ts
+scripts/tron test gateway src/e2e/modules/apps/apps-install.integration.test.ts
 ```
 
 Store/lock journeys retain the named v1 and real SQLite oracles.
