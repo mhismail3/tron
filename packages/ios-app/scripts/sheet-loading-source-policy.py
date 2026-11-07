@@ -29,7 +29,6 @@ SPINNER_ALLOWED = {
 # Visible text that names in-flight work but is not a loading placeholder.
 TEXT_ALLOWED = {
     ("UI/Chat/ChatTranscriptEventViews.swift", "Preparing details…"),  # transcript event row
-    ("UI/Settings/IntegrationConfiguredRow.swift", "Loading credits…"),  # row value
 }
 COMMENTS = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/')
 STRINGS = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"')

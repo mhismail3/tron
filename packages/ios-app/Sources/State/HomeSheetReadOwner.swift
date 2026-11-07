@@ -324,41 +324,6 @@ struct HomeProfileListDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// The Home context and memory text the sheets show, derived in one owner so the
-/// rows and their tests describe the same meanings.
-enum HomeContextPresentation {
-    static func sectionLabel(_ id: HomeContextDTO.Breakdown.Section.ID, input: HomeContextDTO.Breakdown.Activation.Kind) -> String {
-        switch id {
-        case .instructions: "Instructions"
-        case .profile: "About you"
-        case .memory: "Memory"
-        case .chapter: "This chapter"
-        case .results: "Task results"
-        case .input: input == .wake ? "Wake" : "Your message"
-        }
-    }
-
-    /// The count the section names, in the words of its meaning ("3 notes").
-    static func countLine(_ section: HomeContextDTO.Breakdown.Section) -> String? {
-        guard let count = section.count else { return nil }
-        switch section.id {
-        case .profile: return "\(count.formatted()) \(count == 1 ? "note" : "notes")"
-        case .memory: return "\(count.formatted()) \(count == 1 ? "summary" : "summaries")"
-        case .chapter: return "\(count.formatted()) \(count == 1 ? "entry" : "entries")"
-        case .results: return "\(count.formatted()) delivered"
-        case .instructions, .input: return nil
-        }
-    }
-
-    /// Activation header: what started it and how long ago; its state is the pill beside it.
-    static func activationLine(_ activation: HomeContextDTO.Breakdown.Activation, now: Date = .now) -> String {
-        let kind = activation.kind == .wake ? "Wake" : "Your message"
-        guard let started = HomeChapterPresentation.parse(activation.startedAt) else { return kind }
-        let relative = RelativeDateTimeFormatter().localizedString(for: started, relativeTo: now)
-        return "\(kind) · \(relative)"
-    }
-}
-
 /// One owner of the chapter rows' derived text, so the sheet and its tests
 /// describe the same ledger identically.
 enum HomeChapterPresentation {

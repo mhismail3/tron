@@ -455,28 +455,6 @@ struct TronActionButtonStyle: ButtonStyle {
     }
 }
 
-struct TronRowButtonStyle: ButtonStyle {
-    let accent: Color
-    @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.colorScheme) private var colorScheme
-
-    init(accent: Color = .tronAccentText) { self.accent = accent }
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-            .foregroundStyle(
-                isEnabled
-                    ? TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : accent
-                    : Color.tronTextMuted
-            )
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-            .opacity(configuration.isPressed ? 0.64 : (isEnabled ? 1 : 0.48))
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
 struct TronIconButtonStyle: ButtonStyle {
     let accent: Color
     let size: CGFloat
