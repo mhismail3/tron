@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 
 /**
  * Kernel settings-change lock (packages/gateway/docs/scenario-locks.md#locks) for the `gateway/admin`

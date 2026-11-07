@@ -1,9 +1,9 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { normalizeTraceValue } from "../../test-support/scenario-lock.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * Session lifecycle locks (packages/gateway/docs/scenario-locks.md#locks; K-0 §7 E0d) guarding the

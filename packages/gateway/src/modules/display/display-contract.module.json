@@ -5,6 +5,6 @@
     "display-contract.module.json"
   ],
   "verify": [
-    "scripts/tron test gateway src/display/display.store.lock.integration.test.ts src/display/runtime-retirement.lock.integration.test.ts src/e2e/display/display-image-lifetime.integration.test.ts src/transport/server-live-view.integration.test.ts src/protocol/protocol.wire.lock.integration.test.ts"
+    "scripts/tron test gateway src/display/display.store.lock.integration.test.ts src/e2e/display/runtime-retirement.lock.integration.test.ts src/e2e/display/display-image-lifetime.integration.test.ts src/transport/server-live-view.integration.test.ts src/protocol/protocol.wire.lock.integration.test.ts"
   ]
 }

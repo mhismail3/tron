@@ -148,7 +148,7 @@ expiry (15 s / 300 s); body-idle checks the 30 s configuration and drives Node's
 socket timeout event through real incomplete-body teardown without a wall-clock assertion.
 `openai-model-eligibility.integration.test.ts` exercises catalog filtering and custom-endpoint
 OAuth isolation; its fixture drains offline SDK registration work before removing its disk store.
-Behavior locks: `transport.lock.integration.test.ts`,
+Behavior locks: `src/e2e/transport/transport.lock.integration.test.ts`,
 `transport.store.lock.integration.test.ts`, `command-receipts.lock.integration.test.ts`.
 
 ## Not here

@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { startLockGateway, type LockGateway } from "../../../../test-support/gateway-lock-harness.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 // The unchanged scheduler and owned-run tests own cancellation/terminal evidence.
 // This lock adds only the missing real-socket preview and cursor admission cuts.

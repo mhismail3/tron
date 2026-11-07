@@ -57,6 +57,10 @@ the `computer` module registers only on darwin.
 
 ## Locks
 
+Scenario lock files live in `gateway/e2e`, at the path of the module they lock
+(`src/e2e/<path under src>/`); the Module column names that module. Store locks
+(`store-*`) stay with their store's owner.
+
 | Module | Lock | Scenario |
 |---|---|---|
 | `gateway/run` | `run-prompt-stream` | streamed thinking and text, a `read` round trip. Named checks: the idle snapshot a client opens, transcript rows (semantics, tool and content text, including thinking), canonical entry types and roles, invocation receipts and their identities, each provider request's messages, and `chat` shapes for the requests and system entry |
@@ -237,7 +241,7 @@ a lockstep slice that updates both ends ([charter](../../../AGENTS.md#architectu
 cd packages/gateway
 npx vitest run .lock.integration                                      # parallel-pass locks
 npx vitest run --config vitest.nested.config.ts delegation.lock       # subagent lock
-TRON_UPDATE_LOCKS=gateway/run npx vitest run src/sessions/run.lock.integration.test.ts
+TRON_UPDATE_LOCKS=gateway/run npx vitest run src/e2e/sessions/run.lock.integration.test.ts
 ```
 
 Store and wire locks run in the parallel pass: `npx vitest run .lock.integration`.

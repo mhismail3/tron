@@ -87,7 +87,7 @@ class RealRepositoryTests(unittest.TestCase):
 
     def test_settings_list_holds_the_key_the_settings_lock_edited(self) -> None:
         # The admin settings lock asserts its real-Gateway trace against this inline JSON literal.
-        source = (ROOT / "packages/gateway/src/admin/admin.lock.integration.test.ts").read_text()
+        source = (ROOT / "packages/gateway/src/e2e/admin/admin.lock.integration.test.ts").read_text()
         marker = '"admin-settings-change": '
         self.assertEqual(source.count(marker), 1, "the admin lock's inline expectation moved")
         lock, _ = json.JSONDecoder().raw_decode(source, source.index(marker) + len(marker))

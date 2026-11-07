@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 
 /**
  * Project-root resources lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7 E0e follow-up)
