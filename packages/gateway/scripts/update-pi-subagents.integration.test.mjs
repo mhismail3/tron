@@ -242,18 +242,27 @@ function writeLooseBlobs(gitDir, prefix, count) {
   }
 }
 
+// The Git subcommands an invocation started, its own included, read from its trace2
+// events. Every Git child inherits the event target, so automatic maintenance shows
+// up whatever its strategy: Git 2.54 made "geometric" the default, which repacks
+// without running gc or its pre-auto-gc hook, so a hook cannot observe it.
+function startedGitCommands(trace) {
+  if (!existsSync(trace)) return [];
+  return readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+    .filter((event) => event.event === "start").map((event) => event.argv[1]);
+}
+
 test("fixture Git children never start automatic maintenance", () => {
   fixture(({ target, env, git, root }) => {
-    const hooks = join(root, "hooks"); mkdirSync(hooks);
-    const marker = join(root, "auto-gc.marker");
-    // Foreground auto-GC (autoDetach=false) runs this hook before git commit returns, so the marker is deterministic.
-    writeFileSync(join(hooks, "pre-auto-gc"), `#!/bin/sh\n: > ${JSON.stringify(marker)}\n`, { mode: 0o755 });
-    git(target, "config", "gc.auto", "1"); git(target, "config", "gc.autoDetach", "false"); git(target, "config", "core.hooksPath", hooks);
+    // Foreground maintenance (autoDetach=false) finishes before git commit returns, so each trace is complete.
+    git(target, "config", "gc.auto", "1"); git(target, "config", "gc.autoDetach", "false");
     writeLooseBlobs(join(target, ".git"), "17", 2);
-    git(target, "commit", "--allow-empty", "-qm", "guarded");
-    assert.equal(existsSync(marker), false, "fixture commit started automatic GC");
-    // Negative control: the same eligible repository, without the fixture configuration, runs the hook.
-    command("git", ["-C", target, "commit", "--allow-empty", "-qm", "unguarded"], { env: { PATH: env.PATH, HOME: env.HOME, TMPDIR: env.TMPDIR } });
-    assert.equal(existsSync(marker), true, "eligible auto-GC did not run its hook");
+    const guarded = join(root, "guarded.trace");
+    command("git", ["-C", target, "commit", "--allow-empty", "-qm", "guarded"], { env: { ...env, GIT_TRACE2_EVENT: guarded } });
+    assert.deepEqual(startedGitCommands(guarded).filter((name) => ["maintenance", "gc", "repack"].includes(name)), [], "fixture commit started automatic maintenance");
+    // Negative control: the same eligible repository, without the fixture configuration, repacks.
+    const unguarded = join(root, "unguarded.trace");
+    command("git", ["-C", target, "commit", "--allow-empty", "-qm", "unguarded"], { env: { PATH: env.PATH, HOME: env.HOME, TMPDIR: env.TMPDIR, GIT_TRACE2_EVENT: unguarded } });
+    assert.ok(startedGitCommands(unguarded).includes("repack"), `eligible automatic maintenance did not repack: ${startedGitCommands(unguarded).join(" ")}`);
   });
 });
