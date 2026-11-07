@@ -21,4 +21,5 @@ it("answers a missing path not_found and an existing folder conflict, not an int
   expect(await refusal(service.list(join(root, "note.txt", "child")))).toEqual(missing);
   expect(await refusal(service.createDirectory(join(root, "gone"), "child"))).toEqual(missing);
   expect(await refusal(service.createDirectory(root, "kept"))).toEqual({ code: "conflict", message: "An item with that name already exists", retryable: false });
+  expect(await refusal(service.createDirectory(join(root, "note.txt"), "child"))).toEqual({ code: "invalid_request", message: "Path is not a directory", retryable: false });
 });

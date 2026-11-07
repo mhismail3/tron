@@ -99,7 +99,8 @@ export class FilesystemService {
     const target = join(canonicalParent, name);
     if (!containedWithin(this.root, target)) throw new GatewayError("invalid_request", "Folder is outside the allowed workspace root");
     await mkdir(target).catch((error: NodeJS.ErrnoException) => {
-      throw error.code === "EEXIST" ? new GatewayError("conflict", "An item with that name already exists") : error;
+      if (error.code === "EEXIST") throw new GatewayError("conflict", "An item with that name already exists");
+      throw error.code === "ENOTDIR" ? new GatewayError("invalid_request", "Path is not a directory") : error;
     });
     return realpath(target);
   }
