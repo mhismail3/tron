@@ -19,6 +19,8 @@ compiler resolves the import graph exactly as it does for the Gateway:
 4a. The Pi seam (decision D2): only `gateway/pi` imports or names `@earendil-works`;
    a type-only import, a value import and a resolution string elsewhere each fail
    without a baseline, and the seam's own re-exports pass.
+4b. `layers tests` reports, per module, the test files that reach another module's files, the
+   shared test-support or the registry directly, from the compiler's graph of tests; it never fails on them.
 5. iOS: real index stores compiled by `swiftc -index-store-path` and stamped by
    `scripts/ios-test-build-identity.py` give declared, upward and two-way
    references, ignore units of files no longer tracked, pass a split
@@ -249,6 +251,31 @@ class ErrorTests(LayersCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("install Gateway dependencies", result.stderr)
         self.assertNotIn("no violation", result.stdout)
+
+
+class TestBoundaryTests(LayersCase):
+    def test_reports_cross_module_support_and_registry_reach_without_failing(self) -> None:
+        r = self.repo
+        r.manifest("packages/gateway/test-support/test-support.module.json", {"layer": "L5", "owns": ["**"]})
+        r.write("packages/gateway/test-support/gateway-registry.ts", "export const boot = () => 1;\n")
+        r.write("packages/gateway/test-support/wait-for.ts", "export const wait = () => 2;\n")
+        # Own-module imports are local; kernel/run.ts is another module's file; a type-only import counts too.
+        r.write("packages/gateway/src/feature/feature.test.ts",
+                'import { feature } from "./feature.js";\nimport type { run } from "../kernel/run.js";\n'
+                'import { boot } from "../../test-support/gateway-registry.js";\nexport type R = typeof run;\n'
+                "export const t = [feature, boot];\n")
+        r.write("packages/gateway/src/feature/local.test.ts",
+                'import { feature } from "./feature.js";\nexport const t = feature;\n')
+        r.write("packages/gateway/src/kernel/run.test.ts",
+                'import { wait } from "../../test-support/wait-for.js";\nexport const t = wait;\n')
+        self.assertEqual(self.run_ok("tests"), [
+            "module\ttests\treach-other-module\treach-test-support\timport-registry",
+            "gateway/feature\t2\t1\t1\t1",
+            "gateway/kernel\t1\t0\t1\t0",
+            "layers tests: 3 Gateway test files in 2 modules; 1 reach another module's files, 2 reach test-support, "
+            "1 import the registry directly (report only, #2316)"])
+        self.assertEqual(r.layers("tests", "--update").returncode, 2)
+        self.assertEqual(list((r.path / "packages/gateway").glob("tsconfig.tests-*")), [], "the temporary tsconfig is removed")
 
 
 class PiSeamTests(LayersCase):
