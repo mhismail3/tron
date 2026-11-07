@@ -4,7 +4,7 @@ import { GatewayError } from "../errors.js";
 import type { UploadStore } from "../machine/upload-store.js";
 import type { GatewayLogger } from "./logger.js";
 
-export interface UploadHttpDependencies {
+interface UploadHttpDependencies {
   options: {
     uploads: UploadStore;
     logger: Pick<GatewayLogger, "log">;

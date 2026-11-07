@@ -6,7 +6,7 @@ import {
 import type { ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError } from "./terminal-sanitizer.js";
 
-export interface CapturingTuiMainScreenOptions {
+interface CapturingTuiMainScreenOptions {
   showHardwareCursor?: boolean;
   onRender?: (state: TuiMainScreenRenderState) => void;
   /** Called after every compositor request, including failures and stopped renders. */

@@ -3,7 +3,7 @@ import { lstat, open } from "node:fs/promises";
 
 const MAX_SECURE_JSON_BYTES = 64 * 1_048_576;
 
-export type SecureJsonRead<T> =
+type SecureJsonRead<T> =
   | { present: false }
   | { present: true; value: T };
 

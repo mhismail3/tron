@@ -10,7 +10,7 @@ import type { SubjectAuditReference, SubjectContext } from "../../kernel/setting
 import type { ProfilePartitionRequest } from "./profile-notes.js";
 import { tronWorkspacePath } from "../../foundation/tron-home-layout.js";
 
-export const PROFILE_FILE_BYTES = 64 * 1_048_576;
+const PROFILE_FILE_BYTES = 64 * 1_048_576;
 const ROOTS = [...Object.keys(PROFILE_AREAS), "inferred", "prior"];
 type FileNote = Omit<ProfileNoteRecord, "content"> & { content: Omit<ProfileNoteRecord["content"], "profile"> };
 export interface ProfileSection { notes: FileNote[]; children: Record<string, ProfileSection> }
@@ -89,7 +89,7 @@ export function profileFileRecords(file: ProfileFile): ProfileNoteRecord[] {
   return result;
 }
 
-export function validateProfileFile(value: unknown): ProfileFile {
+function validateProfileFile(value: unknown): ProfileFile {
   if (!object(value) || Object.keys(value).some(field => !["format", "version", "stateRevision", "sections", "anchors", "deferred", "control"].includes(field))
     || value.format !== "tron-profile" || value.version !== 2 || !Number.isSafeInteger(value.stateRevision) || (value.stateRevision as number) < 0
     || !Array.isArray(value.anchors) || (value.deferred !== undefined && (typeof value.deferred !== "string" || !/^[a-f0-9]{64}$/.test(value.deferred)))) fail("Unsupported Profile file format");

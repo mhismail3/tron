@@ -3,7 +3,7 @@ import type { ExtensionOwner } from "../../protocol/types.js";
 
 /** Call-time identity shared by extension callbacks and host presentation across awaits. */
 const ownerStorage = new AsyncLocalStorage<ExtensionOwner>();
-export interface InvocationExecutionContext {
+interface InvocationExecutionContext {
   invocationId: string;
   operationId: string;
   trigger?: import("./input-admission.js").InputTriggerAttribution | undefined;

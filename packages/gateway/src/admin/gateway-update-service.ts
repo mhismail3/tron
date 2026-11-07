@@ -32,10 +32,10 @@ const UPDATE_FAILURE: FailureLine = {
   rejection: "Gateway update error is malformed",
 };
 
-export type GatewayUpdateChannel = "stable" | "dev";
-export type GatewayUpdateMode = "source" | "artifact" | "auto";
+type GatewayUpdateChannel = "stable" | "dev";
+type GatewayUpdateMode = "source" | "artifact" | "auto";
 
-export interface GatewayUpdateRequest {
+interface GatewayUpdateRequest {
   channel: GatewayUpdateChannel;
   mode: GatewayUpdateMode;
   candidateVersion?: string;
@@ -44,13 +44,13 @@ export interface GatewayUpdateRequest {
   commandId?: string;
 }
 
-export interface GatewayRollbackRequest {
+interface GatewayRollbackRequest {
   channel: GatewayUpdateChannel;
   /** Gateway-owned receipt identity, never accepted from the update helper's options. */
   commandId: string;
 }
 
-export interface GatewayUpdateIdentity {
+interface GatewayUpdateIdentity {
   version?: string;
   gatewayVersion?: string;
   sourceRevision?: string;
@@ -58,7 +58,7 @@ export interface GatewayUpdateIdentity {
   payloadFingerprint?: string;
 }
 
-export interface GatewayUpdateConfig {
+interface GatewayUpdateConfig {
   schema: 1;
   kind: typeof UPDATE_CONFIG_KIND;
   sourceRoot: string;
@@ -66,7 +66,7 @@ export interface GatewayUpdateConfig {
   updatedAt: string;
 }
 
-export interface GatewayDebugCandidateProvenance {
+interface GatewayDebugCandidateProvenance {
   origin: "debug";
   version: string;
   payloadFingerprint: string;
@@ -75,7 +75,7 @@ export interface GatewayDebugCandidateProvenance {
   candidateRuntimeEpoch: string;
 }
 
-export interface GatewayUpdateStatus {
+interface GatewayUpdateStatus {
   state: string;
   channel: GatewayUpdateChannel;
   currentIdentity: GatewayUpdateIdentity | null;
@@ -89,7 +89,7 @@ export interface GatewayUpdateStatus {
   candidateProvenance: GatewayDebugCandidateProvenance | null;
 }
 
-export type GatewayUpdateCallback = (request: GatewayUpdateRequest | (GatewayRollbackRequest & { operation?: "rollback" })) => Promise<JsonValue>;
+type GatewayUpdateCallback = (request: GatewayUpdateRequest | (GatewayRollbackRequest & { operation?: "rollback" })) => Promise<JsonValue>;
 type RuntimeIdentityFallback = GatewayUpdateIdentity & { buildFingerprint?: string };
 
 /** Convert the supervised launcher's `buildFingerprint` into update identity

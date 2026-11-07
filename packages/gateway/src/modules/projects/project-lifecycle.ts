@@ -14,19 +14,19 @@ import type { ChangeReview } from "../../protocol/types.js";
 import { changeReview } from "../../kernel/settings/settings-types.js";
 
 const exec = promisify(execFile);
-export const PROJECT_ACTION = "project.lifecycle";
+const PROJECT_ACTION = "project.lifecycle";
 type Operation = "create" | "trust" | "untrust";
 export type ProjectChangeResult = ChangeResult & { intent?: Action };
 interface Action { operation: Operation; name: string; identity: string }
 export interface ProjectRequest { action: Operation; name: string; reason: string }
-export type ProjectEligibility = { allowed: true } | { allowed: false; code: string; reason: string };
-export interface ProjectRow {
+type ProjectEligibility = { allowed: true } | { allowed: false; code: string; reason: string };
+interface ProjectRow {
   name: string;
   path: string;
   trust: TrustInspection | null;
   eligibility: Record<"trust" | "untrust", ProjectEligibility>;
 }
-export interface ProjectPage { workspace: string; projects: ProjectRow[]; nextCursor: string | null }
+interface ProjectPage { workspace: string; projects: ProjectRow[]; nextCursor: string | null }
 const eligibilityActions = ["trust", "untrust"] as const;
 
 /** Live occupancy as of one read: runtime slots are consulted live, Home work as of `occupancy()`. */

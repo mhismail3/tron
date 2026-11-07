@@ -1273,7 +1273,7 @@ function isPiCodemodeImageSavedText(text: string, followingImageMimeType: string
  * `extensions/codemode/execute.js:243`). Hide only that exact pair in client
  * projections; the source result remains authoritative and unchanged.
  */
-export function visibleToolResultContent<T>(toolName: string, content: readonly T[]): readonly T[] {
+function visibleToolResultContent<T>(toolName: string, content: readonly T[]): readonly T[] {
   if (toolName !== "codemode") return content;
   let visible: T[] | undefined;
   for (let index = 0; index < content.length; index += 1) {

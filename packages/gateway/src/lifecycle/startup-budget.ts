@@ -18,7 +18,7 @@ export interface StartupStepTiming {
   readonly durationMs: number;
 }
 
-export interface StartupBudget {
+interface StartupBudget {
   readonly listeningMs: number;
   readonly withinBudget: boolean;
   readonly overBudgetMs: number;

@@ -31,7 +31,7 @@ import type { SessionSearchRequest, SessionSearchResponse } from "../../sessions
 
 /** What the Home runtime offers the research tools. Every owner is resolved at
  * call time: the services behind a running Home can be installed or released. */
-export interface HomeResearchHost {
+interface HomeResearchHost {
   sessionRead: HomeSessionReader;
   sessionSearch: () => ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
 }

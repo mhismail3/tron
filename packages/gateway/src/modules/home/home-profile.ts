@@ -42,9 +42,9 @@ const KIND_ROLE: Record<HomeProfileKind, NoteContent["role"]> = {
 export const HOME_PROFILE_BOUND_BYTES = 8 * 1_024;
 const PROFILE_PAGE_LIMIT = 50;
 export type HomeProfileStatus = "active" | "superseded" | "retired";
-export type ProfileNote = ProfileNoteRecord & { kind: "note" };
+type ProfileNote = ProfileNoteRecord & { kind: "note" };
 
-export interface HomeProfileItem {
+interface HomeProfileItem {
   id: string;
   revisionId: string;
   file: ProfileFile | null | undefined;
@@ -201,7 +201,7 @@ export type HomeProfileAuthor =
 
 /** A profile note's state as the change record holds it: `before` and `after` of every
  * profile change, and what undo restores. `null` is a note that did not exist. */
-export interface HomeProfileValue {
+interface HomeProfileValue {
   kind: HomeProfileKind;
   text: string;
   confirmed: boolean;
@@ -214,8 +214,8 @@ export interface HomeProfileValue {
   profile?: ProfileMetadata;
 }
 
-export interface HomeProfileWrite { id: string; before: HomeProfileValue | null; after: HomeProfileValue | null }
-export type ProfileChangePath = Pick<SettingsChangePath, "record" | "auditSubject" | "publishSubjectAudit" | "validateSubjectAudit" | "prepareSubjectAudit" | "readPreparedSubjectAudit">;
+interface HomeProfileWrite { id: string; before: HomeProfileValue | null; after: HomeProfileValue | null }
+type ProfileChangePath = Pick<SettingsChangePath, "record" | "auditSubject" | "publishSubjectAudit" | "validateSubjectAudit" | "prepareSubjectAudit" | "readPreparedSubjectAudit">;
 interface PartitionEnvelope {
   version: 1;
   replayAt: string;
@@ -268,7 +268,7 @@ export interface HomeProfileSaved {
   previousText?: string;
 }
 
-export function profileValue(item: HomeProfileItem | undefined): HomeProfileValue | null {
+function profileValue(item: HomeProfileItem | undefined): HomeProfileValue | null {
   if (!item) return null;
   return { kind: item.kind, text: item.text, confirmed: item.confirmed, state: item.status, revisionId: item.revisionId,
     ...(item.supersedes ? { supersedes: item.supersedes } : {}), ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}),
@@ -277,7 +277,7 @@ export function profileValue(item: HomeProfileItem | undefined): HomeProfileValu
 }
 
 /** The list projection of an item (`home.profileList` and the change answer). */
-export function profileListItem(item: HomeProfileItem) {
+function profileListItem(item: HomeProfileItem) {
   return { id: item.id, revisionId: item.revisionId, path: item.path, kind: item.kind, text: item.text, confirmed: item.confirmed,
     status: item.status, createdAt: item.record.createdAt, updatedAt: item.record.updatedAt };
 }
@@ -333,7 +333,7 @@ function staleConflict(error: unknown, current: HomeProfileItem | undefined): un
  * notes through the Profile owner with its revision fence, and reads back what it wrote.
  */
 /** `approved` only ever comes from the maintainer's accepted native card. */
-export interface ProfileChangeContext extends SubjectContext { author: HomeProfileAuthor; approved?: true; confirm?: ConfirmChange }
+interface ProfileChangeContext extends SubjectContext { author: HomeProfileAuthor; approved?: true; confirm?: ConfirmChange }
 export interface ProfileChangeResult extends ChangeResult {
   status: "applied";
   saved: HomeProfileSaved[];

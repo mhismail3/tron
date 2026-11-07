@@ -24,7 +24,7 @@ interface EligibilityState {
   displayNames: ReadonlyMap<string, string>;
 }
 type EligibilityUpdate = { fingerprint?: string | undefined; oauth?: boolean | undefined; entries: readonly string[]; displayNames: ReadonlyMap<string, string> };
-export interface OpenAIModelEligibilityOptions {
+interface OpenAIModelEligibilityOptions {
   /** Production always uses the fixed OpenAI endpoint and global fetch. */
   fetch?: typeof globalThis.fetch;
   now?: () => number;

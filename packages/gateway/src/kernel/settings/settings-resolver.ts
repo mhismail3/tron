@@ -175,7 +175,7 @@ function instances(schema: SettingsSchema, key: KeyDeclaration, target: Settings
   return [fixed];
 }
 
-export function resolveInstance(
+function resolveInstance(
   schema: SettingsSchema,
   key: KeyDeclaration,
   qualifiers: Qualifiers,

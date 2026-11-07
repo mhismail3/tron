@@ -41,7 +41,7 @@ const SWIFT_APP_LIMITS = {
 const APP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const SCHEMA_VERSION = 1;
 
-export interface SwiftAppStateSnapshot {
+interface SwiftAppStateSnapshot {
   appId: string;
   revision: number;
   entries: Array<{ key: string; value: JsonValue }>;

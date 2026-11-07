@@ -406,11 +406,6 @@ export interface ExtensionRunActivity {
   lifecycleOmissions?: { children: number; byteLimitExceeded: boolean };
 }
 
-export interface ExtensionActivityDelta {
-  activity: ExtensionRunActivity;
-  liveActivityRevision: number;
-  extensionActivityAsOf: string;
-}
 
 export type SessionProcessKind = "command" | "subagent";
 export type SessionProcessExecutionMode = "foreground" | "background" | "synchronous" | "asynchronous" | "unknown";
@@ -477,15 +472,6 @@ export interface SessionProcessOverview {
   extensionChildOmissions?: { children: number; byteLimitExceeded: boolean };
 }
 
-export interface SessionProcessDelta {
-  /** One exact upsert. A removal-only frame deliberately omits it. */
-  activity?: SessionProcessActivity;
-  /** Exact identities removed or re-keyed by the same authoritative replacement. */
-  removedProcessIds?: string[];
-  processRevision: number;
-  processAsOf: string;
-  overview: SessionProcessOverview;
-}
 
 export interface SessionProcessHistoryPage {
   activities: SessionProcessActivity[];
@@ -724,7 +710,7 @@ export interface ExtensionPresentationDiagnostic {
   message: string;
 }
 
-export interface ExtensionFrameStyle {
+interface ExtensionFrameStyle {
   bold?: true;
   dim?: true;
   italic?: true;
@@ -736,7 +722,7 @@ export interface ExtensionFrameStyle {
   link?: string;
 }
 
-export interface ExtensionFrameRun { text: string; style: ExtensionFrameStyle }
+interface ExtensionFrameRun { text: string; style: ExtensionFrameStyle }
 export interface ExtensionFrameLine { plainText: string; runs: ExtensionFrameRun[] }
 export interface ExtensionFrameCursor { row: number; column: number }
 export interface ExtensionFrame {

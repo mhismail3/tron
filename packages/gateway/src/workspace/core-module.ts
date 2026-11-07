@@ -5,7 +5,7 @@ import { workspaceModule } from "./workspace-module.js";
 import { JevDecisionClient } from "../providers/jev-client.js";
 import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
-export interface CoreModuleServices { connections: Pick<ConnectionAccess, "snapshot"> | undefined }
+interface CoreModuleServices { connections: Pick<ConnectionAccess, "snapshot"> | undefined }
 
 /** Gateway owners are resolved when the runtime assembles its extension, not at start. */
 export function createCoreModule(services: () => CoreModuleServices): ModuleDescriptor {

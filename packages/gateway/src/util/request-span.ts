@@ -293,7 +293,7 @@ export class RequestSpan {
   }
 }
 
-export interface RequestSpanBreakdown {
+interface RequestSpanBreakdown {
   /** `name=12ms×2/610KB;name=5ms` — every named entry, most expensive first. */
   stages: string;
   /** Time in the request that no named entry covered. */

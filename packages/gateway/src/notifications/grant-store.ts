@@ -9,7 +9,7 @@ import { GatewayError } from "../errors.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 export type NotificationKind = "explicit" | "ask" | "agent_finished" | "waiting";
-export type DeliveryOutcome = "pending" | "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "expired";
+type DeliveryOutcome = "pending" | "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "expired";
 
 export interface PushGrant {
   deviceId: string;
@@ -24,7 +24,7 @@ export interface PushGrant {
   updatedAt: string;
 }
 
-export interface PendingTarget {
+interface PendingTarget {
   grantId: string;
   requestId: string;
   relayEnvelope: string;

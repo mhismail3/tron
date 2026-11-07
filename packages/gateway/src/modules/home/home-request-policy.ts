@@ -113,7 +113,7 @@ function homeRefusalMessage(reason: HomeRefusalReason): string {
 }
 
 /** The memory reasons a view source may raise. */
-export type HomeMemoryRefusalReason = Extract<HomeRefusalReason, `memory-${string}`>;
+type HomeMemoryRefusalReason = Extract<HomeRefusalReason, `memory-${string}`>;
 
 /**
  * What the memory view source refuses with. The seam keeps the memory's own
@@ -131,16 +131,16 @@ export class HomeMemoryRefusal extends Error {
 }
 
 /** The refusal an activation ended with, as `home.context` reports it. */
-export interface HomeRefusal {
+interface HomeRefusal {
   reason: HomeRefusalReason;
   detail: string;
 }
 
 /** What started an activation: a maintainer message, or a settled task result that woke Home. */
-export type HomeActivationKind = "user" | "wake";
+type HomeActivationKind = "user" | "wake";
 
 /** The sizes of the last request one activation prepared, as `home.context` reports them. */
-export interface HomeRequestStep {
+interface HomeRequestStep {
   /** Effective-size estimate of the request, in tokens: the sum of `sections`. */
   effectiveTokens: number;
   /** UTF-8 bytes and lines of the frozen memory view this request carried. */
@@ -208,7 +208,7 @@ export type HomeRequestRecord =
     contextWindow?: number;
   };
 
-export interface HomeRequestPolicyOptions {
+interface HomeRequestPolicyOptions {
   /**
    * The frozen memory view for one activation. Called at most once per
    * activation, at its first `prepareRequest` step; a throw or rejection fails
@@ -227,7 +227,7 @@ export interface HomeRequestPolicyOptions {
 /** The evidence of one activation, as `home.context` reports it. Only fields of
  * that activation: its start entry, whether it is open, the last request it
  * prepared, and its own refusal when it was refused. */
-export interface HomeActivationEvidence {
+interface HomeActivationEvidence {
   activationStartEntryId: string | null;
   activationOpen: boolean;
   kind: HomeActivationKind;

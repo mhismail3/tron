@@ -5,7 +5,7 @@ import { basename } from "node:path";
  * an installed Pi package; `local` is a user/project extension or skill file;
  * `file` is an instruction file Pi reads verbatim (AGENTS.md, SYSTEM.md,
  * APPEND_SYSTEM.md). */
-export type InstructionSource =
+type InstructionSource =
   | { kind: "pi" }
   | { kind: "module"; name: string }
   | { kind: "package"; name: string }
@@ -13,7 +13,7 @@ export type InstructionSource =
   | { kind: "file"; path: string }
   | { kind: "unknown" };
 
-export interface InstructionEntry {
+interface InstructionEntry {
   name?: string;
   path?: string;
   text: string;
@@ -43,7 +43,7 @@ export interface AgentInstructions {
 
 interface SourceInfoLike { path: string; source: string; scope: string; origin: string }
 
-export interface AgentInstructionsInput {
+interface AgentInstructionsInput {
   /** Pi's current prompt: between runs its idle prompt (base options plus the
    * extension sections, e.g. `mcp_servers`, the transcript still gives the model;
    * #1312), or the run's forced prompt (already carrying the Tron context) while a

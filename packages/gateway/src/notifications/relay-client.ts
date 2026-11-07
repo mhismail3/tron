@@ -4,8 +4,8 @@ import { GatewayError } from "../errors.js";
 
 export type RelayNotificationOutcome = "accepted_by_apns" | "retryable" | "invalid_token" | "invalid_grant" | "permanent_failure" | "ambiguous" | "rate_limited" | "in_progress";
 export interface RelayNotificationResult { status: RelayNotificationOutcome; reason?: string }
-export interface RelayFetchResponse { status: number; headers: Headers; body: ReadableStream<Uint8Array> | null; }
-export type RelayFetch = (input: string, init: RequestInit) => Promise<RelayFetchResponse>;
+interface RelayFetchResponse { status: number; headers: Headers; body: ReadableStream<Uint8Array> | null; }
+type RelayFetch = (input: string, init: RequestInit) => Promise<RelayFetchResponse>;
 
 const RESPONSE_MAX_BYTES = 16 * 1_024;
 const REQUEST_MAX_BYTES = 2 * 1_024;

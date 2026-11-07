@@ -10,14 +10,14 @@ const SUPPORTED_ARCHITECTURES = new Map<string, "arm64" | "x64">([
   ["x86_64", "x64"],
 ]);
 
-export interface NodeCommandEnvironmentOptions {
+interface NodeCommandEnvironmentOptions {
   environment?: NodeJS.ProcessEnv;
   architecture?: string;
   execPath?: string;
   entryPoint?: string;
 }
 
-export interface NodeCommandEnvironmentResult {
+interface NodeCommandEnvironmentResult {
   managed: boolean;
   runtimeAliasDirectory?: string;
   piCommandPath?: string;

@@ -116,7 +116,7 @@ const CATALOG_SUMMARY_ATTEMPTS = 3;
  * old-space limit the launcher passes, with room for the catalog index, the
  * projections and the transport, so budgeted sessions cannot reach the heap
  * limit the memory exit criterion measures. */
-export const LIVE_RUNTIME_BYTE_BUDGET = 1_536 * 1_024 * 1_024;
+const LIVE_RUNTIME_BYTE_BUDGET = 1_536 * 1_024 * 1_024;
 
 /** Estimated heap one loaded runtime holds per canonical transcript byte.
  * Measured 2026-09-28 on the live Gateway: a 108 MB session cost about 310 MB of
@@ -129,19 +129,19 @@ export const LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR = 3;
  * libuv pool with interactive reads; a third waits its turn instead of thrashing
  * the same disk and heap. The wait, not the load, is what a leaving client
  * abandons. */
-export const MAXIMUM_CONCURRENT_COLD_LOADS = 2;
+const MAXIMUM_CONCURRENT_COLD_LOADS = 2;
 
 /** Heap share of the V8 limit above which a cold load first reclaims idle
  * runtimes, largest first (`G-12`): the exit criterion is that the heap never
  * passes 70% of the configured limit, so the load that would cross it is the
  * moment to give memory back rather than after it crossed. */
-export const HEAP_EVICTION_SHARE = 0.70;
+const HEAP_EVICTION_SHARE = 0.70;
 
 /** Heap share above which a cold runtime load is refused instead of admitted
  * (`G-12`): past this point the load is what would take the process to its
  * limit, and a retryable refusal is cheaper than the OOM it would cause. The
  * byte budget (eviction pressure) deliberately never refuses. */
-export const HEAP_REFUSAL_SHARE = 0.85;
+const HEAP_REFUSAL_SHARE = 0.85;
 
 /** What a refused cold load tells the client to wait (`G-12`). Heap pressure is
  * released by eviction and the collector rather than by the next tick, so the
@@ -152,7 +152,7 @@ export const HEAP_REFUSAL_RETRY_AFTER_MS = 5_000;
 /** Why a runtime was published: the admission that did it, or `oversize` for a
  * transcript whose own estimate exceeds `LIVE_RUNTIME_BYTE_BUDGET`, which is
  * admitted alone because no retirement can make it fit. */
-export type RuntimeLoadReason = "open" | "create" | "automation" | "import" | "oversize";
+type RuntimeLoadReason = "open" | "create" | "automation" | "import" | "oversize";
 
 /** What reclaimed a runtime: the idle lifetime, the runtime count, the byte
  * budget's own pass, the heap-pressure pass (`G-12`), or a lifecycle event the
@@ -220,7 +220,7 @@ export interface CapacityShedRecord {
   retryAfterMs: number;
 }
 
-export interface HeapSample {
+interface HeapSample {
   usedBytes: number;
   limitBytes: number;
 }
@@ -302,7 +302,7 @@ function sessionShowsWork(projection: {
 }
 
 /** Privacy-safe archive lifecycle signal, never a session ID or path. */
-export type ArchiveDiagnostic =
+type ArchiveDiagnostic =
   | { outcome: "failure"; stage: "set" | "remove" | "auto-unarchive" }
   | { outcome: "auto-unarchived"; trigger: "admission" | "backstop" };
 

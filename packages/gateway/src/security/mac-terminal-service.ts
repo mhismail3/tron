@@ -12,7 +12,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { MacTerminalKeys } from "./mac-terminal.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-export const MAC_TERMINAL_PORT = 44222;
+const MAC_TERMINAL_PORT = 44222;
 export interface MacTerminalStatus {
   username: string;
   port: number;
@@ -26,7 +26,7 @@ export interface MacTerminalStatus {
 }
 interface Job { pid?: number; running: boolean }
 
-export function isMacTerminalIPv4(address: string): boolean {
+function isMacTerminalIPv4(address: string): boolean {
   const octets = address.split(".").map(Number);
   return isIP(address) === 4 && octets[0] === 100 && octets[1]! >= 64 && octets[1]! <= 127;
 }

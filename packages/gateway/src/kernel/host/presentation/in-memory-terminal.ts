@@ -27,12 +27,12 @@ function initializeRemoteTuiCapabilities(): void {
   capabilitiesInitialized = true;
 }
 
-export interface InMemoryTerminalWriteEvent {
+interface InMemoryTerminalWriteEvent {
   bytes: number;
   sample: string;
 }
 
-export interface InMemoryTerminalState {
+interface InMemoryTerminalState {
   started: boolean;
   cursorVisible: boolean;
   title: string;

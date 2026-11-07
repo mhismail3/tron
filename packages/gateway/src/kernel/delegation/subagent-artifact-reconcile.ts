@@ -480,7 +480,7 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
 }
 
 
-export function artifactPublishesChildSession(turns: OwnedTurnOwner, value: unknown): boolean {
+function artifactPublishesChildSession(turns: OwnedTurnOwner, value: unknown): boolean {
   const root = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
@@ -505,7 +505,7 @@ export function artifactPublishesChildSession(turns: OwnedTurnOwner, value: unkn
 }
 
 
-export function activityNeedsChildSessionBinding(turns: OwnedTurnOwner, children: readonly ExtensionRunChild[]): boolean {
+function activityNeedsChildSessionBinding(turns: OwnedTurnOwner, children: readonly ExtensionRunChild[]): boolean {
   return children.some((child) => child.childSessionRef === undefined
     || child.children !== undefined && activityNeedsChildSessionBinding(turns, child.children));
 }

@@ -18,7 +18,7 @@ export interface ActivityExpiryFrame {
   expiredActivityIds: string[];
 }
 
-export type ExtensionActivityExpiryCallback = (frame: ActivityExpiryFrame) => void;
+type ExtensionActivityExpiryCallback = (frame: ActivityExpiryFrame) => void;
 
 /** Gateway-owned current/recent partition. Recency is a bounded scheduling
  * projection; canonical history is never removed here. */

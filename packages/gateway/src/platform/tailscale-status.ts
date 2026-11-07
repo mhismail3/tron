@@ -9,7 +9,7 @@ const MAXIMUM_COMMAND_OUTPUT_BYTES = 8 * 1_024 * 1_024;
 /** Tailscale's own path kinds. `offline` is a peer Tailscale knows but cannot
  * reach; `unknown` is no answer at all (no CLI, a timeout, or an address that
  * is not a Tailscale peer, such as the loopback or LAN listener). */
-export type PeerPath = "direct" | "relay" | "offline" | "unknown";
+type PeerPath = "direct" | "relay" | "offline" | "unknown";
 
 export interface BoundedCommandResult {
   /** Exit code, or null when the command never ran to completion. */

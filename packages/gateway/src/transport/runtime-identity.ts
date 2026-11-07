@@ -1,4 +1,4 @@
-export interface GatewayRuntimeIdentity {
+interface GatewayRuntimeIdentity {
   sourceRevision?: string;
   buildFingerprint?: string;
   runtimeEpoch?: string;

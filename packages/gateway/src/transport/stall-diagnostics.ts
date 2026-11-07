@@ -21,7 +21,7 @@ type EventLoopDelayHistogram = ReturnType<typeof monitorEventLoopDelay>;
  * These are observations, not attribution.
  */
 
-export interface StallWindow {
+interface StallWindow {
   gcCount: number;
   gcPauseMs: number;
   gcMaxPauseMs: number;
@@ -45,16 +45,16 @@ export interface HostMemory {
 }
 
 /** What one kernel probe adds to Node's process-memory facts. */
-export type HostKernelFacts = Omit<HostMemory, "freeBytes" | "totalBytes">;
+type HostKernelFacts = Omit<HostMemory, "freeBytes" | "totalBytes">;
 
 /** The latest host sample together with the age of the cache it came from. */
-export interface HostSample {
+interface HostSample {
   memory: HostMemory;
   /** Age of the cached sample when it was read; 0 for a probe taken for this record. */
   ageMs: number;
 }
 
-export interface StallSamplerDependencies {
+interface StallSamplerDependencies {
   /** `performance.eventLoopUtilization`: with two marks, the delta between them. */
   eventLoopUtilization?: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
   /** Installs a GC observer; returns its disposer. */
@@ -177,7 +177,7 @@ const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
 
 /** Heap above this share of the V8 heap limit is the pressure the shedding work
  * has to bound. */
-export const HEAP_WARNING_SHARE = 0.7;
+const HEAP_WARNING_SHARE = 0.7;
 
 /** Heap used moved this many absolute bytes from the last window written at
  * info or above: a growth step no share of a multi-gigabyte limit would round
@@ -192,7 +192,7 @@ const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
 const RSS_INFO_STEP_SHARE = 0.1;
 
 /** An event-loop p99 over this bound in one minute misses the exit criterion. */
-export const EVENT_LOOP_P99_WARNING_MS = 100;
+const EVENT_LOOP_P99_WARNING_MS = 100;
 
 /** A window that recorded a snapshot built although no ready socket held a
  * subscription token for its session. The slot builds one only for a session
@@ -200,7 +200,7 @@ export const EVENT_LOOP_P99_WARNING_MS = 100;
  * regressed slot guard, or a registry and transport subscription record that
  * diverged) rather than an expected condition, which is why it is the one
  * threshold here that has no value to compare against. */
-export const UNAUDIENCED_SNAPSHOT_WARNING = 0;
+const UNAUDIENCED_SNAPSHOT_WARNING = 0;
 
 /** Named entries in the message's topic and runtime detail; the rest are
  * counted, so the record stays one readable line. */
@@ -209,13 +209,13 @@ const MAX_RESOURCE_DETAIL = 8;
 /** One topic's traffic over the sample window. `subscribers` is the highest
  * recipient count a frame on that topic had; a topic whose recipients left is
  * still visible by its frames and bytes. */
-export interface ResourceTopicTraffic {
+interface ResourceTopicTraffic {
   frames: number;
   bytes: number;
   subscribers: number;
 }
 
-export interface ResourceSample {
+interface ResourceSample {
   /** The closed window's length; an in-flight sample that skipped a tick makes
    * it longer than `RESOURCE_SAMPLE_INTERVAL_MS`, and a rate reader has to know
    * that. */
@@ -255,7 +255,7 @@ export interface ResourceSample {
   outboundCoalescedBytes: number;
 }
 
-export interface ResourceSamplerDependencies {
+interface ResourceSamplerDependencies {
   readRuntimes?: () => Promise<readonly ResourceRuntimeEntry[]>;
   durableWrites?: () => { count: number; ms: number };
   memoryUsage?: () => { heapUsed: number; rss: number };
@@ -486,7 +486,7 @@ export class ResourceSampler implements ResourceRecorder {
 /** Where one window's values sit, compared with the window before it. Info is
  * written when a step moves, so a minute that repeats the same steps never
  * reaches disk. */
-export interface ResourceSteps {
+interface ResourceSteps {
   /** Event-loop p99 in bands of `EVENT_LOOP_P99_INFO_STEP_MS`. */
   eventLoopP99Band: number;
   /** Event-loop max in bands of `EVENT_LOOP_MAX_INFO_STEP_MS`. */

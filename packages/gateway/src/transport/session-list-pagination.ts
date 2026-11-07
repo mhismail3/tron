@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import type { SessionArchiveFilter, SessionSummary } from "../protocol/types.js";
 
-export interface SessionListPage {
+interface SessionListPage {
   sessions: SessionSummary[];
   listRevision: number;
   /** The projection token this page's rows belong to. A first page that named
@@ -15,7 +15,7 @@ export interface SessionListPage {
   archivedCount?: number;
 }
 
-export interface SessionListPageSource {
+interface SessionListPageSource {
   readonly generation: string;
   readonly projectionToken: string;
   readonly listRevision: number;

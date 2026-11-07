@@ -4,7 +4,7 @@
  * `isVirtualModel` helper is not re-exported from the pinned package root, so
  * the one check Tron needs is defined here against the same value.
  */
-export const VIRTUAL_MODEL_API = "pi-virtual";
+const VIRTUAL_MODEL_API = "pi-virtual";
 
 /** Whether a selected model is virtual rather than a fixed physical model. */
 export function isVirtualModel(model: { api: string }): boolean {

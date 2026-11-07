@@ -86,7 +86,7 @@ export const LAYER_LABELS: Record<LayerId, string> = {
 
 
 /** Invisible controls are disclosed, not silently stripped from an exact review. */
-export function disclosed(text: string): string {
+function disclosed(text: string): string {
   return redactCredentials(text).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
     character => character === "\n" ? character : character.split("").map(unit => "\\u" + unit.charCodeAt(0).toString(16).padStart(4, "0")).join(""));
 }

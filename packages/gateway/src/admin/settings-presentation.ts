@@ -91,17 +91,17 @@ export interface PresentedResolution extends Omit<Resolution, "keys"> {
   sections: SettingsSectionPresentation[];
 }
 
-export interface PresentationInput {
+interface PresentationInput {
   /** The controls the client names (`renderer.controls`); absent without a renderer. */
   controls?: readonly string[];
 }
 
 /** Who asked, as the iPhone's approval row names it. */
-export function requesterLabel(actor: Actor): string {
+function requesterLabel(actor: Actor): string {
   return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}` : actorLabel(actor);
 }
 
-export function actorLabel(actor: Actor): string {
+function actorLabel(actor: Actor): string {
   return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
 }
 

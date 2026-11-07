@@ -64,7 +64,7 @@ function paths(binding: Binding): readonly (readonly string[])[] {
   return binding.store === "pi-model-ref" ? [["defaultProvider"], ["defaultModel"]]
     : binding.store === "pi" ? [binding.path, ...(binding.qualified ? [binding.qualified] : [])] : [];
 }
-export function admittedProjectSettings(schema: SettingsSchema, raw: Document): Document {
+function admittedProjectSettings(schema: SettingsSchema, raw: Document): Document {
   const admitted: Document = Object.create(null);
   for (const key of schema.KEYS) {
     const binding = key.projectSettable ? key.layers.project : undefined;

@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import type { JsonValue } from "../protocol/types.js";
 
-export interface GatewayClientEvent {
+interface GatewayClientEvent {
   type: "event";
   topic: string;
   sessionId?: string;

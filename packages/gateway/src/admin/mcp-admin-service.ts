@@ -133,7 +133,7 @@ function parseConfig(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-export type McpAdminLog = (level: "warning", message: string, event: string, fields: Record<string, string>) => void;
+type McpAdminLog = (level: "warning", message: string, event: string, fields: Record<string, string>) => void;
 
 export class McpAdminService {
   constructor(private readonly agentDir: string, private readonly cliPath: string, private readonly credentials?: McpCredentialOwner,

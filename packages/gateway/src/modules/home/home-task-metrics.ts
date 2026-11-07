@@ -3,7 +3,7 @@ import { homeTaskLineages } from "./home-task-lineage.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
 import { homeTaskPromptTokens } from "./home-task-spend.js";
 
-export interface HomeTaskMetricsRequest {
+interface HomeTaskMetricsRequest {
   taskId?: string;
   from?: string;
   to?: string;

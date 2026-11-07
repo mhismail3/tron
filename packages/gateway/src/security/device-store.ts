@@ -10,7 +10,7 @@ import { tronHomePath } from "../foundation/tron-home-layout.js";
 
 /** The wrapper credential document written by the credential store and read by
  * the terminal client. One shape rule decides which of these documents is valid. */
-export interface LocalAuthDocument {
+interface LocalAuthDocument {
   version: 2;
   bearerToken: string;
   purpose: "local-wrapper-health";
@@ -33,7 +33,7 @@ export interface DeviceIdentity {
   deviceId: string;
 }
 
-export interface DeviceListEntry {
+interface DeviceListEntry {
   id: string;
   /** Effective display name: custom label, observed Mac name, then pairing name. */
   name: string;
@@ -53,14 +53,14 @@ interface DeviceDocument {
   devices: DeviceRecord[];
 }
 
-export interface EnrollmentDocument {
+interface EnrollmentDocument {
   version: 1;
   code: string;
   expiresAt: string;
   machineId: string;
 }
 
-export interface PairingResult {
+interface PairingResult {
   deviceId: string;
   token: string;
 }

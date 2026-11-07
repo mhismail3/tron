@@ -43,10 +43,10 @@ export const HOME_OPERATING_CONTEXT = [
 ].join("\n");
 
 const HOME_TASK_TOOL_ACTIONS = ["list", "status", "report", "metrics", "steer", "interrupt", "stop", "resume", "rename"] as const;
-export type HomeTaskToolAction = typeof HOME_TASK_TOOL_ACTIONS[number];
+type HomeTaskToolAction = typeof HOME_TASK_TOOL_ACTIONS[number];
 /** One admitted `task` call. Control actions name only the task: the Gateway resolves
  * the worker's current task and operation; `operationId` is an optional race guard. */
-export type HomeTaskToolRequest = { action: HomeTaskToolAction; taskId?: string; text?: string; title?: string; operationId?: string; offset?: number; limit?: number; from?: string; to?: string };
+type HomeTaskToolRequest = { action: HomeTaskToolAction; taskId?: string; text?: string; title?: string; operationId?: string; offset?: number; limit?: number; from?: string; to?: string };
 
 const HOME_TASK_TOOL_DESCRIPTION = "Inspect and control the tasks you delegated. "
   + "list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId and the actions each allows. "

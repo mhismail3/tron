@@ -53,7 +53,7 @@ async function writeProjectionFile(path: string, contents: string): Promise<void
 }
 
 
-export interface QueueAvailability { role: ModelQueueRole; models: QueueModelState[] }
+interface QueueAvailability { role: ModelQueueRole; models: QueueModelState[] }
 
 export type ModelQueueRecord =
   | { event: "model-queue.skip"; role: ModelQueueRole; model: string; reason: string }

@@ -2,11 +2,11 @@ import { execFile } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
-export interface IOSBuildRecord {
+interface IOSBuildRecord {
   id: string; title: string; notes: string; commit: string; branch: string; mode: string;
   time: string; sha256: string; bytes: number; bundle_id: string; manifestURL: string; installURL: string;
 }
-export interface IOSBuildsFeed {
+interface IOSBuildsFeed {
   status: "ready" | "empty" | "unavailable";
   builds: IOSBuildRecord[];
   message?: string;

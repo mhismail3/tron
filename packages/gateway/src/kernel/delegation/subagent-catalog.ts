@@ -36,7 +36,7 @@ export interface SubagentCatalog {
   invalidDefinitionCount?: number;
 }
 
-export interface SubagentCatalogRequest {
+interface SubagentCatalogRequest {
   agentDir: string;
   cwd: string;
   settingsManager: SettingsManager;

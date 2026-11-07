@@ -16,7 +16,7 @@ const MAX_ACTIVE_READS = 16;
 const NEGATIVE_RETRY_MS = 30_000;
 
 type ProviderStatus = "available" | "unsupported" | "unconfigured" | "authentication_required" | "rate_limited" | "unavailable";
-export interface UsageWindow {
+interface UsageWindow {
   id: string;
   label: string;
   usedPercent: number | null;
@@ -27,7 +27,7 @@ export interface UsageWindow {
   resetsAt: string | null;
   windowSeconds: number | null;
 }
-export interface UsageBalance { id: string; label: string; amount: number; currency: string; }
+interface UsageBalance { id: string; label: string; amount: number; currency: string; }
 export interface ProviderUsageSnapshot {
   providerId: string;
   status: ProviderStatus;
@@ -73,7 +73,7 @@ interface ProviderBinding {
   modelSignature: string;
   authBinding: string;
 }
-export interface ProviderUsageOptions {
+interface ProviderUsageOptions {
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   timeoutMs?: number;

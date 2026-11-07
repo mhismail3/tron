@@ -118,7 +118,7 @@ export interface LogRecord {
   error?: LogError;
 }
 
-export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries" | "pid"> {
+interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries" | "pid"> {
   event?: string;
   source?: string;
   kind?: string;
@@ -200,7 +200,7 @@ function durationField(value: unknown): number | undefined {
     : undefined;
 }
 
-export interface LoggerIdentity {
+interface LoggerIdentity {
   runtimeEpoch?: string | undefined;
   payloadVersion?: string | undefined;
 }
@@ -237,7 +237,7 @@ function boundedBytes(value: string, maximum: number): string {
   return `${bytes.subarray(0, maximum - 3).toString("utf8").replace(/\uFFFD$/u, "")}…`;
 }
 
-export function boundedMessage(value: string): string {
+function boundedMessage(value: string): string {
   return boundedBytes(redact(value), MAX_MESSAGE_BYTES);
 }
 

@@ -126,14 +126,14 @@ export interface CatalogMetadataIndexSummary {
 /** One reconcile's result. A candidate the pass could not prove is reported
  * instead of failing the whole cut: the caller keeps its own prior row for that
  * path, because an unprovable file proves neither presence nor absence. */
-export interface CatalogMetadataIndexReconciliation {
+interface CatalogMetadataIndexReconciliation {
   rows: CatalogMetadataIndexRow[];
   unproven: string[];
 }
 
 /** What one reconcile has proven so far. A candidate whose row is missing from
  * `rows` and from `unproven` has not been read yet. */
-export interface CatalogMetadataReconcileProgress {
+interface CatalogMetadataReconcileProgress {
   proven: number;
   unproven: number;
 }
@@ -149,7 +149,7 @@ export interface CatalogMetadataReconcileProgress {
  * it cannot prove, because it discards the whole cut in that case and would
  * otherwise parse every later candidate for nothing. A stopped pass reports the
  * remaining candidates as unproven. */
-export type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcileProgress) => boolean | Promise<boolean>;
+type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcileProgress) => boolean | Promise<boolean>;
 
 /** A handled index failure. The affected rows are left to be rebuilt from
  * canonical files, so nothing else records it; the index write is
