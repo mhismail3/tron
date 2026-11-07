@@ -83,6 +83,9 @@ Commands:
                                     unindexed file beyond packages/<pkg>/layer-baseline.json,
                                     which only shrinks; undeclared pairs are reported only
                                     (tools/layers); never a gate
+  layers tests                      Report only: per Gateway module, test files that
+                                    reach another module's files, test-support, or
+                                    import the registry directly (#2316)
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
   home-layout check|audit|retention|prune|migrate
                                     Tron-home path registry (docs/tron-home.md): check

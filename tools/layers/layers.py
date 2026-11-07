@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -49,9 +50,9 @@ def modules(prefix: str) -> tuple[dict, dict, set]:
     return package, owner, set(result["tracked"])
 
 
-def gateway_graph() -> tuple[set[tuple[str, str]], set[str], set[str]]:
-    """File edges of the Gateway production program, as resolved by the pinned TypeScript compiler,
-    with the program's `src/` files and those that import a Pi SDK (`@earendil-works/*`) file.
+def gateway_graph(config: str = "tsconfig.json", roots: tuple[str, ...] = ("src/",)) -> tuple[set[tuple[str, str]], set[str], set[str]]:
+    """File edges of a Gateway TypeScript program (default: production), as resolved by the pinned
+    compiler, with the program's files under `roots` and those that import a Pi SDK (`@earendil-works/*`) file.
 
     `--explainFiles` names every reason a file is in the program: static, type-only,
     side-effect, re-export and dynamic imports. Type errors do not stop it.
@@ -60,7 +61,7 @@ def gateway_graph() -> tuple[set[tuple[str, str]], set[str], set[str]]:
     node = ROOT / "scripts" / "tron-node"
     if not tsc.is_file():
         raise LayersError(f"missing {tsc.relative_to(ROOT)}; install Gateway dependencies (npm ci in {GATEWAY})")
-    done = subprocess.run([str(node), "exec", "node", str(tsc), "-p", "tsconfig.json", "--noEmit",
+    done = subprocess.run([str(node), "exec", "node", str(tsc), "-p", config, "--noEmit",
                            "--explainFiles", "--pretty", "false"],
                           cwd=ROOT / GATEWAY, capture_output=True, text=True)
     edges, current, files, pi_importers = set(), None, set(), set()
@@ -68,12 +69,12 @@ def gateway_graph() -> tuple[set[tuple[str, str]], set[str], set[str]]:
         if not line.startswith((" ", "\t")):
             # A file header is a bare path; diagnostics carry "(line,col): error".
             current = None if re.search(r"\(\d+,\d+\): error ", line) or not line.strip() else line.strip()
-            if current is not None and current.startswith("src/"):
+            if current is not None and current.startswith(roots):
                 files.add(f"{GATEWAY}/{current}")
             continue
         match = REASON.match(line)
-        if match and current and match.group(1).startswith("src/"):
-            if current.startswith("src/"):
+        if match and current and match.group(1).startswith(roots):
+            if current.startswith(roots):
                 edges.add((f"{GATEWAY}/{match.group(1)}", f"{GATEWAY}/{current}"))
             elif PI_PACKAGE.search(current):
                 pi_importers.add(f"{GATEWAY}/{match.group(1)}")
@@ -121,6 +122,49 @@ def evaluate(gateway: dict, owner: dict, edges: set) -> tuple[Counter, dict]:
             violations[rule] = len(found) if not rule.startswith("two-way") else 1
             examples[rule] = found[0]
     return violations, {"pairs": len(pairs), "fileEdges": len(edges), "examples": examples}
+
+
+def test_boundary(owner: dict) -> int:
+    """Report only (#2316 T2.9): which Gateway test files reach into other modules.
+
+    The program is every `*.test.ts` plus `test-support/` and `test-fixtures/`, compiled with the
+    production options; its edges count like the production graph's. A test file's own module and
+    the shared `gateway/test-support` are counted separately from other modules' files. A direct
+    import of `test-support/gateway-registry` is counted too; helpers that boot it are not followed.
+    Never fails on findings: exit 0, or 2 when the graph cannot be read.
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="tsconfig.tests-", dir=ROOT / GATEWAY,
+                                     delete=True) as config:
+        json.dump({"extends": "./tsconfig.json", "compilerOptions": {"noEmit": True, "rootDir": "."},
+                   "include": ["src/**/*.ts", "test-support/**/*.ts", "test-fixtures/**/*.ts"], "exclude": []}, config)
+        config.flush()
+        edges, files, _ = gateway_graph(Path(config.name).name, ("src/", "test-support/", "test-fixtures/"))
+    support = "gateway/test-support"
+    registry = f"{GATEWAY}/test-support/gateway-registry.ts"
+    rows: dict[str, Counter] = defaultdict(Counter)
+    reached: dict[str, set] = defaultdict(set)
+    for path in sorted(files):
+        if path.endswith(".test.ts") and owner.get(path) not in (None, support):
+            rows[owner[path]]["tests"] += 1
+    for importer, imported in sorted(edges):
+        source, target = owner.get(importer), owner.get(imported)
+        if not importer.endswith(".test.ts") or source in (None, support) or target is None or target == source:
+            continue
+        reached[importer].add("support" if target == support else "other")
+        if imported == registry:
+            reached[importer].add("registry")
+    for importer, kinds in reached.items():
+        for kind in kinds:
+            rows[owner[importer]][kind] += 1
+    total = Counter()
+    print("module\ttests\treach-other-module\treach-test-support\timport-registry")
+    for key, row in sorted(rows.items(), key=lambda item: (-item[1]["other"], item[0])):
+        total.update(row)
+        print(f"{key}\t{row['tests']}\t{row['other']}\t{row['support']}\t{row['registry']}")
+    print(f"layers tests: {total['tests']} Gateway test files in {len(rows)} modules; {total['other']} reach another "
+          f"module's files, {total['support']} reach test-support, {total['registry']} import the registry directly "
+          "(report only, #2316)")
+    return 0
 
 
 def load_baseline(text: str | None, origin: str) -> dict:
@@ -188,11 +232,17 @@ def main(argv: list[str]) -> int:
             base = args[at + 1]
             del args[at:at + 2]
         target = args.pop(0) if args else "gateway"
-        if args or target not in TARGETS:
+        if args or target not in (*TARGETS, "tests") or (target == "tests" and update):
             raise IndexError
     except IndexError:
-        print("usage: scripts/tron layers [gateway|ios] [--update] [--base <ref>]", file=sys.stderr)
+        print("usage: scripts/tron layers [gateway|ios|tests] [--update] [--base <ref>]", file=sys.stderr)
         return 2
+    if target == "tests":
+        try:
+            return test_boundary(modules("gateway/")[1])
+        except LayersError as error:
+            print(f"layers: {error}", file=sys.stderr)
+            return 2
     directory, prefix, label = TARGETS[target]
     baseline_path = f"{directory}/layer-baseline.json"
     command = f"scripts/tron layers {target}"

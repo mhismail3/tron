@@ -88,6 +88,12 @@ a production file not owned by `gateway/pi` (`src/kernel/pi/`) must neither impo
 name `@earendil-works` in its text (a runtime resolution such as `import.meta.resolve`).
 It has no baseline: every finding fails. Tests and test support are outside the program.
 
+**Test boundary** (`scripts/tron layers tests`, report only, #2316 T2.9): the same compiler graph
+over every Gateway `*.test.ts`, `test-support/` and `test-fixtures/` file. Per module it prints how
+many of its test files reach another module's files, the shared `gateway/test-support`, and
+`test-support/gateway-registry` directly (tests that boot it through another helper are not
+counted). It never fails on findings: it becomes an enforced ratchet in T2.9, or is deleted.
+
 The ratchet is the module pair, not its file edges: splitting a file or adding
 code inside an already-violating pair never fails. Edge counts are reported
 (per new violation and in the summary) only. An `unindexed` rule counts files.
@@ -120,6 +126,8 @@ real identity script. It covers:
 - declared, type-only and dynamic TypeScript edges;
 - the Pi seam: type-only and value imports and a resolution string outside it fail,
   its own re-exports pass;
+- the test-boundary report: own-module, cross-module (type-only included), test-support and
+  registry reach, exit 0, and no temporary config left behind;
 - upward, re-export, two-way and same-layer cycle mutations, which fail; undeclared
   downward pairs and imports into L0/L1, which pass; and a move-only split inside a
   baselined pair, which passes;
