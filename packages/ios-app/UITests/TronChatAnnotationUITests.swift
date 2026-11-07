@@ -42,7 +42,12 @@ final class TronChatAnnotationUITests: XCTestCase {
         // so the journey verifies the plain-text markers and block separation.
         // Saving hands the keyboard to the composer; put it away first so the
         // list items are on screen for the drag.
-        if app.keyboards.firstMatch.exists { app.buttons["Dismiss keyboard"].firstMatch.tap() }
+        if app.keyboards.firstMatch.exists {
+            // The transcript dismisses the keyboard interactively.
+            let window = app.windows.firstMatch
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        }
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10), app.debugDescription)
         let startAgain = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
         let endAgain = nextItem.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9))
