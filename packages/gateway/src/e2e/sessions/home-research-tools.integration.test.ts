@@ -1,5 +1,5 @@
-import { workspaceModule } from "../workspace/workspace-module.js";
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { workspaceModule } from "../../workspace/workspace-module.js";
+import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
  * `session_search`, `session_read`, `profile` and shared `read` registered by the
@@ -26,7 +26,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type SessionManager } from "@earendil-works/pi-coding-agent";
@@ -35,16 +35,16 @@ import {
   type FauxProviderHandle, type ToolCall, type Message,
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
-import type { HomeResearchToolDetails } from "../modules/home/home-research-tools.js";
-import type { WebResearchTransport } from "../workspace/web-research.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import type { HomeRequestRecord } from "../../modules/home/home-request-policy.js";
+import type { HomeResearchToolDetails } from "../../modules/home/home-research-tools.js";
+import type { WebResearchTransport } from "../../workspace/web-research.js";
 
-import { ProfileStore } from "../modules/home/profile-store.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { SessionSearchIndex } from "./session-search-index.js";
-import { SessionSearchService } from "./session-search-service.js";
+import { ProfileStore } from "../../modules/home/profile-store.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { SessionSearchIndex } from "../../sessions/session-search-index.js";
+import { SessionSearchService } from "../../sessions/session-search-service.js";
 
 const PROVIDER = "tron-home-research";
 const MODEL_ID = "chat";

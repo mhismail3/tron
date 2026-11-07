@@ -1,10 +1,10 @@
-import { homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import type { ProfileNoteRecord } from "../modules/home/profile-note-contract.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { PROVIDER, MODEL_ID, PROFILE_HEADING, readProfilePage, profileReadResult, report, retireFixtures, holdTerminalWrite, recordCase, Step, fixture, homeActivation, profileResults, profileCall, say, profileSection, latestMaintainerEntryId, profileNotes, noteAt, maintainer, command, listed, itemText, history, change, undo } from "../../test-support/home-profile-fixture.js";
+import type { ProfileNoteRecord } from "../../modules/home/profile-note-contract.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { PROVIDER, MODEL_ID, PROFILE_HEADING, readProfilePage, profileReadResult, report, retireFixtures, holdTerminalWrite, recordCase, Step, fixture, homeActivation, profileResults, profileCall, say, profileSection, latestMaintainerEntryId, profileNotes, noteAt, maintainer, command, listed, itemText, history, change, undo } from "../../../test-support/home-profile-fixture.js";
 
 describe("Tron Home learned profile", () => {
   it("F1/F2: learn preserves evidence; the next activation indexes it and an explicit read carries it verbatim", async () => {

@@ -68,7 +68,7 @@ None of its own; extension artifact and discovery records are rows of
 
 ```bash
 scripts/tron verify --module gateway/extensions
-scripts/tron test gateway src/sessions/tron-modules.integration.test.ts \
+scripts/tron test gateway src/e2e/sessions/tron-modules.integration.test.ts \
   src/admin/package-node-requirement.integration.test.ts
 ```
 

@@ -67,7 +67,7 @@ alias values as Codemode without rewriting them. MCP uses Pi's `mcp.json` and
 `mcp-auth.json` for server and OAuth configuration;
 Tron does not maintain a second server schema. Runtime fixture coverage for
 stdio/HTTP exposure, resource reads, `list_changed`, lazy reconnect, and process
-group cleanup lives in `src/sessions/runtime-registry.integration.test.ts`.
+group cleanup lives in `src/e2e/sessions/runtime-registry.integration.test.ts`.
 When the bounded admin CLI call times out, Tron kills the CLI and every stdio server group it
 started: groups are listed at the timeout and again before the SIGKILL escalation, so a server a
 SIGTERM-ignoring CLI starts in that grace period is still reaped. The explicit admin status command

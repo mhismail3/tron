@@ -1,4 +1,4 @@
-import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 /**
  * Tron Home's memory tools end to end: `zoom`, `date` and `memory_search`
  * registered by the real `tron-home` module, called by a faux model inside a real
@@ -23,25 +23,25 @@ import { createTestRegistry, homeOwnerOf } from "../../test-support/gateway-regi
  * mutated view or a refused tool-result step.
  */
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { waitFor } from "../../test-support/wait-for.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
-import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { TronWorkspace } from "../../workspace/tron-workspace.js";
 import {
   fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall,
   type AssistantMessage, type FauxProviderHandle, type Message, type ToolCall,
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { EPISODIC_DEFAULTS, type EpisodicMessageRecord, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
-import { EpisodicStore } from "../episodic/episodic-store.js";
-import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../modules/home/home-memory.js";
-import type { HomeRequestRecord } from "../modules/home/home-request-policy.js";
-import type { HomeMemoryToolDetails } from "../modules/home/home-memory-tools.js";
-import type { HomeMemoryStatus } from "../protocol/types.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { EPISODIC_DEFAULTS, type EpisodicMessageRecord, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import { EpisodicStore } from "../../episodic/episodic-store.js";
+import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../../modules/home/home-memory.js";
+import type { HomeRequestRecord } from "../../modules/home/home-request-policy.js";
+import type { HomeMemoryToolDetails } from "../../modules/home/home-memory-tools.js";
+import type { HomeMemoryStatus } from "../../protocol/types.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const PROVIDER = "tron-home-tools";
 const MODEL_ID = "chat";

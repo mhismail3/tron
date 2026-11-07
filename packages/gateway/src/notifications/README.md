@@ -112,8 +112,8 @@ deliveries retired as failed with one `schema_upgrade` signal).
 ```bash
 scripts/tron verify --module gateway/notifications
 scripts/tron test gateway src/notifications/notification-inbox.integration.test.ts \
-  src/sessions/runtime-terminal-notifications.integration.test.ts \
-  src/sessions/runtime-registry-notification-read.integration.test.ts
+  src/e2e/sessions/runtime-terminal-notifications.integration.test.ts \
+  src/e2e/sessions/runtime-registry-notification-read.integration.test.ts
 ```
 
 `runtime-terminal-notifications.integration.test.ts` drives a local fake relay and the

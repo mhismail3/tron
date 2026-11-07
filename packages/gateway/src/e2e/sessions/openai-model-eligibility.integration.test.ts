@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type AddressInfo, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -6,9 +6,9 @@ import { join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, type Credential, type CredentialInfo, type CredentialStore } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { OpenAIModelEligibility } from "../../providers/openai-model-eligibility.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 class SessionCredentials implements CredentialStore {
   constructor(

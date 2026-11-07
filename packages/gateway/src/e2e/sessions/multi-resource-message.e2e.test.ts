@@ -2,15 +2,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { UploadStore } from "../machine/upload-store.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { INVOCATION_RECEIPT_TYPE } from "../kernel/receipts/invocation-receipts.js";
-import { displayOwnerOf, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { UploadStore } from "../../machine/upload-store.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { INVOCATION_RECEIPT_TYPE } from "../../kernel/receipts/invocation-receipts.js";
+import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
-/** Repeatable evidence for #311: `npx vitest run src/sessions/multi-resource-message.e2e.test.ts`. */
+/** Repeatable evidence for #311: `npx vitest run src/e2e/sessions/multi-resource-message.e2e.test.ts`. */
 const REPORT = "test-results/multi-resource-message.json";
 
 afterEach(disposeFixtures);

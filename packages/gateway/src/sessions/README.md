@@ -138,8 +138,8 @@ metadata, never JSONL, and never implies parallel execution.
 
 ```bash
 scripts/tron verify --module gateway/run
-scripts/tron test gateway src/sessions/runtime-registry.integration.test.ts \
-  src/sessions/runtime-tool-loadout.integration.test.ts
+scripts/tron test gateway src/e2e/sessions/runtime-registry.integration.test.ts \
+  src/e2e/sessions/runtime-tool-loadout.integration.test.ts
 ```
 
 `home-request-seam.integration.test.ts` streams faux chunks without timer pacing:

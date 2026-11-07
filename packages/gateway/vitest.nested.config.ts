@@ -31,7 +31,7 @@ export const nestedTestFiles = [
   "src/kernel/delegation/managed-subagents.install.integration.test.ts",
   "src/e2e/kernel/delegation/managed-subagents.transform.integration.test.ts",
   "src/kernel/delegation/managed-workflow-children.integration.test.ts",
-  "src/sessions/runtime-terminal-notifications.integration.test.ts",
+  "src/e2e/sessions/runtime-terminal-notifications.integration.test.ts",
   "src/e2e/kernel/delegation/subagent-parity.integration.test.ts",
   "src/kernel/delegation/delegation.lock.integration.test.ts",
   "src/kernel/delegation/process-transcript-stop.integration.test.ts",

@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../kernel/resources/trust-service.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
 
 const disposals: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) await dispose(); });

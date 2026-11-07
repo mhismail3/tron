@@ -1,4 +1,4 @@
-import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 /**
  * Tron Home end to end: the real `EpisodicMemory` behind Home's request seam,
  * driven through the Gateway RPC surface, with a deterministic faux compactor and
@@ -13,8 +13,8 @@ import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-supp
  * Retained artifacts are `test-results/home-activation/report.json` and
  * `test-results/terminal-chat-home/transcript.json`.
  */
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { homeMemoryChange } from "../../test-support/session-settings-change.js";
+import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -29,8 +29,8 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxProviderHand
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 const admissionLimits = vi.hoisted(() => ({ bytes: 200 * 1_024 * 1_024, entries: 100_000 }));
-vi.mock("../modules/home/home-chapter-state.js", async importOriginal => ({
-  ...await importOriginal<typeof import("../modules/home/home-chapter-state.js")>(),
+vi.mock("../../modules/home/home-chapter-state.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../modules/home/home-chapter-state.js")>(),
   get HOME_HARD_BYTES() { return admissionLimits.bytes; },
   get HOME_HARD_ENTRIES() { return admissionLimits.entries; },
 }));
@@ -50,8 +50,8 @@ vi.mock("@earendil-works/pi-coding-agent", async importOriginal => {
 });
 
 const materializationScan = vi.hoisted(() => ({ hold: undefined as undefined | (() => Promise<void>) }));
-vi.mock("../modules/home/home-session-recovery.js", async importOriginal => {
-  const actual = await importOriginal<typeof import("../modules/home/home-session-recovery.js")>();
+vi.mock("../../modules/home/home-session-recovery.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../modules/home/home-session-recovery.js")>();
   return {
     ...actual,
     scanReservedHomeSession: async (...args: Parameters<typeof actual.scanReservedHomeSession>) => {
@@ -63,32 +63,32 @@ vi.mock("../modules/home/home-session-recovery.js", async importOriginal => {
     },
   };
 });
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
-import { EpisodicMemory } from "../episodic/episodic-memory.js";
-import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
-import { ModelQueueOwner } from "../providers/model-queue.js";
-import { ProviderUsageOwner } from "../providers/provider-usage.js";
-import * as homeSource from "../episodic/home-source.js";
-import type { HomeRecord } from "../modules/home/home-owner.js";
-import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
-import { scanReservedHomeSession } from "../modules/home/home-session-recovery.js";
-import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../modules/home/home-request-policy.js";
-import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryView, HomeMemoryEvidencePage } from "../protocol/types.js";
-import { DEFAULT_MAX_UPLOAD_BYTES, type GatewayConfig } from "../config.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { INLINE_IMAGE_BASE64_LIMIT_BYTES } from "../kernel/resources/prompt-bounds.js";
-import { UploadStore } from "../machine/upload-store.js";
-import { DeviceStore } from "../security/device-store.js";
-import { GatewayServer } from "../transport/server.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { RuntimeSlot } from "../kernel/run/runtime-slot.js";
-import { RunInvocations } from "../kernel/run/run-invocations.js";
-import { invocationReceipts } from "../kernel/receipts/invocation-receipts.js";
-import { logHomeDiagnostic } from "../modules/home/home-diagnostic.js";
-import { GatewayLogger } from "../transport/logger.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../../episodic/episodic-contract.js";
+import { EpisodicMemory } from "../../episodic/episodic-memory.js";
+import { createQueueSummarizer } from "../../episodic/episodic-compactor.js";
+import { ModelQueueOwner } from "../../providers/model-queue.js";
+import { ProviderUsageOwner } from "../../providers/provider-usage.js";
+import * as homeSource from "../../episodic/home-source.js";
+import type { HomeRecord } from "../../modules/home/home-owner.js";
+import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
+import { scanReservedHomeSession } from "../../modules/home/home-session-recovery.js";
+import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
+import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryView, HomeMemoryEvidencePage } from "../../protocol/types.js";
+import { DEFAULT_MAX_UPLOAD_BYTES, type GatewayConfig } from "../../config.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { INLINE_IMAGE_BASE64_LIMIT_BYTES } from "../../kernel/resources/prompt-bounds.js";
+import { UploadStore } from "../../machine/upload-store.js";
+import { DeviceStore } from "../../security/device-store.js";
+import { GatewayServer } from "../../transport/server.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
+import { RunInvocations } from "../../kernel/run/run-invocations.js";
+import { invocationReceipts } from "../../kernel/receipts/invocation-receipts.js";
+import { logHomeDiagnostic } from "../../modules/home/home-diagnostic.js";
+import { GatewayLogger } from "../../transport/logger.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";

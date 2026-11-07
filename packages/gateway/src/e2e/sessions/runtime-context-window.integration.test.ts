@@ -1,14 +1,14 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { CONTEXT_WINDOW_ENTRY } from "../providers/context-window-policy.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { CONTEXT_WINDOW_ENTRY } from "../../providers/context-window-policy.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /** Wait for the catalog owner's first published cut: a read that lands before
  * it refuses retryably, and no reader walks the folder (G-1c). */

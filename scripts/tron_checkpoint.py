@@ -21,7 +21,7 @@ OUTCOMES = [
         "testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
         "testImageOnlySteerLeavesTheQueueOnceDelivered"], []),
     ("Home continuity and current Profile", ["testHomeStatusShowsHostPressureAndWorkers"], [
-        "src/sessions/home-memory-tools.e2e.test.ts",
+        "src/e2e/sessions/home-memory-tools.e2e.test.ts",
         "src/e2e/modules/home/home-profile-triage.integration.test.ts"]),
     ("Controls: settings persistence and exact native review", [
         "testSettingsOutsideChangesAndBuiltinExtensionPersist"], [
@@ -29,7 +29,7 @@ OUTCOMES = [
     ("Files/artifacts/research: uploads, reopen and source reads", [
         "testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen"], [
         "src/display/display.store.lock.integration.test.ts",
-        "src/sessions/home-research-tools.integration.test.ts"]),
+        "src/e2e/sessions/home-research-tools.integration.test.ts"]),
     ("Independent SSH access and protocol/release identity", [
         "testMacReplacementRowAndProgressFollowTheJournal"], [
         "src/e2e/security/mac-terminal.e2e.test.ts",

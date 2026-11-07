@@ -1,7 +1,7 @@
-import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../test-support/gateway-registry.js";
+import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
-import { homeMemoryChange } from "../../test-support/session-settings-change.js";
+import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
+import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
@@ -9,17 +9,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import type { GatewayConfig } from "../config.js";
-import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, VIEW_BLOCK_LINES } from "../episodic/cache-layout.js";
-import { EPISODIC_COMPACT_PROMPT } from "../episodic/episodic-compactor.js";
-import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
-import { HOME_MEMORY_VIEW_MARKER } from "../modules/home/home-memory.js";
-import { HOME_NONCE_MARKER, markHomeMemoryCache, type HomeRequestRecord } from "../modules/home/home-request-policy.js";
-import type { HomeStatus } from "../protocol/types.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import type { GatewayConfig } from "../../config.js";
+import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, VIEW_BLOCK_LINES } from "../../episodic/cache-layout.js";
+import { EPISODIC_COMPACT_PROMPT } from "../../episodic/episodic-compactor.js";
+import { EPISODIC_DEFAULTS } from "../../episodic/episodic-contract.js";
+import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
+import { HOME_NONCE_MARKER, markHomeMemoryCache, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
+import type { HomeStatus } from "../../protocol/types.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 // Home's cached view and the summarizer's stretch-only calls, proved on the
 // wire (#491, #2228): Home turns and the episodic summarizer's calls go through pi-ai's real Anthropic

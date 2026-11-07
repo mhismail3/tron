@@ -140,7 +140,7 @@ scripts/tron test gateway src/providers/provider-usage.integration.test.ts \
 ```
 
 `src/transport/openai-model-eligibility.integration.test.ts` and
-`src/sessions/openai-model-eligibility.integration.test.ts` cover the account list.
+`src/e2e/sessions/openai-model-eligibility.integration.test.ts` cover the account list.
 Live sign-in and the current account's membership remain manual maintainer checks.
 
 ## Not here
