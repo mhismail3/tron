@@ -18,7 +18,7 @@ and the two cross-module contracts live in this directory.
 | `Sources/UI/` (`Components/`, `Theme/`) | shared presentation | [Presentation](../Sources/UI/README.md) |
 | `Sources/UI/Chat/` | session shell, dashboard, chat, Manage Session, Home | [Chat](../Sources/UI/Chat/README.md) |
 | `Sources/UI/Settings/` | settings, renderer, providers, integrations | [Settings](../Sources/UI/Settings/README.md) |
-| `Sources/UI/Automations/` | dashboard selector, Automations, shared accepted-mutation primitives | [Automations](../Sources/UI/Automations/README.md) |
+| `Sources/UI/Automations/` | dashboard selector, Automations | [Automations](../Sources/UI/Automations/README.md) |
 | `Sources/UI/Onboarding/` | pairing, setup, workspace and model pickers | [Onboarding](../Sources/UI/Onboarding/README.md) |
 | `Sources/UI/Terminal/` | SSH/tmux Mac Terminal | [Terminal](../Sources/UI/Terminal/README.md) |
 | `Sources/UI/SwiftApps/` | Swift-app runner and card | [Swift apps](../Sources/UI/SwiftApps/README.md) |

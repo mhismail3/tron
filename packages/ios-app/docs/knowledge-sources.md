@@ -14,8 +14,8 @@ Markdown; no iOS catalog, corpus cache, sync owner or manifest reader exists.
 ## Profile and memory
 
 Profile remains a separate Home surface backed by its active note store. Its
-shared presentation identities and form/mutation primitives also serve settings,
-uploads and connection setup; those primitives are not a corpus reader.
+shared presentation identities also serve settings, uploads and connection setup;
+they are not a corpus reader.
 Home memory, chapters, zoom and memory search keep their existing owners.
 
 ## Validation
