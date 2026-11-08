@@ -1,6 +1,6 @@
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { appendFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 import { resolveTronHome } from "../tron-home.js";
 
@@ -11,7 +11,8 @@ import { resolveTronHome } from "../tron-home.js";
  * core offline. It never feeds anything back and never throws into its caller.
  *
  * It runs only on the Debug Gateway, only when `scripts/tron dev --proof-traffic` set TRON_PROOF_TRAFFIC=1:
- * any other channel (Stable, a Release build) ignores the variable, and the Stable home is refused outright.
+ * any other channel (Stable, a Release build) ignores the variable, and a home inside the Stable home (also
+ * through a symlink) or one that does not resolve is refused.
  * Records go to <Debug home>/gateway/proof-traffic/<block>/<yyyy-mm-dd>.jsonl (UTC days), at most
  * DAILY_RECORD_CAP per block and day, keeping the newest RETAINED_DAYS days. Seams pass typed values only
  * (times, trigger shapes, policies); free text and identities are never recorded.
@@ -27,9 +28,23 @@ export interface TrafficRecorder {
 /** The recorder this environment allows, or null (the default everywhere but an opted-in Debug Gateway). */
 export function openTrafficRecorder(environment: NodeJS.ProcessEnv = process.env, now: () => number = Date.now): TrafficRecorder | null {
   if (environment.TRON_PROOF_TRAFFIC !== "1" || environment.TRON_GATEWAY_CHANNEL !== "dev") return null;
-  const home = resolveTronHome(environment);
-  if (home === resolve(homedir(), ".tron")) return null;
+  let home: string;
+  try { home = resolveTronHome(environment); } catch { return null; }
+  // Never inside the Stable home, however it is reached (a symlink, a subdirectory).
+  const stable = physical(resolve(homedir(), ".tron"));
+  const target = physical(home);
+  if (target === stable || target.startsWith(`${stable}${sep}`)) return null;
   return new FileTrafficRecorder(tronHomePath(home, "gateway/proof-traffic"), now);
+}
+
+/** The path with symlinks resolved, also a dangling one and below a path that does not exist yet. */
+function physical(path: string, depth = 0): string {
+  try { return realpathSync(path); } catch { /* not all of it exists */ }
+  try {
+    if (depth < 40 && lstatSync(path).isSymbolicLink()) return physical(resolve(dirname(path), readlinkSync(path)), depth + 1);
+  } catch { /* the path itself does not exist */ }
+  const parent = dirname(path);
+  return parent === path ? path : join(physical(parent, depth), basename(path));
 }
 
 class FileTrafficRecorder implements TrafficRecorder {
@@ -80,6 +95,8 @@ let shared: TrafficRecorder | null | undefined;
 
 /** Records one seam call through the process's recorder; a no-op unless the recorder is enabled. */
 export function recordSeam(block: string, seam: string, input: unknown, output: unknown): void {
-  if (shared === undefined) shared = openTrafficRecorder();
+  if (shared === undefined) {
+    try { shared = openTrafficRecorder(); } catch { shared = null; }
+  }
   shared?.record(block, seam, input, output);
 }

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,9 +11,8 @@ import { DAILY_RECORD_CAP, RETAINED_DAYS, TRAFFIC_SCHEMA, openTrafficRecorder } 
  */
 const homes: string[] = [];
 const home = (): string => { const dir = mkdtempSync(join(tmpdir(), "tron-proof-traffic-")); homes.push(dir); return dir; };
-const saved = { ...process.env };
 afterEach(() => {
-  process.env = { ...saved };
+  vi.unstubAllEnvs();
   vi.resetModules();
   for (const dir of homes.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -33,12 +32,21 @@ describe("proof traffic recorder", () => {
     expect(openTrafficRecorder({ ...debug, TRON_PROOF_TRAFFIC: "true" })).toBeNull();
     expect(openTrafficRecorder({ ...debug, TRON_DATA_DIR: join(homedir(), ".tron") })).toBeNull();
     expect(openTrafficRecorder({ TRON_PROOF_TRAFFIC: "1", TRON_GATEWAY_CHANNEL: "dev", TRON_HOME_NAME: ".tron" })).toBeNull();
+    // Inside the Stable home by a subdirectory or a symlink, or a home that does not resolve: refused, never thrown.
+    expect(openTrafficRecorder({ ...debug, TRON_DATA_DIR: join(homedir(), ".tron", "proof-scratch") })).toBeNull();
+    const link = join(home(), "stable-link");
+    symlinkSync(join(homedir(), ".tron"), link);
+    expect(openTrafficRecorder({ ...debug, TRON_DATA_DIR: link })).toBeNull();
+    expect(openTrafficRecorder({ ...debug, TRON_DATA_DIR: join(link, "nested") })).toBeNull();
+    expect(openTrafficRecorder({ ...debug, TRON_DATA_DIR: "relative/home" })).toBeNull();
     expect(openTrafficRecorder(debug)).not.toBeNull();
   });
 
   it("records a seeded schedule journey that replays to the recorded outputs", async () => {
     const dataDir = home();
-    Object.assign(process.env, { TRON_PROOF_TRAFFIC: "1", TRON_GATEWAY_CHANNEL: "dev", TRON_DATA_DIR: dataDir });
+    vi.stubEnv("TRON_PROOF_TRAFFIC", "1");
+    vi.stubEnv("TRON_GATEWAY_CHANNEL", "dev");
+    vi.stubEnv("TRON_DATA_DIR", dataDir);
     vi.resetModules();
     const recorded = await import("../automations/schedule.js");
     let seed = 5;
@@ -71,7 +79,7 @@ describe("proof traffic recorder", () => {
     expect(records.every((r) => r.block === "schedule/occurrence" && ["next", "first", "classify"].includes(r.seam as string))).toBe(true);
 
     // Replay: the same TypeScript, recorder off, gives every recorded output back.
-    process.env = { ...saved };
+    vi.unstubAllEnvs();
     vi.resetModules();
     const plain = await import("../automations/schedule.js");
     for (const record of records) {

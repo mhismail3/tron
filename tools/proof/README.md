@@ -119,8 +119,9 @@ block will replace TypeScript logic, the exact typed inputs and the output the T
 calls are not seams.
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
-  `TRON_PROOF_TRAFFIC=1` for that launch. The Gateway honours it only with `TRON_GATEWAY_CHANNEL=dev` and
-  never for the Stable home, so Stable and Release builds ignore it. It is an environment variable rather
+  `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
+  flag is refused while it runs (stop first). The Gateway honours it only with `TRON_GATEWAY_CHANNEL=dev` and
+  never for a home inside the Stable home (also through a symlink), so Stable and Release builds ignore it. It is an environment variable rather
   than a typed setting because every settings key appears in iOS Settings and the settings tool; making it
   a setting is a later product decision.
 - **Format:** JSONL under `<Debug home>/gateway/proof-traffic/<block>/<yyyy-mm-dd>.jsonl` (UTC days), one

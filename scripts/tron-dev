@@ -281,6 +281,12 @@ case "$command" in
     "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway --version "$admitted_version" --fingerprint "$admitted_fingerprint"
     ;;
   start|restart)
+    # A live supervisor keeps the recorder setting it was started with across promotions: changing it needs a
+    # stop and a fresh start.
+    if [[ "$PROOF_TRAFFIC" == yes ]] && supervisor_live; then
+      echo "--proof-traffic applies to a fresh start; the running Debug Gateway keeps its recorder setting (scripts/tron dev stop first)" >&2
+      exit 64
+    fi
     # Measure the source before building; a dirty tree still stages its full
     # HEAD. record-source re-measures after the build and records the epoch
     # dirty if either measurement is, or if HEAD moved (#140).
