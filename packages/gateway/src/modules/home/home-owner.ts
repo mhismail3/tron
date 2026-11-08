@@ -48,7 +48,6 @@ import { admitHomeTaskToolRequest, homeSystemPrompt } from "./tron-home-extensio
 import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
 import type { ProfileStore } from "./profile-store.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
-import { RESEAL_LEDGER, type ChapterReseal } from "../../sessions/retired-format-migration.js";
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
 const MAXIMUM_RECORD_BYTES = 16 * 1_024 * 1_024;
@@ -1602,7 +1601,6 @@ export class HomeOwner {
       homeId: record.homeId,
       ledgerRevision: record.bindingRevision,
       chapters,
-      resealLedger: tronHomePath(this.options.tronHome, RESEAL_LEDGER),
     };
   }
 
@@ -1612,10 +1610,6 @@ export class HomeOwner {
     if (current) void current.owner.dispose();
     const source = () => this.readHomeSource();
     const proofs = new HomeSourceProofs();
-    const diagnostic = this.options.memoryDiagnostic;
-    const resealed = (record: ChapterReseal) => diagnostic?.({ event: "episodic.chapter-resealed", level: "info",
-      message: "A sealed Home chapter rewritten by the retired-format migration was re-proven against its recorded original; its cursor pins the rewritten bytes",
-      counts: { beforeBytes: record.before.size, afterBytes: record.after.size, values: record.values.length } });
     const owner = new HomeMemory({
       workspace: this.options.workspace,
       sessionId: homeId,
@@ -1631,7 +1625,7 @@ export class HomeOwner {
         return undefined;
       },
       sessionSource: {
-        read: async function* (cursor, limits) { yield* readCanonicalHomeDeltas(await source(), cursor, limits, resealed); },
+        read: async function* (cursor, limits) { yield* readCanonicalHomeDeltas(await source(), cursor, limits); },
         branchAtCursor: async function* (cursor, limits) { yield* readCanonicalHomeIndex(await source(), cursor, limits, undefined, proofs); },
       },
       modelSummarizer: this.options.memorySummarizer,

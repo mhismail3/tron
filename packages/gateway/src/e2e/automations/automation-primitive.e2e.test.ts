@@ -107,7 +107,7 @@ it("real interactive schedule mutations still require and obey confirmation", as
   await gateway.settled(sessionId);
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
 });
-it("real RPC expiry bounds timeline/list and the scheduler never fires an expired automation", async () => {
+it("real RPC expiry bounds list and the scheduler never fires an expired automation", async () => {
   const { gateway, phone } = await fixture();
   const status = (await phone.request("home.status", {})).result;
   const now = Date.now();
@@ -117,9 +117,6 @@ it("real RPC expiry bounds timeline/list and the scheduler never fires an expire
     trigger: { kind: "interval", everySeconds: 60, anchorAt: new Date(now + 6_000).toISOString() }, action: { kind: "sessionPrompt", text: "Must not fire after expiry." },
   } });
   expect(created.ok, JSON.stringify(created)).toBe(true);
-  const timeline = await phone.request("automation.timeline.list", { from: new Date(now).toISOString(), through: new Date(now + 3_600_000).toISOString(), displayTimezone: "UTC", limit: 200 });
-  expect(timeline.ok, JSON.stringify(timeline)).toBe(true);
-  expect(timeline.result.items).toHaveLength(0);
   await waitFor(async () => (await phone.request("automation.list", {})).result.items[0].activation === "expired", "generic expiry projection");
   const expired = (await phone.request("automation.get", { automationId: created.result.id })).result;
   expect(expired.activation).toBe("expired");
@@ -162,27 +159,6 @@ it("resolving an uncertain run and internal state mutation cannot silently resum
   expect(resolved.activation).toBe("paused");
   await expect(store.mutateState(definition.id, current => ({ ...current, activation: "enabled" }))).rejects.toThrow("explicit enable");
   expect((await store.setActivation(definition.id, resolved.revision, "enabled")).activation).toBe("enabled");
-});
-it("real persisted provenance expiry trims the timeline before the scheduler's expiry pass", async () => {
-  let { gateway, phone } = await fixture();
-  const status = (await phone.request("home.status", {})).result;
-  const now = Date.now();
-  const created = await phone.request("automation.create", { commandId: gateway.commandId(), definition: {
-    name: "Persisted finite schedule", activation: "enabled", target: { kind: "home", homeId: status.homeId, routeGeneration: status.routeGeneration },
-    trigger: { kind: "interval", everySeconds: 300, anchorAt: new Date(now + 300_000).toISOString() }, action: { kind: "sessionPrompt", text: "Finite fixture." },
-  } });
-  expect(created.ok).toBe(true);
-  const file = join(gateway.tronHome, "gateway", "automations", `${created.result.id}.json`);
-  const record = JSON.parse(await readFile(file, "utf8"));
-  const root = gateway.root;
-  await gateway.dispose({ keepRoot: true }); gateways.splice(gateways.indexOf(gateway), 1);
-  await writeFile(file, JSON.stringify({ ...record, provenance: { kind: "home", homeId: status.homeId, expiresAt: new Date(now + 600_000).toISOString() } }), { mode: 0o600 });
-  gateway = await startLockGateway("automation-primitive", { automations: true, root }); gateways.push(gateway);
-  phone = await gateway.connect("reopened");
-  const timeline = await phone.request("automation.timeline.list", { from: new Date(now).toISOString(), through: new Date(now + 3_600_000).toISOString(), displayTimezone: "UTC", limit: 200 });
-  expect(timeline.ok, JSON.stringify(timeline)).toBe(true);
-  expect(timeline.result.items).toHaveLength(1);
-  expect(timeline.result.items[0]).toMatchObject({ kind: "occurrence", scheduledFor: new Date(now + 300_000).toISOString() });
 });
 it("expired persisted definitions do not consume the generic definition-count cap", async () => {
   const { root, definition } = await storeFixture();

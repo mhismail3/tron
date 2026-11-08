@@ -87,28 +87,6 @@ export interface ConnectionSetupOperation {
   updatedAt: string;
 }
 
-export interface ProviderAdmissionObservation {
-  credentialAvailability: CredentialAvailability;
-  providerIdentity: ProviderIdentityAdmission;
-  /** Accepted only alongside an admitted identity and exact setup revision. */
-  providerDisplayName?: string;
-}
-
-export type ConnectionCommand =
-  | { kind: "setup.begin"; commandId: string; instanceId: string; definitionId: string; method: ConnectionSetupMethod }
-  | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy; raindropCollections?: RaindropCollectionMapping[] }
-  | { kind: "setup.cancel"; commandId: string; operationId: string; instanceId: string }
-  | { kind: "policy.update"; commandId: string; instanceId: string; expectedSetupRevision: number; policy: ConnectionPolicy; raindropCollections?: RaindropCollectionMapping[] }
-  | { kind: "disconnect"; commandId: string; instanceId: string };
-
-export type ConnectionAction =
-  | { operation: "connections.list"; request: Record<string, never> }
-  | { operation: "connections.setup.begin"; request: Omit<Extract<ConnectionCommand, { kind: "setup.begin" }>, "kind"> }
-  | { operation: "connections.setup.complete"; request: Omit<Extract<ConnectionCommand, { kind: "setup.complete" }>, "kind"> }
-  | { operation: "connections.setup.cancel"; request: Omit<Extract<ConnectionCommand, { kind: "setup.cancel" }>, "kind"> }
-  | { operation: "connections.policy.update"; request: Omit<Extract<ConnectionCommand, { kind: "policy.update" }>, "kind"> }
-  | { operation: "connections.disconnect"; request: Omit<Extract<ConnectionCommand, { kind: "disconnect" }>, "kind"> };
-
 export interface ConnectionOwnerSnapshot {
   definitions: IntegrationDefinition[];
   /** Presentation projection: credential refs never leave the owner. */
@@ -136,11 +114,7 @@ export interface ConnectionOwnerState {
 /** Shared identifier only; credential bytes remain with the Mac adapter. */
 export const CONNECTOR_CREDENTIAL_SERVICE = "Tron Connector Credentials";
 
-/** Existing owner operations consumed by tools, RPCs and connector adapters. */
+/** The read-only projection consumed by the agent `connections` tool. */
 export interface ConnectionAccess {
   snapshot(): Promise<ConnectionOwnerSnapshot>;
-  invoke(action: ConnectionAction): Promise<unknown>;
-  execute(command: ConnectionCommand): Promise<unknown>;
-  resolveInstance(instanceId: string): Promise<ConnectionInstance>;
-  recordProviderObservation(instanceId: string, setupRevision: number, observation: ProviderAdmissionObservation): Promise<void>;
 }

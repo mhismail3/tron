@@ -1,45 +1,19 @@
-import { randomUUID } from "node:crypto";
-import { lstat, mkdir } from "node:fs/promises";
-import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson } from "../foundation/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../foundation/secure-json.js";
 import { GatewayError } from "../errors.js";
 import {
   CONNECTION_STATE_SCHEMA_VERSION, CONNECTOR_CREDENTIAL_SERVICE,
   type ConnectionAccess,
-  type ConnectionAction,
   type ConnectionCapabilityStatus,
-  type ConnectionCommand,
-  type ConnectionHealth,
-  type ConnectionInstance,
   type ConnectionInstanceProjection,
-  type ConnectionOwnerReceipt,
   type ConnectionOwnerSnapshot,
   type ConnectionOwnerState,
-  type ConnectionSetupOperation,
-  type ProviderAdmissionObservation,
   type IntegrationDefinition,
 } from "../modules/integrations/contract.js";
-import {
-  assertConnectionId,
-  assertDefinitionId,
-  assertCredentialReference,
-  connectionRequestHash,
-  normalizeProviderDisplayName,
-  validateRaindropCollectionMappings,
-  validateConnectionPolicy,
-  validateConnectionState,
-  validateIntegrationDefinition,
-} from "./connection-contract.js";
+import { validateConnectionState, validateIntegrationDefinition } from "./connection-contract.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-const MAX_RECEIPTS = 256;
 const STATE_MAX_BYTES = 4 * 1_048_576;
 
-function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
-function conflict(message: string): GatewayError { return new GatewayError("conflict", message); }
-function unsupported(message: string): GatewayError { return new GatewayError("unsupported", message); }
-function now(): string { return new Date().toISOString(); }
 function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTION_STATE_SCHEMA_VERSION, stateRevision: 0, instances: {}, setupOperations: {}, receipts: {} }; }
 function statePath(tronHome: string): string { return tronHomePath(tronHome, "gateway/integrations", "connections.json"); }
 function copy<T>(value: T): T { return structuredClone(value); }
@@ -78,35 +52,7 @@ function capabilityAvailability(
   return { availability: "available" };
 }
 
-function validateCommand(command: ConnectionCommand): void {
-  if (!command || typeof command !== "object") throw invalid("Connection command is invalid");
-  if (typeof command.commandId !== "string" || command.commandId.length < 8 || command.commandId.length > 160) throw invalid("Connection commandId is invalid");
-  if (command.kind === "setup.begin") { assertConnectionId(command.instanceId); assertDefinitionId(command.definitionId); if (!["oauth", "token", "browser"].includes(command.method)) throw invalid("Connection setup method is invalid"); return; }
-  if (command.kind === "setup.complete") {
-    assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); if (typeof command.providerAccountId !== "string" || command.providerAccountId.length < 1 || command.providerAccountId.length > 256) throw invalid("Provider account is invalid");
-    if (command.scope !== undefined && (typeof command.scope !== "string" || command.scope.length < 1 || command.scope.length > 512)) throw invalid("Connection scope is invalid");
-    assertCredentialReference(command.credentialRef); validateConnectionPolicy(command.policy);
-    if (command.raindropCollections !== undefined) {
-      if (command.scope !== undefined) throw invalid("Raindrop collection mappings replace the single connector scope");
-      validateRaindropCollectionMappings(command.raindropCollections);
-    }
-    return;
-  }
-  if (command.kind === "setup.cancel") { assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); return; }
-  assertConnectionId(command.instanceId);
-  if (command.kind === "policy.update") {
-    validateConnectionPolicy(command.policy);
-    if (command.raindropCollections !== undefined) validateRaindropCollectionMappings(command.raindropCollections);
-    if (!Number.isSafeInteger(command.expectedSetupRevision) || command.expectedSetupRevision < 1) throw invalid("Policy updates require the observed setup revision");
-  }
-}
-
-function resultForInstance(instance: ConnectionInstance): Record<string, unknown> {
-  return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), ...(instance.raindropCollections ? { raindropCollections: copy(instance.raindropCollections) } : {}), ...(instance.providerDisplayName ? { providerDisplayName: instance.providerDisplayName } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
-}
-
 export class ConnectionOwner implements ConnectionAccess {
-  private readonly mutex = new AsyncMutex();
   private readonly definitions: IntegrationDefinition[];
   constructor(
     private readonly tronHome: string,
@@ -116,103 +62,10 @@ export class ConnectionOwner implements ConnectionAccess {
     if (new Set(this.definitions.map(definition => definition.id)).size !== this.definitions.length) throw new Error("Integration definition IDs must be unique");
   }
 
-  /** This owner does not initialize or migrate state at Gateway startup. A
-   * missing file is an empty projection; publication only follows an explicit
-   * accepted setup/policy/disconnect command. */
+  /** Read-only: this owner never initializes, migrates or writes state. A
+   * missing file is an empty projection. */
   async snapshot(): Promise<ConnectionOwnerSnapshot> {
-    return this.mutex.run(async () => {
-      const state = await this.load();
-      return this.snapshotOf(state);
-    });
-  }
-
-  async invoke(action: ConnectionAction): Promise<unknown> {
-    if (action.operation === "connections.list") return this.snapshot();
-    // The wire operation names are explicit; do not accept a generic enable or
-    // disable alias that could bypass setup/policy/disconnect ownership.
-    const expected: Record<string, ConnectionCommand["kind"]> = {
-      "connections.setup.begin": "setup.begin", "connections.setup.complete": "setup.complete", "connections.setup.cancel": "setup.cancel",
-      "connections.policy.update": "policy.update", "connections.disconnect": "disconnect",
-    };
-    const kind = expected[action.operation];
-    if (!kind) throw unsupported("Unsupported connection operation");
-    return this.execute({ kind, ...action.request } as ConnectionCommand);
-  }
-
-  async execute(command: ConnectionCommand): Promise<unknown> {
-    try { validateCommand(command); } catch (error) { if (error instanceof GatewayError) throw error; throw invalid(error instanceof Error ? error.message : "Connection command is invalid"); }
-    return this.mutex.run(async () => {
-      const state = await this.load();
-      const operation = command.kind;
-      const hash = connectionRequestHash(operation, command);
-      const prior = state.receipts[command.commandId];
-      if (prior) {
-        if (prior.operation !== operation || prior.requestHash !== hash) throw conflict("Connection commandId was already used for a different request");
-        return copy(prior.result);
-      }
-      const value = this.apply(state, command);
-      const receipt: ConnectionOwnerReceipt = { operation, requestHash: hash, createdAt: now(), result: value as ConnectionOwnerReceipt["result"] };
-      state.receipts[command.commandId] = receipt;
-      const entries = Object.entries(state.receipts).sort(([, left], [, right]) => left.createdAt.localeCompare(right.createdAt));
-      for (const [id] of entries.slice(0, Math.max(0, entries.length - MAX_RECEIPTS))) delete state.receipts[id];
-      state.stateRevision += 1;
-      validateConnectionState(state);
-      await this.save(state);
-      return copy(value);
-    });
-  }
-
-  /** Adapter-owned admission observations are bounded and revision-fenced. They
-   * are never inferred from setup intent and are not polled during projection.
-   * An observation that repeats the current projection is not a state
-   * transition, so a read that re-observes it saves nothing. */
-  async recordProviderObservation(instanceId: string, setupRevision: number, observation: ProviderAdmissionObservation): Promise<void> {
-    assertConnectionId(instanceId);
-    return this.mutex.run(async () => {
-      const state = await this.load();
-      const instance = state.instances[instanceId];
-      if (!instance || instance.setupRevision !== setupRevision || !instance.policy.enabled || instance.health === "disconnected") throw conflict("Connection instance is no longer admitted");
-      if (!["available", "unavailable", "unknown"].includes(observation.credentialAvailability) || !["admitted", "mismatch", "unknown"].includes(observation.providerIdentity)) throw invalid("Provider admission observation is invalid");
-      const admittedDisplayName = observation.credentialAvailability === "available"
-        && observation.providerIdentity === "admitted"
-        ? normalizeProviderDisplayName(observation.providerDisplayName)
-        : undefined;
-      const health: ConnectionHealth = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
-      // All four projected fields already hold these values (an absent
-      // observation field projects as `unknown`, so it is compared that way),
-      // so this is not a state transition: a read that re-observes the same
-      // provider result must not bump `updatedAt`/`stateRevision` or fsync.
-      if ((instance.credentialAvailability ?? "unknown") === observation.credentialAvailability
-        && (instance.providerIdentity ?? "unknown") === observation.providerIdentity
-        && instance.providerDisplayName === admittedDisplayName
-        && instance.health === health) return;
-      instance.credentialAvailability = observation.credentialAvailability;
-      instance.providerIdentity = observation.providerIdentity;
-      if (admittedDisplayName !== undefined) {
-        instance.providerDisplayName = admittedDisplayName;
-      } else {
-        delete instance.providerDisplayName;
-      }
-      instance.health = health;
-      instance.updatedAt = now();
-      state.stateRevision += 1;
-      validateConnectionState(state);
-      await this.save(state);
-    });
-  }
-
-  /** Adapter owners may resolve the private envelope internally. Callers must
-   * never serialize the returned credential reference. */
-  async resolveInstance(instanceId: string): Promise<ConnectionInstance> {
-    assertConnectionId(instanceId);
-    return this.mutex.run(async () => {
-      const state = await this.load();
-      const instance = state.instances[instanceId];
-      if (!instance) {
-        throw conflict("Connection instance is unknown");
-      }
-      return copy(instance);
-    });
+    return this.snapshotOf(await this.load());
   }
 
   private snapshotOf(state: ConnectionOwnerState): ConnectionOwnerSnapshot {
@@ -233,57 +86,6 @@ export class ConnectionOwner implements ConnectionAccess {
     return { definitions: this.definitions.map(copy), instances, setupOperations: Object.values(state.setupOperations).map(copy), capabilities, stateRevision: state.stateRevision };
   }
 
-  private apply(state: ConnectionOwnerState, command: ConnectionCommand): unknown {
-    const timestamp = now();
-    if (command.kind === "setup.begin") {
-      const definition = this.definitions.find(item => item.id === command.definitionId);
-      if (!definition || !definition.setupMethods.includes(command.method)) throw unsupported("Setup method is not supported by this integration");
-      const existing = state.instances[command.instanceId]; if (existing && existing.health !== "disconnected") throw conflict("Connection instance already exists; use a new instance ID");
-      const active = Object.values(state.setupOperations).find(item => item.instanceId === command.instanceId && item.status === "pending");
-      if (active) {
-        if (active.definitionId !== command.definitionId || active.method !== command.method) throw conflict("Pending setup belongs to another integration or method");
-        return { operationId: active.operationId, instanceId: active.instanceId, definitionId: active.definitionId, method: active.method, status: active.status };
-      }
-      const operation: ConnectionSetupOperation = { operationId: randomUUID(), instanceId: command.instanceId, definitionId: command.definitionId, method: command.method, status: "pending", createdAt: timestamp, updatedAt: timestamp };
-      state.setupOperations[operation.operationId] = operation;
-      return { operationId: operation.operationId, instanceId: operation.instanceId, definitionId: operation.definitionId, method: operation.method, status: operation.status };
-    }
-    if (command.kind === "setup.complete") {
-      const operation = state.setupOperations[command.operationId];
-      if (!operation || operation.instanceId !== command.instanceId) throw conflict("Setup operation is unknown or belongs to another instance");
-      if (operation.status !== "pending") throw conflict("Setup operation is no longer pending");
-      const definition = this.definitions.find(item => item.id === operation.definitionId); if (!definition) throw unsupported("Integration definition is unavailable");
-      if (definition.implementation === "knowledge-connector" && !command.credentialRef.startsWith(`connector:${definition.id.slice("knowledge.".length)}:`)) throw invalid("Credential reference does not belong to this integration");
-      const existing = state.instances[command.instanceId]; if (existing && existing.health !== "disconnected") throw conflict("Connection instance already exists");
-      if (command.raindropCollections !== undefined && definition.id !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
-      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.raindropCollections ? { raindropCollections: copy(command.raindropCollections) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "setup-required" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
-      state.instances[instance.id] = instance; operation.status = "completed"; operation.updatedAt = timestamp;
-      return resultForInstance(instance);
-    }
-    const operation = command.kind === "setup.cancel" ? state.setupOperations[command.operationId] : undefined;
-    if (command.kind === "setup.cancel") {
-      if (!operation || operation.instanceId !== command.instanceId) throw conflict("Setup operation is unknown or belongs to another instance");
-      if (operation.status !== "pending") throw conflict("Setup operation is no longer pending"); operation.status = "cancelled"; operation.updatedAt = timestamp;
-      return { operationId: operation.operationId, instanceId: operation.instanceId, status: operation.status };
-    }
-    const instance = state.instances[command.instanceId]; if (!instance) throw conflict("Connection instance is unknown");
-    if (instance.health === "disconnected") throw conflict("Connection instance is disconnected");
-    if (command.kind === "policy.update") {
-      // Compare under the same mutex as publication, after receipt replay. A
-      // stale sheet cannot restore permissions changed by another owner client.
-      if (instance.setupRevision !== command.expectedSetupRevision) throw conflict("Connection changed; reopen its settings before saving");
-      if (command.raindropCollections !== undefined) {
-        if (instance.definitionId !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
-        instance.raindropCollections = copy(command.raindropCollections);
-        delete instance.scope;
-      }
-      instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "setup-required" : "disabled"; instance.credentialAvailability = "unknown"; instance.providerIdentity = "unknown"; delete instance.providerDisplayName; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
-      return resultForInstance(instance);
-    }
-    instance.health = "disconnected"; instance.policy = { ...instance.policy, enabled: false }; delete instance.providerDisplayName; instance.updatedAt = timestamp; instance.setupRevision += 1;
-    return resultForInstance(instance);
-  }
-
   private async load(): Promise<ConnectionOwnerState> {
     const path = statePath(this.tronHome);
     let read;
@@ -296,17 +98,5 @@ export class ConnectionOwner implements ConnectionAccess {
       validateConnectionState(loaded);
       return loaded;
     } catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
-  }
-
-  private async save(state: ConnectionOwnerState): Promise<void> {
-    const root = tronHomePath(this.tronHome, "gateway/integrations");
-    try {
-      const info = await lstat(root);
-      if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o700) throw new GatewayError("conflict", "Connection state directory must be owner-only");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await mkdir(root, { recursive: true, mode: 0o700 });
-    }
-    await durableAtomicWriteJson(statePath(this.tronHome), state, 0o600);
   }
 }

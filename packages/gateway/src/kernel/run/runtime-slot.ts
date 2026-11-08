@@ -124,7 +124,7 @@ import { currentExtensionOwner, currentInvocationContext } from "../host/extensi
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../delegation/managed-producer.js";
 import { type ExtensionArtifactRejectionReason } from "../projection/extension-run-projection.js";
 import { ChildSessionAdmission } from "../delegation/child-session-admission.js";
-import { extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../receipts/extension-activity-history.js";
+import { extensionActivityReceipts, extensionReceiptActivity } from "../receipts/extension-activity-history.js";
 import { makeContextDeliveryReceipt } from "../receipts/context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt, receiptJSON } from "../receipts/invocation-receipts.js";
 import { inputMessageOrigin, type InputTrigger } from "../host/input-admission.js";
@@ -3660,14 +3660,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return sessionPages.transcriptPage(this.pageSource(), before, expectedNextEntryId, expectedRuntimeGeneration, expectedLeafEntryId, branchCut);
   }
 
-  extensionActivityHistory(cursor?: string, limit = 25, filter?: { ownerId?: string; runId?: string; state?: "completed" | "failed" | "stopped" | "rejected" }): ExtensionActivityHistoryPage {
-    return sessionPages.extensionActivityHistory(this.pageSource(), cursor, limit, filter);
-  }
-
-  extensionActivityDetail(activityId: string, expectedHistoryRevision?: string): ExtensionRunActivity | undefined {
-    return sessionPages.extensionActivityDetail(this.pageSource(), activityId, expectedHistoryRevision);
-  }
-
   processHistory(cursor?: string, limit = 25, filter?: { kind?: "command" | "subagent"; state?: SessionProcessActivity["lifecycle"]["state"] }): SessionProcessHistoryPage {
     return sessionPages.processHistory(this.pageSource(), cursor, limit, filter);
   }
@@ -3690,8 +3682,6 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       get bashMetadata() { return slot.bashMetadata; },
       get forkBoundary() { return slot.forkBoundary; },
       internalWakeSemantic: (...args) => slot.internalWakeSemantic(...args),
-      get id() { return slot.id; },
-      get extensionActivities() { return slot.ownedTurns.extensionActivities; },
     };
   }
 

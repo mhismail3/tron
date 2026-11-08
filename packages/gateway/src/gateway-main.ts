@@ -546,7 +546,7 @@ const automationScheduler = new AutomationScheduler(automationStore, automationE
 automationSchedulerForArchive = automationScheduler;
 // Parts of the `automation-recovery` startup step, as a separate event so the
 // startup steps of one restart still sum without double counting.
-automations = new AutomationService(automationStore, automationScheduler, sessions, undefined, (step, durationMs, detail) => {
+automations = new AutomationService(automationStore, automationScheduler, sessions, (step, durationMs, detail) => {
   logger.log("info", `Automation recovery ${step} took ${Math.round(durationMs)} ms${detail ? ` (${detail})` : ""}`, {
     event: "automation.recovery-step", source: "automations", step, durationMs,
   });
@@ -804,7 +804,6 @@ const service = new GatewayService({
   workRegistry,
   automations,
   knowledge,
-  connections,
   home: home(),
   mcpAdmin: new McpAdminService(
     config.agentDir,

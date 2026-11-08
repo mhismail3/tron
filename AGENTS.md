@@ -105,7 +105,7 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
    Every commit is gated by `scripts/tron verify --changed` (the changed modules' tests) plus the E2E journeys that prove any behaviour you delete; add partial
    or full checks as needed; serial or long checks run once per batch. Obtain required ACCEPTs. Never retry-to-green.
 2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push origin HEAD:main`; never
-   force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. A batch red is filed
+   force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. Landing bar: no worse than fetched main — every remaining red also fails on main and has a filed issue; never a new red. A batch red is filed
    against its owning module, which root-fixes it or reverts its change.
 3. Close the issue with the change, what it deleted or retired, actual commands and results, and residual risk; link long logs (`test-results/`, internal workspace).
    Incidents also name the one-step diagnosing signal, added to its owning test and a row in its module README Signals (`packages/gateway/docs/observability.md`).
@@ -128,10 +128,10 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 - A blocker is a bug in the system. Unblock it right away. If the same kind of failure
   has happened before, or the fix is cheap, fix the mechanism behind it, changing an existing script,
   test or rule before adding one. Otherwise record it and move on. Delete guards that cost more than they prevent.
-- Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Independent review covers test changes and security/data-loss/irreversible changes.
+- Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Review scales with risk: full independent ACCEPT for test changes, persisted data/`~/.tron`, wire protocol, security, data-loss and irreversible changes; visual-only changes whose screenshots the maintainer approved get a light diff review.
 - Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
   file-length targets or blanket base-lock runs. Build ahead on branches. [Health](docs/HEALTH.md) metrics are signals, never gates; never drop a capability to move a metric.
-- Default 2h tasks, 30-minute SHA/change/blocker check-ins; land green or settle in ≤25 lines.
+- Default 2h tasks, 30-minute SHA/change/blocker check-ins; land at the no-worse-than-main bar or settle in ≤25 lines.
   Gateway/Mac/iPhone rebuilds wait until all workers stop/park cleanly; Home coordinates, the maintainer executes lockstep delivery.
 
 ## Where things go
