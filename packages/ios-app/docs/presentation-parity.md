@@ -71,8 +71,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   [Presentation-scoped state](#presentation-scoped-state).
 - **Sheet direction.** All progressive disclosure (pickers, skill/command containers, custom chat
   UI, default sheets) moves to one generic content-sized custom sheet, built ground-up as the
-  managed-sheet owner. Until it lands, managed sheets keep the medium/large detents
-  below; a surface never gets its own sheet patch.
+  managed-sheet owner. Until it lands, managed sheets keep the medium/large detents below
+  (`TronPadSheetMode` on iPadOS 27); a surface never gets its own sheet patch.
 - **Presentation haptics.** Managed sheets (including nested and interpreted Swift-app sheets)
   and system pickers play one medium, full-intensity impact through `TronHaptics`, respecting System Haptics.
   Semantic interaction patterns and exclusions are in the [UI haptic map](../Sources/UI/README.md#haptic-map).
