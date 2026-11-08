@@ -27,7 +27,6 @@ import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
 import type { DisplayOwner } from "../display/display-modules.js";
 import type { RuntimeSlot } from "../kernel/run/runtime-slot.js";
-import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../kernel/receipts/extension-activity-history.js";
 import { SESSION_ARCHIVE_CAPABILITY } from "../sessions/session-archive-store.js";
 import {
   PROCESS_ACTIVITY_CAPABILITY,
@@ -69,14 +68,12 @@ import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { admitPromptText, admitResourceInvocations } from "../kernel/resources/resource-invocation.js";
 import type { AutomationService } from "../automations/automation-service.js";
-import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../automations/types.js";
+import { AUTOMATIONS_CAPABILITY } from "../automations/types.js";
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
-import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import type { ProfileStore } from "../modules/home/profile-store.js";
-import type { ConnectionAccess, ConnectionAction } from "../modules/integrations/contract.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import type { HomeOwner } from "../modules/home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
@@ -239,9 +236,8 @@ const restartDrainMethods = new Set([
   "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
-  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
-  "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "connections.list",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
+  "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
 ]);
 
 /** One session export at a time (`G-12`): an export streams a whole transcript
@@ -319,7 +315,6 @@ export interface GatewayServiceDependencies {
   automations?: AutomationService;
   knowledge?: ProfileStore;
   /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
-  connections?: Pick<ConnectionAccess, "invoke">;
   /** Tron Home's designation owner; absent only in a Gateway without one. */
   home?: HomeOwner;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
@@ -461,7 +456,6 @@ export class GatewayService {
   releaseClient(clientID: string): void {
     this.sessionListPages.releaseClient(clientID);
     this.automationPages.releaseClient(clientID);
-    this.dependencies.automations?.releaseClient(clientID);
     this.processTranscriptLeases.releaseClient(clientID);
   }
 
@@ -530,7 +524,6 @@ export class GatewayService {
         BROWSER_LIVE_VIEW_CAPABILITY,
         NATIVE_LIVE_VIEW_CAPABILITY,
         "extension-presentation.v1",
-        EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
         PROCESS_ACTIVITY_CAPABILITY,
         PROCESS_ACTIVITY_HISTORY_CAPABILITY,
         "session-history-pages.v1",
@@ -549,8 +542,7 @@ export class GatewayService {
         ...(this.updateService.channel === "stable" ? [MAC_REPLACE_CAPABILITY] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
-        ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
-        ...(this.dependencies.connections ? ["connections.v1"] : []),
+        ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY] : []),
         ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY] : []),
         ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY] : []),
       ],
@@ -702,11 +694,6 @@ export class GatewayService {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home context accepts no parameters");
         return safeJson(this.requireHome().contextStatus());
       }
-      case "connections.list": {
-        if (!this.dependencies.connections) throw new GatewayError("unsupported", "Connection management is unavailable");
-        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "connections.list accepts no parameters");
-        return safeJson(await this.dependencies.connections.invoke({ operation: method, request: {} } as ConnectionAction));
-      }
       case "mcp.list": {
         const scope = await this.mcpScope(params);
         const work = this.workRegistry?.begin({ kind: "rpc-mutation", method, hostEpoch: this.workRegistry.runtimeEpoch });
@@ -764,15 +751,6 @@ export class GatewayService {
           this.mcpChanged(scope);
           return safeJson(stored);
         });
-      case "connections.setup.begin":
-      case "connections.setup.complete":
-      case "connections.setup.cancel":
-      case "connections.policy.update":
-      case "connections.disconnect": {
-        const connections = this.dependencies.connections;
-        if (!connections) throw new GatewayError("unsupported", "Connection management is unavailable");
-        return this.mutation(client, method, params, async () => safeJson(await connections.invoke({ operation: method, request: params } as ConnectionAction)));
-      }
       case "system.logs":
         return safeJson({ records: this.dependencies.logger.recent(integer(params.limit ?? 200, "limit", 1, 1_000)) });
       case "system.logs.export":
@@ -1183,29 +1161,6 @@ export class GatewayService {
         const limit = params.limit === undefined ? 5 : integer(params.limit, "limit", 1, 20);
         return safeJson(this.requireAutomations().schedulePreview(params.trigger, after, limit));
       }
-      case "automation.timeline.list": {
-        if (Object.keys(params).some((key) => !["from", "through", "displayTimezone", "cursor", "limit"].includes(key))) {
-          throw new GatewayError("invalid_request", "Automation timeline accepts only from, through, displayTimezone, cursor, and limit");
-        }
-        if (params.cursor === null) throw new GatewayError("invalid_request", "Timeline cursor must be omitted or a string");
-        const cursor = params.cursor === undefined ? undefined : string(params.cursor, "cursor", { max: 64 });
-        const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 200);
-        const from = string(params.from, "from", { max: 64 });
-        const through = string(params.through, "through", { max: 64 });
-        const displayTimezone = string(params.displayTimezone, "displayTimezone", { max: 128 });
-        validateTimelineWindow(from, through, displayTimezone);
-        this.requireObserverAdmission(client);
-        const page = this.requireAutomations().timelinePage(
-          client.id,
-          from,
-          through,
-          displayTimezone,
-          cursor,
-          limit,
-        );
-        this.requireObserverAdmission(client);
-        return safeJson(page);
-      }
       case "automation.get": {
         if (Object.keys(params).some((key) => key !== "automationId")) throw new GatewayError("invalid_request", "Automation get accepts only automationId");
         return safeJson(this.requireAutomations().get(string(params.automationId, "automationId", { max: 64 })));
@@ -1480,32 +1435,6 @@ export class GatewayService {
         return safeJson(after !== undefined
           ? slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId)
           : slot.transcriptPage(before, expectedNextEntryId, expectedRuntimeGeneration, expectedLeafEntryId));
-      }
-      case "session.extensionActivity.list": {
-        const slot = await this.openedSlot(client, params);
-        const cursor = optionalString(params.cursor, "cursor", 200);
-        const limit = params.limit === undefined ? 25 : integer(params.limit, "limit", 1, 50);
-        const ownerId = optionalString(params.ownerId, "ownerId", 256);
-        const runId = optionalString(params.runId, "runId", 256);
-        const state = params.state === undefined ? undefined : oneOf(params.state, "state", ["completed", "failed", "stopped", "rejected"] as const);
-        try {
-          return safeJson(slot.extensionActivityHistory(cursor, limit, {
-            ...(ownerId ? { ownerId } : {}), ...(runId ? { runId } : {}), ...(state ? { state } : {}),
-          }));
-        } catch (error) {
-          if (error instanceof Error && /cursor conflict/u.test(error.message)) {
-            throw new GatewayError("conflict", "Extension activity history changed; restart paging", true);
-          }
-          throw new GatewayError("invalid_request", error instanceof Error ? error.message : "Invalid extension activity history request");
-        }
-      }
-      case "session.extensionActivity.get": {
-        const slot = await this.openedSlot(client, params);
-        const activityId = string(params.activityId, "activityId", { max: 256 });
-        const generation = optionalString(params.historyRevision, "historyRevision", 64);
-        const activity = slot.extensionActivityDetail(activityId, generation);
-        if (!activity) throw new GatewayError("not_found", "Extension activity is not available");
-        return safeJson({ activity });
       }
       case "session.processHistory.list": {
         const slot = await this.openedSlot(client, params);
@@ -2110,8 +2039,6 @@ export class GatewayService {
         });
       case "models.custom.get":
         return safeJson(await this.dependencies.modelConfig.get());
-      case "models.custom.validate":
-        return safeJson(await this.dependencies.modelConfig.validate(params.document));
       case "models.custom.put":
         return this.mutation(client, method, params, async () => {
           const result = await this.asTronWrite([{ kind: "models" }], () => this.dependencies.modelConfig.put(params.document));

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   CONNECTION_STATE_SCHEMA_VERSION, CONNECTION_DEFINITION_SCHEMA_VERSION,
   type ConnectionPolicy, type IntegrationDefinition, type ConnectionInstance,
@@ -8,20 +7,16 @@ import {
 const ID = /^[A-Za-z0-9._:-]{1,160}$/;
 const CREDENTIAL_REF = /^connector:[A-Za-z0-9._-]{1,64}:[A-Za-z0-9._:-]{1,256}$/;
 
-export function assertConnectionId(value: unknown, label = "connection id"): asserts value is string {
+function assertConnectionId(value: unknown, label = "connection id"): asserts value is string {
   if (typeof value !== "string" || !ID.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
 }
 
-export function assertCredentialReference(value: unknown): asserts value is string {
+function assertCredentialReference(value: unknown): asserts value is string {
   if (typeof value !== "string" || !CREDENTIAL_REF.test(value)) throw new Error("Credential reference is invalid");
 }
 
-export function assertDefinitionId(value: unknown): asserts value is string {
+function assertDefinitionId(value: unknown): asserts value is string {
   if (typeof value !== "string" || !ID.test(value)) throw new Error("Definition ID is invalid");
-}
-
-export function connectionRequestHash(operation: string, request: unknown): string {
-  return createHash("sha256").update(operation).update("\0").update(JSON.stringify(request)).digest("hex");
 }
 
 function bounded(value: unknown, label: string, maximum: number): asserts value is string {
@@ -29,13 +24,13 @@ function bounded(value: unknown, label: string, maximum: number): asserts value 
 }
 
 /** Optional provider metadata never participates in account authorization. */
-export function normalizeProviderDisplayName(value: unknown): string | undefined {
+function normalizeProviderDisplayName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const label = value.trim();
   return label.length > 0 && label.length <= 320 && !/[\u0000-\u001f\u007f]/.test(label) ? label : undefined;
 }
 
-export function validateConnectionPolicy(value: unknown): asserts value is ConnectionPolicy {
+function validateConnectionPolicy(value: unknown): asserts value is ConnectionPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Connection policy is invalid");
   const policy = value as Record<string, unknown>;
   if (typeof policy.enabled !== "boolean" || typeof policy.allowWrites !== "boolean" || typeof policy.paidAccessApproved !== "boolean" || typeof policy.recurringApproved !== "boolean"
@@ -78,7 +73,7 @@ function validateConnectionInstance(value: unknown): asserts value is Connection
   if (item.lastError !== undefined) bounded(item.lastError, "Connection error", 4_096);
 }
 
-export function validateRaindropCollectionMappings(value: unknown): asserts value is RaindropCollectionMapping[] {
+function validateRaindropCollectionMappings(value: unknown): asserts value is RaindropCollectionMapping[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 64) throw new Error("Raindrop collection mappings must contain 1..64 entries");
   const ids = new Set<string>();
   const homes = new Set<string>();
