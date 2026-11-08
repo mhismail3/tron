@@ -19,9 +19,7 @@ inferred from pairing identity, browser preferences, or the current project.
   Installed Swift apps are owned by `SwiftAppStore` under `state/apps/`
   ([swift-apps.md](swift-apps.md)); agents use the `swift_app` tool.
 - `internal/machine-group-id`: one shared Stable/Debug physical-machine
-  identity. The retired `~/.tron-machine-group-id` is never read on startup and
-  is never a fallback: while it exists, startup refuses and asks the operator to
-  retire it. The value is opaque identity bytes, not a credential.
+  identity. The value is opaque identity bytes, not a credential.
 - `internal/subagents/`: the installed delegated provider's existing
   `PI_SUBAGENTS_TEMP_ROOT` root; its `async-subagent-runs/` child is the only
   lifecycle subtree admitted by Gateway. Provider project/session artifacts,
@@ -140,10 +138,5 @@ unimplemented namespace API or by arbitrary filesystem tools today.
 
 The pinned `pi-subagents` provider reads `PI_SUBAGENTS_TEMP_ROOT` before its
 module initializes and derives its provider-owned trees from that root. Gateway
-startup sets `<tronHome>/internal/subagents` only after a read-only inventory
-proves the legacy temporary provider root has no retained work. Project/session
-artifact history remains at its configured location; it is not part of the
-temporary-store move. Discovery never includes similarly named test directories
-or retired copies. If retained artifacts are found, startup fails with a
-migration-required diagnostic; it never silently adopts a new root. The gate and
-its inventory live in `delegated-root-migration.ts`.
+startup sets `<tronHome>/internal/subagents` before Pi loads any extension.
+Project/session artifact history remains at its configured location.

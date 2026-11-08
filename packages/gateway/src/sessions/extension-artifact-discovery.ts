@@ -230,13 +230,13 @@ export class ExtensionArtifactDiscovery {
       try {
         const metadata = await stat(projectRoot);
         if (metadata.isDirectory()) roots.set(projectRoot, metadata);
-      } catch { /* isolated pre-cutover fixture */ }
+      } catch { /* a fixture without a project artifact root */ }
     }
     try {
       let examined = 0;
-      // A configured provider root is the sole ambient source after the
-      // cutover. Temporary/project roots are only scanned by test fixtures
-      // that omit the explicit production root.
+      // A configured provider root is the sole ambient source. Temporary and
+      // project roots are only scanned by test fixtures that omit the explicit
+      // production root.
       if (this.options.delegatedArtifactRoot) {
         // The exact root was admitted above; do not inspect unrelated temp
         // trees that could become a second delegated authority.

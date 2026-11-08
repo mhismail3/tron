@@ -17,10 +17,7 @@ RPCs ([MCP servers](mcp.md)). Model-provider credentials and sign-in likewise st
 with their existing provider owners and Provider Settings.
 
 Jev uses Pi's `ModelRuntime.classify()` and provider credential store, not a
-ConnectionOwner definition. Existing legacy `knowledge.jev` rows stay hidden and
-refuse instance-specific setup. The owner's existing accepted-write retirement
-removes those rows and setup operations in the same revision; reads and rejected
-writes remove nothing. No Keychain item is read or deleted by that retirement.
+ConnectionOwner definition.
 
 ## Generic envelope contract
 

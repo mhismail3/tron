@@ -1,11 +1,11 @@
 import { readFile, realpath } from "node:fs/promises";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
-import { startScriptedChild, type ChildModelServer } from "../../../test-support/home-task-subagent-child.js";
-import { expectScenario } from "../../../test-support/lock-projections.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../test-support/scenario-lock.js";
-import { waitFor } from "../../../test-support/wait-for.js";
+import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
+import { startScriptedChild, type ChildModelServer } from "../../../../test-support/home-task-subagent-child.js";
+import { expectScenario } from "../../../../test-support/lock-projections.js";
+import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
 
 /**
  * Kernel subagent lock (packages/gateway/docs/scenario-locks.md#locks) for the `gateway/delegation`
@@ -28,7 +28,7 @@ import { waitFor } from "../../../test-support/wait-for.js";
  * an ordered `{ narrowedGolden }` placeholder in the inline trace.
  */
 
-const MODULE = "gateway/delegation";
+const MODULE = "gateway/e2e";
 const BOUND = { boundMs: 30_000 };
 const servers: ChildModelServer[] = [];
 afterEach(async () => {
