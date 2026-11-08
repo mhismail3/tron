@@ -43,9 +43,13 @@ try {
   const core = join(work, "core.js");
   execFileSync(DAFNY, ["translate", "js", "--no-verify", "--include-runtime", full.translate, "-o", join(work, "core")], { cwd: root, env, stdio: "ignore" });
   const run = spawnSync(cfg.cmd[0], cfg.cmd.slice(1).map((c) => c.replaceAll("{core}", core)), { cwd: REPO, env, encoding: "utf8", maxBuffer: 1 << 26 });
+  if (run.error) fail(`shadow command did not run: ${run.error.message}`);
+  // The comparison exits 1 on a mismatch (its output still says how many agreed); anything else is a crash.
+  if (run.signal || ![0, 1].includes(run.status)) fail(`shadow command ${run.signal ? `killed by ${run.signal}` : `exited ${run.status}`}: ${`${run.stdout}${run.stderr}`.slice(-200)}`);
   let j; try { j = JSON.parse(run.stdout.slice(run.stdout.indexOf("{"))); } catch { fail(`unparsable shadow output: ${`${run.stdout}${run.stderr}`.slice(0, 200)}`); }
   const compared = j.requests, mismatches = j.requests - j.agree;
-  if (!(compared > 0) || !Number.isInteger(mismatches)) fail(`nothing compared (${JSON.stringify({ compared, mismatches })})`);
+  if (!(compared > 0) || !Number.isInteger(mismatches) || mismatches < 0) fail(`nothing compared (${JSON.stringify({ compared, mismatches })})`);
+  if ((mismatches === 0) !== (run.status === 0)) fail(`shadow command exited ${run.status} but reported ${mismatches} mismatches`);
   const status = {
     status: mismatches === 0 ? "match" : "mismatch", compared, unit: "inputs", mismatches, firstMismatch: j.diffs?.[0] ?? null,
     source: cfg.source, realTraffic: false, windowDays: 0, inputsHash: blockHash(root, full),

@@ -9,7 +9,8 @@ For every block with a mutate.json, with the pinned toolchain and the repository
    match and not STALE, REVIEW.json for the current block hash with every law ACCEPT.
 
 So an edit to a block that does not re-run its mutation check, shadow and review, or regenerate its
-packet, fails here. The reviewer transcript check reads Pi's session store; it is not re-derived here.
+packet, fails here. The review row is verified against the reviewer's transcript in this machine's Pi
+session store (read only), so the test needs that transcript.
 """
 
 from __future__ import annotations
@@ -42,13 +43,16 @@ class CoreBlocksTest(unittest.TestCase):
             with self.subTest(block=block):
                 packet = tron("packet", block)
                 self.assertEqual(packet.returncode, 0, packet.stderr)
+                rows = {line.split(" | ")[0][2:]: line for line in packet.stdout.splitlines() if line.startswith("| ")}
+                # The review row is verified against the reviewer's transcript in this machine's Pi session store.
+                self.assertRegex(rows["Independent review"], r"^\| Independent review \| ACCEPT by ", "review not verified here (transcript missing or stale)")
                 self.assertEqual((directory / "LAWS.md").read_text(), packet.stdout,
                                  f"LAWS.md is not the current packet: run scripts/tron proof packet {block} --write")
-                rows = {line.split(" | ")[0][2:]: line for line in packet.stdout.splitlines() if line.startswith("| ")}
                 self.assertRegex(rows["Proof (pinned Dafny, --verify-included-files)"], r"\| PASS: ")
                 self.assertRegex(rows["Mutation check"], r"^\| Mutation check \| PASS: ")
                 self.assertRegex(rows["Shadow"], r"^\| Shadow \| match: ")
                 self.assertNotIn("STALE", rows["Shadow"])
+                self.assertNotIn("not checked", rows["Shadow"])
                 current = re.search(r"Block hash: `([0-9a-f]{16})`", packet.stdout).group(1)
                 review = json.loads((directory / "REVIEW.json").read_text())
                 self.assertEqual(review["packetHash"], current, "REVIEW.json is for another version of the block")
