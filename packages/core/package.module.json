@@ -1,0 +1,7 @@
+{
+  "layer": "L1",
+  "purpose": "Proof blocks: Dafny laws (laws/) and the pure, total blocks that refine them (blocks/), checked by scripts/tron proof check.",
+  "owns": [
+    "**"
+  ]
+}

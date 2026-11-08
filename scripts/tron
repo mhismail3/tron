@@ -94,6 +94,8 @@ Commands:
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
   proof bootstrap|doctor            Install (bootstrap) or re-verify (doctor) the pinned Dafny
                                     proof toolchain in the per-user cache (tools/proof)
+  proof check [<block>...] [--json] Check proof blocks (packages/core/blocks) and the blocks
+                                    below them with the pinned toolchain; cached per worktree
   health [<rev>] [--baseline <rev>] [--github] [--evidence] [--deploy-log <jsonl>]
          [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
                                     Read-only outcome and diagnostic health signals diffed
@@ -250,6 +252,7 @@ case "$cmd" in
   proof)
     case "${1:-}" in
       bootstrap|doctor) exec /bin/bash "$ROOT/tools/proof/bootstrap.sh" "$@" ;;
+      check) shift; use_pinned_node; exec node "$ROOT/tools/proof/lawcheck/lawcheck.mjs" "$@" ;;
       *) usage >&2; exit 64 ;;
     esac
     ;;

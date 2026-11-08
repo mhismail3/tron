@@ -1,0 +1,1 @@
+{"interface": ["laws/arith/Divide.dfy"], "impl": ["blocks/arith/divide/Block.dfy"], "deps": []}
