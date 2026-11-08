@@ -40,8 +40,9 @@ re-check every block on the new pin in the same change; a solver bump is a full 
 --verify-included-files` per block on the pinned wrapper after `doctor` passes. A block's key is the
 sha256 of the pin, the checker source and flags, the block's own files and the interface files of its
 transitive deps; a passing key is cached in `<git dir>/proof/lawcheck-cache.json` (per worktree), so a
-cached block is not re-run. It refuses unknown deps, cycles, and any `include` outside the block's own
-files and its deps' interfaces. Exit 0: every block passed; 1: a block failed (its verifier output is
+cached block is not re-run. It refuses unknown deps, cycles, and any `include` (comments are blanked
+first) from an impl file outside the block's own files and its deps' interfaces, or from an interface
+file outside the interface files of the block and its deps. Exit 0: every block passed; 1: a block failed (its verifier output is
 printed and blocks above it do not run); 2: usage, block graph or toolchain error.
 
 ## Verify
@@ -55,4 +56,5 @@ the user cache when present, otherwise downloads it.
 `scripts/tron-node exec node --test tools/proof/tests/lawcheck.test.mjs` runs `proof check` on a copy of
 two fixture blocks (`tests/fixtures/lawcheck`, test input, not blocks): cold and cached runs, a proof-only
 edit re-checks one block, a law edit re-checks the block above, a deliberately false law fails and the
-block above does not run, and an include of a dep's implementation is refused.
+block above does not run with the verifier's postcondition error, and an include of a dep's
+implementation is refused, also behind a comment and from a laws file.

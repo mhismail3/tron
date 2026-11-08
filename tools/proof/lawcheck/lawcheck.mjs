@@ -77,16 +77,41 @@ function below(blocks, name, done = new Set(), path = []) {
   return done;
 }
 
-// Every `include` resolves to an own file or a transitive dep's interface file; anything else would let
-// a block see an implementation its key does not cover.
+// Dafny source with comments blanked (strings kept), so an `include` cannot hide behind a comment.
+function code(text) {
+  let out = "";
+  for (let i = 0; i < text.length;) {
+    if (text[i] === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"' && text[j] !== "\n") j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1); i = j + 1;
+    } else if (text.startsWith("//", i)) {
+      while (i < text.length && text[i] !== "\n") { out += " "; i++; }
+    } else if (text.startsWith("/*", i)) {
+      // Dafny block comments nest.
+      let depth = 0;
+      do {
+        if (text.startsWith("/*", i)) { depth++; out += "  "; i += 2; }
+        else if (text.startsWith("*/", i)) { depth--; out += "  "; i += 2; }
+        else { out += text[i] === "\n" ? "\n" : " "; i++; }
+      } while (depth > 0 && i < text.length);
+    } else { out += text[i]; i++; }
+  }
+  return out;
+}
+
+// What a block's files may include: impl files see the block's own files and its transitive deps'
+// interfaces; interface files see only interface files (own or deps'), because a dependent follows them
+// transitively and its key covers only interfaces. Anything else would let a block see what its key omits.
 function checkIncludes(root, blocks, b) {
-  const own = new Set([...b.interface, ...b.impl].map((f) => resolve(root, f)));
-  const visible = new Set(own);
-  for (const d of below(blocks, b.name)) if (d !== b.name) for (const f of blocks.get(d).interface) visible.add(resolve(root, f));
-  for (const f of own) {
-    for (const m of readFileSync(f, "utf8").matchAll(/^\s*include\s+"([^"]+)"/gm)) {
-      const target = resolve(dirname(f), m[1]);
-      if (!visible.has(target)) throw new UsageError(`${b.name}: ${relative(root, f)} includes ${m[1]}, which is neither its own file nor a dep's interface`);
+  const deps = [...below(blocks, b.name)].filter((d) => d !== b.name);
+  const laws = new Set([...b.interface, ...deps.flatMap((d) => blocks.get(d).interface)].map((f) => resolve(root, f)));
+  const all = new Set([...laws, ...b.impl.map((f) => resolve(root, f))]);
+  for (const [files, visible, what] of [[b.interface, laws, "an interface file of this block or a dep"], [b.impl, all, "its own file nor a dep's interface"]]) {
+    for (const f of files.map((x) => resolve(root, x))) {
+      for (const m of code(readFileSync(f, "utf8")).matchAll(/\binclude\s*"([^"]+)"/g)) {
+        if (!visible.has(resolve(dirname(f), m[1]))) throw new UsageError(`${b.name}: ${relative(root, f)} includes ${m[1]}, which is neither ${what}`);
+      }
     }
   }
 }
@@ -140,6 +165,7 @@ function main(argv) {
       cwd: args.root, encoding: "utf8", timeout: 900_000, env: { ...process.env, DAFNY_CORES: "1" },
     });
     const seconds = +((performance.now() - started) / 1000).toFixed(2);
+    if (run.error) throw new UsageError(`${n}: could not run the pinned dafny: ${run.error.message}`);
     const summary = (run.stdout.match(/Dafny program verifier finished[^\n]*/) ?? [""])[0];
     if (run.status !== 0) {
       report.push({ block: n, status: "FAIL", seconds, output: `${run.stdout}${run.stderr}`.trim().slice(-4000) });

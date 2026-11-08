@@ -16,9 +16,10 @@ blocks/<area>/<block>/           L1: one directory per block
 - `block.json` lists the block's `interface` (its laws files), its `impl` (definition and proof files),
   both relative to `packages/core`, and its `deps` (other block names; a block's name is its directory
   under `blocks/`, e.g. `schedule/next`).
-- A dependent sees only its deps' laws: it imports their abstract modules, and every `include` names
-  the block's own files or a transitive dep's interface file. `proof check` refuses any other include,
-  because the cache key would not cover what the block depends on.
+- A dependent sees only its deps' laws: it imports their abstract modules. A block's impl files include
+  only its own files and its transitive deps' interface files; its interface (laws) files include only
+  interface files, since dependents follow them. `proof check` refuses any other include (also one
+  behind a comment), because the cache key would not cover what the block depends on.
 - Law statements are what review guards; definitions and proofs are what the checker guards. Edit a
   law only with an independent review of that law.
 - Escape hatches (`assume`, `{:axiom}`, `{:verify false}`, `{:extern}`) are trusted code and need a
