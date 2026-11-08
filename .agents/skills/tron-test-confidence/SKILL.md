@@ -12,8 +12,8 @@ Use the fewest faithful checks; bounded logic cannot substitute for wiring or re
 
 Trace risk → real entrypoint → owner → action → observable assertion. Explain why
 broken shipped behavior fails; mocks, constants, source text and private calls do not
-prove it. Bugs need fail-before/pass-after in the test that owns the behaviour; add a
-file only when none does. Merge or retire a test once a survivor is shown to catch its fault. Mark boundaries not crossed; whole AX-tree equality is not interaction.
+prove it. Bugs need fail-before/pass-after in the owning E2E/integration test, or nothing new
+when one already proves it. Retire tests that restate code or duplicate another's fault. Mark boundaries not crossed; whole AX-tree equality is not interaction.
 
 ## Diagnose and change
 

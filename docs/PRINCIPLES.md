@@ -32,11 +32,15 @@ tracked as #2230–#2235.
 ## P3 Delete before adding
 
 **Rule.** Code, tests, scripts and docs must trace to a named consumer, contract or journey.
-Anything that cannot is deleted. A replacement deletes the path it replaces in the same change. A
-regression proof strengthens the test that owns the behaviour; a new test file is added only when no
-owner exists. Other additions are a fix, a consolidation that removes more than it adds, or a type
-change that deletes the runtime checks it replaces. No shims, aliases, compat or fallback readers,
-flags or "just in case" wrappers.
+Anything that cannot is deleted. A replacement deletes the path it replaces in the same change.
+Tests default to fewer: agents read the code itself, so a test earns its place only by catching a
+real behaviour fault at a boundary. A fix's proof strengthens the owning E2E/integration test, or adds
+nothing when one already proves it; tests that restate code (structure locks, duplicate unit tests,
+implementation snapshots) are retired. Loosening an assertion that guards real behaviour is never
+allowed. Other additions are a fix, a consolidation that removes more than it adds, or a type
+change that deletes the runtime checks it replaces. No backward-compatibility code: no shims,
+aliases, old-format or fallback readers, flags or "just in case" wrappers; live old data moves once
+through a backed-up migration.
 **Evidence.** The #2297 structure program added custom governance tooling and ended at net +227
 lines. Governance tooling alone was about 14,000 lines (#2316 §0). Tests reached about 127,000 lines:
 fail-before/pass-after named no owner for the proof and only deleting a test needed evidence, so each

@@ -2,8 +2,10 @@
 
 Detect a named surviving regression through shipped logic or its actual boundary.
 For bugs, retain fail-before/pass-after evidence: action, outcome and why the broken
-implementation fails. Put it in the test that already owns the behaviour, extending or
-replacing its cases; add a test file only when no owner exists. Mocks, copied algorithms,
+implementation fails. Put it in the E2E/integration test that already owns the behaviour; add
+nothing when a test already proves it, and a file only when no owner exists. Default to fewer
+tests: retire tests that restate code (structure locks, duplicate unit tests, implementation
+snapshots) rather than keeping them. Mocks, copied algorithms,
 private calls and source-text matches cannot prove wiring, authority, ordering, cleanup or
 rendering. Use few faithful oracles.
 

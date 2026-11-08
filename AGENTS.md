@@ -52,9 +52,9 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - **Ship together:** code, its owning doc and the smallest faithful regression proof in one change.
 - **A replacement deletes what it replaces** (code, tests, fixtures, docs) in the same change.
   Fix root causes; leave coherent code alone; never revive retired architecture (README.md, Repository).
-- **No compatibility code:** no shims, aliases, re-exports, dual schemas, fallbacks, compat readers
-  or finished-migration code; replace internal contracts atomically. Old persisted data moves once through a migration
-  (above); a live external consumer is a maintainer decision, never a bridge. Test-only hooks stay test-only.
+- **No backward-compatibility code:** no shims, aliases, re-exports, dual schemas, fallbacks, old-format
+  readers or finished-migration code; replace contracts atomically. Live old data moves once through a backed-up
+  migration (above) and its reader is deleted; an external consumer is a maintainer decision. Test-only hooks stay test-only.
 - **Unclear fit:** when a rule does not clearly fit a case, stop and ask the maintainer. Never guess or make a quiet exception.
 - **One authority** per state, resource and lifecycle, owning stale work, cancellation,
   bounds and cleanup; fix misplaced ownership instead of adding flags, caches, timers,
@@ -76,10 +76,10 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - **Fewest faithful oracles:** call shipped logic, not mocks, copied algorithms or private
   calls. The four bounded logic groups are #2097–#2100; wiring, authority, ordering,
   cleanup and rendering still need actual Gateway/Pi/process/socket/built/UI boundaries.
-- **Strengthen before adding:** a fix's fail-before/pass-after proof extends or replaces the test
-  that owns the behaviour; a new test file only when none exists. Retiring or merging a test that
-  another is shown (fail-before or mutant) to catch the same fault is consolidation, not weakening.
-  Preserve the first failure. Keep rendered witnesses, not whole AX trees.
+- **Fewer tests by default:** a fix's fail-before/pass-after proof strengthens the owning E2E/integration
+  test; add nothing when a test already proves it, and a new file only when no owner exists. Retiring tests that
+  restate code (structure locks, duplicate unit tests, implementation snapshots) or duplicate another's fault is
+  not weakening; loosening an assertion that guards real behaviour is. Preserve the first failure.
 - Test additions, edits and retirements need no maintainer tap; a non-author reviewer ACCEPTs them
   against `verify`'s delta (what was deleted; why a new file is not its owner; any compat wording).
   Subjective design goes to the maintainer. See the [oracle policy](tools/verify/test-oracles.md).
