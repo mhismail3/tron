@@ -1,0 +1,107 @@
+{
+  "block": "schedule/occurrence",
+  "tier": "high-stakes",
+  "tierReason": "decides when automation runs dispatch or skip (feeds the automation-run lifecycle); \"when unsure, high-stakes\"",
+  "impl": "blocks/schedule/occurrence/Block.dfy",
+  "symbols": [
+    "Next",
+    "First",
+    "Classify"
+  ],
+  "verify": [
+    "blocks/schedule/occurrence/Block.dfy"
+  ],
+  "laws": {
+    "L1 next-sound": [
+      "ScheduleOccurrence.L1NextSound"
+    ],
+    "L2 next-minimal": [
+      "ScheduleOccurrence.L2NextMinimal"
+    ],
+    "L3 next-none": [
+      "ScheduleOccurrence.L3NextNone"
+    ],
+    "L4 first-interval": [
+      "ScheduleOccurrence.L4FirstInterval"
+    ],
+    "L5 classify-not-due": [
+      "ScheduleOccurrence.L5ClassifyNotDue"
+    ],
+    "L6 classify-due": [
+      "ScheduleOccurrence.L6ClassifyDue",
+      "ScheduleOccurrence.L6IntervalResult",
+      "ScheduleOccurrence.L6IntervalLatest",
+      "ScheduleOccurrence.L6IntervalNext",
+      "ScheduleOccurrence.NoOccBetween"
+    ],
+    "L7 first-once": [
+      "ScheduleOccurrence.L7FirstOnce"
+    ],
+    "L8 first-after-occurrence": [
+      "ScheduleOccurrence.L8FirstAfterOccurrence"
+    ]
+  },
+  "helpers": [
+    "OccInterval",
+    "DivMod",
+    "MulNonNeg",
+    "MulLeMono",
+    "DivNonNeg",
+    "ShiftDiv"
+  ],
+  "translate": "blocks/schedule/occurrence/Block.dfy",
+  "oracles": [
+    {
+      "name": "diff-vs-gateway-schedule.ts(20000)",
+      "cmd": [
+        "node",
+        "tools/proof/oracles/schedule-occurrence.mjs",
+        "{dir}/out/core.js",
+        "20000"
+      ],
+      "jsonEq": [
+        "agree",
+        "requests"
+      ]
+    }
+  ],
+  "accepted": {},
+  "report": "blocks/schedule/occurrence/MUTATION.json",
+  "shadow": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/schedule-occurrence.mjs",
+      "{core}",
+      "20000"
+    ],
+    "source": "compiled core vs packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic)"
+  },
+  "replay": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/schedule-occurrence.mjs",
+      "{core}",
+      "--replay",
+      "{corpus}"
+    ],
+    "source": "compiled core vs the schedule seams' recorded Debug-Gateway calls (packages/gateway/src/automations/schedule.ts)"
+  },
+  "kinds": {
+    "safety": [
+      "L1 next-sound",
+      "L2 next-minimal"
+    ],
+    "progress": "n/a: pure functions, no workflow",
+    "recovery": "n/a: stateless; the scheduler's restart behaviour is the automation-run lifecycle block (P4)",
+    "stale-inputs": "n/a: Classify is given a stored next occurrence of the current trigger (Assumption A2), and L6 requires it; L5 covers a stored next still in the future",
+    "exact-results": [
+      "L3 next-none",
+      "L4 first-interval",
+      "L5 classify-not-due",
+      "L6 classify-due",
+      "L7 first-once",
+      "L8 first-after-occurrence"
+    ],
+    "uncertain-outcomes": "n/a: no effects"
+  }
+}

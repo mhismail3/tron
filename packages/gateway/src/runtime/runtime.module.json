@@ -3,6 +3,9 @@
   "owns": [
     "**"
   ],
+  "verify": [
+    "scripts/tron test gateway src/kernel/run/direct-bash-process-owner.integration.test.ts"
+  ],
   "dependsOn": [
     "gateway/pi"
   ]

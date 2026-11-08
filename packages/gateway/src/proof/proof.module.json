@@ -1,0 +1,10 @@
+{
+  "layer": "L0",
+  "purpose": "Debug-only proof traffic recorder: seam inputs and outputs for offline shadow replay of proof blocks.",
+  "owns": [
+    "**"
+  ],
+  "dependsOn": [
+    "gateway/foundation"
+  ]
+}

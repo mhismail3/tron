@@ -7,12 +7,6 @@ import { AutomationStore } from "./automation-store.js";
 import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationRunSummary, AutomationSummary, AutomationTarget, AutomationTrigger } from "./types.js";
 import { nextAutomationOccurrence } from "./schedule.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
-import {
-  buildAutomationTimeline,
-  type AutomationTimelinePage,
-  AutomationTimelinePaginationStore,
-  validateTimelineWindow,
-} from "./automation-timeline.js";
 
 interface AutomationTargetValidator {
   requirePersistedUserSession(sessionId: string): Promise<void>;
@@ -39,7 +33,6 @@ export class AutomationService {
     readonly store: AutomationStore,
     readonly scheduler: AutomationScheduler,
     private readonly targets: AutomationTargetValidator,
-    private readonly timelinePages = new AutomationTimelinePaginationStore(),
     private readonly onRecoveryStep: AutomationRecoveryStep = () => {},
     private readonly homeTarget?: () => InputTriggerRoute | undefined,
   ) {
@@ -59,8 +52,6 @@ export class AutomationService {
     this.onRecoveryStep("scheduler-recover", performance.now() - startedAt);
     this.scheduler.start();
   }
-
-  releaseClient(clientId: string): void { this.timelinePages.releaseClient(clientId); }
 
   beginDrain(): void { this.scheduler.beginDrain(); }
   async requestShutdownCancellation(): Promise<void> { await this.scheduler.cancelActiveForShutdown(); }
@@ -120,20 +111,6 @@ export class AutomationService {
       boundary = nextMs;
     }
     return { occurrences };
-  }
-
-  timelinePage(
-    clientId: string,
-    from: string,
-    through: string,
-    displayTimezone: string,
-    cursor: string | undefined,
-    limit: number,
-  ): AutomationTimelinePage {
-    validateTimelineWindow(from, through, displayTimezone);
-    const sourcePage = this.list();
-    const source = buildAutomationTimeline(sourcePage.items, sourcePage.catalogRevision, from, through, displayTimezone);
-    return this.timelinePages.page(clientId, source, cursor, limit, `${from}\0${through}\0${displayTimezone}`);
   }
 
   runGet(id: string, runId: string): AutomationRun {

@@ -216,6 +216,17 @@ class TierTests(fixture.VerifyCase):
         self.assertNotIn(nested, changed['selection']['deferredTests'])
         self.assertIn(nested, self.plan('--all')['selection']['tests'],
                       'batch integration must include changed serial tests too')
+        # A module that declares the serial test as its proof runs it now, not in the batch.
+        r.write(root + '/src/declaring/declaring.module.json', json.dumps({'layer': 'L2', 'owns': ['**'],
+                'verify': ['scripts/tron test gateway src/worker/nested.integration.test.ts']}))
+        r.write(root + '/src/declaring/declaring.ts', 'export const value = 1;\n')
+        r.commit('declaring module')
+        r.git('branch', '-f', 'base')
+        r.write(root + '/src/declaring/declaring.ts', 'export const value = 2;\n')
+        r.commit('declaring producer change')
+        declared = self.plan()
+        self.assertIn(nested, declared['selection']['tests'])
+        self.assertNotIn(nested, declared['selection']['deferredTests'])
 
     def test_interrupted_step_preserves_partial_report_and_stops_descendant(self):
         import signal

@@ -58,7 +58,7 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
   | `verify` | no | `scripts/tron …` commands |
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
-  | `directories` | no | whole-directory modules below this manifest: `{"<dir>": {"name", "layer"}}`; see [Directory modules](#directory-modules) |
+  | `directories` | no | whole-directory modules below this manifest: `{"<dir>": {"name", "layer", "verify"?}}`; see [Directory modules](#directory-modules) |
 
   Lists must not repeat an entry.
 
@@ -83,11 +83,12 @@ stale and reported, so manifests move with their code.
 
 A module that is a whole directory with only a layer has no file of its own. A manifest above it
 declares it under `directories`, relative to the manifest's folder; by convention that is its
-package's `package.module.json` (outside a package, `root.module.json`):
+package's `package.module.json` (outside a package, `root.module.json`). A directory entry may
+also declare `verify` commands for tests proving that module, without adding a module manifest:
 `"src/util": {"name": "util", "layer": "L0"}` is exactly the module a
 `src/util/util.module.json` of `{"layer": "L0", "owns": ["**"]}` would be: the same id, layer and
 owned paths. `--modules` names it `<manifest>#<dir>`. A module that needs any other key (a purpose,
-`dependsOn`, `riskClass`, `verify`) or a split directory keeps its own manifest file.
+`dependsOn`, `riskClass`) or a split directory keeps its own manifest file.
 
 ## As-is modules
 

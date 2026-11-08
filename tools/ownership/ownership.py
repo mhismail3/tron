@@ -131,10 +131,10 @@ def module_id(manifest: str) -> str:
     return f"{package}/{parts[-1][:-len(SUFFIX)]}"
 
 
-def directory_modules(manifest: str, data: dict, problems: list[str]) -> dict[str, tuple[str, str, str]]:
+def directory_modules(manifest: str, data: dict, problems: list[str]) -> dict[str, tuple[str, str, str, list[str]]]:
     """The whole-directory modules a manifest declares below its folder, as `"directories": {"<dir>":
-    {"name", "layer"}}`: each is the module a `<name>.module.json` of `{"layer", "owns": ["**"]}` in that
-    directory would be, without the file. Returns {key: (id, folder, layer)}; the key is `<manifest>#<dir>`."""
+    {"name", "layer", "verify?"}}`: each is the module a `<name>.module.json` of `{"layer", "owns": ["**"]}` in that
+    directory would be, without the file. Returns {key: (id, folder, layer, verify)}; the key is `<manifest>#<dir>`."""
     declared = data.get("directories", {})
     if not isinstance(declared, dict):
         problems.append("directories must be an object")
@@ -144,12 +144,13 @@ def directory_modules(manifest: str, data: dict, problems: list[str]) -> dict[st
         label = f"directories entry {json.dumps(directory)}"
         if pattern_problem(directory) or set(directory) & set("*?"):
             problems.append(f"{label} must be a relative directory path without wildcards")
-        elif not isinstance(entry, dict) or set(entry) != {"name", "layer"} or not isinstance(entry["name"], str) \
-                or not STEM.fullmatch(entry["name"]) or not one_of(entry["layer"], LAYERS):
-            problems.append(f"{label} must be {{\"name\": <lowercase-kebab>, \"layer\": L0..L5}}")
+        elif not isinstance(entry, dict) or not {"name", "layer"} <= set(entry) or set(entry) - {"name", "layer", "verify"} or not isinstance(entry["name"], str) \
+                or not STEM.fullmatch(entry["name"]) or not one_of(entry["layer"], LAYERS) \
+                or ("verify" in entry and (not isinstance(entry["verify"], list) or any(not isinstance(command, str) or not command.startswith("scripts/tron ") for command in entry["verify"]))):
+            problems.append(f"{label} must declare name/layer and may declare scripts/tron verify commands")
         else:
             path = directory if folder == "." else f"{folder}/{directory}"
-            found[f"{manifest}#{directory}"] = (module_id(f"{path}/{entry['name']}{SUFFIX}"), path, entry["layer"])
+            found[f"{manifest}#{directory}"] = (module_id(f"{path}/{entry['name']}{SUFFIX}"), path, entry["layer"], entry.get("verify", []))
     return found
 
 
@@ -267,9 +268,9 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
                 problems.append(f"owns entry {json.dumps(pattern)} {problem}")
             else:
                 patterns.append(pattern)
-        for key, (own_id, path, layer) in directory_modules(manifest, data, problems).items():
+        for key, (own_id, path, layer, verify) in directory_modules(manifest, data, problems).items():
             by_id.setdefault(own_id, []).append(key)
-            modules[key] = {"id": own_id, "folder": path, "data": {"layer": layer, "owns": ["**"]},
+            modules[key] = {"id": own_id, "folder": path, "data": {"layer": layer, "owns": ["**"], "verify": verify},
                             "patterns": ["**"], "owned": []}
         errors.extend(f"{manifest}: {p}" for p in problems)
         modules[manifest] = {"id": module_id(manifest), "folder": folder, "data": data,

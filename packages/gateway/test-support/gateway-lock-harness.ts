@@ -311,7 +311,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     const scheduler = new AutomationScheduler(store,
       new GatewayAutomationExecutor(registry, work, notificationService, "lock-machine"), { hostEpoch: work.runtimeEpoch,
         onHomePending: () => homeOwnerOf(registry).notifyTrigger() });
-    automations = new AutomationService(store, scheduler, registry, undefined, undefined, () => homeOwnerOf(registry).triggerRoute());
+    automations = new AutomationService(store, scheduler, registry, undefined, () => homeOwnerOf(registry).triggerRoute());
     homeTriggers = automations.homeTrigger;
     scheduleTool = new GatewayScheduleToolOperations(automations, receipts);
   }

@@ -251,8 +251,8 @@ class SchemaTests(OwnershipCase):
             'owned more than once: a/a.module.json (a/a.module.json "**"; root.module.json#a "**")',
             'owned more than once: a/x.ts (a/a.module.json "**"; root.module.json#a "**")',
             'root.module.json: directories entry "c/*" must be a relative directory path without wildcards',
-            'root.module.json: directories entry "d" must be {"name": <lowercase-kebab>, "layer": L0..L5}',
-            'root.module.json: directories entry "e" must be {"name": <lowercase-kebab>, "layer": L0..L5}',
+            'root.module.json: directories entry "d" must declare name/layer and may declare scripts/tron verify commands',
+            'root.module.json: directories entry "e" must declare name/layer and may declare scripts/tron verify commands',
         ])
 
     def test_duplicate_ids_and_dangling_references_are_reported(self) -> None:

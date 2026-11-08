@@ -7,6 +7,6 @@
     "**"
   ],
   "verify": [
-    "scripts/tron test gateway src/e2e/integrations/tests/connections.lifecycle.lock.integration.test.ts"
+    "scripts/tron test gateway src/e2e/integrations/tests/connections.projection.integration.test.ts"
   ]
 }

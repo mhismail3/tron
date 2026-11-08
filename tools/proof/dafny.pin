@@ -1,0 +1,26 @@
+# Pinned proof toolchain (sourced by bootstrap.sh; a bump of ANY line is a full re-check of every block).
+# Source: official Dafny release asset; GitHub's published asset digest == DAFNY_ZIP_SHA256.
+# The archive is self-contained: it ships the .NET 8 runtime and the Z3 solvers, so nothing else is installed.
+DAFNY_VERSION=4.11.0
+DAFNY_COMMIT=fcb2042d6d043a2634f0854338c08feeaaaf4ae2
+DAFNY_PLATFORM=arm64-macos-13
+DAFNY_URL=https://github.com/dafny-lang/dafny/releases/download/v4.11.0/dafny-4.11.0-arm64-macos-13.zip
+DAFNY_ZIP_SHA256=c90c75e7d5db9c6ccbb7127840dfe43f0ac938b039a7ebed146d8ead383a572f
+DAFNY_ZIP_BYTES=54789814
+# sha256 of `find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256` over the extracted tree (290 files).
+DAFNY_TREE_SHA256=fa9d5dafd39ef904bc3cb7c2e9c5e0c094f91d72a3e83d16c72441f3d181692b
+DAFNY_TREE_FILES=290
+# Bundled .NET runtime (self-contained; see Dafny.runtimeconfig.json includedFrameworks).
+DOTNET_RUNTIME="Microsoft.NETCore.App 8.0.19"
+DOTNET_CORECLR_SHA256=803f3c64f2b127e725b61b5dcb92ab96ce8e8a76c9b65b85c251dac3c8211d0d
+DOTNET_CORELIB_SHA256=fdf2faa198d276ee6253abf6ad700ed80de53c5ec74f067e74e82b4515436914
+# Solver: Dafny 4.11's default is its bundled Z3 4.12.1 (used even when another z3 is on PATH).
+Z3_VERSION=4.12.1
+Z3_SHA256=7d15df1e4ba8f60b0808dce02ec85e0dd6dac4b975231a2f7b35fe8789464208
+# Second bundled solver, used only by the solver-portability check (--solver-path).
+Z3_ALT_VERSION=4.14.1
+Z3_ALT_SHA256=2fb05b03121f522fdea1ee523c73b9341d327814c81f051a887e97e931af06bf
+# Key component digests (also covered by the tree digest; listed so a reviewer can spot-check).
+DAFNY_HOST_SHA256=5d02cbb88300aef0726e933bd6f19754960b7409a9e0e2212a5e07edd1686012
+DAFNY_DLL_SHA256=b636637dd728760673cd9266cf344cc4e5457ccbf2794cd3499452dd52a4da58
+DAFNY_PRELUDE_SHA256=0b3f30afee36c213f667a9e4a9d1bc7c09116eaceb3ad789565870e90ed8395f
