@@ -18,7 +18,7 @@ misleads, and the counter-metric that catches that.
 | O1 | **Escaped defects**: what reaches him works | `kind:bug` issues opened per landed change (`--github`), plus a hand-labelled sample of 40 of his Home messages per re-score (share that report a defect) | bugs are not filed, filed as `kind:maintenance`, or closed as duplicates; fewer changes land | O2 defect-report share (he notices what is not filed); O4 rework after landing |
 | O2 | **Maintainer attention**, the scarcest resource | his typed Home messages per landed change, and the share that chase status (`--home-sessions`; the regex gives 15%, a hand check 17.5%) | Home batches questions; landing many trivial commits inflates the denominator | O3 lead time; the sample's share of process steering (he redesigns how agents work) |
 | O3 | **Lead time** from his ask to a working build | bug opened → closed (`--github`); landed → next Mac deploy and deploy failures (`--deploy-log`). The iPhone build has no mechanical timestamp yet | issues opened late or closed early; deploys skipped | O1 (fast but broken); O4 |
-| O4 | **Verdict trust**: red means a real fault, green holds | share of red/flake issues whose fix touched production code; batch verdicts and same-head green+red flips (`--evidence`); landed merges whose issue is named again by a later commit, or by a later fix | reds are closed "not planned" without a cause; tests are deleted to stop reds | O1 escapes; mutation kill rate on hotspots (`scripts/tron mutate`) |
+| O4 | **Verdict trust**: red means a real fault, green holds | share of red/flake issues that a commit naming them fixed in production code (`--github`, a lower bound); batch verdicts and same-head green+red flips (`--evidence`); landed merges, older than three days, whose issue a later commit or fix names again | reds are closed "not planned" without a cause; tests are deleted to stop reds | O1 escapes; mutation kill rate on hotspots (`scripts/tron mutate`) |
 
 Diagnostics, with their validation status (backtest below). "Validated" means it predicted later
 rework on Tron's history better than chance in both backtests; it is still not proof of cause.
@@ -50,7 +50,7 @@ attribution (±10%). As a target it rewards merging or dropping capabilities and
 | SWE-Bench Pro, arXiv 2509.16941 | Reference fixes span 4.1 files; resolve rate falls sharply with file count | Medium; supports D3, which Tron's data only partly confirms |
 | "Evaluating AGENTS.md" (ETH), arXiv 2602.11988 | Context files do not raise task success and add over 20% cost; only non-standard practices help | High for D6: rules and docs are not navigability |
 | Wang, Pradel, Liu, arXiv 2503.15223 | 7.8% of "passing" patches fail the developer tests; 29.6% behave differently | High for O4: a green that a weak oracle gives is not a fix |
-| Google Testing Blog, "Flaky tests at Google", 2016 | 84% of pass→fail transitions involve a flaky test; 16% of tests are somewhat flaky | High for O4; Tron: at least 14% of red issues led to a product fix |
+| Google Testing Blog, "Flaky tests at Google", 2016 | 84% of pass→fail transitions involve a flaky test; 16% of tests are somewhat flaky | High for O4; Tron: about 11% of red issues led to a product fix |
 | Inozemtseva & Holmes, ICSE 2014; Just et al., FSE 2014 | Coverage barely predicts suite effectiveness; mutant detection tracks real-fault detection | High for D5: count mutation kills, not test lines |
 | DORA (dora.dev metrics, 2024 five-metric model) | Lead time, deploy frequency, recovery time, change-fail rate, rework rate | High: O1, O3, O4 are its one-maintainer analogues |
 
@@ -94,8 +94,8 @@ Replaced, never appended, at each re-score. Oct 20 (`4c046a814`) in brackets whe
   sampling error.
 - O3: bug opened → closed p50 2.2 h, p90 53 h [3.2 h, 117 h]; landed → Mac deploy p50 11 h, p90 40 h
   [8 h, 42 h]; 11 of 56 deploys failed or rolled back [13 of 62]; the week of Nov 2 had 0 of 6.
-- O4: of 115 red or flake issues since Oct 15, at least 16 (14%) led to a production change, 23 to test or
-  tooling only, and 52 closed not planned without a commit. Batch: 1 of 15 runs green; the green head
+- O4: of 105 red or flake issues opened, a commit naming the issue changed production code for 11.4%,
+  only non-production paths for 20%, and 68.6% have no naming commit. Batch: 1 of 15 runs green; the green head
   (`efa0efe43`) went red on both repeats; no batch has run since Nov 4. 50% of landed issue merges
   had their issue named again later, 22% by a fix.
 - Diagnostics: file score 5.75 [4.87]; fix share 15.0% [17.7%]; reverts 5 [12]; fix commits on

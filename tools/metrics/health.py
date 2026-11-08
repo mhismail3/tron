@@ -19,7 +19,7 @@ import statistics
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -33,6 +33,9 @@ DAY = 86400
 SCORED = metrics.HAND_WRITTEN + metrics.SEPARATE
 FIX = re.compile(r"\bfix(e[sd])?\b|^revert\b", re.IGNORECASE)
 ISSUE_REF = re.compile(r"#(\d{3,5})")
+# An issue about a red verdict rather than a feature (docs/HEALTH.md O4).
+RED = re.compile(r"\bred\b|\bflak|\bfails? on (main|base)\b|\btimed? ?out\b|\btimeouts?\b|\bunder load\b|"
+                 r"\bload-sensitive\b|\bintermittent|\bnondetermin|\bspurious|\bstall(s|ed)?\b", re.IGNORECASE)
 BROAD = 40  # a commit touching more files is a sweep; it says nothing about coupling
 HASH_PIN = re.compile(rb"\b[0-9a-f]{64}\b|promptHash")
 # A maintainer message that asks for status instead of deciding something (docs/HEALTH.md O2).
@@ -149,6 +152,8 @@ def measure(rev: str, days: int) -> dict:
     for _, first, second, *_ in merges:
         result = subprocess.run(["git", "-C", str(metrics.ROOT), "merge-tree", "--write-tree", "--name-only",
                                  "--no-messages", first, second], capture_output=True, text=True)
+        if result.returncode not in (0, 1):  # 0 clean, 1 conflicted, anything else is a Git error
+            raise metrics.MetricsError(f"merge-tree {first[:9]} {second[:9]}: {result.stderr.strip()}")
         if result.returncode == 1:
             conflicted.update(result.stdout.splitlines()[1:])
             conflicted["(merges)"] += 1
@@ -182,26 +187,46 @@ def measure(rev: str, days: int) -> dict:
     }
 
 
-def github_outcomes(end: int, days: int, landed: int) -> list[str]:
-    """O1 bug intake and O3 bug lead time from GitHub (read-only `gh`)."""
-    since = datetime.utcfromtimestamp(end - days * DAY).strftime("%Y-%m-%d")
-    raw = subprocess.run(["gh", "issue", "list", "--state", "all", "--label", "kind:bug", "--limit", "1000", "--search",
-                          f"created:>={since}", "--json", "number,createdAt,closedAt,stateReason"],
-                         capture_output=True, text=True, cwd=metrics.ROOT)
-    if raw.returncode:
-        return [f"  GitHub unavailable: {raw.stderr.strip()[:120]}"]
-    bugs = json.loads(raw.stdout)
+def github_outcomes(head: dict) -> list[str]:
+    """O1 bug intake, O3 bug lead time and O4 red causes from GitHub issues (read-only `gh`)."""
+    limit, issues, truncated = 1000, {}, False
+    day = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731
+    for start in range(head["end"] - head["days"] * DAY, head["end"], 7 * DAY):  # GitHub search caps each query
+        raw = subprocess.run(["gh", "issue", "list", "--state", "all", "--limit", str(limit), "--search",
+                              f"created:{day(start)}..{day(min(start + 6 * DAY, head['end']))}",
+                              "--json", "number,title,labels,createdAt,closedAt,stateReason"],
+                             capture_output=True, text=True, cwd=metrics.ROOT)
+        if raw.returncode:
+            raise OSError(f"gh issue list failed: {raw.stderr.strip()[:200]}")
+        page = json.loads(raw.stdout)
+        truncated |= len(page) >= limit
+        issues.update((i["number"], i) for i in page)
+    issues = list(issues.values())
+    bugs = [i for i in issues if any(label["name"] == "kind:bug" for label in i["labels"])]
 
     def ts(value: str) -> float:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     hours = sorted((ts(b["closedAt"]) - ts(b["createdAt"])) / 3600 for b in bugs if b["stateReason"] == "COMPLETED")
-    return [f"  O1 kind:bug issues opened: {len(bugs)} ({ratio(len(bugs), landed)} per landed change); "
-            f"closed not planned {sum(b['stateReason'] == 'NOT_PLANNED' for b in bugs)}",
-            f"  O3 bug opened -> closed completed, hours p50 / p90: {pct(hours, 50)} / {pct(hours, 90)} (n={len(hours)})"]
+    # A red is real when a commit naming its issue changed production code (a lower bound: not every fix names it).
+    named = defaultdict(set)
+    for c in head["commits"]:
+        for n in ISSUE_REF.findall(c["subject"]):
+            named[int(n)].update(c["paths"])
+    reds = [i for i in issues if RED.search(i["title"])]
+    causes = Counter("product" if any(metrics.classify(p, "100644", b"") == "production" for p in named[i["number"]])
+                     else "no production change" if named[i["number"]] else "no commit" for i in reds)
+    out = [f"  O1 kind:bug issues opened: {len(bugs)} ({ratio(len(bugs), head['landed'])} per landed change); "
+           f"closed not planned {sum(b['stateReason'] == 'NOT_PLANNED' for b in bugs)}",
+           f"  O3 bug opened -> closed completed, hours p50 / p90: {pct(hours, 50)} / {pct(hours, 90)} (n={len(hours)})",
+           f"  O4 red or flake issues opened: {len(reds)}; a commit naming it changed production code "
+           f"{ratio(causes['product'], len(reds))}, only non-production paths {ratio(causes['no production change'], len(reds))}, "
+           f"no naming commit {ratio(causes['no commit'], len(reds))}"]
+    return out + ([f"  warning: a weekly GitHub query hit the {limit}-issue limit; counts are truncated"] if truncated else [])
 
 
 def rework_after_landing(head: dict) -> str:
-    """O4: landed merges naming an issue that a later commit names again (a green that did not hold)."""
+    """O4: landed merges naming an issue that a later commit names again (a green that did not hold).
+    Merges from the last three days are skipped: they have not had time to need rework."""
     names = defaultdict(list)
     for c in head["commits"]:
         for n in ISSUE_REF.findall(c["subject"]):
@@ -286,7 +311,10 @@ def attention(sessions: Path, head: dict) -> str:
         for raw in path.open(errors="replace"):
             if '"user"' not in raw:
                 continue
-            entry = json.loads(raw)
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue  # a partially written last line
             message = entry.get("message") or {}
             if entry.get("type") != "message" or message.get("role") != "user" or not entry.get("timestamp"):
                 continue
@@ -319,7 +347,8 @@ def spearman(a: list[float], b: list[float]) -> float:
 
 
 def backtest(t0: str, t1: str) -> list[str]:
-    """Do diagnostics measured at t0 predict rework in t0..t1? Files are followed through renames."""
+    """Do diagnostics measured at t0 predict rework in t0..t1? Later outcomes follow files through renames;
+    the predictors' 30-day history before t0 does not, so a file renamed inside it starts fresh."""
     s0, s1 = metrics.resolve(t0), metrics.resolve(t1)
     end0, end1 = int(git("show", "-s", "--format=%ct", s0)), int(git("show", "-s", "--format=%ct", s1))
     files = {f["path"]: f for f in metrics.read_tree(s0) if f["category"] in ("production", "tests", "tooling")
@@ -391,6 +420,8 @@ def write_csvs(head: dict, out: Path) -> None:
                          "fixes": sum(r["fixes"] for r in rs), "hotspot": round(sum(r["hotspot"] for r in rs), 1)}
                         for g, rs in sorted(groups.items())]
     for name, rows in tables.items():
+        if not rows:
+            continue
         with (out / name).open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
             writer.writeheader()
@@ -414,12 +445,12 @@ def main(argv: list[str]) -> int:
         base = None if metrics.resolve(args.baseline) == head["sha"] else measure(args.baseline, args.days)
         lines = report(head, base)
         lines += ["", "Outcomes:", rework_after_landing(head)]
-        lines += github_outcomes(head["end"], head["days"], head["landed"]) if args.github else []
+        lines += github_outcomes(head) if args.github else []
         lines += deploy_outcomes(args.deploy_log, head) if args.deploy_log else []
         lines += [attention(args.home_sessions, head)] if args.home_sessions else []
         lines += local_evidence(head["sha"]) if args.evidence else []
         lines += [""] + backtest(args.backtest, head["sha"]) if args.backtest else []
-    except (metrics.MetricsError, ownership.GitError) as error:
+    except (metrics.MetricsError, ownership.GitError, OSError, ValueError) as error:  # unreadable input: exit 2
         print(f"health: {error}", file=sys.stderr)
         return 2
     print("\n".join(lines))
