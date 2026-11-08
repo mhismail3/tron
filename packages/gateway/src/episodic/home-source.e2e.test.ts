@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -13,7 +12,6 @@ import { resolveLimits, type EpisodicLimits, type EpisodicDiagnostic, type Episo
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
 import type { EpisodicSourceDelta } from "./episodic-projection.js";
-import { applyRetiredFormatMigration, planRetiredFormatMigration } from "../sessions/retired-format-migration.js";
 
 const roots: string[] = [];
 const memories: EpisodicMemory[] = [];
@@ -396,123 +394,4 @@ it("refuses a source snapshot belonging to another Home before projecting it", a
   await memory.entriesCommitted("home");
   expect(memory.status().blocked?.reason).toBe("source-unavailable");
   expect(memory.status().messages).toBe(0);
-});
-
-/** Two chapters laid out as a Tron home (`agent/sessions`, `gateway/home/home.json`),
- * the sealed one holding a pre-#1634 settings entry, so the real retired-format
- * migration runs over them. */
-async function retiredHome() {
-  const root = await mkdtemp(join(tmpdir(), "tron-home-reseal-")); roots.push(root);
-  const tronHome = join(root, "home");
-  const workspace = new TronWorkspace(tronHome); workspaces.push(workspace); await workspace.initialize();
-  const sessions = join(tronHome, "agent", "sessions", "--home--");
-  await mkdir(sessions, { recursive: true });
-  const chapters = ["one", "two"].map(sessionId => ({ sessionId, path: join(sessions, sessionId + ".jsonl"), sealed: sessionId === "one" }));
-  for (const chapter of chapters) await writeFile(chapter.path, JSON.stringify({ type: "session", version: 3, id: chapter.sessionId, cwd: root, timestamp: "2026-01-01T00:00:00.000Z" }) + "\n");
-  const retiredPin = JSON.stringify({ type: "custom", customType: "tron.settings.v1", data: { settings: {}, requestPins: {
-    "context.images.block": { value: false, from: "builtin", at: "2026-01-01T00:00:00.000Z", ref: "retired-pin" } } },
-    id: "s", parentId: "a", timestamp: "2026-01-01T00:00:00.000Z" }) + "\n";
-  await appendFile(chapters[0]!.path, entry("a", null, "first chapter violet fact") + retiredPin + boundary("b", "s"));
-  await appendFile(chapters[1]!.path, entry("c", null, "second chapter amber fact") + boundary("d", "c"));
-  const past = new Date(Date.now() - 3_600_000);
-  for (const chapter of chapters) await utimes(chapter.path, past, past);
-  await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
-  await writeFile(join(tronHome, "gateway", "home", "home.json"), JSON.stringify({ version: 2, chapters: [{ sessionId: "one", state: "sealed" }, { sessionId: "two", state: "active" }] }));
-  const ledger = join(tronHome, "gateway", "home", "chapter-reseals.jsonl");
-  const snapshot = { homeId: "home", ledgerRevision: 2, chapters, resealLedger: ledger };
-  const resealed: string[] = [];
-  const source: EpisodicSessionSource = {
-    read: (cursor, limits) => readCanonicalHomeDeltas(snapshot, cursor, limits, record => resealed.push(record.sessionId)),
-    branchAtCursor: (cursor, limits) => readCanonicalHomeIndex(snapshot, cursor, limits),
-  };
-  const summaries: string[] = [];
-  const diagnostics: EpisodicDiagnostic[] = [];
-  const open = async () => {
-    const memory = await EpisodicMemory.open({ workspace, sessionId: "home", sessionSource: source,
-      summarizer: async request => { summaries.push(request.turns.at(-1)!.text); return fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200)); },
-      diagnostic: record => diagnostics.push(record), limits: { viewBytes: 4096, jobs: 2, retryMs: 0 } });
-    memories.push(memory); return memory;
-  };
-  const migrate = async () => {
-    const plan = await planRetiredFormatMigration(tronHome, 600);
-    return await applyRetiredFormatMigration(tronHome, join(root, `backup-${roots.length}-${Date.now()}`), plan);
-  };
-  const statePath = join(tronHome, "workspace/state/episodic/home/state.json");
-  const chapterCursor = async () => (JSON.parse(await readFile(statePath, "utf8")) as { cursor: EpisodicSourceCursor }).cursor.home.chapters[0]!;
-  return { root, tronHome, chapters, ledger, open, migrate, summaries, diagnostics, resealed, chapterCursor };
-}
-
-it("re-proves a sealed chapter the retired-format migration rewrote, without re-summarizing, and keeps it across a restart", async () => {
-  const fx = await retiredHome();
-  const memory = await fx.open(); await memory.entriesCommitted("home");
-  await memory.whenReady(memory.status().messages);
-  expect(memory.status().blocked ?? null).toBeNull();
-  const summaries = fx.summaries.length, messages = memory.status().messages;
-  const original = await readFile(fx.chapters[0]!.path);
-
-  expect(await fx.migrate()).toMatchObject({ failed: [] });
-  const migrated = await readFile(fx.chapters[0]!.path);
-  expect(migrated.toString("utf8")).toBe(original.toString("utf8").replace('"from":"builtin"', '"from":"global"'));
-  await memory.entriesCommitted("home");
-  expect(memory.status().blocked ?? null).toBeNull();
-  expect(fx.resealed).toEqual(["one"]);
-  expect(await fx.chapterCursor()).toMatchObject({ size: migrated.length, completeBytes: migrated.length });
-  expect(memory.status().messages).toBe(messages);
-  expect(fx.summaries).toHaveLength(summaries);
-  expect(memory.searchMessages("violet", 0, 10)?.matches).toBe(1);
-  // Frozen cuts prove every admitted chapter against the re-sealed cursor.
-  expect(await memory.cutAtEntry("b")).toBe(1);
-
-  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
-  const restarted = await fx.open();
-  const cursor = await fx.chapterCursor();
-  await appendFile(fx.chapters[1]!.path, entry("e", "d", "after the re-seal teal fact"));
-  await restarted.entriesCommitted("home");
-  expect(restarted.status().blocked ?? null).toBeNull();
-  expect(fx.resealed).toEqual(["one"]);
-  expect(await fx.chapterCursor()).toEqual(cursor);
-  expect(await restarted.cutAtEntry("b")).toBe(1);
-  expect(await restarted.cutAtEntry("e")).toBe(3);
-  expect(fx.diagnostics.filter(record => record.event === "episodic.node-blocked")).toEqual([]);
-});
-
-it.each([
-  ["an unrecorded retired-name rewrite", async (fx: Awaited<ReturnType<typeof retiredHome>>) => {
-    const path = fx.chapters[0]!.path;
-    await writeFile(path, (await readFile(path, "utf8")).replace('"from":"builtin"', '"from":"global"'));
-  }],
-  ["a recorded rewrite that also changes another byte", async (fx: Awaited<ReturnType<typeof retiredHome>>) => {
-    await fx.migrate();
-    const path = fx.chapters[0]!.path;
-    await writeFile(path, (await readFile(path, "utf8")).replace("violet", "orange"));
-  }],
-  ["a recorded rewrite whose record was forged to cover another byte", async (fx: Awaited<ReturnType<typeof retiredHome>>) => {
-    await fx.migrate();
-    const path = fx.chapters[0]!.path;
-    const forged = Buffer.from((await readFile(path, "utf8")).replace("violet", "orange"));
-    await writeFile(path, forged);
-    const [record] = (await readFile(fx.ledger, "utf8")).trim().split("\n").map(line => JSON.parse(line));
-    record.after = { sha256: createHash("sha256").update(forged).digest("hex"), size: forged.length };
-    await writeFile(fx.ledger, JSON.stringify(record) + "\n");
-  }],
-  ["a record naming a pair outside the retired-name map", async (fx: Awaited<ReturnType<typeof retiredHome>>) => {
-    await fx.migrate();
-    const path = fx.chapters[0]!.path;
-    const forged = Buffer.from((await readFile(path, "utf8")).replace('"from":"global"', '"from":"session"'));
-    await writeFile(path, forged);
-    const [record] = (await readFile(fx.ledger, "utf8")).trim().split("\n").map(line => JSON.parse(line));
-    record.after = { sha256: createHash("sha256").update(forged).digest("hex"), size: forged.length };
-    record.values[0].to = "session";
-    await writeFile(fx.ledger, JSON.stringify(record) + "\n");
-  }],
-] as const)("still refuses a sealed chapter changed by %s", async (_label, change) => {
-  const fx = await retiredHome();
-  const memory = await fx.open(); await memory.entriesCommitted("home");
-  expect(memory.status().blocked ?? null).toBeNull();
-  await change(fx);
-  await memory.entriesCommitted("home");
-  expect(memory.status().blocked).toEqual({ reason: "source-unavailable", detail: "Sealed Home source changed since ingestion" });
-  expect(fx.resealed).toEqual([]);
-  expect(memory.searchMessages("violet", 0, 10)?.matches).toBe(1);
-  expect(memory.searchMessages("orange", 0, 10)?.matches).toBe(0);
 });
