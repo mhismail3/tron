@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { recordSeam } from "../proof/traffic-recorder.js";
 import type { AutomationMisfirePolicy, AutomationTrigger } from "./types.js";
 
 interface LocalDateTime {
@@ -145,7 +146,35 @@ export function automationLocalDayStart(instantMs: number, timezone: string): st
   return new Date(automationLocalDayBounds(instantMs, timezone).start).toISOString();
 }
 
+// Seams of proof block schedule/occurrence (packages/core): once and interval calls are recorded on an
+// opted-in Debug Gateway for its shadow; calendar triggers are not in the block. Nested calls are not seams.
+const BLOCK = "schedule/occurrence";
+const inBlock = (trigger: AutomationTrigger): boolean => trigger.kind === "once" || trigger.kind === "interval";
+
 export function nextAutomationOccurrence(trigger: AutomationTrigger, afterMs: number): string | undefined {
+  const output = nextOccurrence(trigger, afterMs);
+  if (inBlock(trigger)) recordSeam(BLOCK, "next", { trigger, afterMs }, output);
+  return output;
+}
+
+export function firstAutomationOccurrence(trigger: AutomationTrigger, nowMs: number): string | undefined {
+  const output = firstOccurrence(trigger, nowMs);
+  if (inBlock(trigger)) recordSeam(BLOCK, "first", { trigger, nowMs }, output);
+  return output;
+}
+
+export function classifyDueOccurrence(
+  trigger: AutomationTrigger,
+  nextOccurrenceAt: string,
+  nowMs: number,
+  policy: AutomationMisfirePolicy,
+): { dispatchAt?: string; nextOccurrenceAt?: string; skipped: string[] } {
+  const output = classifyDue(trigger, nextOccurrenceAt, nowMs, policy);
+  if (inBlock(trigger)) recordSeam(BLOCK, "classify", { trigger, nextOccurrenceAt, nowMs, policy }, output);
+  return output;
+}
+
+function nextOccurrence(trigger: AutomationTrigger, afterMs: number): string | undefined {
   if (!Number.isFinite(afterMs)) throw new Error("Schedule boundary is invalid");
   if (trigger.kind === "once") {
     const instant = Date.parse(trigger.at);
@@ -160,17 +189,17 @@ export function nextAutomationOccurrence(trigger: AutomationTrigger, afterMs: nu
   return new Date(calendarOccurrenceAfter(trigger, afterMs)).toISOString();
 }
 
-export function firstAutomationOccurrence(trigger: AutomationTrigger, nowMs: number): string | undefined {
+function firstOccurrence(trigger: AutomationTrigger, nowMs: number): string | undefined {
   if (trigger.kind === "once") return new Date(Date.parse(trigger.at)).toISOString();
   if (trigger.kind === "interval") {
     const anchor = Date.parse(trigger.anchorAt);
     if (anchor >= nowMs) return new Date(anchor).toISOString();
-    return nextAutomationOccurrence(trigger, nowMs - 1);
+    return nextOccurrence(trigger, nowMs - 1);
   }
-  return nextAutomationOccurrence(trigger, nowMs - 1);
+  return nextOccurrence(trigger, nowMs - 1);
 }
 
-export function classifyDueOccurrence(
+function classifyDue(
   trigger: AutomationTrigger,
   nextOccurrenceAt: string,
   nowMs: number,
@@ -196,7 +225,7 @@ export function classifyDueOccurrence(
   }
 
   latest = new Date(calendarOccurrenceAtOrBefore(trigger, nowMs)).toISOString();
-  const next = nextAutomationOccurrence(trigger, nowMs)!;
+  const next = nextOccurrence(trigger, nowMs)!;
   if (policy === "skip") skipped.push(latest);
   return policy === "latest"
     ? { dispatchAt: latest, nextOccurrenceAt: next, skipped: [] }
