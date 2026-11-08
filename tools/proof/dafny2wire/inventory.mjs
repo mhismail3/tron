@@ -10,7 +10,7 @@
 // utility expressions are probed again until only primitives, literals, arrays, object literals and
 // references to named declarations remain. The classifier reads that output only.
 //
-// Usage: scripts/tron proof wire --inventory [--json] [--numbers float64|integer]
+// Usage: scripts/tron proof wire --inventory [--json] [--numbers float64|integer] [--types <file.ts>]
 //   --numbers float64 (default): `number` is a JSON float64 (today's wire); integer: `number` is not
 //   expressible because nothing in types.ts bounds it to integers.
 // Exit 0 with the inventory; 2 on usage or compiler error.
@@ -21,7 +21,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const TYPES = join(REPO, "packages/gateway/src/protocol/types.ts");
+let TYPES = join(REPO, "packages/gateway/src/protocol/types.ts");
 const TSC = join(REPO, "packages/gateway/node_modules/.bin/tsc");
 
 // ---------------------------------------------------------------- compiler probe
@@ -187,7 +187,7 @@ function parse(src) {
         return { k: "typeof", text };
       }
       if (p.v === "import") { k++; eat("("); const from = eat("str").v; eat(")"); eat("."); const name = eat("id").v; return { k: "ref", name, from, args: typeArgs() }; }
-      const kw = { string: "string", number: "number", boolean: "boolean", null: "null", undefined: "undefined", never: "never", unknown: "unknown", any: "any", object: "object", bigint: "bigint", symbol: "symbol", void: "void" }[p.v];
+      const kw = { string: "string", number: "number", boolean: "boolean", null: "null", undefined: "undefined", never: "never", unknown: "unknown", any: "any", object: "objectKeyword", bigint: "bigint", symbol: "symbol", void: "void" }[p.v];
       if (kw) { k++; return { k: kw }; }
       if (p.v === "true" || p.v === "false") { k++; return { k: "literal", v: p.v === "true" }; }
       return ref();
@@ -227,10 +227,12 @@ function parse(src) {
 const UTILITY = /^(Partial|Required|Readonly|Pick|Omit|Record|Exclude|Extract|NonNullable)$/;
 function main(argv) {
   const json = argv.includes("--json");
+  const typesAt = argv.indexOf("--types");
+  if (typesAt >= 0) TYPES = resolve(argv[typesAt + 1]);
   const numbersAt = argv.indexOf("--numbers");
   const numbers = numbersAt >= 0 ? argv[numbersAt + 1] : "float64";
   if (!argv.includes("--inventory") || !["float64", "integer"].includes(numbers)) {
-    console.error("usage: scripts/tron proof wire --inventory [--json] [--numbers float64|integer]"); return 2;
+    console.error("usage: scripts/tron proof wire --inventory [--json] [--numbers float64|integer] [--types <file.ts>]"); return 2;
   }
   const source = readFileSync(TYPES, "utf8");
   const exports = [...source.matchAll(/^export (interface|type|const) ([A-Za-z_$][A-Za-z0-9_$]*)(<)?/gm)].map((m) => ({ kind: m[1], name: m[2], generic: !!m[3] }));
@@ -277,13 +279,17 @@ function main(argv) {
   const unfaithful = new Set(verifyPrinted([...expanded].sort(([a], [b]) => a.localeCompare(b)).map(([expr, ast]) => [expr, print(ast)])));
 
   const memo = new Map();
+  // Generator forms the expressible types use; the test requires each to be exercised by the codec fixture.
+  const features = new Set();
   const classify = (node, stack = []) => {
     switch (node.k) {
       case "string": case "boolean": case "null": return { ok: true };
-      case "literal": return typeof node.v === "number" && numbers === "integer" && !Number.isInteger(node.v) ? { ok: false, reason: "non-integer literal" } : { ok: true };
-      case "number": return numbers === "float64" ? { ok: true } : { ok: false, reason: "number is not bounded to integers" };
-      case "never": case "undefined": return { ok: true, absent: true };
-      case "array": return classify(node.of, stack);
+      case "literal":
+        if (typeof node.v === "number" && numbers === "integer" && !Number.isInteger(node.v)) return { ok: false, reason: "non-integer literal" };
+        features.add(`literal-${typeof node.v}`); return { ok: true };
+      case "number": if (numbers === "float64") { features.add("float64"); return { ok: true }; } return { ok: false, reason: "number is not bounded to integers" };
+      case "never": case "undefined": features.add("absent"); return { ok: true, absent: true };
+      case "array": features.add("array"); return classify(node.of, stack);
       case "indexed": return named_(exprOf(node), stack);
       case "ref": {
         const expr = node.args.length || UTILITY.test(node.name) ? exprOf(node) : keyOf(node);
@@ -291,8 +297,9 @@ function main(argv) {
       }
       case "object": {
         if (node.callable) return { ok: false, reason: "function member" };
-        for (const f of node.fields) { const r = classify(f.type, stack); if (!r.ok) return { ok: false, reason: `field ${f.name}: ${r.reason}` }; }
-        if (node.index) { const r = classify(node.index.value, stack); if (!r.ok) return { ok: false, reason: `map value: ${r.reason}` }; if (node.index.key.k !== "string") return { ok: false, reason: "map key is not string" }; }
+        if (node.index && node.fields.length) return { ok: false, reason: "object with both fields and an index signature" };
+        for (const f of node.fields) { const r = classify(f.type, stack); if (!r.ok) return { ok: false, reason: `field ${f.name}: ${r.reason}` }; if (f.optional) features.add("optional"); }
+        if (node.index) { if (node.index.key.k !== "string") return { ok: false, reason: "map key is not string" }; const r = classify(node.index.value, stack); if (!r.ok) return { ok: false, reason: `map value: ${r.reason}` }; features.add("map"); }
         return { ok: true, object: true };
       }
       case "union": return union(node, stack);
@@ -300,6 +307,7 @@ function main(argv) {
       case "tuple": return { ok: false, reason: "tuple" };
       case "function": return { ok: false, reason: "function type" };
       case "typeof": return named_(exprOf(node), stack);
+      case "objectKeyword": return { ok: false, reason: "object type without a shape" };
       default: return { ok: false, reason: `${node.k} type` };
     }
   };
@@ -307,11 +315,11 @@ function main(argv) {
   // stack is expressible as a recursive datatype if everything else is.
   const named_ = (expr, stack) => {
     if (memo.has(expr)) return memo.get(expr);
-    if (stack.includes(expr)) return { ok: true, recursive: true };
+    if (stack.includes(expr)) { features.add("recursive"); return { ok: true, recursive: true }; }
     const ast = expanded.get(expr);
     if (!ast) return { ok: false, reason: `unresolved ${expr}` };
-    if (unfaithful.has(expr)) return { ok: false, reason: `tsc: the parsed shape of ${expr} differs from the original` };
-    const r = classify(ast, [...stack, expr]);
+    const classified = classify(ast, [...stack, expr]);
+    const r = classified.ok && unfaithful.has(expr) ? { ok: false, reason: `tsc: the parsed shape of ${expr} differs from the original` } : classified;
     const out = { ...r, object: r.object || isObjectAst(ast) };
     if (!stack.length) memo.set(expr, out);
     return out;
@@ -350,7 +358,10 @@ function main(argv) {
     const nullable = members.some((m) => m.k === "null");
     members = members.filter((m) => m.k !== "null");
     if (members.length === 0) return { ok: true };
+    if (nullable && members.length) features.add("nullable");
     if (members.length === 1) return classify(members[0], stack);
+    // A union of literals (of any JSON kinds) is an enum of JSON literals.
+    if (members.every((m) => m.k === "literal")) { for (const m of members) { const r = classify(m, stack); if (!r.ok) return r; } features.add("enum"); return { ok: true }; }
     const groups = new Map();
     for (const m of members) groups.set(jsonKind(m), [...(groups.get(jsonKind(m)) ?? []), m]);
     for (const kind of groups.keys()) if (!["string", "number", "boolean", "array", "object"].includes(kind)) return { ok: false, reason: `union member of kind ${kind}` };
@@ -369,6 +380,8 @@ function main(argv) {
       if (!tag) return { ok: false, reason: "object union without a discriminator of disjoint literal values" };
     }
     for (const m of members) { const r = classify(m, stack); if (!r.ok) return r; }
+    if (tag) features.add("tagged");
+    if (groups.size > 1) features.add("bykind");
     return { ok: true, ...(tag ? { tag } : {}), ...(groups.size > 1 ? { byJsonKind: true } : {}), nullable };
   };
 
@@ -381,7 +394,7 @@ function main(argv) {
   });
   const types = rows.filter((r) => r.kind !== "const");
   const ok = types.filter((r) => r.expressible).length;
-  const summary = { numbers, exports: rows.length, types: types.length, consts: rows.length - types.length, expressible: ok, share: +(ok / types.length).toFixed(4), expansions: expanded.size, unfaithful: [...unfaithful].sort() };
+  const summary = { numbers, exports: rows.length, types: types.length, consts: rows.length - types.length, expressible: ok, share: +(ok / types.length).toFixed(4), expansions: expanded.size, unfaithful: [...unfaithful].sort(), features: [...features].sort() };
   if (json) console.log(JSON.stringify({ summary, rows, expanded: Object.fromEntries([...expanded.keys()].sort().map((k) => [k, print(expanded.get(k))])) }, null, 1));
   else {
     for (const r of rows) console.log(`${r.expressible ? "yes" : "no "}  ${r.kind.padEnd(9)} ${r.name}${r.reason ? `  (${r.reason})` : r.tag ? `  [tagged on ${r.tag}]` : ""}`);
@@ -404,6 +417,7 @@ function print(n) {
     case "tuple": return `[${n.items.map(print).join(", ")}]`;
     case "function": return "(() => unknown)";
     case "typeof": return n.text;
+    case "objectKeyword": return "object";
     default: return n.k;
   }
 }
