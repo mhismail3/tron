@@ -1,9 +1,9 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { realpath } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { awaitsWithin } from "../../test-support/wait-for.js";
+import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { awaitsWithin } from "../../../test-support/wait-for.js";
 
 /**
  * Kernel reconnect-snapshot lock (packages/gateway/docs/scenario-locks.md#locks) for the

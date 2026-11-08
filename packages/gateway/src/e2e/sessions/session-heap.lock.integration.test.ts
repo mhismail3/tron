@@ -1,9 +1,9 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { normalizeTraceValue } from "../../test-support/scenario-lock.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { createAndOpen, DETACHED_RUN, drainBlockersScenario, openExisting, WAITING_COMMAND } from "../../test-support/lock-scenarios.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { createAndOpen, DETACHED_RUN, drainBlockersScenario, openExisting, WAITING_COMMAND } from "../../../test-support/lock-scenarios.js";
 
 /**
  * Heap and drain locks (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5's run
