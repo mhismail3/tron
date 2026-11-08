@@ -15,7 +15,6 @@ interface ComponentRegistryOptions {
   readonly onRetire: (record: ComponentRecord) => void;
   readonly onDiagnostic?: (diagnostic: ComponentDiagnostic) => void;
   readonly onFactoryFailure?: (key: string, generation: number, diagnostic: ComponentDiagnostic) => void;
-  readonly onFactorySettled?: (key: string, generation: number) => void;
   readonly onActivity?: (pendingFactories: number) => void;
   readonly maxRecords?: number;
 }
@@ -27,7 +26,6 @@ export class ComponentRegistry {
   private pendingFactories = 0;
   private retired = false;
   constructor(private readonly options: ComponentRegistryOptions) {}
-  get pendingFactoryCount(): number { return this.pendingFactories; }
   get recordCount(): number { return this.records.size; }
   has(key: string): boolean { return this.records.has(key); }
   currentGeneration(key: string): number | undefined { return this.generations.get(key); }
@@ -53,27 +51,24 @@ export class ComponentRegistry {
     catch (error) {
       this.finishFactory(record); record.state = "failed";
       this.reportFailure(record, { code: "render-failed", message: boundedDisplayError(error) });
-      this.options.onFactorySettled?.(key, generation);
       this.releaseGeneration(record);
       return true;
     }
     Promise.resolve(result).then((component) => {
       const current = this.owns(record);
       this.finishFactory(record);
-      this.options.onFactorySettled?.(key, generation);
       this.releaseGeneration(record);
       if (!current || !component || typeof component.render !== "function" || typeof component.invalidate !== "function") {
         if (component && typeof component.render === "function") this.disposeLate(component);
         if (current) { record.state = "failed"; this.reportFailure(record, { code: "render-invalid", message: "Component factory returned an invalid component" }); }
         return;
       }
-      record.recording = new RecordingComponent(component, this.options.onDiagnostic ? { onDiagnostic: this.options.onDiagnostic } : {});
+      record.recording = new RecordingComponent(component, this.options.onDiagnostic);
       if (!this.isCurrent(record)) { record.state = "retired"; record.recording.dispose(); record.state = "disposed"; return; }
       record.state = "mounted";
       this.options.onMount(record);
     }, (error) => {
       this.finishFactory(record);
-      this.options.onFactorySettled?.(key, generation);
       this.releaseGeneration(record);
       if (this.isCurrent(record)) { record.state = "failed"; this.reportFailure(record, { code: "render-failed", message: boundedDisplayError(error) }); }
     });

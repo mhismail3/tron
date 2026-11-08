@@ -13,18 +13,11 @@ export interface RunMarkerEvidence {
   assistantCompletedAt?: string;
 }
 
-interface LegacyRunMarkerEvidence extends RunMarkerEvidence {
-  version: 1;
-  sessionId: string;
-}
-
 interface RunMarkerDocument {
   version: 2;
   sessionId: string;
   operations: RunMarkerEvidence[];
 }
-
-type StoredRunMarker = LegacyRunMarkerEvidence | RunMarkerDocument;
 
 interface Lane {
   mutex: AsyncMutex;
@@ -204,12 +197,7 @@ export class RunMarkerStore {
 }
 
 async function readOperations(path: string, sessionId: string): Promise<RunMarkerEvidence[]> {
-  const stored = await readJson<StoredRunMarker | undefined>(path, undefined, MAXIMUM_RUN_MARKER_BYTES);
-  if (admitsLegacyMarker(stored, sessionId)) {
-    const { operationId, acceptedAt, assistantCompletionId, assistantCompletedAt } = stored;
-    return [{ operationId, acceptedAt, ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
-      ...(assistantCompletedAt === undefined ? {} : { assistantCompletedAt }) }];
-  }
+  const stored = await readJson<RunMarkerDocument | undefined>(path, undefined, MAXIMUM_RUN_MARKER_BYTES);
   if (!admitsMarkerDocument(stored, sessionId)) return [];
   return stored.operations.map((operation) => ({ ...operation }));
 }
@@ -253,11 +241,7 @@ function admitsOperation(operation: unknown): operation is RunMarkerEvidence {
       && boundedString(candidate.assistantCompletedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)));
 }
 
-function admitsLegacyMarker(marker: StoredRunMarker | undefined, sessionId: string): marker is LegacyRunMarkerEvidence {
-  return marker?.version === 1 && marker.sessionId === sessionId && admitsOperation(marker);
-}
-
-function admitsMarkerDocument(marker: StoredRunMarker | undefined, sessionId: string): marker is RunMarkerDocument {
+function admitsMarkerDocument(marker: RunMarkerDocument | undefined, sessionId: string): marker is RunMarkerDocument {
   if (marker?.version !== 2 || marker.sessionId !== sessionId || !Array.isArray(marker.operations)
     || marker.operations.length === 0 || marker.operations.length > MAXIMUM_RUN_MARKER_OPERATIONS
     || !marker.operations.every(admitsOperation)) return false;

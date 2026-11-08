@@ -1,6 +1,6 @@
 {
   "layer": "L5",
-  "purpose": "Gateway system journeys: tests that boot the real RuntimeRegistry; batch and checkpoint signals, not a per-commit gate",
+  "purpose": "Gateway system journeys: tests that boot the Gateway (the in-process RuntimeRegistry through test-support harnesses, or a real Gateway process); batch and checkpoint signals, run before landing only when changed or declared by a changed module",
   "owns": [
     "**"
   ]

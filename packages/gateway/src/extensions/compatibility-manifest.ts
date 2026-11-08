@@ -1,4 +1,3 @@
-import { PI_VERSION } from "../kernel/pi/version.js";
 import type {
   EntryRenderOptions,
   ExtensionAPI,
@@ -11,9 +10,6 @@ import type {
   ToolDefinition,
   ToolRenderResultOptions,
 } from "../kernel/pi/coding-agent.js";
-
-export { PI_VERSION };
-export const EXTENSION_PRESENTATION_VERSION = 3 as const;
 
 export type HostClassification = "native-semantic" | "remote-component" | "renderer" | "pi-runtime" | "explicit-fallback";
 export interface CompatibilityEntry {
@@ -41,9 +37,9 @@ export const extensionPresentationCompatibility = {
   setTitle: entry("native-semantic", "title"), pasteToEditor: entry("native-semantic", "editor.revisioned"),
   setEditorText: entry("native-semantic", "editor.revisioned"), getEditorText: entry("native-semantic", "editor.revisioned"),
   getToolsExpanded: entry("native-semantic", "tools.expanded"), setToolsExpanded: entry("native-semantic", "tools.expanded"),
-  onTerminalInput: entry("remote-component", "terminal.input", "The bounded in-memory input seam is proven; production routing remains unavailable while the binding is RPC."),
+  onTerminalInput: entry("remote-component", "terminal.input", "No input reaches Pi components while the binding is RPC."),
   setFooter: entry("remote-component", "components.footer", "Public component composition is proven; production slot mounting awaits Phase 4D."), setHeader: entry("remote-component", "components.header", "Public component composition is proven; production slot mounting awaits Phase 4D."),
-  custom: entry("remote-component", "components.custom", "Foundation-only: one exclusive non-overlay custom owner is bounded in the dormant harness; overlay UX, input routing, and production activation are deferred."),
+  custom: entry("remote-component", "components.custom", "Refused in RPC mode with a diagnostic; the factory is never invoked."),
   addAutocompleteProvider: entry("remote-component", "editor.autocomplete", "Phase 4."),
   setEditorComponent: entry("remote-component", "editor.component", "Phase 4."), getEditorComponent: entry("remote-component", "editor.component", "Phase 4."),
   theme: entry("native-semantic", "theme.baseline", "RPC callbacks receive the host-owned 256-color dark baseline; process-global Pi helpers are pinned to dark because the Gateway has no terminal and Pi exposes no public per-instance global setter."),
@@ -116,13 +112,12 @@ export const toolDefinitionCompatibility = {
 } satisfies Record<keyof ToolDefinition, "pi-runtime" | "renderer">;
 
 export const remoteTuiFeasibilityCompatibility = {
-  terminal: entry("remote-component", "feasibility.terminal", "A bounded no-stdio Terminal drives production read-only component widgets; remote input remains unavailable."),
+  terminal: entry("remote-component", "feasibility.terminal", "A fixed 80x24 no-stdio Terminal drives production read-only component widgets; it delivers no input."),
   composition: entry("remote-component", "feasibility.main-screen", "Root-exported TuiMainScreen capture composes retained read-only widgets; overlay geometry, stacking, focus, and blocking custom UI remain deferred."),
   recording: entry("remote-component", "feasibility.recording", "Recording wrappers capture Pi's single render invocation into generic widget surfaces; interactive component surfaces remain deferred."),
   frameParser: entry("remote-component", "feasibility.frame-parser", "Logical lines sanitize to bounded plain text, RGB styles, safe links, and cursor state for the unified v2 presentation protocol."),
-  presentationStore: entry("remote-component", "presentation.aggregate-revision", "One epoch-scoped store atomically owns semantic state, surfaces, interactions, leases, capabilities, and diagnostics while production remains RPC."),
+  presentationStore: entry("remote-component", "presentation.aggregate-revision", "One epoch-scoped store atomically owns semantic state, surfaces, interactions, capabilities, and diagnostics while production remains RPC."),
   fullFrames: entry("remote-component", "presentation.full-frames", "Retained component widgets may publish bounded read-only frames; interactive custom/overlay surfaces remain deferred."),
-  inputLeaseProjection: entry("remote-component", "presentation.input-lease", "The scoped lease is modeled and retained; acquisition and input routing await Phase 4C."),
   terminalImages: entry("explicit-fallback", "feasibility.images", "Kitty/iTerm image and file controls are stripped; remote terminal images are not advertised."),
   kittyKeyRelease: entry("explicit-fallback", "feasibility.kitty-key-release", "The in-memory terminal truthfully reports Kitty keyboard protocol unavailable."),
 } as const;

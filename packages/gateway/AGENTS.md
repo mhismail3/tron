@@ -43,6 +43,9 @@ Wire-traffic profiling and multi-session qualification:
 - **Host lock and isolation.** `scripts/tron test gateway` takes the host's full-Gateway lock (unless
   its caller already holds it) and gives each run its own HOME and temporary roots
   ([verify](../../tools/verify/README.md#gateway-test-isolation)); a bare `npx vitest run` has neither.
+- **Mac mini lanes.** `scripts/tron verify --gateway-host mini` (or `scripts/tron test gateway --mini`) runs the
+  Gateway Vitest lanes on the Mac mini at the exact commit, and the mini's result is verify's
+  ([mini](../../tools/verify/README.md#gateway-lanes-on-the-mac-mini)). That keeps this Mac's load off them.
 - **Nested pass.** Files that run nested Vitest or real pi children, or activate the managed
   pi-subagents install, run one at a time in the nested pass; `vitest.nested.config.ts` lists them
   ([test-support](test-support/README.md#contract)).
@@ -50,6 +53,9 @@ Wire-traffic profiling and multi-session qualification:
   `com.tron.server` are the maintainer's ([charter](../../AGENTS.md#safety-boundaries)).
 - **Persisted bytes.** A change to stored JSON or JSONL bytes is a migration decision, not a
   refactor ([charter](../../AGENTS.md#architecture-invariants)).
+- **Home.** Home memory, the endless Home chat, summarization and chapters keep working exactly as
+  they do; cleanup there only preserves behaviour. Triggers and automations stay generic
+  Gateway primitives: they carry no Home-specific logic that steers how Home behaves.
 
 ## gateway/platform
 

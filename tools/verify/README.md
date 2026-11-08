@@ -18,6 +18,7 @@ scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun ev
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
+scripts/tron verify ... --gateway-host mini     # run the Gateway Vitest lanes on the Mac mini, not this Mac
 ```
 
 ## Worktree dependencies
@@ -69,6 +70,23 @@ the lock's one owner; the runner and the batch import it.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
 user's settings or profile. Test input and output must not depend on live stores.
 
+## Gateway lanes on the Mac mini
+
+`--gateway-host mini` (or `scripts/tron test gateway --mini [vitest args]`) runs the Gateway Vitest lanes on the
+Mac mini through `mini.py`; the default, and `--update-locks` always, runs them here. Making the mini the default
+waits on an exact pass/fail match with this Mac at one commit (#2334). `mini.py` refuses a dirty tree, or a HEAD
+other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/tron.git`. One job at a time
+(`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the
+Gateway `node_modules`, refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
+only when `package.json`, `package-lock.json`, `third_party/` or the Node binary changed, and runs that commit's
+`gateway.py` with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
+live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. An unconfigured or unreachable mini,
+an off-pin toolchain or a session without a result exits 2; nothing falls back to this Mac. Stopping verify ends
+the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
+`tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node is
+installed there, the first job refuses with the `scripts/tron-node install` command to run in its checkout.
+`verify --batch` and `mutate` run their Gateway lanes here.
+
 ## Run output
 
 Execution reads committed state: uncommitted or untracked changes are refused
@@ -78,7 +96,11 @@ live log, result and wall time. The first failure stops the run and prints its t
 `test-results/verify/<sha>.json` is atomically updated before/after every step;
 `running` and `interrupted` are not passes. SIGINT/SIGTERM stops and joins the owned
 step process group while retaining partial results. Full logs are in
-`test-results/verify/<sha>/`. Repeating a selection at one SHA overwrites this local
+`test-results/verify/<sha>/`. `--changed` prints and records a `delta`: source, test and doc lines
+added and removed (tests include fixtures, support and goldens), added and deleted test files,
+each new or renamed-in test file beside an existing test of the same stem, and each added source line naming
+legacy, compat, shim or deprecated code. It never fails a run; the reviewer ACCEPTs against it
+([oracle policy](test-oracles.md)). Repeating a selection at one SHA overwrites this local
 report; batch evidence is copied separately before another run. The `resultDigest` covers the
 selection, each step's outcome and test count, and the verdict, but not timing,
 so two runs of one commit against one base can be compared (a reused iOS build compares equal to
@@ -222,7 +244,9 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
    file) runs as its `test` methods, at most three per runner process (`tests: ios 1/N`), so
    every process keeps the runner's focused deadline; a class whose methods cannot be read
    or that holds test-shaped methods the reader cannot place runs whole. Each method shard must
-   pass exactly its named tests. Every admitted shard runs before a failure is reported; a busy
+   pass exactly its named tests. A method that skips unless on an iPad (in itself, its class's
+   `setUp` or a helper it calls directly) runs in its own shards on this worktree's iPad lane
+   (`verify-ipad-<hash>`, `iPad Pro 13-inch (M5)`), on the same products. Every admitted shard runs before a failure is reported; a busy
    exit 73 defers that shard and the rest, which is never a pass. Harnessed journeys use their own lanes. A file naming
    neither fails unless iOS is skipped. Counts/failures come from XCTest `summary.json`
    (`passedTests`); `--update-locks` passes `TEST_RUNNER_TRON_UPDATE_LOCKS`. Goldens are

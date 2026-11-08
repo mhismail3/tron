@@ -3,7 +3,7 @@
  *
  * A committed corpus written by the *outgoing* Pi SDK through the real Gateway
  * (regenerated with `npm run record:pi-corpus`) and reopened by the *installed*
- * SDK in `src/sessions/pi-persisted-state-corpus.integration.test.ts`. The
+ * SDK in `src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts`. The
  * corpus is data about what Tron persisted; every assertion about it is a
  * Tron-level invariant, so a breaking SDK delta surfaces as a failed invariant
  * instead of a hand-authored fixture drifting.

@@ -61,7 +61,7 @@ snapshot. No startup migration, polling or background credential probe occurs.
 
 ```bash
 scripts/tron verify --module gateway/integrations
-scripts/tron test gateway src/integrations/tests/connections.lifecycle.lock.integration.test.ts
+scripts/tron test gateway src/e2e/integrations/tests/connections.lifecycle.lock.integration.test.ts
 ```
 
 The lifecycle lock crosses a paired loopback WebSocket, real Gateway service,

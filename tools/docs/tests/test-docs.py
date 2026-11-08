@@ -4,7 +4,8 @@
 1. The real repository: the module map lists exactly the ids that
    `git ls-files '*.module.json'` derives; the RPC list holds every method the
    recorded protocol wire lock exercised against a real Gateway; the settings list
-   holds the key the recorded settings lock resolved, with the layers it edited;
+   holds the key the admin settings lock resolves, with the layers it edits and the
+   group the Gateway resolves it in (its named checks);
    committed generated blocks are current.
 2. A disposable fixture repository (the real `scripts/tron`, `scripts/tron-node`,
    `tools/docs` and `tools/ownership`, isolated HOME and Git): each generator reads
@@ -76,7 +77,7 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(gateway, {m for m in expected if m.startswith("gateway/")})
 
     def test_rpc_list_holds_every_method_a_real_gateway_answered(self) -> None:
-        lock = json.loads((ROOT / "packages/gateway/src/protocol/locks/protocol-wire.golden.json").read_text())
+        lock = json.loads((ROOT / "packages/gateway/src/e2e/protocol/locks/protocol-wire.golden.json").read_text())
         answered = {call["method"] for call in lock["methods"] if call["ok"]}
         output = self.generate("rpc")
         rows = [line.split(" | ")[1] for line in output.splitlines() if line.startswith("| `")]
@@ -86,24 +87,18 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(int(output.split(" ", 1)[0]), len(listed))
 
     def test_settings_list_holds_the_key_the_settings_lock_edited(self) -> None:
-        # The admin settings lock asserts its real-Gateway trace against this inline JSON literal.
-        source = (ROOT / "packages/gateway/src/admin/admin.lock.integration.test.ts").read_text()
-        marker = '"admin-settings-change": '
-        self.assertEqual(source.count(marker), 1, "the admin lock's inline expectation moved")
-        lock, _ = json.JSONDecoder().raw_decode(source, source.index(marker) + len(marker))
-        resolved = next(e for e in lock["exchanges"] if e["method"] == "settings.resolve")["response"]["result"]["keys"][0]
-        row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{resolved['key']}` |"))
+        # The admin settings lock changes one key at one layer through the real Gateway and
+        # asserts the group the Gateway resolves it in; the generated list must agree.
+        source = (ROOT / "packages/gateway/src/e2e/admin/admin.lock.integration.test.ts").read_text()
+        keys = re.findall(r'^const KEY = "([^"]+)";$', source, re.M)
+        edited_layers = set(re.findall(r'changes: \[\{ key: KEY, layer: "([a-z]+)", op: "set"', source))
+        groups = re.findall(r'expect\(before\.result\.keys\[0\]\.group\)\.toBe\("([a-z]+)"\);', source)
+        self.assertEqual((len(keys), len(groups)), (1, 1), "the admin lock's key or group assertion moved")
+        self.assertTrue(edited_layers, "the admin lock's settings.change moved")
+        row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{keys[0]}` |"))
         layers = row.split(" | ")[3].split(", ")
-        edited_layers = {
-            change["layer"]
-            for exchange in lock["exchanges"]
-            if exchange["method"] == "settings.change" and exchange["response"]["ok"]
-            for change in exchange["response"]["result"]["changes"]
-            if change["key"] == resolved["key"] and change["status"] == "applied"
-        }
-        self.assertTrue(edited_layers)
         self.assertLessEqual(edited_layers, set(layers))
-        self.assertEqual(row.split(" | ")[2], resolved["group"])
+        self.assertEqual(row.split(" | ")[2], groups[0])
 
     def test_signals_print_and_committed_blocks_are_current(self) -> None:
         # Today no module README has a Signals section and no doc embeds a block; consumers (#1501, #1497,

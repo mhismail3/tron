@@ -12,7 +12,7 @@ export const PROFILE_AREAS = {
   corrections: "Corrections",
 } as const;
 export interface ProfileMetadata { version: 2; path: string[] }
-/** Rebuildable SQL-head projection, written only with its canonical note. */
+/** Metadata row derived from a canonical note. */
 interface ProfileNoteRow {
   title: string; confirmed: boolean; tags: string[]; retired: boolean;
   profile?: ProfileMetadata; supersedes: string[];
