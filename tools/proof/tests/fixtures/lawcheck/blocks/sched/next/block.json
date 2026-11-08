@@ -1,0 +1,1 @@
+{"interface": ["laws/sched/Next.dfy"], "impl": ["blocks/sched/next/Block.dfy"], "deps": ["arith/divide"]}

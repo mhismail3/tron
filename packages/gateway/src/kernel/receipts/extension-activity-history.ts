@@ -1,16 +1,12 @@
-import { createHash } from "node:crypto";
 import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../../protocol/types.js";
 /** This module must stay free of runtime imports: it is loaded in a worker thread
  * under `node --experimental-strip-types`, which does not resolve the `.js`
  * specifiers the rest of the Gateway uses. The bounded page
- * assembler shared with process history therefore lives here. */
+ * assembler process history uses therefore lives here. */
 
 /** Reserved Pi custom-entry type. Custom entries are canonical JSONL facts but
  * are intentionally not transcript messages or model context. */
 export const EXTENSION_ACTIVITY_RECEIPT_TYPE = "tron.extension-activity.v1";
-export const EXTENSION_ACTIVITY_HISTORY_CAPABILITY = "extension-activity-history.v1";
-const MAX_EXTENSION_HISTORY_PAGE = 50;
-export const MAX_EXTENSION_HISTORY_BYTES = 256 * 1_024;
 
 export interface ExtensionActivityReceipt {
   version: 1;
@@ -233,31 +229,6 @@ function admitExtensionActivityReceipt(value: unknown, expectedSessionId?: strin
   };
 }
 
-export interface ExtensionActivityHistoryPage {
-  /** Wire summaries use the same bounded activity schema as snapshots/iOS. */
-  activities: ExtensionRunActivity[];
-  historyRevision: string;
-  nextCursor?: string;
-  omissions?: { count: number; bytes: number; reason: "bytes" | "countAndBytes" };
-}
-
-export function extensionActivityHistoryRevision(entries: readonly unknown[], sessionId: string, branchRevision = ""): string {
-  return revisionOf(canonicalReceiptSequence(extensionActivityReceipts(entries, sessionId)), sessionId, branchRevision);
-}
-
-function canonicalReceiptSequence(entries: Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }>): Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }> {
-  return [...entries].sort((left, right) =>
-    right.receipt.terminalAt.localeCompare(left.receipt.terminalAt)
-    || right.receipt.activityId.localeCompare(left.receipt.activityId)
-    || (right.id ?? "").localeCompare(left.id ?? "")
-    || (right.parentId ?? "").localeCompare(left.parentId ?? "")
-  );
-}
-
-function revisionOf(entries: Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }>, sessionId: string, branchRevision = ""): string {
-  return createHash("sha256").update(`${sessionId}\n${branchRevision}\n${entries.map((entry) => `${entry.id ?? ""}\0${entry.parentId ?? ""}\0${entry.receipt.activityId}\0${entry.receipt.terminalAt}`).join("\n")}`).digest("hex").slice(0, 32);
-}
-
 /** Reads reserved custom entries only. Callers may pass SessionManager.getEntries()
  * without exposing the entries to ordinary transcript projection. */
 export function extensionActivityReceipts(entries: readonly unknown[], sessionId: string): Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }> {
@@ -273,51 +244,6 @@ export function extensionActivityReceipts(entries: readonly unknown[], sessionId
     result.push({ ...(id ? { id } : {}), parentId: typeof entry.parentId === "string" ? entry.parentId : null, receipt });
   }
   return result;
-}
-
-/** Bounded fingerprint of the exact filter that produced a page offset. The
- * shared content revision identifies the canonical sequence, not a position
- * inside a filtered projection of it. */
-function extensionActivityCursorQuery(filter?: { ownerId?: string; runId?: string; state?: ExtensionActivityReceipt["state"] }): string {
-  return createHash("sha256").update([filter?.ownerId, filter?.runId, filter?.state].map((part) => part ?? "*").join("\u0000")).digest("hex").slice(0, 16);
-}
-
-export function listExtensionActivityHistory(entries: readonly unknown[], sessionId: string, cursor?: string, limit = 25, branchRevision?: string, filter?: { ownerId?: string; runId?: string; state?: ExtensionActivityReceipt["state"] }): ExtensionActivityHistoryPage {
-  const canonical = canonicalReceiptSequence(extensionActivityReceipts(entries, sessionId));
-  // Filters and duplicate collapse select page content only. Revision identity
-  // remains global so detail and filtered list cursors agree; the list cursor
-  // additionally binds the exact filter so it cannot be replayed against a
-  // different filtered array at the same revision.
-  const historyRevision = revisionOf(canonical, sessionId, branchRevision);
-  const sorted = canonical
-    .filter(({ receipt }) => (!filter?.ownerId || receipt.owner?.id === filter.ownerId)
-      && (!filter?.runId || receipt.runId === filter.runId)
-      && (!filter?.state || receipt.state === filter.state));
-  const seenActivityIDs = new Set<string>();
-  const all = sorted.filter(({ receipt }) => {
-    if (seenActivityIDs.has(receipt.activityId)) return false;
-    seenActivityIDs.add(receipt.activityId);
-    return true;
-  });
-  // Receipt identity changes still invalidate cursors even when duplicate
-  // activity IDs are collapsed from the returned page.
-  const page = boundedHistoryPage({
-    rowCount: all.length,
-    project: (index) => extensionReceiptActivity(all[index]!.receipt),
-    cursor,
-    revision: historyRevision,
-    query: extensionActivityCursorQuery(filter),
-    limit,
-    maximumPage: MAX_EXTENSION_HISTORY_PAGE,
-    maximumBytes: MAX_EXTENSION_HISTORY_BYTES,
-    label: "extension activity history",
-  });
-  return {
-    activities: page.activities,
-    historyRevision,
-    ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
-    ...(page.omissions === undefined ? {} : { omissions: page.omissions }),
-  };
 }
 
 export function extensionReceiptActivity(receipt: ExtensionActivityReceipt): ExtensionRunActivity {
