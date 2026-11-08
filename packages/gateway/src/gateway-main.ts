@@ -77,7 +77,6 @@ import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./kernel/delegation/delegated-provider.js";
-import { assertDelegatedRootCutoverReady } from "./kernel/delegation/delegated-root-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
 import { tronHomePath } from "./foundation/tron-home-layout.js";
 
@@ -86,10 +85,6 @@ import { tronHomePath } from "./foundation/tron-home-layout.js";
 const moduleGraphLoadedAt = performance.now();
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
-// Never switch the provider's root while retained artifacts are discoverable in
-// its legacy roots. The operator cutover is explicit and runs before Pi loads
-// the provider, so an old run cannot be silently stranded.
-await assertDelegatedRootCutoverReady(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. Existing installed packages are never rewritten in place.

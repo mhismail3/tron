@@ -3,7 +3,6 @@
   "owns": [
     "child-session-admission.ts",
     "delegated-provider.ts",
-    "delegated-root-migration.ts",
     "delegated-activity.md",
     "delegation.module.json",
     "managed-producer.ts",
