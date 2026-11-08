@@ -22,9 +22,6 @@ const CATALOG_METADATA_SHARD_COUNT = 64;
 const CATALOG_METADATA_SHARD_MAX_BYTES = 8 * 1_024 * 1_024;
 const CATALOG_METADATA_SHARD_WARN_BYTES = 2 * 1_024 * 1_024;
 const CATALOG_METADATA_MANIFEST_MAX_BYTES = 64 * 1_024;
-/** The single-document form this store replaces; read only to migrate it. */
-const LEGACY_DOCUMENT_NAME = "catalog-metadata-v2.json";
-const LEGACY_DOCUMENT_MAX_BYTES = 8 * 1_024 * 1_024;
 const STORE_DIRECTORY_NAME = "catalog-metadata-v3";
 const MANIFEST_NAME = "manifest.json";
 const SHARD_FILE = /^shard-([0-9a-f]{2})\.json$/u;
@@ -156,7 +153,7 @@ type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcileProgress)
  * fire-and-forget outside any request span, which is why its owner reports it.
  * A refused save names why and how large the refused part was, so one log line
  * diagnoses a bound. */
-export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append" | "line-limit" | "migrate";
+export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append" | "line-limit";
 export interface CatalogMetadataIndexFailureDetail {
   reason: "entries" | "shard-bytes" | "write" | "readback";
   shard?: string;
@@ -237,14 +234,6 @@ function shardFileName(shard: string): string {
   return `shard-${shard}.json`;
 }
 
-function sortedRowsEqual(left: readonly CatalogMetadataIndexRow[], right: readonly CatalogMetadataIndexRow[]): boolean {
-  if (left.length !== right.length) return false;
-  const encode = (rows: readonly CatalogMetadataIndexRow[]) => rows.map((row) => JSON.stringify(row)).sort();
-  const a = encode(left);
-  const b = encode(right);
-  return a.every((value, index) => value === b[index]);
-}
-
 function validString(value: unknown, max: number): value is string {
   return typeof value === "string" && value.length <= max;
 }
@@ -268,8 +257,6 @@ function validCreationOrigin(value: unknown): value is SessionCreationOrigin {
 export class CatalogMetadataIndex {
   /** The sharded store directory. */
   readonly directory: string;
-  /** The superseded single document, migrated on first read and then removed. */
-  readonly legacyPath: string;
   private readonly onFailure: CatalogMetadataIndexFailure | undefined;
   private readonly onPressure: ((pressure: CatalogMetadataIndexPressure) => void) | undefined;
   private readonly writeMutex = new AsyncMutex();
@@ -288,7 +275,6 @@ export class CatalogMetadataIndex {
     onPressure?: (pressure: CatalogMetadataIndexPressure) => void,
   ) {
     this.directory = join(gatewayStateRoot, STORE_DIRECTORY_NAME);
-    this.legacyPath = join(gatewayStateRoot, LEGACY_DOCUMENT_NAME);
     this.onFailure = onFailure;
     this.onPressure = onPressure;
   }
@@ -322,7 +308,7 @@ export class CatalogMetadataIndex {
       // before its drain, must observe the closed owner instead of publishing.
       if (this.closed) return false;
       const root = await realpath(catalogRoot).catch(() => resolve(catalogRoot));
-      return this.writeStore(root, rows, "save");
+      return this.writeStore(root, rows);
     });
   }
 
@@ -528,56 +514,9 @@ export class CatalogMetadataIndex {
     finally { await handle?.close().catch(() => {}); }
   }
 
-  /** The store for one root, migrating the superseded single document first
-   * when it is still present. */
+  /** The store for one root. */
   private async readStore(catalogRoot: string): Promise<CatalogMetadataStoreRead> {
-    const root = await realpath(catalogRoot).catch(() => resolve(catalogRoot));
-    const legacy = await this.readLegacy(root);
-    if (legacy) return this.migrate(root, legacy);
-    return this.readShards(root);
-  }
-
-  /** The v2 document, if present, valid and bound to this root. */
-  private async readLegacy(root: string): Promise<CatalogMetadataIndexRow[] | undefined> {
-    const file = await this.readBounded(this.legacyPath, LEGACY_DOCUMENT_MAX_BYTES);
-    if (!file) return undefined;
-    try {
-      const document = JSON.parse(file.bytes.toString("utf8")) as unknown;
-      return this.admitDocument(document, root) ? document.rows : undefined;
-    } catch { return undefined; }
-  }
-
-  /** Non-destructive migration: the legacy rows are written as shards, read
-   * back, and the legacy document is removed only when the read-back cut equals
-   * it. Until then the legacy document stays, so a failed or interrupted
-   * migration repeats on the next read, and its rows still serve this one. */
-  private async migrate(root: string, observed: CatalogMetadataIndexRow[]): Promise<CatalogMetadataStoreRead> {
-    const started = Date.now();
-    return this.writeMutex.run(async () => {
-      if (this.closed) return { complete: true, rows: observed, readable: true };
-      // Re-read under the mutex: a save that committed since the document was
-      // first read has removed it, and its newer cut must not be overwritten.
-      const legacy = await this.readLegacy(root);
-      if (!legacy) return this.readShards(root);
-      const served = { complete: true, rows: legacy, readable: true };
-      // A refused or failed write has already reported itself.
-      const written = await this.writeStore(root, legacy, "migrate").catch(() => false);
-      if (!written) return served;
-      try {
-        const readBack = await this.readShards(root);
-        if (!readBack.complete || !sortedRowsEqual(readBack.rows, legacy)) {
-          this.failed("migrate", started, { reason: "readback", rows: legacy.length });
-          return served;
-        }
-        await durableRemove(this.legacyPath);
-        return readBack;
-      } catch {
-        // Only the legacy removal can throw here; the document stays for the
-        // next read, and the shards it matches are already complete.
-        this.failed("migrate", started, { reason: "write", rows: legacy.length });
-        return served;
-      }
-    });
+    return this.readShards(await realpath(catalogRoot).catch(() => resolve(catalogRoot)));
   }
 
   private async readShards(root: string): Promise<CatalogMetadataStoreRead> {
@@ -638,12 +577,9 @@ export class CatalogMetadataIndex {
     } catch { return undefined; }
   }
 
-  /** One save or migration, inside the write mutex. */
-  private async writeStore(
-    root: string,
-    rows: readonly CatalogMetadataIndexRow[],
-    stage: "save" | "migrate",
-  ): Promise<boolean> {
+  /** One save, inside the write mutex. */
+  private async writeStore(root: string, rows: readonly CatalogMetadataIndexRow[]): Promise<boolean> {
+    const stage = "save";
     const started = Date.now();
     if (rows.length > CATALOG_METADATA_INDEX_MAX_ENTRIES) {
       this.failed(stage, started, { reason: "entries", rows: rows.length, limit: CATALOG_METADATA_INDEX_MAX_ENTRIES });
@@ -687,13 +623,6 @@ export class CatalogMetadataIndex {
       if (rows.length > CATALOG_METADATA_INDEX_WARN_ENTRIES) {
         this.pressure("rows", { rows: rows.length, limit: CATALOG_METADATA_INDEX_MAX_ENTRIES });
       }
-      // A save that refused nothing supersedes any v2 document still present,
-      // so the document is removed before this manifest commits: no state can
-      // hold both a newer committed cut and a v2 document that a later
-      // migration would publish over it. A crash between the two leaves the
-      // previous manifest, which no longer matches the rewritten shards, so
-      // their rows are reuse candidates only. A refused save keeps v2.
-      if (stage === "save" && manifest.refused.length === 0) await durableRemove(this.legacyPath);
       await durableAtomicWriteText(join(this.directory, MANIFEST_NAME), JSON.stringify(manifest));
       // Pruned only after the manifest commit: a shard that became empty. A
       // refused shard keeps its last accepted file.

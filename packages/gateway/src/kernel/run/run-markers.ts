@@ -13,18 +13,13 @@ export interface RunMarkerEvidence {
   assistantCompletedAt?: string;
 }
 
-interface LegacyRunMarkerEvidence extends RunMarkerEvidence {
-  version: 1;
-  sessionId: string;
-}
-
 interface RunMarkerDocument {
   version: 2;
   sessionId: string;
   operations: RunMarkerEvidence[];
 }
 
-type StoredRunMarker = LegacyRunMarkerEvidence | RunMarkerDocument;
+type StoredRunMarker = RunMarkerDocument;
 
 interface Lane {
   mutex: AsyncMutex;
@@ -205,11 +200,6 @@ export class RunMarkerStore {
 
 async function readOperations(path: string, sessionId: string): Promise<RunMarkerEvidence[]> {
   const stored = await readJson<StoredRunMarker | undefined>(path, undefined, MAXIMUM_RUN_MARKER_BYTES);
-  if (admitsLegacyMarker(stored, sessionId)) {
-    const { operationId, acceptedAt, assistantCompletionId, assistantCompletedAt } = stored;
-    return [{ operationId, acceptedAt, ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
-      ...(assistantCompletedAt === undefined ? {} : { assistantCompletedAt }) }];
-  }
   if (!admitsMarkerDocument(stored, sessionId)) return [];
   return stored.operations.map((operation) => ({ ...operation }));
 }
@@ -251,10 +241,6 @@ function admitsOperation(operation: unknown): operation is RunMarkerEvidence {
   return hasCompletionId === hasCompletedAt
     && (!hasCompletionId || (boundedString(candidate.assistantCompletionId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
       && boundedString(candidate.assistantCompletedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)));
-}
-
-function admitsLegacyMarker(marker: StoredRunMarker | undefined, sessionId: string): marker is LegacyRunMarkerEvidence {
-  return marker?.version === 1 && marker.sessionId === sessionId && admitsOperation(marker);
 }
 
 function admitsMarkerDocument(marker: StoredRunMarker | undefined, sessionId: string): marker is RunMarkerDocument {
