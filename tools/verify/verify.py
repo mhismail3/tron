@@ -50,7 +50,7 @@ class VerifyError(Exception):
 
 
 def git(*args: str) -> str:
-    done = subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotepath=false", *args], capture_output=True, text=True)
+    done = subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotepath=false", *args], capture_output=True, text=True, errors="replace")
     if done.returncode:
         raise VerifyError(done.stderr.strip() or f"git {args[0]} failed")
     return done.stdout
@@ -299,18 +299,22 @@ def delta(base: str) -> dict:
         side[0] += int(added)
         side[1] += int(removed)
     status = git("diff", "--name-status", "-M", f"{base}..HEAD").splitlines()
-    added = [fields[-1] for fields in (row.split("\t") for row in status) if fields[0] == "A" and is_test(fields[-1])]
-    deleted = [fields[-1] for fields in (row.split("\t") for row in status) if fields[0] == "D" and is_test(fields[-1])]
+    rows = [row.split("\t") for row in status]
+    # A rename into a new test path is reviewed like an addition; its source left as a deletion.
+    added = [fields[-1] for fields in rows if fields[0][0] in "AR" and is_test(fields[-1])
+             and not (fields[0][0] == "R" and is_test(fields[1]) and test_stem(fields[1]) == test_stem(fields[-1]))]
+    deleted = [fields[1] for fields in rows if fields[0][0] in "DR" and is_test(fields[1])
+               and not (fields[0][0] == "R" and is_test(fields[-1]) and test_stem(fields[1]) == test_stem(fields[-1]))]
     beside = {}
+    base_tests = [name for name in git("ls-tree", "-r", "--name-only", base).splitlines() if is_test(name)] if added else []
     for path in added:
-        directory = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
-        owners = [name for name in git("ls-tree", "--name-only", base, directory).splitlines()
-                  if name != path and is_test(name) and test_stem(name) == test_stem(path)]
+        owners = [name for name in base_tests if name != path and name.rpartition("/")[0] == path.rpartition("/")[0]
+                  and test_stem(name) == test_stem(path)]
         if owners:
             beside[path] = sorted(owners)
     # Added source lines that name compatibility machinery, which AGENTS.md forbids.
     bridges, path = [], None
-    for line in git("diff", "-U0", "-M", f"{base}..HEAD").splitlines():
+    for line in git("diff", "-U0", "-M", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", f"{base}..HEAD").splitlines():
         if line.startswith("+++ "):
             path = line[6:] if line.startswith("+++ b/") else None
             path = path if path and not is_test_code(path) and not is_doc(path) else None

@@ -56,8 +56,8 @@ are #2316 Phase 7.
 
 **Rule.** A refactor changes no observable behaviour: wire output, persisted bytes, errors callers
 match on, user-visible effects and their order. It leaves contract assertions untouched. A fix
-changes behaviour on purpose and lands its regression proof first, in the owning test, marked
-expected-fail with its issue. Commits are prefixed `test:`, `delete:`, `refactor:`, `fix(#n):`, `docs:` or `chore:`.
+changes behaviour on purpose; its fail-before/pass-after proof goes in the owning test, in the
+same change. Commits are prefixed `test:`, `delete:`, `refactor:`, `fix(#n):`, `docs:` or `chore:`.
 **Evidence.** #2279 converted four whole-trace locks into behaviour checks. Each conversion was
 proven by injecting 8 mutants that failed both the old check and the new one.
 **Enforced by** the wire goldens (`protocol-wire`, `client-event-schemas`), the persisted-format
