@@ -542,6 +542,35 @@ class FastPathTests(VerifyCase):
         self.assertEqual(mixed.returncode, 0, mixed.stdout)
         self.assertEqual(r.report()["selection"]["tests"], ["mods/alpha/test-alpha.py"])
 
+    def test_a_gateway_golden_change_selects_only_the_lock_that_reads_it(self) -> None:
+        r = self.repo
+        base = "packages/gateway/src/e2e"
+        r.write(f"{base}/e2e.module.json", '{"layer":"L5","owns":["**"]}\n')
+        r.write(f"{base}/one/locks/state.golden.json", "{}\n")
+        r.write(f"{base}/one/one.lock.integration.test.ts", 'import { lockPaths } from "../../test-support/scenario-lock.js";\nlockPaths(import.meta.url, "state");\n')
+        r.write(f"{base}/two/locks/other.golden.json", "{}\n")
+        r.write(f"{base}/two/two.lock.integration.test.ts", 'import { lockPaths } from "../../test-support/scenario-lock.js";\nconst trace = { lock: "other" };\nlockPaths(import.meta.url, trace.lock);\n')
+        r.commit("gateway locks")
+        r.git("branch", "-f", "base")
+        r.write(f"{base}/one/locks/state.golden.json", '{"changed":true}\n')
+        r.commit("one golden")
+        planned = r.verify("--changed", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        selection = json.loads(planned.stdout[planned.stdout.index("{\n"):])["selection"]
+        self.assertEqual(selection["tests"], [f"{base}/one/one.lock.integration.test.ts"], planned.stdout)
+        r.git("branch", "-f", "base")
+        r.write(f"{base}/two/locks/other.golden.json", '{"changed":true}\n')
+        r.commit("computed-name golden")
+        computed = r.verify("--changed", "--plan")
+        self.assertEqual(computed.returncode, 0, computed.stdout + computed.stderr)
+        self.assertEqual(json.loads(computed.stdout[computed.stdout.index("{\n"):])["selection"]["tests"],
+                         [f"{base}/two/two.lock.integration.test.ts"], computed.stdout)
+        r.write(f"{base}/two/locks/unread.golden.json", "{}\n")
+        r.commit("unread golden")
+        refused = r.verify("--changed", "--plan")
+        self.assertNotEqual(refused.returncode, 0, refused.stdout)
+        self.assertIn("no lock beside packages/gateway/src/e2e/two/locks/unread.golden.json reads it", refused.stdout + refused.stderr)
+
     def test_a_change_to_only_tests_or_goldens_runs_those_tests_and_the_goldens_locks(self) -> None:
         r = self.repo
         r.write("mods/core/test-core-other.py", PASSING)

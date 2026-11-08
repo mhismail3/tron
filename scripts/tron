@@ -89,6 +89,11 @@ Commands:
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
   proof bootstrap|doctor            Install (bootstrap) or re-verify (doctor) the pinned Dafny
                                     proof toolchain in the per-user cache (tools/proof)
+  proof wire --inventory [--json] [--numbers float64|integer]
+                                    Classify every protocol type as expressible by the
+                                    generated wire format, from the pinned tsc's expansion
+  proof wire --generate <in.dfy> <out-dir>
+                                    Generate TypeScript and Swift codecs from @wire datatypes
   proof check [<block>...] [--json] Check proof blocks (packages/core/blocks) and the blocks
                                     below them with the pinned toolchain; cached per worktree
   proof mutate <block> [options]    Mutation gate: every change to a block's compiled functions
@@ -243,6 +248,14 @@ case "$cmd" in
   proof)
     case "${1:-}" in
       bootstrap|doctor) exec /bin/bash "$ROOT/tools/proof/bootstrap.sh" "$@" ;;
+      wire)
+        shift; use_pinned_node
+        case "${1:-}" in
+          --inventory) exec node "$ROOT/tools/proof/dafny2wire/inventory.mjs" "$@" ;;
+          --generate) exec node "$ROOT/tools/proof/dafny2wire/dafny2wire.mjs" "$@" ;;
+          *) usage >&2; exit 64 ;;
+        esac
+        ;;
       check) shift; use_pinned_node; exec node "$ROOT/tools/proof/lawcheck/lawcheck.mjs" "$@" ;;
       mutate) shift; use_pinned_node; exec node "$ROOT/tools/proof/mutate/mutate.mjs" "$@" ;;
       packet) shift; use_pinned_node; exec node "$ROOT/tools/proof/packet/packet.mjs" "$@" ;;
