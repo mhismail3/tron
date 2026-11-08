@@ -11,16 +11,16 @@ effects, refusals, ordering, identity, persistence and recovery) inline. Two kee
 narrowed golden: `notifications-waiting` its provider requests, and `notifications-push`
 its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock` scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`, `run-extension-ui`), `run-queue-control`, `project-root-trust`, `project-root-resources`, `run-lifecycle-rpcs`, `transport-reconnect-snapshot`, `admin-settings-change`, `automation-owned-run`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers` and the store mutation-path tests in the paragraph after the table
-assert named effects only. `delegation-subagent` and `home-contention-restart` assert inline
-and keep a narrowed golden of the entries no other lock covers. The other scenario
-locks in the table below compare whole-scenario goldens.
+assert named effects only. `delegation-subagent` and `home-contention-restart` keep a
+narrowed golden of the entries no other lock covers, plus an `inlineTrace` in
+the same golden for the remaining ordered trace. The other scenario locks in the
+table below compare whole-scenario goldens.
 
 ## Framework
 
-- `test-support/lock-projections.ts` `expectScenario` asserts a converted lock's
-  normalized trace exactly: its events leave the trace (owned by `client-event-schemas`),
-  and each provider request's tools, prompt sections and prompt hash, and each system
-  entry's sections and tools, must equal a `session-shapes` shape, named by reference.
+- `test-support/lock-projections.ts` `expectRequestShapes` and `expectSystemShapes`
+  assert, in order, that each provider request's tools, prompt sections and prompt
+  hash, and each system entry's sections and tools, equal a `session-shapes` shape.
 - `test-support/scenario-lock.ts` owns all normalization in one place:
   identity keys and UUIDs become `<id>`; ISO and session-file timestamps become
   `<timestamp>`; durations, counters, temp roots, package paths, per-run path
@@ -30,6 +30,11 @@ locks in the table below compare whole-scenario goldens.
 - `compareWithGolden` writes the actual trace to
   `test-results/locks/<name>.actual.json`. On a mismatch it throws the
   `git diff --no-index` hunks and keeps the full diff beside the actual trace.
+  A lock may supply `inlineTrace` alongside its narrowed trace; the framework
+  stores it under the golden's `inlineTrace` field and compares it with the rest of
+  the golden, after the same shared-tool-schema projection.
+  This lets the golden retain a focused shared-entry projection and also pin
+  every remaining field and ordering without an inline expected trace in the test.
   Each lock also asserts that its own steps happened, so a golden can never
   record a degraded run.
 - `test-support/gateway-lock-harness.ts` starts a real Gateway for a lock: the
@@ -84,8 +89,8 @@ Scenario lock files live in `gateway/e2e`, at the path of the module they lock
 | `gateway/notifications` | `notifications-queued-cancel` | inline checks: removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged. Named checks: each run's admission and durable terminal (record, history and reads agree), its completion and receipts bound to the owned prompt with Automation attribution, both sessions' entry types, the chat's transcript rows, each provider request's messages, `chatWithAutomations` shapes, every command receipt (result equal to the response) and run markers (none left); the owners validate the record and receipt formats, and `store-automations`/`store-command-receipts` pin a record envelope and receipt projections |
 | `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
-| `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result. Inline checks (`expectScenario`): the callers, both Gateways' exchanges and Home requests, the publication and ledger, the task records and Home's other entries. Narrowed golden: Home's system entry, the recovered task result and its settings, chat-invocation and context-delivery entries |
-| `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child. Inline checks (`expectScenario`): the parent's provider requests, both sessions' other entries and the subagent's process activity. Narrowed golden: both sessions' system entries and the parent session's settings, context-window and extension-activity entries |
+| `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result. Golden: callers, both Gateways' exchanges and Home requests, publication and ledger, task records and other Home entries in exact `inlineTrace` order, plus Home's system entry, recovered task result, settings, chat-invocation and context-delivery entries in the narrowed canonical trace |
+| `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child. Golden: the parent's provider requests, both sessions' other entries and the subagent's process activity in exact `inlineTrace` order, plus both sessions' system entries and the parent's settings, context-window and extension-activity entries in the narrowed canonical trace |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 | `gateway/pi-sdk` | `session-shapes` | what the model receives for each kind of session (plain chat, extension tool, notifications, automations, Home task worker and its reminder, trusted and revoked project subdirectory, compaction): tool names, prompt sections and hash, canonical system entries (section text and tool schemas), and the product-written messages. Golden in `test-fixtures/pi-sdk/` |
 | `gateway/pi-sdk` | `session-entries` | every distinct Tron custom session entry (`tron.chat-invocation.v1`, `tron.settings.v1`, `tron.context-window.v1`, `tron.extension-activity.v1`) the shared scenarios persist, with its values; each lock's faux provider name becomes `<lock>`. Golden in `test-fixtures/pi-sdk/` |
