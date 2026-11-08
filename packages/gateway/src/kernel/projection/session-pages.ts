@@ -1,11 +1,10 @@
 import type { ToolDisplayProjection } from "./tool-result.js";
 import type { AgentSession } from "../pi/coding-agent.js";
 import type { BlobStore } from "../../sessions/blob-store.js";
-import type { ExtensionRunActivity, SessionProcessActivity, SessionProcessHistoryPage, ChatSemanticMetadata } from "../../protocol/types.js";
+import type { SessionProcessActivity, SessionProcessHistoryPage, ChatSemanticMetadata } from "../../protocol/types.js";
 import type { ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
 import { GatewayError } from "../../errors.js";
 import { projectTranscriptPage, projectTranscriptPageAfter, type TranscriptPage, type ToolProjectionMetadata } from "./projection.js";
-import { listExtensionActivityHistory, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, type ExtensionActivityHistoryPage } from "../receipts/extension-activity-history.js";
 import { listProcessHistory, processHistoryDetail } from "./process-activity.js";
 
 export interface PageSource {
@@ -20,8 +19,6 @@ export interface PageSource {
   bashMetadata: ReadonlyMap<string, ToolProjectionMetadata>;
   forkBoundary: ForkBoundaryAnchor | undefined;
   internalWakeSemantic(entryId: string): ChatSemanticMetadata | undefined;
-  id: string;
-  extensionActivities: ReadonlyMap<string, ExtensionRunActivity>;
 }
 
 export function transcriptPageAfter(source: PageSource,
@@ -101,33 +98,6 @@ export function transcriptPage(source: PageSource,
     }
     throw error;
   }
-}
-
-/** Canonical reserved receipts are read independently of transcript/tree
- * projection. The page revision includes entry/parent identity so branch
- * changes invalidate cursors without creating a second history store. */
-export function extensionActivityHistory(source: PageSource, cursor?: string, limit = 25, filter?: { ownerId?: string; runId?: string; state?: "completed" | "failed" | "stopped" | "rejected" }): ExtensionActivityHistoryPage {
-  source.assertNoTrustReload();
-  return listExtensionActivityHistory(
-    source.runtime.session.sessionManager.getEntries(),
-    source.id,
-    cursor,
-    limit,
-    source.runtime.session.sessionManager.getLeafId() ?? "root",
-    filter,
-  );
-}
-
-export function extensionActivityDetail(source: PageSource, activityId: string, expectedHistoryRevision?: string): ExtensionRunActivity | undefined {
-  source.assertNoTrustReload();
-  if (expectedHistoryRevision !== undefined) {
-    const actual = extensionActivityHistoryRevision(source.runtime.session.sessionManager.getEntries(), source.id, source.runtime.session.sessionManager.getLeafId() ?? "root");
-    if (actual !== expectedHistoryRevision) throw new GatewayError("conflict", "Extension activity generation changed; refresh history", true);
-  }
-  const receipts = extensionActivityReceipts(source.runtime.session.sessionManager.getEntries(), source.id);
-  const receipt = receipts.find((entry) => entry.receipt.activityId === activityId)?.receipt;
-  if (receipt) return extensionReceiptActivity(receipt);
-  return [...source.extensionActivities.values()].find((activity) => (activity.activityId ?? activity.id) === activityId);
 }
 
 export function processHistory(source: PageSource, cursor?: string, limit = 25, filter?: { kind?: "command" | "subagent"; state?: SessionProcessActivity["lifecycle"]["state"] }): SessionProcessHistoryPage {
