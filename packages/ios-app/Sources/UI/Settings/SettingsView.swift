@@ -26,11 +26,8 @@ struct SettingsView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
                     SettingsGroupCard(.iphone) {
-                        settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
+                        settingsLink("Appearance", summary: "Dashboard, activity, theme, and fonts",
                                      icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
-                        TronSettingsDivider()
-                        settingsLink("App Customizations", summary: "Dashboard, visible servers, and subagent activity",
-                                     icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
                     }
                     SettingsGroupCard(.accounts) {
                         settingsLink("Connections", summary: "Paired Macs and authorized devices", icon: "desktopcomputer") {

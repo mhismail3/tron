@@ -11,11 +11,14 @@ import Vision
             defer { app.terminate() }
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
             app.buttons["Open Settings"].tap()
-            let link = app.buttons["settings-link-App Customizations"]
+            let link = app.buttons["settings-link-Appearance"]
             reveal(link, app: app)
             link.tap()
             let field = app.textFields["Chats per project"]
+            XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 8), app.debugDescription)
             XCTAssertTrue(field.waitForExistence(timeout: 8), app.debugDescription)
+            reveal(field, app: app)
+            XCTAssertTrue(field.isHittable, app.debugDescription)
             field.tap()
             let done = app.buttons["text-entry-done"]
             XCTAssertTrue(done.waitForExistence(timeout: 5), app.debugDescription)

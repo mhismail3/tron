@@ -37,15 +37,17 @@ final class TronSheetTintUITests: XCTestCase {
             app.launch(); defer { app.terminate() }
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
             app.buttons["Open Settings"].tap()
-            let sessions = app.buttons["settings-link-App Customizations"]
+            let sessions = app.buttons["settings-link-Appearance"]
             for _ in 0..<12 where !sessions.isHittable { app.swipeUp() }
             XCTAssertTrue(sessions.isHittable, app.debugDescription)
             sessions.tap()
             let retention = app.buttons["Show finished subagents"]
-            XCTAssertTrue(retention.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<10 where !retention.isHittable { app.swipeUp() }
+            XCTAssertTrue(retention.isHittable, app.debugDescription)
             let previous = retention.value as? String
             XCTAssertNotNil(previous)
-            assertToolbarTint(app, title: "App Customizations")
+            assertToolbarTint(app, title: "Appearance")
             retention.tap()
             let choice = app.buttons[previous == "Only active" ? "1 minute" : "Only active"]
             XCTAssertTrue(choice.waitForExistence(timeout: 5), "The control must open at sheet depth two: \(app.debugDescription)")
@@ -59,8 +61,11 @@ final class TronSheetTintUITests: XCTestCase {
             XCTAssertEqual(done.count, 1)
             done.first?.tap()
             XCTAssertTrue(sessions.waitForExistence(timeout: 5)); sessions.tap()
-            XCTAssertTrue(retention.waitForExistence(timeout: 5))
-            XCTAssertEqual(retention.value as? String, selected, "The value survives reopening App Customizations")
+            XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(retention.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<10 where !retention.isHittable { app.swipeUp() }
+            XCTAssertTrue(retention.isHittable, app.debugDescription)
+            XCTAssertEqual(retention.value as? String, selected, "The value survives reopening Appearance")
             retention.tap()
             let restore = app.buttons[previous ?? "Only active"]
             XCTAssertTrue(restore.waitForExistence(timeout: 5)); restore.tap()

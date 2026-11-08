@@ -1,6 +1,11 @@
 import SwiftUI
 
+/// This iPhone's local preferences in one sheet: dashboard, subagent activity,
+/// color mode, theme and fonts. The dashboard's number field sits near the top
+/// so focusing it never needs keyboard avoidance under the floating Done.
 struct AppearanceSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @PresentationState private var behavior = AppLocalBehaviorSettings.shared
     @PresentationState private var appearance = AppearanceSettings.shared
     @PresentationState private var fonts = FontSettings.shared
     @PresentationState private var iconChangeFailed = false
@@ -8,6 +13,47 @@ struct AppearanceSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .leading, spacing: 20, lazy: true, hidesLoneHeading: true) {
+                TronSettingsGroup("Dashboard", accent: .tronPrimary) {
+                    TronChoiceRow(icon: "rectangle.3.group", title: "Dashboard View",
+                                  choices: DashboardSessionSortMode.allCases.map { TronChoice(id: $0, label: $0.rawValue, detail: $0.detail) },
+                                  selected: behavior.dashboardFilter.sortMode) { behavior.dashboardFilter.setSortMode($0) }
+                    TronSettingsDivider()
+                    TronSelectionSheetRow(icon: "server.rack", title: "Visible Servers",
+                        value: behavior.dashboardFilter.isAllSelected ? "All servers" : "\(behavior.dashboardFilter.selectedProfileIDs.count) server\(behavior.dashboardFilter.selectedProfileIDs.count == 1 ? "" : "s")") {
+                        VisibleServersSettingsView(settings: behavior)
+                    }
+                    TronSettingsDivider()
+                    TronNumberSettingRow(
+                        icon: "bubble.left.and.bubble.right",
+                        title: "Chats per project",
+                        detail: "Shown by default",
+                        value: $behavior.dashboardChatsPerProject
+                    )
+                }
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
+                .tronSettingsCaption("Choose 1–100 chats (default 10). Show more reveals another batch of this size. Applies to every project on this iPhone.")
+
+                TronSettingsGroup("Subagent Activity", accent: .tronPrimary) {
+                    TronValueRow(
+                        icon: "circle.dotted",
+                        title: "Show finished subagents",
+                        detail: "Keep the subagent button visible after work finishes",
+                        accent: .tronPrimary
+                    ) {
+                        TronInlineMenu(retentionLabel(behavior.subagentRecentFinishedRetentionMinutes), accent: .tronPrimary) {
+                            ForEach(Array(AppLocalBehaviorSettings.subagentRecentFinishedRetentionRange), id: \.self) { minutes in
+                                Button(retentionLabel(minutes)) {
+                                    behavior.subagentRecentFinishedRetentionMinutes = minutes
+                                }
+                            }
+                        }
+                        .accessibilityLabel("Show finished subagents")
+                        .accessibilityValue(retentionLabel(behavior.subagentRecentFinishedRetentionMinutes))
+                    }
+                }
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
+                .tronSettingsCaption("Only active hides the button as soon as all subagents finish. This applies to every session on this iPhone. Finished subagents are always available in Manage Session’s Subagent History.")
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Color Mode")
                         .tronSectionHeading()
@@ -23,24 +69,12 @@ struct AppearanceSettingsView: View {
                     .accessibilityLabel("Color Mode")
                 }
 
-                TronSettingsGroup("Theme color", accent: .tronPrimary) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(ThemeColor.allCases.enumerated()), id: \.element.id) { index, color in
-                            if index > 0 { TronSettingsDivider(accent: .tronPrimary) }
-                            Button {
-                                Task { @MainActor in
-                                    iconChangeFailed = false
-                                    do { try await appearance.selectTheme(color) }
-                                    catch { iconChangeFailed = true }
-                                }
-                            } label: {
-                                TronSettingsRow(icon: appearance.themeColor == color ? "checkmark.circle.fill" : "circle",
-                                                title: color.label, accent: .tronPrimary)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(appearance.isApplyingAppIcon)
-                            .accessibilityIdentifier("theme-color-\(color.rawValue)")
-                            .accessibilityValue(appearance.themeColor == color ? "Selected" : "")
+                TronSettingsGroup("Theme color", accent: .tronPrimary, surfaceStyle: .uncontained) {
+                    ThemeColorPicker(selection: appearance.themeColor, isApplying: appearance.isApplyingAppIcon) { color in
+                        Task { @MainActor in
+                            iconChangeFailed = false
+                            do { try await appearance.selectTheme(color) }
+                            catch { iconChangeFailed = true }
                         }
                     }
                 }
@@ -143,7 +177,14 @@ struct AppearanceSettingsView: View {
             .padding(.bottom, 40)
         }
         .tronScrollEdgeChrome()
+        .onChange(of: model.dashboardServerSources.map(\.profileID), initial: true) { _, ids in
+            behavior.dashboardFilter.reconcile(profileIDs: ids)
+        }
         .tronNavigationTitle("Appearance")
+    }
+
+    private func retentionLabel(_ minutes: Int) -> String {
+        minutes == 0 ? "Only active" : "\(minutes) minute\(minutes == 1 ? "" : "s")"
     }
 
     private func axisSlider(
@@ -176,6 +217,64 @@ struct AppearanceSettingsView: View {
             get: { fonts.axisValue(for: family, axis: axis) },
             set: { fonts.setAxisValue(for: family, axis: axis, value: $0) }
         )
+    }
+}
+
+/// Theme choices as one horizontally scrolling row of Liquid Glass tiles, each
+/// a third of the row and tinted with the theme it names; more themes scroll.
+/// Accessibility sizes widen each tile to most of the row, peeking the next,
+/// so names wrap by word rather than by letter.
+private struct ThemeColorPicker: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let selection: ThemeColor
+    let isApplying: Bool
+    let select: (ThemeColor) -> Void
+    private static let spacing: CGFloat = 10
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: Self.spacing) {
+                ForEach(ThemeColor.allCases) { color in
+                    tile(color)
+                        .containerRelativeFrame(.horizontal, count: dynamicTypeSize.isAccessibilitySize ? 5 : 3,
+                                                span: dynamicTypeSize.isAccessibilitySize ? 4 : 1, spacing: Self.spacing)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.viewAligned)
+        .scrollClipDisabled()
+    }
+
+    private func tile(_ color: ThemeColor) -> some View {
+        let isSelected = color == selection
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return Button { select(color) } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(color.ink)
+                Text(color.label)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 76, maxHeight: .infinity, alignment: .topLeading)
+            .tronGlassSurface(accent: color.surfaceTint, cornerRadius: 16,
+                              tintOpacity: isSelected ? 0.34 : 0.18, interactive: true,
+                              respectsSettingsTheme: false)
+            .overlay { shape.strokeBorder(color.ink.opacity(isSelected ? 1 : 0.25), lineWidth: isSelected ? 2 : 0.5) }
+        }
+        .buttonStyle(.plain)
+        .disabled(isApplying)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(color.label)
+        .accessibilityValue(isSelected ? "Selected" : "")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("theme-color-\(color.rawValue)")
     }
 }
 

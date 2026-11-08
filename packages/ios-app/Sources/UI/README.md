@@ -46,6 +46,9 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   explicit selection and requests its bundled icon through UIKit, serializing that operation.
   It never changes icons on restoration, foregrounding or color-mode switches. An icon failure
   preserves the selected in-app theme and allows an explicit retry; no second saved icon choice.
+  The picker is one horizontally scrolling row of Liquid Glass tiles, a third of the row each (most
+  of it at accessibility sizes), tinted with each theme's own `surfaceTint`/`ink`; the selected
+  tile carries a checkmark, a full-ink border and the `isSelected` trait.
   `Color.tronPrimary` reads that observable owner; ink, title,
   icon, container and pill tint share the adaptive ink without recreating navigation or chats.
   Dark Burgundy separates saturated purple-leaning `tronPrimary` ink from deep-wine

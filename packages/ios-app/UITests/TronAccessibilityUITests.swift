@@ -250,9 +250,11 @@ final class TronAccessibilityUITests: XCTestCase {
         add(capture)
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Global Settings"].waitForExistence(timeout: 5), app.debugDescription)
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "App Customizations")).firstMatch.tap()
+        app.buttons["settings-link-Appearance"].tap()
         let servers = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Visible Servers")).firstMatch
-        XCTAssertTrue(servers.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 3), app.debugDescription)
+        for _ in 0..<8 where !servers.isHittable { app.swipeUp() }
+        XCTAssertTrue(servers.isHittable, app.debugDescription)
         servers.tap()
         XCTAssertTrue(app.staticTexts["Visible Servers"].waitForExistence(timeout: 3), app.debugDescription)
         let done = try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))

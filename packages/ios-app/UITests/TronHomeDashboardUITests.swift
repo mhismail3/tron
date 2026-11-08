@@ -211,15 +211,19 @@ final class TronHomeDashboardUITests: XCTestCase {
         return app
     }
 
-    /// Servers are chosen in Settings › App Customizations › Visible Servers (#1331: the menu has no Filter); each sheet closes by its Done.
+    /// Servers are chosen in Settings › Appearance › Visible Servers (#1331: the menu has no Filter); each sheet closes by its Done.
     @MainActor private func toggleVisibleServer(_ app: XCUIApplication, _ label: String) {
         app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
-        for id in ["Settings", "settings-link-App Customizations"] { XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5)); app.buttons[id].tap() }
-        app.buttons["Visible Servers"].firstMatch.buttons["Visible Servers"].firstMatch.tap()
+        for id in ["Settings", "settings-link-Appearance"] { XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5)); app.buttons[id].tap() }
+        let servers = app.buttons["Visible Servers"].firstMatch
+        XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<8 where !servers.isHittable { app.swipeUp() }
+        XCTAssertTrue(servers.isHittable, app.debugDescription)
+        servers.tap()
         let source = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: 5) && source.isHittable, app.debugDescription); source.tap()
-        for sheet in ["Visible Servers", "App Customizations", "Settings"] { try! XCTUnwrap(app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable), sheet).tap() }
-        XCTAssertTrue(app.buttons["dashboard.menu"].isHittable, "Visible Servers, App Customizations and Settings are closed")
+        for sheet in ["Visible Servers", "Appearance", "Settings"] { try! XCTUnwrap(app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable), sheet).tap() }
+        XCTAssertTrue(app.buttons["dashboard.menu"].isHittable, "Visible Servers, Appearance and Settings are closed")
     }
 
     @MainActor private func openOtherSessions(_ app: XCUIApplication) {
