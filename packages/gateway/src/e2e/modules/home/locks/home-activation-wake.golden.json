@@ -1868,7 +1868,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:e9170e37ef004eb5ea32efbffcdbaaecd2203f606691fe49d4d922d4a8bb4c6c",
+        "promptHash": "sha256:c7811c8948f96406cb2bf1daf47cfd543a814c364e160fd0e3f2e86e39b45b6b",
         "messages": [
           {
             "role": "user",
@@ -1911,7 +1911,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:e9170e37ef004eb5ea32efbffcdbaaecd2203f606691fe49d4d922d4a8bb4c6c",
+        "promptHash": "sha256:c7811c8948f96406cb2bf1daf47cfd543a814c364e160fd0e3f2e86e39b45b6b",
         "messages": [
           {
             "role": "user",
@@ -1963,7 +1963,7 @@
           "docs",
           "cwd"
         ],
-        "promptHash": "sha256:e9170e37ef004eb5ea32efbffcdbaaecd2203f606691fe49d4d922d4a8bb4c6c",
+        "promptHash": "sha256:c7811c8948f96406cb2bf1daf47cfd543a814c364e160fd0e3f2e86e39b45b6b",
         "messages": [
           {
             "role": "user",
@@ -2048,7 +2048,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:e9170e37ef004eb5ea32efbffcdbaaecd2203f606691fe49d4d922d4a8bb4c6c"
+      "promptHash": "sha256:c7811c8948f96406cb2bf1daf47cfd543a814c364e160fd0e3f2e86e39b45b6b"
     },
     {
       "caller": "home-delegated",
@@ -2056,7 +2056,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:e9170e37ef004eb5ea32efbffcdbaaecd2203f606691fe49d4d922d4a8bb4c6c"
+      "promptHash": "sha256:c7811c8948f96406cb2bf1daf47cfd543a814c364e160fd0e3f2e86e39b45b6b"
     },
     {
       "caller": "home-wake",
@@ -2064,7 +2064,7 @@
         "## Tron Home",
         "## Learned profile"
       ],
-      "promptHash": "sha256:e9170e37ef004eb5ea32efbffcdbaaecd2203f606691fe49d4d922d4a8bb4c6c"
+      "promptHash": "sha256:c7811c8948f96406cb2bf1daf47cfd543a814c364e160fd0e3f2e86e39b45b6b"
     }
   ],
   "requestOptions": [
