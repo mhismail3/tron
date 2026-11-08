@@ -8,12 +8,12 @@
 // Every gate result is bound to the block hash (hash.mjs): any edit makes it STALE.
 //
 // Usage: scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]   -> <block dir>/LAWS.md
-//   --recheck re-runs a random sample of mutants (gate files are not trusted); "Ready for cut-over" can only
-//   be YES with --recheck, and also needs a shadow recheck, which the replay runner (#2349) provides.
+//   --recheck re-runs a random sample of mutants and the shadow comparison (gate files are not trusted);
+//   "Ready for cut-over" can only be YES with --recheck.
 //        scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...      -> one batch for human reading
 // Exit 1 if the packet has problems (missing English, unlisted law lemma, missing law kinds).
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, readdirSync, statSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -104,9 +104,14 @@ function packet(root, block, opts = {}) {
     if (review.packetHash !== hash) reviewProblems.push(`STALE (reviewed ${review.packetHash}, current ${hash})`);
     if (review.tier !== cfg.tier) reviewProblems.push(`reviewer did not confirm tier ${cfg.tier} (REVIEW.json tier: ${review.tier})`);
     if (!review.reviewer?.agent || review.reviewer.agent === review.writer?.agent) reviewProblems.push("reviewer agent missing or same as writer");
-    const t = review.reviewer?.session;
-    if (!t || !existsSync(t)) reviewProblems.push("reviewer transcript (reviewer.session) missing: identity unverifiable");
-    else if (!resolve(t).startsWith(SESSIONS)) reviewProblems.push(`reviewer transcript is not a Pi session under ${SESSIONS}`);
+    // reviewer.session names the transcript below its project directory of the Pi session store
+    // (<started-at>_<id>/.../session.jsonl), so committed reviews carry no machine path.
+    const named = review.reviewer?.session;
+    const found = typeof named === "string" && !named.startsWith("/") && !named.split("/").includes("..") && existsSync(SESSIONS)
+      ? readdirSync(SESSIONS).map((d) => join(SESSIONS, d, named)).filter((f) => existsSync(f) && statSync(f).isFile()) : [];
+    const t = found.length === 1 ? found[0] : null;
+    if (!named || found.length === 0) reviewProblems.push("reviewer transcript (reviewer.session) missing: identity unverifiable");
+    else if (found.length > 1) reviewProblems.push(`reviewer.session matches ${found.length} transcripts in the Pi session store`);
     else if (!readFileSync(t, "utf8").includes(hash)) reviewProblems.push("reviewer transcript never mentions the current block hash (it did not review this version)");
     else {
       const models = [...new Set([...readFileSync(t, "utf8").matchAll(/"provider":"([^"]+)","model":"([^"]+)"/g)].map((m) => `${m[1]}/${m[2]}`))];
@@ -124,7 +129,7 @@ function packet(root, block, opts = {}) {
   // whole shadow comparison; READY requires both to reproduce.
   let mutRecheck = null, shadowRecheck = null;
   if (opts.recheck && ms && mutFresh) { const r = sh([process.execPath, join(REPO, "tools/proof/mutate/mutate.mjs"), block, "--root", root, "--recheck", join(root, cfg.report), "--sample", "12", "--jobs", "2"], REPO); try { mutRecheck = JSON.parse(r.out.trim().split("\n").pop()); } catch { mutRecheck = { recheck: "error", why: r.out.slice(-200) }; } }
-  // No shadow recheck exists before the replay runner (#2349), so with --recheck the shadow gate cannot pass.
+  if (opts.recheck && cfg.shadow) { const tmp = join(tmpdir(), `shadow-recheck-${process.pid}.json`); sh([process.execPath, join(REPO, "tools/proof/shadow/shadow.mjs"), block, "--root", root, "--out", tmp], REPO); shadowRecheck = readJson(tmp); rmSync(tmp, { force: true }); }
   // The report must come from the current checker (a semantics change re-runs every block).
   const toolNow = toolHash();
   const toolFresh = ms?.toolHash === toolNow;
@@ -134,7 +139,15 @@ function packet(root, block, opts = {}) {
   // Gate 4: shadow for exactly these inputs; cut-over additionally needs real traffic over the tier's window.
   const windowNeed = cfg.tier === "high-stakes" ? 7 : 3;
   const shadowFresh = shadow?.inputsHash === hash;
-  const coreHashNow = existsSync(join(dir, "out/core.js")) ? createHash("sha256").update(readFileSync(join(dir, "out/core.js"))).digest("hex").slice(0, 16) : null;
+  // The compiled core the shadow ran must be the one the current sources compile to (pinned toolchain).
+  let coreHashNow = null;
+  if (shadow && !opts.noVerify) {
+    const work = mkdtempSync(join(tmpdir(), "tron-proof-packet-"));
+    try {
+      if (sh([DAFNY, "translate", "js", "--no-verify", "--include-runtime", cfg.translate, "-o", join(work, "core")], root).code === 0)
+        coreHashNow = createHash("sha256").update(readFileSync(join(work, "core.js"))).digest("hex").slice(0, 16);
+    } finally { rmSync(work, { recursive: true, force: true }); }
+  }
   const shadowOk = shadow?.status === "match" && shadow.compared > 0 && shadow.mismatches === 0 && shadowFresh && shadow.coreJsHash === coreHashNow
     && (!opts.recheck || (shadowRecheck?.status === "match" && shadowRecheck.compared === shadow.compared && shadowRecheck.realTraffic === shadow.realTraffic));
   const realOk = shadowOk && shadow.realTraffic === true && shadow.windowDays >= windowNeed;
@@ -150,7 +163,7 @@ function packet(root, block, opts = {}) {
     `| Proof (pinned Dafny, --verify-included-files) | ${verify.ok === null ? verify.text : `${verify.ok ? "PASS" : "FAIL"}: ${verify.text}`} |`,
     `| Independent review | ${!review ? "MISSING" : reviewOk ? `ACCEPT by ${review.reviewer.agent} (${review.reviewer.model}, transcript-verified); writer ${review.writer.agent} (${review.writer.model}); ${review.date}` : `NOT ACCEPTED: ${reviewProblems.join("; ")}`} |`,
     `| Mutation check | ${!ms ? "MISSING" : `${!mutFresh ? `STALE (report for ${ms.inputsHash}) ` : ""}${!toolFresh ? "STALE (older mutation checker) " : ""}${ms.pass ? "PASS" : "FAIL"}${mutRecheck ? ` [recheck ${mutRecheck.recheck}: ${mutRecheck.sampled?.length ?? 0} sampled mutants re-run]` : ""}: ${ms.valid} valid mutants, ${ms.killed} killed by laws, ${ms.lawGap} law-gap, ${ms.survived} survived, ${ms.accepted} accepted (${cfg.report})`} |`,
-    `| Shadow | ${!shadow ? "MISSING" : `${!shadowFresh ? `STALE (run for ${shadow.inputsHash}) ` : ""}${shadow.status}: ${shadow.compared} ${shadow.unit ?? ""} compared, ${shadow.mismatches} mismatches; ${(opts.recheck ? shadowRecheck?.realTraffic : shadow.realTraffic) ? `real traffic, ${shadow.windowDays} days` : "lab traffic only"}; ${shadow.source ?? shadow.error}${shadow.coreJsHash !== coreHashNow ? "; STALE: compiled core changed" : ""}${shadowRecheck ? ` [recheck: ${shadowRecheck.status}, ${shadowRecheck.compared} compared]` : ""}`} |`,
+    `| Shadow | ${!shadow ? "MISSING" : `${!shadowFresh ? `STALE (run for ${shadow.inputsHash}) ` : ""}${shadow.status}: ${shadow.compared} ${shadow.unit ?? ""} compared, ${shadow.mismatches} mismatches; ${(opts.recheck ? shadowRecheck?.realTraffic : shadow.realTraffic) ? `real traffic, ${shadow.windowDays} days` : "lab traffic only"}; ${shadow.source ?? shadow.error}${coreHashNow === null ? "; compiled core not checked (--no-verify or translate failed)" : shadow.coreJsHash !== coreHashNow ? "; STALE: compiled core changed" : ""}${shadowRecheck ? ` [recheck: ${shadowRecheck.status}, ${shadowRecheck.compared} compared]` : ""}`} |`,
     `| **Ready for cut-over** | ${ready ? "**YES**" : `no${!opts.recheck ? " (READY is only computed with --recheck)" : ""}${shadowOk && !realOk ? ` (needs real-traffic shadow over >= ${windowNeed} days; starts in P1)` : ""}`} |`, "");
   const per = (law) => report?.perLaw?.find((p) => p.law === law);
   for (const { law, items } of laws) {
@@ -189,7 +202,7 @@ if (args[0] === "--batch") {
   if (positional.length !== 1) { console.error("usage: scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck] (tools/proof/README.md)"); process.exit(2); }
   const p = packet(root, positional[0], opts);
   const target = join(root, "blocks", positional[0], "LAWS.md");
-  if (args.includes("--write")) { writeFileSync(target, p.md + "\n"); console.log(`wrote ${target} (hash ${p.hash}, ready ${p.ready})`); }
-  else console.log(p.md);
+  if (args.includes("--write")) { writeFileSync(target, `${p.md.trimEnd()}\n`); console.log(`wrote ${target} (hash ${p.hash}, ready ${p.ready})`); }
+  else console.log(p.md.trimEnd());
   if (p.problems.length) { console.error(p.problems.join("\n")); process.exit(1); }
 }

@@ -1,0 +1,1 @@
+{"interface": ["laws/schedule/Occurrence.dfy"], "impl": ["blocks/schedule/occurrence/Block.dfy"], "deps": []}

@@ -117,8 +117,9 @@ const ROR = { "<": ["<=", ">="], "<=": ["<", ">"], ">": [">=", "<="], ">=": [">"
 const AOR = { "+": ["-"], "-": ["+"], "*": ["+"], "/": ["*"], "%": ["/"] };
 const operandEnd = (t) => t && (t.kind === "id" || t.kind === "num" || t.text === ")" || t.text === "]");
 
-function mutants(src, toks, symbols) {
-  const out = []; const groups = ctorGroups(toks);
+// Constructor groups come from the impl and the block's laws, where a refined block's datatypes live.
+function mutants(src, toks, symbols, lawToks = []) {
+  const out = []; const groups = [...ctorGroups(toks), ...ctorGroups(lawToks)];
   const add = (sym, op, a, b, repl, from, note) => {
     const s = src.slice(0, toks[a].pos) + repl + src.slice(toks[b - 1].pos + toks[b - 1].text.length);
     out.push({ sym, op, line: toks[a].line, col: toks[a].col, from: from ?? src.slice(toks[a].pos, toks[b - 1].pos + toks[b - 1].text.length), to: repl, note, src: s });
@@ -294,7 +295,7 @@ function copyBlock(dst) {
 
 // ---------------- main ----------------
 const implSrc = readFileSync(join(root, cfg.impl), "utf8");
-const generated = mutants(implSrc, tokenize(implSrc), cfg.symbols);
+const generated = mutants(implSrc, tokenize(implSrc), cfg.symbols, lawFiles.flatMap((f) => tokenize(readFileSync(join(root, f), "utf8"))));
 let all = generated;
 if (opt("--only")) all = all.filter((m) => m.id.includes(opt("--only")));
 // --recheck <report.json> [--sample N]: never trusts a report. (1) Every count and the verdict are recomputed
