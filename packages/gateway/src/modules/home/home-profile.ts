@@ -124,7 +124,7 @@ export interface HomeProfileIndexRead {
   unclassified: number;
   diagnostics: HomeProfileRead["diagnostics"];
 }
-/** Mechanical SQL-head discovery; only the historical reader loads old bodies. */
+/** Metadata-only discovery; only the full reader loads note bodies. */
 export async function readHomeProfileIndex(knowledge: ProfileStore): Promise<HomeProfileIndexRead> {
   const { rows, sorting } = await knowledge.profileMetadata();
   const superseded = new Set(rows.flatMap(row => row.supersedes));
@@ -138,8 +138,8 @@ export async function readHomeProfileIndex(knowledge: ProfileStore): Promise<Hom
     if (kinds.length === 1) items.push({ id: row.id, revisionId: row.revisionId, path: row.profile?.path.join("/") ?? "prior", kind: kinds[0]!, text: row.title,
       confirmed: row.confirmed, status: row.retired ? "retired" : superseded.has(row.id) ? "superseded" : "active", createdAt: row.createdAt, updatedAt: row.updatedAt });
   }
-  // SQL key order is storage detail. Both native lists and cursor pages retain
-  // the original kind/creation/ID order used by the canonical body reader.
+  // Both native lists and cursor pages use the kind/creation/ID order of the
+  // canonical body reader, independent of file order.
   items.sort((left, right) => HOME_PROFILE_KINDS.indexOf(left.kind) - HOME_PROFILE_KINDS.indexOf(right.kind)
     || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
   return { items, sorting, diagnostics, unclassified: diagnostics.filter(item => item.issues.includes("kind")).length };

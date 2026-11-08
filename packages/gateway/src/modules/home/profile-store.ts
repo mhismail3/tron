@@ -221,13 +221,7 @@ export class ProfileStore {
   async settleProfileAudit(id: string): Promise<void> {
     await this.mutex.run(async () => { const state = await this.load(true), receipt = state.control.commands[commandKey("knowledge.profile.partition", id)]; if (receipt?.auditPending) { delete receipt.auditPending; await this.save(state); } });
   }
-  async correct(id: string, recordId: string, expectedRevision: string, replacement: ProfileNoteRecordDraft, relation: ProfileNoteRecord["relations"][number]): Promise<ProfileMutationResult> {
-    if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || !["corrects", "supersedes"].includes(relation.type)) throw invalid("Correction relation must identify the replaced revision");
-    return this.mutate("knowledge.correction", id, { recordId, expectedRevision, replacement, relation }, [recordId], state => {
-      const current = state.records.get(recordId); if (!current) throw conflict("Profile record does not exist");
-      return this.put(state, { ...replacement, id: recordId, content: carryNoteMarks(current, replacement.content), relations: [...replacement.relations, relation] }, expectedRevision);
-    });
-  }
+
   async setExclusion(id: string, recordId: string, excluded: boolean, expectedRevision?: string, reason?: string) {
     return this.mutate("knowledge.exclusion", id, { recordId, excluded, expectedRevision, reason }, [recordId], state => {
       const current = state.records.get(recordId); if (!current || expectedRevision !== undefined && current.revisionId !== expectedRevision) throw conflict("Profile record revision is stale");

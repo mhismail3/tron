@@ -6353,17 +6353,16 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    const internal = slot as unknown as { extensionHost: { isTuiStarted: boolean; mountedComponentCount: number } };
-    await waitFor(() => internal.extensionHost.mountedComponentCount === 1, "the mounted extension component");
-    expect(internal.extensionHost.isTuiStarted).toBe(true);
+    await waitFor(() => slot.snapshot().extensionPresentation.surfaces.some((surface) => surface.frame.plainText.includes("must mount")), "the mounted extension component frame");
     const snapshot = slot.snapshot();
     expect(snapshot.extensionPresentation.semanticState.statuses).toMatchObject({
       "context-has-ui": "true", "context-mode": "rpc", "custom-deferred": "not-invoked",
     });
     expect(snapshot.extensionPresentation.semanticState.widgets).toEqual([]);
-    expect(snapshot.extensionPresentation.surfaces).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "widget:ZmFjdG9yeQ", kind: "widget", placement: "aboveEditor", inputMode: "none" }),
-    ]));
+    expect(snapshot.extensionPresentation.surfaces).toEqual([
+      expect.objectContaining({ id: "widget:ZmFjdG9yeQ", kind: "widget", placement: "aboveEditor", lifecycle: "retained", focused: false, inputMode: "none" }),
+    ]);
+    expect(snapshot.extensionPresentation.diagnostics).toContainEqual({ code: "component.render-invalid", message: "Blocking component UI is deferred in RPC mode" });
   });
 
   it("keeps ask-style semantic selection on the RPC interaction path", async () => {

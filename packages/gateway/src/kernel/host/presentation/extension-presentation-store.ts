@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { visibleWidth } from "../../pi/tui.js";
 import { GatewayError } from "../../../errors.js";
 import type {
-  ExtensionInputLease,
   ExtensionInteraction,
   ExtensionPresentationDiagnostic,
   ExtensionPresentationMutation,
@@ -54,10 +53,7 @@ export interface ExtensionHostActivity {
   readonly hasPendingInteraction: boolean;
   readonly hasPendingComponentFactory: boolean;
   readonly hasMountedPresentation: boolean;
-  readonly hasInputLease: boolean;
   readonly hasScheduledRender: boolean;
-  /** Blocking custom surfaces keep the owning runtime operationally live. */
-  readonly hasBlockingPresentation: boolean;
   readonly hasRetainedPresentation: boolean;
 }
 
@@ -158,7 +154,6 @@ interface ExtensionPresentationDraft {
   semanticState: ExtensionSemanticState;
   surfaces: ExtensionSurface[];
   pendingInteractions: ExtensionInteraction[];
-  inputLease?: ExtensionInputLease;
   capabilities: string[];
   diagnostics: ExtensionPresentationDiagnostic[];
   editorDirective?: { action: "set" | "paste" | "native"; delta: string; operationId?: string };
@@ -182,7 +177,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
   private semanticState = clone(DEFAULT_SEMANTIC_STATE);
   private surfaces: ExtensionSurface[] = [];
   private pendingInteractions: ExtensionInteraction[] = [];
-  private inputLease: ExtensionInputLease | undefined;
   private capabilities: string[];
   private diagnostics: ExtensionPresentationDiagnostic[];
   private pendingComponentFactories = 0;
@@ -201,14 +195,10 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
   get hasPendingInteraction(): boolean { return this.pendingInteractions.length > 0; }
   get hasPendingComponentFactory(): boolean { return this.pendingComponentFactories > 0; }
   get hasMountedPresentation(): boolean { return this.surfaces.length > 0; }
-  get hasInputLease(): boolean { return this.inputLease !== undefined; }
   get hasScheduledRender(): boolean { return this.scheduledRenders > 0; }
-  get hasBlockingPresentation(): boolean {
-    return this.surfaces.some((surface) => surface.lifecycle === "blocking");
-  }
   get hasRetainedPresentation(): boolean {
     const semantic = this.semanticState;
-    return this.hasPendingInteraction || this.hasMountedPresentation || this.hasInputLease
+    return this.hasPendingInteraction || this.hasMountedPresentation
       || Object.keys(semantic.statuses).length > 0 || semantic.widgets.length > 0
       || semantic.working.message !== undefined || !semantic.working.visible
       || semantic.working.indicator.kind !== "default" || semantic.hiddenThinkingLabel !== undefined
@@ -236,7 +226,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
       semanticState: clone(this.semanticState),
       surfaces: clone(this.surfaces),
       pendingInteractions: clone(this.pendingInteractions),
-      ...(this.inputLease ? { inputLease: clone(this.inputLease) } : {}),
     };
   }
 
@@ -269,7 +258,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     this.semanticState = candidate.semanticState;
     this.surfaces = candidate.surfaces;
     this.pendingInteractions = candidate.pendingInteractions;
-    this.inputLease = candidate.inputLease;
     this.capabilities = candidate.capabilities;
     this.diagnostics = candidate.diagnostics;
     this.revision = nextRevision;
@@ -300,20 +288,12 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     }
   }
 
-  revokeInputLease(connectionId: string): boolean {
-    this.assertActive();
-    if (this.inputLease?.connectionId !== connectionId) return false;
-    this.transact((draft) => { delete draft.inputLease; });
-    return true;
-  }
-
   retire(): void {
     // Retirement is an internal ownership boundary. Clear disposable
     // presentation state even when no broadcast can be delivered; stale
     // callbacks are rejected by `active` and cannot repopulate this epoch.
     this.surfaces = [];
     this.pendingInteractions = [];
-    this.inputLease = undefined;
     this.pendingComponentFactories = 0;
     this.scheduledRenders = 0;
     this.active = false;
@@ -324,7 +304,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
       semanticState: clone(this.semanticState),
       surfaces: clone(this.surfaces),
       pendingInteractions: clone(this.pendingInteractions),
-      ...(this.inputLease ? { inputLease: clone(this.inputLease) } : {}),
       capabilities: [...this.capabilities],
       diagnostics: clone(this.diagnostics),
     };
@@ -355,7 +334,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     const removals = before.surfaces.filter((surface) => !afterSurfaces.has(surface.id)).map((surface) => surface.id);
     if (upserts.length > 0) result.surfaceUpserts = clone(upserts);
     if (removals.length > 0) result.surfaceRemovals = removals;
-    if (!equal(before.inputLease, after.inputLease)) result.inputLease = after.inputLease ? clone(after.inputLease) : null;
     if (!equal(before.capabilities, after.capabilities)) result.capabilities = [...after.capabilities];
     if (!equal(before.diagnostics, after.diagnostics)) result.diagnostics = clone(after.diagnostics);
     return result;
@@ -409,21 +387,11 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
       || draft.diagnostics.some((value) => !boundedSafe(value.code, MAX_ID_BYTES) || !boundedSafe(value.message, MAX_MESSAGE_BYTES, true))) {
       throw new GatewayError("conflict", "Extension presentation metadata is invalid");
     }
-    if (draft.inputLease) {
-      requireId(draft.inputLease.id, "lease ID");
-      requireId(draft.inputLease.connectionId, "lease connection");
-      requireId(draft.inputLease.surfaceId, "lease surface");
-      if (!boundedSafe(draft.inputLease.acquiredAt, MAX_ID_BYTES) || Number.isNaN(Date.parse(draft.inputLease.acquiredAt))
-        || !Number.isSafeInteger(draft.inputLease.surfaceRevision) || draft.inputLease.surfaceRevision < 1
-        || !draft.surfaces.some((surface) => surface.id === draft.inputLease?.surfaceId && surface.revision === draft.inputLease?.surfaceRevision)) {
-        throw new GatewayError("conflict", "Extension input lease revision is invalid");
-      }
-    }
     const projected = {
       version: 3, hostEpoch: this.hostEpoch, revision: this.revision + 1,
       capabilities: draft.capabilities, diagnostics: draft.diagnostics,
       semanticState: draft.semanticState, surfaces: draft.surfaces,
-      pendingInteractions: draft.pendingInteractions, inputLease: draft.inputLease,
+      pendingInteractions: draft.pendingInteractions,
     };
     if (bytes(projected) > EXTENSION_PRESENTATION_MAX_BYTES) throw new GatewayError("busy", "Extension presentation reached bounded capacity", true);
   }

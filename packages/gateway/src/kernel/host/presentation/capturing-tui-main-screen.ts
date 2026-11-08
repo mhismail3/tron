@@ -24,7 +24,6 @@ export class CapturingTuiMainScreen extends TuiMainScreen {
   private readonly renderCallback: ((state: TuiMainScreenRenderState) => void) | undefined;
   private readonly diagnosticCallback: ((diagnostic: ComponentDiagnostic) => void) | undefined;
   private readonly renderCompleteCallback: ((error?: unknown) => void) | undefined;
-  private _renderCycles = 0;
 
   constructor(terminal: Terminal, options: CapturingTuiMainScreenOptions = {}) {
     super(terminal, options.showHardwareCursor ?? false);
@@ -33,14 +32,11 @@ export class CapturingTuiMainScreen extends TuiMainScreen {
     this.renderCompleteCallback = options.onRenderComplete;
   }
 
-  get renderCycles(): number { return this._renderCycles; }
-
   protected override doRender(): void {
     let failure: unknown;
     try {
       if (this.stopped) return;
       super.doRender();
-      this._renderCycles += 1;
       if (!this.renderCallback) return;
       try {
         this.renderCallback(this.captureRenderState());
