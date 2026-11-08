@@ -11,6 +11,8 @@ scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--no-oracle] [--
                           [--config <mutate.json>] [--only <id>] [--list] [--equiv <id>] [--recheck <report.json> [--sample N]]
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
+scripts/tron proof wire --inventory [--json] [--numbers float64|integer]
+scripts/tron proof wire --generate <in.dfy> <out-dir>
 ```
 
 `bootstrap`/`doctor`: exit 0 when the install matches `dafny.pin`; 1 when missing or mismatched, with the
@@ -107,6 +109,43 @@ A gate for another hash shows STALE. Exit 1 lists packet problems: a missing Eng
 found, a lemma neither a law nor a declared helper, a law-marked lemma not listed, an escape hatch, an
 unaccounted law kind (high-stakes) or a report acceptance not in mutate.json.
 
+## Wire
+
+`dafny2wire/inventory.mjs` (`proof wire --inventory`) classifies every export of
+`packages/gateway/src/protocol/types.ts` (or `--types <file>`) as expressible by the generated wire format or
+not, with a reason. Resolution is the pinned Gateway `tsc`'s: each type is probed as `x<T>()` (a one-level
+mapped expansion) in a temporary copy of the types file in which every declaration is exported, and the
+declaration emit prints its structure with intersections, `extends`, utility types, indexed access and
+`typeof` constants applied; field expressions the emit leaves are probed again until only scalars, literals,
+arrays, object literals and named references remain (a union-of-scalars alias, which the emit keeps by
+name, is probed member by member). The parser's reading of every expansion is printed back and must be
+equal to the original under the same compiler (`Eq<N<printed>, N<original>>`), else the type is not
+expressible. A type is expressible when every part is a form the generator emits: string, boolean, number,
+a literal (one-constructor enum), a union of literals (enum), array, string-keyed map, object with optional
+or absent (`?: never`) fields, or a union a decoder can split: members of distinct JSON kinds (`bykind`), or
+objects by a required field with pairwise disjoint literal values (`tag=`). Refused: `unknown`, `any`,
+`object`, functions, fields mixed with an index signature, untagged object unions, several array kinds.
+The JSON `summary.features` lists the forms the expressible types use. `--numbers float64` (default) reads
+`number` as today's JSON float64; `--numbers integer` treats it as unbounded and so not expressible. The five
+`export const` capability strings are values, not wire types, and are counted apart.
+
+`dafny2wire/dafny2wire.mjs` (`proof wire --generate`) turns `// @wire` Dafny datatypes into `wire.ts` and
+`Wire.swift` codecs: records; `// @wire enum` (a JSON literal per constructor: `{:wire "x"}`, `{:wire 1}`,
+`{:wire true}`, else the constructor name); `// @wire tag=<field>` tagged unions; `// @wire bykind` unions
+split by JSON kind (a nullary constructor is `null`; this is how open JSON values are written). Field types:
+`string`, `bool`, `int`/`nat` (safe-range JSON integers), `real` (float64), `seq<T>`, `map<string, T>`,
+`Option<T>` (absent key), `Nullable<T>` (JSON null) and `Absent` (the key never appears); a trailing `_`
+escapes a Dafny keyword or a shared destructor name. Canonical JSON: keys in declaration order with the tag
+first, no whitespace, JSON.stringify string escaping, ECMAScript Number::toString (`-0` as `0`; non-finite
+numbers refused by both encoders). Maps keep JavaScript's property order (array-index keys ascending, then
+insertion order; a duplicate key keeps its first position and last value), also when built in Swift, so the
+Swift codec parses JSON itself rather than through Foundation; an overflowing number literal (`1e400`)
+parses as infinity and is rejected at its path by both decoders. Decoders reject unknown and absent-only
+fields, wrong kinds, out-of-range integers and unknown constructors at a named JSON path. Limits: Swift refuses
+a lone UTF-16 surrogate, which JavaScript strings can hold; the protocol's goldens lock frame shapes (sorted
+key paths), not bytes, so byte-identity with today's frames, which JSON.stringify writes in construction
+order, needs a recorded frame corpus.
+
 ## Verify
 
 `scripts/tron test tooling tools/proof/tests/test-proof.py` runs the real CLI with an isolated cache and
@@ -129,3 +168,12 @@ rejected by its failing proof; a mutant only an unmapped helper catches is `unma
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
 STALE. The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
+
+`scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: the inventory covers
+every export, every expansion is compiler-confirmed, at least 95% of the protocol types are expressible (the
+H5 kill criterion), every form they need is exercised by the codec fixture, and the shapes in
+`tests/fixtures/wire/not-expressible.ts` are refused with their reasons; and the codecs generated from
+`tests/fixtures/wire/Wire.dfy` (one datatype per form) round trip 2,000 seeded random frames plus edge doubles,
+keys and strings, TypeScript and Swift (`swiftc -O`) produce identical bytes and identical normalisations of
+non-canonical inputs (and a Swift-built map encodes in JavaScript order), and both reject 16 malformed inputs
+at the same path.
