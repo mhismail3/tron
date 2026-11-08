@@ -42,16 +42,26 @@ async function fixture() {
   const prior = await note("An unplaced Prior original.", ["home-file-home", "home-profile", "kind-fact"]);
   const plain = await note("An unlabelled Prior original.", ["home-profile", "kind-fact"]);
   const sorted = await note("A labelled original sorted before the migration.", ["home-profile", "kind-fact", "home-file-core"]);
-  const receipt = await new ProfileStore(workspace).partitionProfile({ commandId: "fixture-partition-command", mode: "reorganize", assignments: [{ id: sorted.id, expectedRevision: sorted.revisionId, path: "engineering" }] });
-  expect(receipt.changes).toEqual([expect.objectContaining({ beforeFile: "core" })]);
+  await new ProfileStore(workspace).partitionProfile({ commandId: "fixture-partition-command", mode: "reorganize", assignments: [{ id: sorted.id, expectedRevision: sorted.revisionId, path: "engineering" }] });
+  // While the label path existed, sorting a note removed its label and its
+  // committed receipt named the label the note left.
+  const profilePath = join(home, "workspace", "files", "Profile.json");
+  const profile = JSON.parse(await readFile(profilePath, "utf8"), (key, value: unknown) =>
+    key === "tags" && Array.isArray(value) ? value.filter(tag => tag !== "home-file-core") : value) as { control: { commands: Record<string, { operation?: string; result?: { value?: { changes?: Array<Record<string, unknown>> } } }> } };
+  Object.values(profile.control.commands).find(command => command.operation === "knowledge.profile.partition")!.result!.value!.changes![0]!.beforeFile = "core";
+  await writeFile(profilePath, JSON.stringify(profile, null, 2) + "\n", { mode: 0o600 });
   return { root, home, workspace, old, current, recent, scoped, prior, plain, profile: join(home, "workspace", "files", "Profile.json") };
 }
 
 it("backs up, rewrites only retired forms, defers recent sessions, is idempotent and restores exactly", async () => {
   const f = await fixture();
   const originals = { old: await readFile(f.old), current: await readFile(f.current), profile: await readFile(f.profile) };
+  // The current readers refuse the retired names; after the migration they read
+  // exactly what each retired name meant.
   const readBefore = await entries(f.old);
-  const fixedBefore = readSessionFixedSettings(readBefore), pinsBefore = readSessionRequestPins(readBefore);
+  expect(() => readSessionFixedSettings(readBefore)).toThrow(/provenance is invalid/);
+  const fixedBefore = { "model.default": { ...snapshot("chat"), from: "session" }, "tools.active": snapshot("session") };
+  const pinsBefore = { thinking: { ...snapshot("builtin"), from: "global" } };
 
   const plan = await planRetiredFormatMigration(f.home, 600);
   expect({ sessions: plan.sessions, profile: plan.profile }).toEqual({ sessions: { scanned: 3, files: 1, entries: 2, values: 3, deferred: [f.recent] }, profile: { notes: 2, labels: 2, receipts: 1 } });
@@ -156,6 +166,26 @@ it("re-seals a sealed Home chapter: only retired names change, the ledger record
 
   await writeFile(join(f.home, "gateway", "home", "home.json"), JSON.stringify({ version: 1, chapters: [] }));
   await expect(planRetiredFormatMigration(f.home, 600)).rejects.toThrow(/Unsupported Home ledger/);
+});
+
+it("leaves every retained settings entry, sealed Home chapters included, readable by the current readers", async () => {
+  const f = await fixture();
+  const h = await homeChapters(f);
+  const settingsEntries = async () => {
+    const found: Array<{ path: string; entry: SessionEntry }> = [];
+    for (const path of [f.old, f.current, f.recent, h.sealed, h.active]) {
+      for (const entry of await entries(path)) if (entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY) found.push({ path, entry });
+    }
+    return found;
+  };
+  const unreadable = async () => (await settingsEntries()).filter(({ entry }) => {
+    try { readSessionFixedSettings([entry]); readSessionRequestPins([entry]); return false; } catch { return true; }
+  }).map(({ path, entry }) => `${path}#${entry.id}`);
+  const retained = (await settingsEntries()).length;
+  expect(await unreadable()).toEqual([`${f.old}#s1`, `${f.old}#s2`, `${f.recent}#s1`, `${h.sealed}#s1`, `${h.sealed}#s2`, `${h.active}#s1`, `${h.active}#s2`]);
+  expect(await applyRetiredFormatMigration(f.home, join(f.root, "backup"), await planRetiredFormatMigration(f.home, 0))).toMatchObject({ failed: [] });
+  expect(await unreadable()).toEqual([]);
+  expect(await settingsEntries()).toHaveLength(retained);
 });
 
 it.each(["before its re-seal record is appended", "after its re-seal record is appended"] as const)(
