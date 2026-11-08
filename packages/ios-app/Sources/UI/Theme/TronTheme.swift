@@ -41,25 +41,13 @@ extension Color {
     static let tronLavender = Color(lightHex: "#8B5CF6", darkHex: "#C4B5FD")
     static let tronBlue = Color(lightHex: "#2563EB", darkHex: "#3B82F6")
     static let tronCyan = Color(lightHex: "#0891B2", darkHex: "#06B6D4")
-    static let tronSky = Color(lightHex: "#0284C7", darkHex: "#38BDF8")
     static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
-    /// The chapter segment of Home's context breakdown, a legend color only:
-    /// Manage Home and Manage Session sheets follow the emerald sheet theme.
-    static let tronChapter = Color(lightHex: "#0E7490", darkHex: "#67E8F9")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
     /// Subagent seafoam identity; darker light-mode ink keeps sheet controls readable.
     static let tronSubagent = Color(lightHex: "#007D6C", darkHex: "#03C3A8")
-    static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
     /// Automation teal: the chat Automation chip identity (approved chip-category palette).
     static let tronAutomation = Color(lightHex: "#31889A", darkHex: "#74CBDC")
     static let tronAutomationText = Color(lightHex: "#1F6675", darkHex: "#8BD8E4")
-    /// Knowledge identity: readable deep violet in light mode and lavender in dark mode.
-    static let tronKnowledge = Color(lightHex: "#6D3BB8", darkHex: "#C4B5FD")
-    static let tronKnowledgeText = Color(lightHex: "#54258F", darkHex: "#DDD6FE")
-    static let tronRose = Color(lightHex: "#D4245F", darkHex: "#E62B6C")
-    /// Adaptive wine accent for server selection surfaces.
-    static let tronBurgundy = Color(lightHex: "#9F1239", darkHex: "#FB7185")
-    static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
     /// Blue steel: the System settings identity and the chat Worker chip, distinct
     /// from Accounts indigo, Automation teal and neutral slate.
@@ -74,15 +62,10 @@ extension Color {
     static let tronTextPrimary = Color(lightHex: "#111827", darkHex: "#E8E9EA")
     static let tronTextSecondary = Color(lightHex: "#4B5563", darkHex: "#AAB2BF")
     static let tronTextMuted = Color(lightHex: "#6B7280", darkHex: "#8B949E")
-    static let tronTextDisabled = Color(lightHex: "#9CA3AF", darkHex: "#5B6472")
     @MainActor static var userMessageText: Color { .tronPrimary }
     @MainActor static var inputText: Color { .tronPrimary }
     /// The typed-text ink, dimmed: a placeholder reads as the theme's own quiet draft, not grey.
     @MainActor static var inputPlaceholder: Color { Color.tronPrimary.opacity(0.6) }
-    @MainActor static var userBubble: Color { .tronPrimary }
-    static let systemBubble = Color(lightHex: "#E6EBF1", darkHex: "#323842")
-    static let toolBubble = Color(lightHex: "#E0F2FE", darkHex: "#14324A")
-    static let errorBubble = Color(lightHex: "#FEE2E2", darkHex: "#7F1D1D")
 
     init(hex: String) {
         let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
@@ -131,12 +114,8 @@ enum TronSpacing {
     static let section: CGFloat = 16
     static let large: CGFloat = 20
     static let xlarge: CGFloat = 24
-    static let bubblePadding: CGFloat = 12
     static let inputHorizontal: CGFloat = 14
-    static let inputVertical: CGFloat = 10
     static let cornerMD: CGFloat = 10
-    static let cornerLG: CGFloat = 16
-    static let cornerInput: CGFloat = 18
 }
 
 /// Full-screen app background: the palette color plus a faint static grain so

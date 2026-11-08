@@ -7,7 +7,6 @@ import UIKit
 /// through the selected text or code family rather than a system SwiftUI font.
 @MainActor
 enum TronTypography {
-    static let sizeXXS: CGFloat = 7
     static let sizeXS: CGFloat = 8
     static let sizeSM: CGFloat = 9
     static let sizeCaption: CGFloat = 10
@@ -20,7 +19,6 @@ enum TronTypography {
     static let sizeTitle: CGFloat = 16
     static let sizeLargeTitle: CGFloat = 18
     static let sizeXL: CGFloat = 20
-    static let sizeXXL: CGFloat = 22
     static let sizeHero: CGFloat = 24
     static let sizeDisplay: CGFloat = 32
 
@@ -220,9 +218,7 @@ extension EnvironmentValues {
 private struct TronCollectionSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .font(TronTypography.body)
-            .foregroundStyle(Color.tronTextPrimary)
-            .tint(Color.tronPrimary)
+            .tronPresentation()
             .scrollContentBackground(.hidden)
             .background { TronBackdrop().ignoresSafeArea() }
     }
@@ -1412,10 +1408,6 @@ struct TronToolbarTextLabel: View {
             Text(title)
         }
     }
-}
-
-enum TronSaveActionPresentation {
-    static let systemImage = "externaldrive"
 }
 
 struct TronReloadToolbarButton: View {

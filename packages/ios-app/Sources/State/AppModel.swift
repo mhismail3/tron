@@ -3585,20 +3585,6 @@ extension AppModel {
         try await sessionMutations.setTools(tools, sessionID: sessionID)
     }
 
-    func setExtensionToolsExpanded(
-        sessionID: String,
-        hostEpoch: String,
-        presentationRevision: Int,
-        expanded: Bool
-    ) async throws {
-        try await sessionMutations.setExtensionToolsExpanded(
-            sessionID: sessionID,
-            hostEpoch: hostEpoch,
-            presentationRevision: presentationRevision,
-            expanded: expanded
-        )
-    }
-
     func fork(
         sessionID: String,
         entryID: String,
@@ -4554,11 +4540,6 @@ extension AppModel {
         await homeStatus.refreshMounted()
     }
 
-    /// Whether this Gateway takes the maintainer's learned-profile changes. Without it
-    /// the Profile sheet stays read-only (an older Gateway).
-    var homeProfileEditable: Bool {
-        lifecycle.gatewayInfo?.capabilities.contains("home-profile-edit.v1") == true
-    }
 
     /// The maintainer's learned-profile change through the Home command owner; the
     /// answer names the record entries `undoHomeProfileChange` reverts.

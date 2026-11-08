@@ -8,9 +8,9 @@ struct SettingsChangeRow: Identifiable, Equatable, Sendable {
     let entry: SettingsChangeHistoryEntry
     let date: Date?
     /// "before → after", from the Gateway's formatted values.
-    let valueChange: String?
+    let valueChange: String
     /// The new value alone, for a line too narrow for "before → after".
-    let newValue: String?
+    let newValue: String
     /// Who, in a word or a known task title: never a raw task ID.
     let actor: String
     let scope: String
@@ -29,13 +29,13 @@ struct SettingsChangeRow: Identifiable, Equatable, Sendable {
     init(_ entry: SettingsChangeHistoryEntry, workerTitles: [String: String]) {
         self.entry = entry
         date = entry.date
-        valueChange = entry.presentation.map { "\($0.display.before) → \($0.display.after)" }
-        newValue = entry.presentation.map { "→ \($0.display.after)" }
+        valueChange = "\(entry.presentation.display.before) → \(entry.presentation.display.after)"
+        newValue = "→ \(entry.presentation.display.after)"
         let taskTitle = entry.actor.taskId.flatMap { workerTitles[$0] }
         actor = Self.conciseActor(entry, taskTitle: taskTitle)
-        scope = entry.presentation?.layer ?? settingsLayerLabel(entry.layer)
+        scope = entry.presentation.layer
         // The Gateway's actor label is the full audit fact (it names the task).
-        let fullActor = entry.presentation?.actor ?? entry.actor.kind.capitalized
+        let fullActor = entry.presentation.actor
         accessibilityLabel = [
             entry.title, entry.status.capitalized, valueChange,
             "Changed by \(fullActor)" + (taskTitle.map { ", \($0)" } ?? ""),
@@ -50,7 +50,7 @@ struct SettingsChangeRow: Identifiable, Equatable, Sendable {
         case "worker": taskTitle ?? "Worker"
         case "agent": "Chat agent"
         case "outside": "Outside Tron"
-        default: entry.presentation?.actor ?? entry.actor.kind.capitalized
+        default: entry.presentation.actor
         }
     }
 
@@ -115,13 +115,13 @@ struct SettingsChangeRowView: View, Equatable {
     @ViewBuilder private var summary: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: TronSpacing.xxs) {
-                if let value = row.valueChange { Text(value).lineLimit(2).truncationMode(.tail) }
+                Text(row.valueChange).lineLimit(2).truncationMode(.tail)
                 Text("\(row.actor) · \(row.scope)").lineLimit(2).truncationMode(.tail)
             }
         } else {
             ViewThatFits(in: .horizontal) {
-                Text(([row.valueChange, row.actor, row.scope].compactMap { $0 }).joined(separator: " · ")).lineLimit(1)
-                Text(([row.newValue, row.actor, row.scope].compactMap { $0 }).joined(separator: " · ")).lineLimit(1)
+                Text([row.valueChange, row.actor, row.scope].joined(separator: " · ")).lineLimit(1)
+                Text([row.newValue, row.actor, row.scope].joined(separator: " · ")).lineLimit(1)
                 HStack(spacing: 0) {
                     Text(row.actor).lineLimit(1).truncationMode(.tail)
                     Text(" · \(row.scope)").lineLimit(1).fixedSize()

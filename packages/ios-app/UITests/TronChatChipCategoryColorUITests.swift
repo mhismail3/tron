@@ -25,17 +25,6 @@ import UIKit
         ("compaction", "Context compacted", burgundy),
     ]
 
-    func testCaptureForVisualApproval() {
-        for theme in ["burgundy", "emerald"] {
-            for mode in ["light", "dark"] {
-                let app = launch(theme: theme, mode: mode)
-                let shot = XCTAttachment(screenshot: app.screenshot())
-                shot.name = "chat-chips-\(theme)-\(mode)"; shot.lifetime = .keepAlways; add(shot)
-                app.terminate()
-            }
-        }
-    }
-
     func testChipInkFollowsMessageCategory() {
         for mode in ["light", "dark"] {
             let app = launch(theme: "burgundy", mode: mode)

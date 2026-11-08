@@ -1,7 +1,6 @@
 import XCTest
 
 /// Sheet behavior through the production views and hosted Gateway socket.
-/// Captures are attachments for maintainer review, not golden comparisons.
 @MainActor final class TronSheetLayoutUITests: XCTestCase {
     func testHomeSettingsAreOnMainSheet() {
         let app = home()
@@ -69,52 +68,6 @@ import XCTest
         // One title line is about a pill tall; a title squeezed into fragments wraps to several.
         XCTAssertLessThan(title.frame.height, pill.frame.height * 1.6, "The title is not broken into fragments: \(title.frame) vs \(pill.frame)")
         XCTAssertGreaterThanOrEqual(pill.frame.minY, title.frame.maxY - 1, "The pill stacks below the title: \(pill.frame) vs \(title.frame)")
-    }
-
-    func testCaptureXXXLHome() { for dark in [false, true] { let app = home(dark: dark, xxxl: true); shot("xxxl-home-\(dark ? "dark" : "light")"); app.swipeUp(); shot("xxxl-home-\(dark ? "dark" : "light")-scrolled"); app.terminate() } }
-    func testCaptureXXXLSessionSettings() { for dark in [false, true] { let app = session(dark: dark, xxxl: true); shot("xxxl-session-settings-\(dark ? "dark" : "light")"); app.terminate() } }
-    func testCaptureXXXLSessionMoreSettings() {
-        for dark in [false, true] {
-            let app = session(dark: dark, xxxl: true)
-            let more = app.buttons["settings-section-advanced-open"]
-            reveal(more, in: app)
-            more.tap()
-            expand(app, title: "More Settings")
-            shot("xxxl-more-settings-\(dark ? "dark" : "light")")
-            app.terminate()
-        }
-    }
-    func testCaptureXXXLManageSession() { for dark in [false, true] { let app = sessionApp(dark: dark, xxxl: true); shot("xxxl-manage-session-\(dark ? "dark" : "light")"); app.terminate() } }
-
-    func testCaptureHomeLightNormal() { captureHome(dark: false, xxxl: false) }
-    func testCaptureHomeDarkNormal() { captureHome(dark: true, xxxl: false) }
-    func testCaptureHomeLightXXXL() { captureHome(dark: false, xxxl: true) }
-    func testCaptureHomeDarkXXXL() { captureHome(dark: true, xxxl: true) }
-    func testCaptureSessionLight() { let app = session(); defer { app.terminate() }; shot("session-light") }
-    func testCaptureSessionDark() { let app = session(dark: true); defer { app.terminate() }; shot("session-dark") }
-    func testCaptureHistoryLight() { captureHistory(dark: false) }
-    func testCaptureHistoryDark() { captureHistory(dark: true) }
-
-    private func captureHome(dark: Bool, xxxl: Bool) {
-        let app = home(dark: dark, xxxl: xxxl)
-        defer { app.terminate() }
-        let name = "home-\(dark ? "dark" : "light")-\(xxxl ? "xxxl" : "normal")"
-        shot("\(name)-top")
-        for index in 1...5 {
-            app.swipeUp()
-            shot("\(name)-scroll-\(index)")
-        }
-    }
-
-    private func captureHistory(dark: Bool) {
-        let app = history(dark: dark)
-        defer { app.terminate() }
-        let mode = dark ? "dark" : "light"
-        shot("history-\(mode)-medium")
-        expand(app, title: "History Entry")
-        shot("history-\(mode)-large")
-        app.swipeUp()
-        shot("history-\(mode)-large-scrolled")
     }
 
     private func home(dark: Bool = false, xxxl: Bool = false) -> XCUIApplication {
@@ -189,10 +142,4 @@ import XCTest
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
-    private func shot(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
 }

@@ -33,14 +33,6 @@ import UIKit
         }
     }
 
-    func testRepresentativePreviews() {
-        for (theme, mode, home) in [("burgundy", "dark", true), ("oliveGold", "light", false)] {
-            let app = open(theme: theme, mode: mode, home: home)
-            capture(app, "\(theme)-\(mode)-\(home ? "home" : "session")")
-            app.terminate()
-        }
-    }
-
     func testHomeAndSessionMarkdownFollowPrimaryTheme() {
         for theme in ["burgundy", "oliveGold"] {
             for mode in ["light", "dark"] {

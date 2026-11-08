@@ -38,12 +38,12 @@ struct SettingsRendererRow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronSettingsVisualTheme) private var theme
 
-    private var presentation: SettingsKeyPresentation? { setting.presentation }
+    private var presentation: SettingsKeyPresentation { setting.presentation }
     private var title: String {
         if modelConfiguration && setting.key == "model.thinking[role=chat]" { return "Effort" }
         if modelConfiguration && setting.key == "model.contextWindow" { return "Context Window" }
-        return instanced ? (Self.instanceName(setting) ?? baseInstanceTitle ?? presentation?.label ?? setting.key)
-            : (presentation?.label ?? setting.key)
+        return instanced ? (Self.instanceName(setting) ?? baseInstanceTitle ?? presentation.label)
+            : (presentation.label)
     }
 
     /// An instance's name: its scope ("tron" for a project path), else its own
@@ -69,9 +69,9 @@ struct SettingsRendererRow: View {
     }
 
     private var control: SettingsRowControl {
-        let negotiated = editable ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
+        let negotiated = editable ? SettingsRowControl(negotiated: presentation.control) : .readOnly
         // Native lists edit strings only; other shapes use the existing read-only value/source row.
-        return negotiated == .list && presentation?.valueKind != "stringList" ? .readOnly : negotiated
+        return negotiated == .list && presentation.valueKind != "stringList" ? .readOnly : negotiated
     }
 
     /// The key's help and note, on detailed rows only; an instance's help is on its group.
@@ -81,13 +81,13 @@ struct SettingsRendererRow: View {
         // describes it when nothing else does.
         let scope = setting.badge("scope")?.label
         let instanceLine = instanceHelp ?? (scope != title ? scope : nil) ?? ""
-        let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
+        let lines = [instanced ? instanceLine : presentation.help, presentation.note ?? ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     /// A text row's subtitle also says what to type, on rows that show help.
     private var entrySubtitle: String? {
-        guard detailed, let hint = presentation?.entry?.hint else { return subtitle }
+        guard detailed, let hint = presentation.entry?.hint else { return subtitle }
         return [subtitle, hint].compactMap { $0 }.joined(separator: "\n")
     }
 
@@ -177,7 +177,7 @@ struct SettingsRendererRow: View {
                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-project")
             ) }
         }
-        guard canReset && editable && (control != .readOnly || presentation?.control == nil) else { return { AnyView(EmptyView()) } }
+        guard canReset && editable && (control != .readOnly || presentation.control == nil) else { return { AnyView(EmptyView()) } }
         return { AnyView(resetButton) }
     }
 
@@ -206,7 +206,7 @@ struct SettingsRendererRow: View {
 
     /// An absent optional value is not a second provenance statement.
     private var display: String {
-        return setting.value == nil && setting.display == "Not set" && presentation?.redacted != true ? "—" : setting.display
+        return setting.value == nil && setting.display == "Not set" && presentation.redacted != true ? "—" : setting.display
     }
 
     @ViewBuilder
@@ -227,13 +227,13 @@ struct SettingsRendererRow: View {
                 }
             }
         case .choice:
-            let choices = presentation?.optionsSource != nil ? (options?.options ?? []) : (presentation?.options?.map {
+            let choices = presentation.optionsSource != nil ? (options?.options ?? []) : (presentation.options?.map {
                 SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil, resource: nil)
             } ?? [])
             if choices.isEmpty {
                 // A source with nothing to offer (a model that does not think) is a value, not a menu.
                 readOnlyRow
-            } else if presentation?.valueKind == "orderedChoice", let value = setting.value {
+            } else if presentation.valueKind == "orderedChoice", let value = setting.value {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: value,
                                            display: display, options: choices, information: subtitle,
                                            onChange: { onChange($0) })
@@ -247,17 +247,17 @@ struct SettingsRendererRow: View {
                               selected: setting.value) { onChange($0) }
             }
         case .text:
-            SettingsRendererTextRow(title: title, icon: icon, subtitle: entrySubtitle, example: presentation?.entry?.example,
+            SettingsRendererTextRow(title: title, icon: icon, subtitle: entrySubtitle, example: presentation.entry?.example,
                                     value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
         case .secret:
             TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
-                SettingsSecretEditor(title: title, help: presentation?.help ?? "", onChange: onChange)
+                SettingsSecretEditor(title: title, help: presentation.help, onChange: onChange)
             }
         case .list:
             if setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
-                    SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,
+                    SettingsListEditor(title: title, help: presentation.help, entry: presentation.entry,
                                        values: values.compactMap(\.stringValue), entryPicker: modelEntryPicker, onChange: onChange)
                 }
             } else {
@@ -265,18 +265,18 @@ struct SettingsRendererRow: View {
             }
         case .checklist:
             // A tool catalog opens the shared Available Tools list and details (#900).
-            if presentation?.optionsSource?.name == "catalog.tools", let options, let values = setting.value?.arrayValue,
+            if presentation.optionsSource?.name == "catalog.tools", let options, let values = setting.value?.arrayValue,
                values.allSatisfy({ $0.stringValue != nil }) {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: toolCount(values.compactMap(\.stringValue), of: options.options),
                                       valueFixed: true) {
                     SettingsToolsEditor(title: title, selected: values.compactMap(\.stringValue),
                                         options: options.options) { onChange(.array($0.map(JSONValue.string))) }
                 }
-            } else if presentation?.optionsSource?.name != "catalog.tools", let values = setting.value?.arrayValue,
+            } else if presentation.optionsSource?.name != "catalog.tools", let values = setting.value?.arrayValue,
                       values.allSatisfy({ $0.stringValue != nil }) {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     TronChecklistPicker(
-                        title: title, help: presentation?.help,
+                        title: title, help: presentation.help,
                         choices: options?.options.compactMap { option in option.value.stringValue.map {
                             TronChoice(id: $0, label: option.label, detail: option.detail, disabledReason: option.disabledReason)
                         } },
@@ -288,7 +288,7 @@ struct SettingsRendererRow: View {
             }
         case .catalog:
             TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
-                if presentation?.optionsSource?.name == "catalog.models" {
+                if presentation.optionsSource?.name == "catalog.models" {
                     SettingsModelPicker(setting: setting, target: target, title: title,
                                         onReset: canReset ? { onChange(nil) } : nil) { onChange($0) }
                 } else {
@@ -302,7 +302,7 @@ struct SettingsRendererRow: View {
 
     /// Model queues add physical models from the same availability-aware picker as chat.
     private var modelEntryPicker: ((@escaping (String) -> Void) -> AnyView)? {
-        guard presentation?.optionsSource?.name == "catalog.models" else { return nil }
+        guard presentation.optionsSource?.name == "catalog.models" else { return nil }
         return { add in
             AnyView(SettingsModelPicker(setting: setting, target: target, title: "Add model") { value in
                 guard let provider = value.objectValue?["provider"]?.stringValue, let id = value.objectValue?["id"]?.stringValue else { return }
@@ -322,7 +322,7 @@ struct SettingsRendererRow: View {
     /// Inspection never offers a shortcut to a different configuration editor.
     @ViewBuilder
     private var readOnlyRow: some View {
-        if presentation?.optionsSource?.name == "catalog.tools", let values = setting.value?.arrayValue?.compactMap(\.stringValue) {
+        if presentation.optionsSource?.name == "catalog.tools", let values = setting.value?.arrayValue?.compactMap(\.stringValue) {
             TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: toolCount(values, of: options?.options), valueFixed: true) {
                 SettingsToolsEditor(title: title, selected: values, options: options?.options ?? values.map {
                     SettingsOption(value: .string($0), label: $0, detail: nil, disabledReason: nil, resource: nil)
