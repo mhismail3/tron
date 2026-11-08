@@ -117,34 +117,63 @@ it("refuses a run whose input changed after planning, and never restores over a 
   expect(await readFile(f.profile, "utf8")).toBe(edited);
 });
 
-it("puts a session back complete and unmigrated when an append reaches it during publication", async () => {
-  const f = await fixture();
-  const original = await readFile(f.old, "utf8");
-  const appended = JSON.stringify(settings("s3", { "model.default": snapshot("session") })) + "\n";
-  // A child process applies the real migration; its rename first appends by path,
-  // as Pi does, after the tool's last check and before the replacement lands.
+/** Applies the real migration in a child process whose `node:fs/promises` calls are
+ * wrapped by `patch` to inject the Gateway's own write at an exact publication step. */
+async function racingApply(f: Awaited<ReturnType<typeof fixture>>, patch: string, line: string): Promise<{ published: number; failed: string[] }> {
   const hook = join(f.root, "loader.mjs"), program = join(f.root, "racing-apply.mjs");
   await writeFile(hook, `import { registerHooks } from 'node:module';
 registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });\n`);
   await writeFile(program, `import fs from 'node:fs/promises';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync, renameSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-const [home, backup, target, line] = process.argv.slice(2);
-const rename = fs.rename;
-fs.rename = async function (from, to) { if (to === target && String(from).includes('.migration-')) appendFileSync(target, line); return rename.call(this, from, to); };
+const [home, backup, session, profile, line] = process.argv.slice(2);
+const rename = fs.rename, link = fs.link;
+${patch}
 syncBuiltinESMExports();
 const { planRetiredFormatMigration, applyRetiredFormatMigration } = await import(${JSON.stringify(fileURLToPath(new URL("./retired-format-migration.ts", import.meta.url)))});
 process.stdout.write(JSON.stringify(await applyRetiredFormatMigration(home, backup, await planRetiredFormatMigration(home, 600))));
 `);
-  const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, f.home, join(f.root, "backup"), f.old, appended], { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, f.home, join(f.root, "backup"), f.old, f.profile, line], { stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.on("data", chunk => { stdout += String(chunk); }); child.stderr.on("data", chunk => { stderr += String(chunk); });
   expect(await once(child, "exit"), stderr).toEqual([0, null]);
-  expect(JSON.parse(stdout)).toEqual({ published: 1, failed: [expect.stringMatching(/^agent\/sessions\/--fixture--\/old\.jsonl: was written during publication; its complete original was put back unmigrated; rerun$/)] });
+  return JSON.parse(stdout);
+}
+const appended = JSON.stringify(settings("s3", { "model.default": snapshot("session") })) + "\n";
+
+it("puts a session back complete and unmigrated when an append reaches it during publication", async () => {
+  const f = await fixture();
+  const original = await readFile(f.old, "utf8");
+  // Pi appends by path: here after the tool's last check and before its rename lands.
+  const result = await racingApply(f, "fs.rename = async function (from, to) { if (to === session && String(from).includes('.migration-')) appendFileSync(session, line); return rename.call(this, from, to); };", appended);
+  expect(result).toEqual({ published: 1, failed: [expect.stringMatching(/^agent\/sessions\/--fixture--\/old\.jsonl: was written during publication; its complete original was put back unmigrated; rerun$/)] });
   expect(await readFile(f.old, "utf8")).toBe(original + appended);
   await utimes(f.old, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000));
-  const rerun = await planRetiredFormatMigration(f.home, 600);
-  expect(rerun.files.map(file => file.path)).toEqual([f.old]);
+  expect((await planRetiredFormatMigration(f.home, 600)).files.map(file => file.path)).toEqual([f.old]);
+});
+
+it("keeps an append that lands just after a session's migrated replacement", async () => {
+  const f = await fixture();
+  const result = await racingApply(f, "fs.rename = async function (from, to) { const done = await rename.call(this, from, to); if (to === session && String(from).includes('.migration-')) appendFileSync(session, line); return done; };", appended);
+  expect(result).toEqual({ published: 2, failed: [] });
+  const text = await readFile(f.old, "utf8");
+  expect(text.endsWith(appended)).toBe(true);
+  expect(text).not.toMatch(/"from":"(mac|builtin|chat|profile)","at"/);
+});
+
+it("keeps a Profile owner publication that races the migration's replacement", async () => {
+  for (const [step, patch, message] of [
+    ["before the original moves aside", "fs.rename = async function (from, to) { if (from === profile && String(to).includes('.migration-held-')) { writeFileSync(profile + '.owner', line, { mode: 0o600 }); renameSync(profile + '.owner', profile); } return rename.call(this, from, to); };", /: was replaced during publication; that write was kept; rerun$/],
+    ["while the original is aside", "fs.link = async function (from, to) { if (to === profile) writeFileSync(profile, line, { mode: 0o600 }); return link.call(this, from, to); };", /: was written during publication; that write was kept, the original is at .*raced-1; rerun$/],
+  ] as const) {
+    const f = await fixture();
+    const owner = (await readFile(f.profile, "utf8")).replace("An unlabelled Prior original.", `An owner write ${step}.`);
+    const result = await racingApply(f, patch, owner);
+    expect(result.published, step).toBe(1);
+    expect(result.failed, step).toEqual([expect.stringMatching(new RegExp("^workspace/files/Profile\\.json" + message.source))]);
+    expect(await readFile(f.profile, "utf8"), step).toBe(owner);
+    expect((await readdir(join(f.profile, ".."))).filter(name => name !== "Profile.json"), step).toEqual([]);
+  }
 });
 
 it("refuses a configured session directory and an unsettled Profile organization", async () => {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, link, lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncDurably } from "../foundation/durable-json.js";
@@ -20,7 +20,7 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  * It is idempotent: a second run plans nothing. Every replacement first clones
  * its original into the backup directory with a manifest of both digests, then
  * publishes atomically only if the file is unchanged since it was read (see
- * `publish` for a write racing the rename). Session files written within
+ * `publishSession` and `publishProfile` for a Gateway write racing publication). Session files written within
  * `--settle-seconds` are deferred to a later run; run it while Home is idle. It
  * refuses a configured `sessionDir` and an uncommitted Profile organization. The
  * shared Changes record is append-only history and is not rewritten. Delete this
@@ -137,43 +137,82 @@ export async function planRetiredFormatMigration(tronHome: string, settleSeconds
   return plan;
 }
 
+async function stage(path: string, bytes: Buffer, mode: number): Promise<string> {
+  const temporary = `${path}.migration-${process.pid}.tmp`;
+  const handle = await open(temporary, "wx", mode);
+  try { await handle.writeFile(bytes); await syncDurably(handle); } catch (error) { await handle.close(); await rm(temporary, { force: true }); throw error; }
+  await handle.close();
+  return temporary;
+}
+const unchanged = "changed since it was read; rerun to include it";
+
 /**
- * Stages the replacement durably, then renames it over the path only while the path
- * is still the original that was read. The original stays open across the rename:
- * a write that reached it after the check (an append by path that opened it first)
- * is detected, and the path is put back to the complete, un-migrated original so
- * nothing is lost; a later run migrates it. Another writer's rename after ours wins
- * and is reported the same way. Both writers here are the Gateway's: Pi appends
- * session entries by path and the Profile owner publishes by rename.
+ * Pi appends session entries by path. The replacement is renamed over the path only
+ * while the path is still the original, and the original stays open across the
+ * rename: an append that reached it after the last check is detected, and if the
+ * migrated file is still exactly as published the complete original is put back
+ * un-migrated for a later run; otherwise its final bytes are kept for a manual
+ * merge. Appends after the rename land in the migrated file and are kept.
  */
-async function publish(file: PlannedFile, raced: string): Promise<void> {
+async function publishSession(file: PlannedFile, raced: string): Promise<void> {
   const original = await open(file.path, "r");
   try {
-    if (!same(identity(await original.stat()), file.identity)) throw new Error("changed since it was read; rerun to include it");
-    const temporary = `${file.path}.migration-${process.pid}.tmp`;
-    const handle = await open(temporary, "wx", (await original.stat()).mode & 0o777);
+    const info = await original.stat();
+    if (!same(identity(info), file.identity)) throw new Error(unchanged);
+    const temporary = await stage(file.path, file.after, info.mode & 0o777);
     try {
-      try { await handle.writeFile(file.after); await syncDurably(handle); } finally { await handle.close(); }
-      if (!same(identity(await lstat(file.path)), file.identity)) throw new Error("changed since it was read; rerun to include it");
+      if (!same(identity(await lstat(file.path)), file.identity)) throw new Error(unchanged);
       await rename(temporary, file.path);
-    } catch (error) {
-      await rm(temporary, { force: true });
-      throw error;
-    }
+    } catch (error) { await rm(temporary, { force: true }); throw error; }
+    const published = await lstat(file.path);
     await syncDirectory(file.path);
-    const published = identity(await stat(file.path));
-    if (same(identity(await original.stat()), file.identity) && digest(await readFile(file.path)) === digest(file.after)) return;
+    if (same(identity(await original.stat()), file.identity)) return;
     const late = await original.readFile();
-    if (same(identity(await lstat(file.path)), published)) {
-      await writeFile(temporary, late, { mode: (await original.stat()).mode & 0o777, flag: "wx" });
-      await rename(temporary, file.path);
-      await syncDirectory(file.path);
-      throw new Error("was written during publication; its complete original was put back unmigrated; rerun");
+    const now = await lstat(file.path);
+    if (now.ino === published.ino && now.size === file.after.length) {
+      const restore = await stage(file.path, late, info.mode & 0o777);
+      const again = await lstat(file.path);
+      if (again.ino === published.ino && again.size === file.after.length) {
+        await rename(restore, file.path); await syncDirectory(file.path);
+        throw new Error("was written during publication; its complete original was put back unmigrated; rerun");
+      }
+      await rm(restore, { force: true });
     }
     await writeFile(raced, late, { mode: 0o600, flag: "wx" });
     throw new Error(`was written during publication; the original's final bytes are kept at ${raced} for a manual merge`);
   } finally { await original.close(); }
 }
+
+/**
+ * The Profile owner publishes by rename, so a rename over it could silently replace
+ * a concurrent owner write. Instead the original is moved aside and the replacement
+ * is linked into the empty path: link refuses when an owner publication already
+ * took the path, and that publication is kept. While the path is briefly empty an
+ * owner read refuses rather than writes.
+ */
+async function publishProfile(file: PlannedFile, raced: string): Promise<void> {
+  const info = await lstat(file.path);
+  if (!same(identity(info), file.identity) || !(await readFile(file.path)).equals(file.before)) throw new Error(unchanged);
+  const temporary = await stage(file.path, file.after, info.mode & 0o777);
+  const held = `${file.path}.migration-held-${process.pid}`;
+  try {
+    if (!same(identity(await lstat(file.path)), file.identity)) throw new Error(unchanged);
+    await rename(file.path, held);
+  } catch (error) { await rm(temporary, { force: true }); throw error; }
+  if (!same(identity(await lstat(held)), file.identity)) {
+    await rm(temporary, { force: true });
+    await link(held, file.path).then(() => rm(held), async () => { await rename(held, raced); });
+    throw new Error(`was replaced during publication; that write was kept${await present(raced) ? ` at ${raced} for a manual merge` : ""}; rerun`);
+  }
+  try { await link(temporary, file.path); }
+  catch (error) {
+    await rm(temporary, { force: true }); await rename(held, raced);
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`was written during publication; that write was kept, the original is at ${raced}; rerun`);
+    throw error;
+  }
+  await rm(temporary); await rm(held); await syncDirectory(file.path);
+}
+const present = (path: string) => lstat(path).then(() => true, () => false);
 async function syncDirectory(path: string): Promise<void> {
   const directory = await open(dirname(path), "r");
   try { await syncDurably(directory); } finally { await directory.close(); }
@@ -200,7 +239,7 @@ export async function applyRetiredFormatMigration(tronHome: string, backup: stri
   await backUp(tronHome, backup, plan.files);
   let published = 0; const failed: string[] = [];
   for (const [index, file] of plan.files.entries()) {
-    try { await publish(file, join(backup, `raced-${index}`)); published += 1; }
+    try { await (file.kind === "profile" ? publishProfile : publishSession)(file, join(backup, `raced-${index}`)); published += 1; }
     catch (error) { failed.push(`${relative(tronHome, file.path)}: ${(error as Error).message}`); }
   }
   return { published, failed };
@@ -219,6 +258,7 @@ export async function restoreRetiredFormatMigration(tronHome: string, backup: st
     if (digest(await readFile(original)) !== file.before) throw new Error(`Backup of ${file.path} does not match its manifest`);
     const temporary = `${live}.restore-${process.pid}.tmp`;
     await copyFile(original, temporary, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
+    if (digest(await readFile(live)) !== file.after) { await rm(temporary); skipped.push(`${file.path}: changed during the restore; restore it by hand from ${original}`); continue; }
     await rename(temporary, live);
     restored += 1;
   }
@@ -255,7 +295,7 @@ async function main(argv: readonly string[]): Promise<number> {
   process.stdout.write(`applied ${JSON.stringify(result)}\n`);
   const remaining = await planRetiredFormatMigration(resolve(tronHome), settle);
   process.stdout.write(`remaining ${summary(remaining)}\n`);
-  return result.failed.length || remaining.files.length ? 1 : 0;
+  return result.failed.length || remaining.files.length || remaining.sessions.deferred.length ? 1 : 0;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
