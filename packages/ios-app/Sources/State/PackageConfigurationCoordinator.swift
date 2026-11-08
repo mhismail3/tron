@@ -2,9 +2,17 @@ import Foundation
 import Observation
 import TronMobileCore
 
-enum PackageMutationAction: String, Sendable {
+enum PackageMutationAction: Sendable {
     case update
     case remove
+
+    /// Explicit wire names keep every package RPC caller statically visible.
+    var method: String {
+        switch self {
+        case .update: "packages.update"
+        case .remove: "packages.remove"
+        }
+    }
 }
 
 @MainActor
@@ -170,7 +178,7 @@ final class PackageConfigurationCoordinator {
         surfaceError: Bool = true
     ) async throws {
         let admission = beginAdmission(target: target, generations: &mutationGenerationByTarget)
-        let method = "packages.\(action.rawValue)"
+        let method = action.method
         let commandID = uuidSource.next().uuidString
         let params = MutationParams(
             source: source,
