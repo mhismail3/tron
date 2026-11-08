@@ -89,8 +89,6 @@ import { RunInvocations } from "../../kernel/run/run-invocations.js";
 import { invocationReceipts } from "../../kernel/receipts/invocation-receipts.js";
 import { logHomeDiagnostic } from "../../modules/home/home-diagnostic.js";
 import { GatewayLogger } from "../../transport/logger.js";
-import { SESSION_SETTINGS_ENTRY } from "../../sessions/session-settings.js";
-import { applyRetiredFormatMigration, planRetiredFormatMigration } from "../../sessions/retired-format-migration.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";
@@ -315,14 +313,12 @@ async function openRegistry(f: Fixture): Promise<void> {
   f.receipts = receipts;
 }
 
-async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; memoryQueueClock?: { now: number }; memoryQueue?: readonly string[]; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean; agentInTronHome?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; memoryQueueClock?: { now: number }; memoryQueue?: readonly string[]; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-e2e-${label}-`));
   roots.push(root);
+  const agentDir = join(root, "agent");
   if (options.aliasedRoot) await symlink(await realpath(root), join(root, "alias"), "dir");
   const tronHome = join(root, ...(options.aliasedRoot ? ["alias", "tron"] : ["tron"]));
-  // The installed layout keeps the agent directory inside the Tron home.
-  const agentDir = options.agentInTronHome ? join(tronHome, "agent") : join(root, "agent");
-  if (options.agentInTronHome) await mkdir(tronHome, { mode: 0o700 });
   await mkdir(agentDir, { recursive: true });
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID }));
   const faux = fauxProvider({
@@ -817,86 +813,6 @@ describe("Tron Home activations end to end", () => {
     expect((await f.registry.catalog("all")).sessions.map(session => session.id)).not.toContain(stored.chapters[1]!.sessionId);
     report.cases.push({ case: "soft-rollover", trigger: _label, oldState: stored.chapters[0]!.state, successorState: stored.chapters[1]!.state, successorMaterialized: false });
   });
-
-  it("re-seals a sealed chapter the retired-format migration rewrote: Home memory keeps every summary, the chapter opens, and Home activates across a restart", async () => {
-    const f = await fixture("retired-reseal", { agentInTronHome: true });
-    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
-    const slot = await designateHome(f, "e2e-retired-reseal");
-    f.faux.setResponses([fauxAssistantMessage("first chapter reply")]);
-    await slot.prompt("first chapter violet fact");
-    await waitUntil(() => slot.snapshot().configurationBlocker === null);
-    // Pre-#1634 history as the live sealed chapters hold it: a settings entry
-    // naming the retired `builtin` scope, superseded by a current one.
-    const pin = (from: string, ref: string) => ({ settings: {}, requestPins: { "context.images.block": { value: false, from, at: "2026-10-12T22:43:28.827Z", ref } } });
-    slot.sessionManager.appendCustomEntry(SESSION_SETTINGS_ENTRY, pin("builtin", "retired-pin"));
-    slot.sessionManager.appendCustomEntry(SESSION_SETTINGS_ENTRY, pin("global", "current-pin"));
-    const owner = homeOwnerOf(f.registry) as unknown as { options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } } };
-    const metrics = owner.options.sessions.chapterMetrics;
-    owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
-    f.faux.setResponses([fauxAssistantMessage("sealing reply")]);
-    await slot.prompt("cross the soft Home threshold");
-    const homeLedger = join(f.tronHome, "gateway", "home", "home.json");
-    await waitUntil(async () => (JSON.parse(await readFile(homeLedger, "utf8")) as HomeRecord).chapters[0]!.state === "sealed");
-    owner.options.sessions.chapterMetrics = metrics;
-    await waitUntil(() => slot.snapshot().configurationBlocker === null);
-    const chapterFile = slot.sessionFile!;
-    const homeId = await homeMemoryStateId(f);
-    const cursorOf = async () => (JSON.parse(await readFile(memoryStatePath(f, homeId), "utf8")) as {
-      cursor: { home: { chapters: Array<{ sessionId: string; size: number; completeBytes: number; sealed: boolean }> } } }).cursor.home.chapters[0]!;
-    // An operator pause and resume re-reads the source with no new content.
-    const reingest = async (commandId: string) => {
-      await f.service.invoke(client, "home.pauseMemory", { commandId: `${commandId}-pause` });
-      await f.service.invoke(client, "home.resumeMemory", { commandId: `${commandId}-resume` });
-    };
-    const settled = async () => {
-      await waitUntil(async () => (await homeOwnerOf(f.registry).memoryStatus()).episodic?.view.unbuilt === 0);
-      return (await homeOwnerOf(f.registry).memoryStatus()).episodic!;
-    };
-    await reingest("e2e-retired-reseal-ingest");
-    await waitUntil(async () => { const cursor = await cursorOf(); return cursor.sealed && cursor.completeBytes === statSync(chapterFile).size; });
-    const original = await readFile(chapterFile, "utf8");
-    expect(original).toContain('"from":"builtin"');
-    const memoryBefore = await settled();
-    const summariesBefore = f.compactor.calls;
-
-    const plan = await planRetiredFormatMigration(f.tronHome, 0);
-    expect(plan.sealedHome).toEqual([chapterFile]);
-    expect(await applyRetiredFormatMigration(f.tronHome, join(f.root, "retired-reseal-backup"), plan)).toMatchObject({ failed: [] });
-    const migrated = await readFile(chapterFile, "utf8");
-    expect(migrated).toBe(original.replace('"from":"builtin"', '"from":"global"'));
-    expect((await planRetiredFormatMigration(f.tronHome, 0)).files).toEqual([]);
-
-    // The running Gateway re-proves the chapter on its next ingestion, with no new summary.
-    await reingest("e2e-retired-reseal-reproved");
-    await waitUntil(async () => (await cursorOf()).size === Buffer.byteLength(migrated));
-    expect((await homeOwnerOf(f.registry).memoryStatus()).blocked).toBeUndefined();
-    const resealed = await settled();
-    expect(resealed.messages).toBe(memoryBefore.messages);
-    expect(resealed.nodes).toEqual(memoryBefore.nodes);
-    expect(f.compactor.calls).toBe(summariesBefore);
-    expect(f.memoryDiagnostics.filter(record => record.event === "episodic.chapter-resealed")).toHaveLength(1);
-
-    // A restart opens the chapter from its re-sealed bytes and Home activates over it.
-    await restart(f);
-    const phone = { ...client, beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
-      isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
-    const opened = await f.service.invoke(phone, "session.open", { sessionId: slot.id }) as unknown as { session: { sessionId: string } };
-    expect(opened.session.sessionId).toBe(slot.id);
-    f.faux.setResponses([async context => {
-      expect(JSON.stringify(context.messages)).toContain("first chapter violet fact");
-      return fauxAssistantMessage("successor after the re-seal");
-    }]);
-    const accepted = await f.service.invoke(client, "home.prompt", { commandId: "e2e-retired-reseal-activate", text: "continue after the re-seal" }) as unknown as { sessionId: string };
-    expect(accepted.sessionId).not.toBe(slot.id);
-    const successor = await f.registry.acquire(accepted.sessionId);
-    await waitUntil(() => successor.snapshot().configurationBlocker === null && successor.sessionManager.getBranch().some(entry => entry.type === "message"
-      && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("successor after the re-seal")));
-    expect(refusedReasons(f)).toEqual([]);
-    expect((await homeOwnerOf(f.registry).memoryStatus()).blocked).toBeUndefined();
-    expect(f.memoryDiagnostics.filter(record => record.event === "episodic.chapter-resealed")).toHaveLength(1);
-    expect(await readFile(chapterFile, "utf8")).toBe(migrated);
-    report.cases.push({ case: "retired-sealed-reseal", resealed: true, resummarized: false, openedAfterRestart: true, activatedAfterRestart: true });
-  }, 60_000);
 
   it.each(["hard bytes", "hard entries"] as const)("rolls Home admission over before effects at the %s threshold", async boundary => {
     const f = await fixture(`hard-boundary-${boundary.replaceAll(" ", "-")}`);

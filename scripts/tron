@@ -36,11 +36,6 @@ Commands:
                                     slots; a 4th job waits; `test ios slots` shows holders)
   test tooling [test files...]      Run Python script integration suites directly
   build gateway                     Build Gateway directly with pinned Node
-  migrate retired-formats --tron-home <dir> [--apply --backup <new dir>] [--settle-seconds N]
-  migrate retired-formats --restore --tron-home <dir> --backup <dir>
-                                    One-shot #2329 rewrite of retired session scope names
-                                    and Profile file labels; dry run unless --apply; run
-                                    with the Gateway listening, never at startup
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp
@@ -203,15 +198,6 @@ case "$cmd" in
       echo "Prepare the CLI first: scripts/tron build gateway" >&2; exit 66;
     }
     exec node "$GATEWAY/dist/security/mac-terminal-cli.js" "$@"
-    ;;
-  migrate)
-    [[ "${1:-}" == retired-formats ]] || { usage >&2; exit 64; }
-    shift
-    use_pinned_node
-    [[ -f "$GATEWAY/dist/sessions/retired-format-migration.js" ]] || {
-      echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
-    }
-    exec node "$GATEWAY/dist/sessions/retired-format-migration.js" "$@"
     ;;
   diagnose)
     use_pinned_node

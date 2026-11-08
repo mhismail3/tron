@@ -33,7 +33,7 @@ import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSession
 import { CatalogMetadataIndex } from "../../sessions/catalog-metadata-index.js";
 import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "../../sessions/session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "../../kernel/receipts/extension-activity-history.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, type ExtensionActivityReceipt } from "../../kernel/receipts/extension-activity-history.js";
 import {
   HEAP_REFUSAL_RETRY_AFTER_MS,
   LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
@@ -346,40 +346,45 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }
   });
 
-  it("pages canonical extension receipts through the live session history owner", async () => {
-    const fixture = await coldFixture("extension-history-pages");
+  it("pages canonical subagent receipts through the live process history owner", async () => {
+    const fixture = await coldFixture("process-history-pages");
     try {
       const sessionId = fixture.manager.getSessionId();
       const receipt: ExtensionActivityReceipt = {
-        version: 1, activityId: "activity", sessionId, toolCallId: "tool", source: "extension", state: "completed",
-        startedAt: "2026-01-01T00:00:00.000Z", terminalAt: "2026-01-01T00:00:01.000Z", observedAt: "2026-01-01T00:00:01.000Z",
-        summary: { children: Array.from({ length: 64 }, (_, index) => ({
-          id: String(index).padEnd(256, "i"), label: "λ".repeat(128),
-          producerId: "p".repeat(256), sessionOwnerId: "s".repeat(256), childSessionRef: "r".repeat(256),
-          state: "completed", attention: "none",
-        })) },
+        version: 1, activityId: "activity", sessionId, toolCallId: "tool", source: "extension", runId: "run", mode: "async", state: "completed",
+        startedAt: "2026-01-01T00:00:00.000Z", terminalAt: "2026-01-01T00:00:01.000Z", observedAt: "2026-01-01T00:00:09.000Z", summary: { toolCount: 1 },
       };
       for (let index = 0; index < 5; index += 1) {
-        fixture.manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, { ...receipt, activityId: `activity-${index}` });
+        const terminalAt = `2026-01-01T00:00:0${index + 1}.000Z`;
+        fixture.manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, { ...receipt, activityId: `activity-${index}`, toolCallId: `tool-${index}`, runId: `run-${index}`, terminalAt });
       }
       // All fixture writes precede acquisition by the sole live runtime.
       const slot = await fixture.registry.acquire(sessionId);
-      const ids: string[] = [];
+      const terminals: string[] = [];
+      const pages: number[] = [];
       let cursor: string | undefined;
+      let revision: string | undefined;
       for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
-        const page = slot.extensionActivityHistory(cursor, 50);
+        const page = slot.processHistory(cursor, 2, { kind: "subagent" });
         expect(page.omissions).toBeUndefined();
         expect(page.activities.length).toBeGreaterThan(0);
-        expect(Buffer.byteLength(JSON.stringify(page.activities))).toBeLessThanOrEqual(MAX_EXTENSION_HISTORY_BYTES);
+        revision ??= page.historyRevision;
+        expect(page.historyRevision).toBe(revision);
+        pages.push(page.activities.length);
         for (const row of page.activities) {
-          ids.push(row.activityId!);
-          expect(slot.extensionActivityDetail(row.activityId!, page.historyRevision)).toEqual(row);
+          terminals.push(row.lifecycle.terminalAt!);
+          expect(slot.processDetail(row.processId, page.historyRevision)).toEqual(row);
         }
         cursor = page.nextCursor;
         if (!cursor) break;
       }
       expect(cursor).toBeUndefined();
-      expect(ids).toEqual(["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"]);
+      expect(pages).toEqual([2, 2, 1]);
+      expect(terminals).toEqual([5, 4, 3, 2, 1].map((second) => `2026-01-01T00:00:0${second}.000Z`));
+      // A cursor is bound to its filter scope and to the canonical revision.
+      const first = slot.processHistory(undefined, 2, { kind: "subagent" });
+      expect(() => slot.processHistory(first.nextCursor, 2, { kind: "command" })).toThrow(/cursor conflict/u);
+      expect(() => slot.processDetail(first.activities[0]!.processId, "stale-revision")).toThrow(/generation changed/u);
     } finally {
       await fixture.registry.dispose();
       registries.splice(registries.indexOf(fixture.registry), 1);
