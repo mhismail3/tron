@@ -11,6 +11,7 @@ scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--no-oracle] [--
                           [--config <mutate.json>] [--only <id>] [--list] [--equiv <id>] [--recheck <report.json> [--sample N]]
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
+scripts/tron proof shadow <block> [--root <dir>] [--out <file>]
 ```
 
 `bootstrap`/`doctor`: exit 0 when the install matches `dafny.pin`; 1 when missing or mismatched, with the
@@ -95,8 +96,10 @@ law-kind table and five gates, each bound to the block hash:
 
 - **Proof:** `doctor`, then `dafny verify --verify-included-files` on each `verify` file.
 - **Independent review:** `REVIEW.json` at the current hash and tier, every law ACCEPT, every accepted mutant
-  AGREE, reviewer agent and model different from the writer's, and the reviewer's Pi transcript (read from
-  `~/.tron/agent/sessions`) naming the hash and exactly that model.
+  AGREE, reviewer agent and model different from the writer's, and the reviewer's Pi transcript naming the
+  hash and exactly that model. `reviewer.session` is the transcript's path below its project directory of
+  `~/.tron/agent/sessions` (read, never written), so a committed review holds no machine path; it must match
+  exactly one transcript.
 - **Mutation:** the `report` for the current hash and checker, PASS (with `--recheck`, re-run with 12 samples).
 - **Shadow:** `SHADOW.json` match at the current hash and compiled core; cut-over needs real traffic over 7
   (high-stakes) or 3 (leaf) days.
@@ -106,6 +109,22 @@ law-kind table and five gates, each bound to the block hash:
 A gate for another hash shows STALE. Exit 1 lists packet problems: a missing English comment, a law lemma not
 found, a lemma neither a law nor a declared helper, a law-marked lemma not listed, an escape hatch, an
 unaccounted law kind (high-stakes) or a report acceptance not in mutate.json.
+
+## Shadow and oracles
+
+`shadow/shadow.mjs` (`proof shadow`) compiles the block's `translate` file with the pinned toolchain into a
+temporary directory and runs `mutate.json` `shadow.cmd` with `{core}` set to the compiled `core.js`; it writes
+`blocks/<block>/SHADOW.json` `{status: match|mismatch|error, compared, mismatches, firstMismatch, source,
+realTraffic, windowDays, inputsHash, coreJsHash, command, date}`, deleting the old file first, so a failed run
+never leaves a stale match. Generated-input comparisons are `realTraffic: false`. The packet re-compiles the
+core to check `coreJsHash`, and `--recheck` re-runs the shadow.
+
+`oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
+inputs and print `{requests, agree, diffs}` (exit 0 iff all agree); a block's `mutate.json` uses its oracle
+both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
+imports `packages/gateway/src/automations/schedule.ts` directly (Node strips its types) and marshals values
+by hand. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
+(`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
 ## Verify
 
@@ -129,3 +148,9 @@ rejected by its failing proof; a mutant only an unmapped helper catches is `unma
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
 STALE. The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
+
+`scripts/tron test tooling tools/proof/tests/test-core.py` is the gate test of the real blocks, declared by
+`packages/core/package.module.json`, so any change under `packages/core` runs it: `proof check` passes on a
+fresh cache, and for each block with a `mutate.json` the regenerated packet equals the committed `LAWS.md`
+and shows proof PASS, a current mutation PASS, a current shadow match, and a `REVIEW.json` for the current
+block hash with every law ACCEPT. An edit that skips any gate fails it.

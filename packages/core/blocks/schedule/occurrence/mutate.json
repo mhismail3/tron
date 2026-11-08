@@ -29,6 +29,7 @@
     ],
     "L6 classify-due": [
       "ScheduleOccurrence.L6ClassifyDue",
+      "ScheduleOccurrence.L6IntervalResult",
       "ScheduleOccurrence.L6IntervalLatest",
       "ScheduleOccurrence.L6IntervalNext",
       "ScheduleOccurrence.NoOccBetween"
@@ -36,8 +37,8 @@
     "L7 first-once": [
       "ScheduleOccurrence.L7FirstOnce"
     ],
-    "L8 first-every-ms": [
-      "ScheduleOccurrence.L8FirstEveryMs"
+    "L8 first-after-occurrence": [
+      "ScheduleOccurrence.L8FirstAfterOccurrence"
     ]
   },
   "helpers": [
@@ -82,15 +83,14 @@
     ],
     "progress": "n/a: pure functions, no workflow",
     "recovery": "n/a: stateless; the scheduler's restart behaviour is the automation-run lifecycle block (P4)",
-    "stale-inputs": [
-      "L5 classify-not-due"
-    ],
+    "stale-inputs": "n/a: Classify is given a stored next occurrence of the current trigger (Assumption A2), and L6 requires it; L5 covers a stored next still in the future",
     "exact-results": [
       "L3 next-none",
       "L4 first-interval",
+      "L5 classify-not-due",
       "L6 classify-due",
       "L7 first-once",
-      "L8 first-every-ms"
+      "L8 first-after-occurrence"
     ],
     "uncertain-outcomes": "n/a: no effects"
   }

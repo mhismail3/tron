@@ -2,14 +2,21 @@
 
 `packages/core` holds Tron's proven decision logic as Dafny **blocks**. It has no I/O, clock or ids:
 a block is pure, total and deterministic, and the shell (Gateway TypeScript) interprets its effects.
-No block replaces shipped TypeScript yet.
+No block replaces shipped TypeScript yet: a block is shadowed against the TypeScript it models until its
+gates allow a cut-over.
 
 ```text
 laws/<area>/<Block>.dfy          L0: abstract modules: types, signatures, law lemmas with plain-English comments
 blocks/<area>/<block>/           L1: one directory per block
   Block.dfy                      `module X refines XLaws`: definitions and proofs
   block.json                     {"interface": [...], "impl": [...], "deps": [...]}
+  mutate.json                    gate config: tier, laws map, mutated symbols, oracle, shadow, report path
+  LAWS.md                        the generated law review packet (scripts/tron proof packet --write)
+  MUTATION.json                  mutation report; REVIEW.json: independent law review; SHADOW.json: shadow result
 ```
+
+Blocks: `schedule/occurrence` (Automation once/interval occurrences; shell
+`packages/gateway/src/automations/schedule.ts`).
 
 ## Block contract
 
@@ -24,6 +31,14 @@ blocks/<area>/<block>/           L1: one directory per block
   law only with an independent review of that law.
 - Escape hatches (`assume`, `{:axiom}`, `{:verify false}`, `{:extern}`) are trusted code and need a
   maintainer decision.
+
+## Gates
+
+Before a block can gate anything, all of these hold at its current block hash (tools/proof/README.md):
+proof check PASS; `proof mutate` PASS (every mutant killed by a law or proven equivalent); an independent
+reviewer (a different agent and, for high-stakes, a different model from the writer) ACCEPTs every law;
+`proof shadow` matches; and `LAWS.md` is regenerated. `tools/proof/tests/test-core.py` enforces this on
+every change here. A cut-over additionally needs a real-traffic shadow over 7 days (high-stakes) or 3 (leaf).
 
 ## Check
 

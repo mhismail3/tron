@@ -1,0 +1,50 @@
+{
+  "packetHash": "88ecabd339a63d34",
+  "tier": "high-stakes",
+  "date": "2026-11-08",
+  "writer": {
+    "agent": "parent",
+    "model": "anthropic/claude-opus-5-5"
+  },
+  "reviewer": {
+    "agent": "law-reviewer (run 77119584, rounds 491045bd, 32260c52)",
+    "model": "anthropic/claude-haiku-5-5",
+    "session": "2026-11-08T11-53-57-413Z_01a1bb02-11a5-7565-bae7-3afa206a8d56/9aca5518-2981-4643-a479-d58a7eda453a/run-0/session.jsonl"
+  },
+  "laws": {
+    "L1 next-sound": {
+      "verdict": "ACCEPT",
+      "notes": "Unchanged: English = Dafny. Non-vacuous (Interval(0,1000), after=0 gives 1000). Matches nextAutomationOccurrence. Kills 32, 3 alone."
+    },
+    "L2 next-minimal": {
+      "verdict": "ACCEPT",
+      "notes": "English = Dafny (occurrence x > after gives Some(v) with v <= x). Non-vacuous (Once(10), after=5, x=10). Matches the TS. Kills 19."
+    },
+    "L3 next-none": {
+      "verdict": "ACCEPT",
+      "notes": "English = Dafny (None iff Once with at <= after). Non-vacuous (Once(5), after=10). Matches the TS. Implied by L1+L2 but it is the readable exact-results statement; keep."
+    },
+    "L4 first-interval": {
+      "verdict": "ACCEPT",
+      "notes": "English = Dafny. First(Interval) = Next(now-1) matches the TS (anchor >= now ? anchor : next(now-1)). Non-vacuous. Kills 6."
+    },
+    "L5 classify-not-due": {
+      "verdict": "ACCEPT",
+      "notes": "English = Dafny (nxt > now gives (None, Some(nxt), None)). Non-vacuous (nxt=10, now=5). Matches the TS early return. Exact-results kind is right. Kills 7, 6 alone."
+    },
+    "L6 classify-due": {
+      "verdict": "ACCEPT",
+      "notes": "Round 3: the English now says a new stored next occurrence is strictly after now, and the Dafny ensures (d.next.Some? ==> d.next.v > now) states exactly that. Proof: L1NextSound(t, now) in the interval case; Once gives None. The earlier unproven no-double-action clause is gone. Non-vacuous (Interval(0,1000), nxt=1000, now=2500). Matches the TS classifyDueOccurrence for both policies and both trigger kinds. Kills 82, 57 alone. L6IntervalResult is a named-term helper with a verified body, listed under L6."
+    },
+    "L7 first-once": {
+      "verdict": "ACCEPT",
+      "notes": "English = Dafny (First(Once(at), now) == Some(at), even when past). Matches firstAutomationOccurrence. The constructor mutant First/constructor/Some(at)->None is killed by L7 alone."
+    },
+    "L8 first-after-occurrence": {
+      "verdict": "ACCEPT",
+      "notes": "English = Dafny: for any a, any e > 0, any occurrence a+k*e, a creation time one ms later gives First = a+(k+1)*e. Non-vacuous (a=0, e=1000, k=0, now=1 gives 1000). Matches the TS. Not a special case of L4, because now need not be an occurrence. The only law that kills the now-1 mutants. First/constant/1->2#1 is now a law failure (L8), not a timeout. Kills 33, 2 alone."
+    }
+  },
+  "acceptedMutants": {},
+  "general": "Round 3 review at block hash 88ecabd339a63d34. Tier: high-stakes CONFIRMED. No accepted mutants. No missing law kinds: progress and recovery are n/a for pure functions; stale-inputs is n/a with reason A2, which is acceptable.\n\nA1: unchanged and accepted. everySeconds in [60, 31536000] is enforced by automation-contract.ts, timestamps are validated, and the shell must refuse non-positive periods.\n\nA2: accepted, with one caveat. Its sources (First, Next, Classify), the paused-edit behaviour, and the enable and retained-run recomputation now match automation-store.ts (about lines 293-345 and 380-394) and automation-scheduler.ts:413. The clause that nothing else writes the store is an assumption, not a proof. It must become a contract test (planned with the P4 cut-over) that covers the persisted-record reader, not only the store methods.\n\nMutation: 118 mutants, 113 valid, all killed by laws, 0 unknown. Classify/off-by-one/e->(e - 1)#1 is killed by L6. Shadow 20000/20000 at this hash. Nothing blocking remains.\n\nResidual, not blocking: the oracle covers only multiples of 1000 ms periods and 1970-2100 times. A1 excludes the rest, so the A1 and A2 contract tests are the real evidence for cut-over."
+}

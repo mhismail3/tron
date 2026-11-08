@@ -12,7 +12,7 @@
 //   "Ready for cut-over" can only be YES with --recheck.
 //        scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...      -> one batch for human reading
 // Exit 1 if the packet has problems (missing English, unlisted law lemma, missing law kinds).
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
@@ -104,9 +104,14 @@ function packet(root, block, opts = {}) {
     if (review.packetHash !== hash) reviewProblems.push(`STALE (reviewed ${review.packetHash}, current ${hash})`);
     if (review.tier !== cfg.tier) reviewProblems.push(`reviewer did not confirm tier ${cfg.tier} (REVIEW.json tier: ${review.tier})`);
     if (!review.reviewer?.agent || review.reviewer.agent === review.writer?.agent) reviewProblems.push("reviewer agent missing or same as writer");
-    const t = review.reviewer?.session;
-    if (!t || !existsSync(t)) reviewProblems.push("reviewer transcript (reviewer.session) missing: identity unverifiable");
-    else if (!resolve(t).startsWith(SESSIONS)) reviewProblems.push(`reviewer transcript is not a Pi session under ${SESSIONS}`);
+    // reviewer.session names the transcript below its project directory of the Pi session store
+    // (<started-at>_<id>/.../session.jsonl), so committed reviews carry no machine path.
+    const named = review.reviewer?.session;
+    const found = typeof named === "string" && !named.startsWith("/") && !named.split("/").includes("..") && existsSync(SESSIONS)
+      ? readdirSync(SESSIONS).map((d) => join(SESSIONS, d, named)).filter((f) => existsSync(f)) : [];
+    const t = found.length === 1 ? found[0] : null;
+    if (!named || found.length === 0) reviewProblems.push("reviewer transcript (reviewer.session) missing: identity unverifiable");
+    else if (found.length > 1) reviewProblems.push(`reviewer.session matches ${found.length} transcripts in the Pi session store`);
     else if (!readFileSync(t, "utf8").includes(hash)) reviewProblems.push("reviewer transcript never mentions the current block hash (it did not review this version)");
     else {
       const models = [...new Set([...readFileSync(t, "utf8").matchAll(/"provider":"([^"]+)","model":"([^"]+)"/g)].map((m) => `${m[1]}/${m[2]}`))];

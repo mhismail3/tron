@@ -9,9 +9,17 @@ abstract module ScheduleOccurrenceLaws {
   datatype Opt = None | Some(v: int)
   datatype Result = Result(dispatchAt: Opt, next: Opt, skipped: Opt)
 
-  // Assumption A1: the shell calls these functions only with well-formed triggers (Wf: a non-positive
-  // period is rejected at the boundary; Tron's TS does not check it today) and with times in
-  // 0 <= t < 2^47 ms, so the JS marshalling (BigNumber <-> number) is exact.
+  // Assumption A1: the shell calls these functions only with well-formed triggers and exact integer
+  // times. Interval periods come from the automation contract (everySeconds an integer in [60, 31536000]),
+  // so every > 0 holds for stored triggers; compiled code does not check `requires`, so the shell must refuse
+  // a non-positive period before calling the core. Times are milliseconds of validated Gateway timestamps
+  // (years 0000-9999), so every argument and result stays within JS safe integers and the marshalling
+  // (BigNumber <-> number) is exact. The laws themselves hold for all integers.
+  // Assumption A2: the stored next occurrence given to Classify is an occurrence of the trigger as it is
+  // now. The shell sets it only from First, Next or Classify of the current trigger; an edit while paused
+  // keeps the old value, but the scheduler classifies only enabled Automations and enabling recomputes it
+  // with First (or keeps it when a retained run carries the same, unchanged trigger). The store's record
+  // validator admits any timestamp when reading, so this also assumes nothing else writes the store.
   // Wf: a trigger is well-formed when it is one-shot or its period is positive.
   predicate Wf(t: Trigger) { t.Once? || t.every > 0 }
 
@@ -75,7 +83,7 @@ abstract module ScheduleOccurrenceLaws {
   // L6 classify-due: if the stored next occurrence is real and due (at or before now), exactly one
   // occurrence is acted on: dispatched under the "latest" policy, skipped under "skip". It is the latest
   // occurrence that is due (a Witness), and the new stored next occurrence is the first one after now for
-  // an interval trigger, or none for a one-shot.
+  // an interval trigger, or none for a one-shot; a new stored next occurrence is strictly after now.
   lemma L6ClassifyDue(t: Trigger, nxt: int, now: int, p: Policy)
     requires Wf(t) && Occ(t, nxt) && nxt <= now
     ensures var d := Classify(t, nxt, now, p);
@@ -84,16 +92,16 @@ abstract module ScheduleOccurrenceLaws {
       && (d.dispatchAt.Some? ==> Witness(t, nxt, now, d.dispatchAt.v))
       && (d.skipped.Some? ==> Witness(t, nxt, now, d.skipped.v))
       && (if t.Interval? then d.next == Next(t, now) else d.next == None)
+      && (d.next.Some? ==> d.next.v > now)
 
   // L7 first-once: for a one-shot trigger the first occurrence is always its own time, even when that
   // time is already in the past (the scheduler then dispatches or skips it).
   lemma L7FirstOnce(at: int, now: int)
     ensures First(Once(at), now) == Some(at)
 
-  // L8 first-every-ms: for an interval trigger whose period is 1 ms, every millisecond from the anchor on
-  // is an occurrence, so the first occurrence at a creation time at or after the anchor is that time
-  // itself (never a millisecond earlier or later).
-  lemma L8FirstEveryMs(a: int, now: int)
-    requires now >= a
-    ensures First(Interval(a, 1), now) == Some(now)
+  // L8 first-after-occurrence: an interval trigger created one millisecond after one of its occurrences
+  // does not count that past occurrence: its first occurrence is the next one, a whole period later.
+  lemma L8FirstAfterOccurrence(a: int, e: int, k: nat)
+    requires e > 0
+    ensures First(Interval(a, e), a + k * e + 1) == Some(a + (k + 1) * e)
 }

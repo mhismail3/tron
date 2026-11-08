@@ -3,5 +3,8 @@
   "purpose": "Proof blocks: Dafny laws (laws/) and the pure, total blocks that refine them (blocks/), checked by scripts/tron proof check.",
   "owns": [
     "**"
+  ],
+  "verify": [
+    "scripts/tron test tooling tools/proof/tests/test-core.py"
   ]
 }

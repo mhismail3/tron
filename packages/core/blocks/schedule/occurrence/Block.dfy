@@ -140,8 +140,13 @@ module ScheduleOccurrence refines ScheduleOccurrenceLaws {
     }
   }
 
-  lemma L8FirstEveryMs(a: int, now: int)
-  {}
+  lemma L8FirstAfterOccurrence(a: int, e: int, k: nat)
+  {
+    // First is the next occurrence after a + k*e, and (k*e)/e == k.
+    MulNonNeg(k, e);
+    ShiftDiv(0, k, e);
+    assert (a + k * e - a) / e == k;
+  }
 
   lemma L7FirstOnce(at: int, now: int)
   {}
@@ -155,16 +160,22 @@ module ScheduleOccurrence refines ScheduleOccurrenceLaws {
       case Once(at) => {}
       case Interval(a, e) =>
         var j: nat :| nxt == a + j * e;
-        // Name Classify's interval result first, so the laws below are proven about named terms.
-        var q := (now - nxt) / e;
-        assert Classify(t, nxt, now, p) == if p == Skip then Result(None, Some(nxt + (q + 1) * e), Some(nxt + q * e))
-          else Result(Some(nxt + q * e), Some(nxt + (q + 1) * e), None);
+        L6IntervalResult(t, nxt, now, p);
         L6IntervalLatest(a, e, j, now);
         L6IntervalNext(a, e, j, now);
+        L1NextSound(t, now);
     }
   }
 
   // Proof helpers for L6 (Interval case), split so each obligation stays small and solver-portable.
+  // Classify's due interval result in named terms: the latest due occurrence nxt + q*e and the next nxt + (q+1)*e.
+  lemma L6IntervalResult(t: Trigger, nxt: int, now: int, p: Policy)
+    requires t.Interval? && t.every > 0 && nxt <= now
+    ensures var q := (now - nxt) / t.every;
+      Classify(t, nxt, now, p) == if p == Skip then Result(None, Some(nxt + (q + 1) * t.every), Some(nxt + q * t.every))
+        else Result(Some(nxt + q * t.every), Some(nxt + (q + 1) * t.every), None)
+  {}
+
   // latest := nxt + q*e (q = (now - nxt)/e) is an occurrence in [nxt, now] with none in (latest, now].
   lemma L6IntervalLatest(a: int, e: int, j: nat, now: int)
     requires e > 0 && a + j * e <= now

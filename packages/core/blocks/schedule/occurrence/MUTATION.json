@@ -4,62 +4,62 @@
   "tier": "high-stakes",
   "laws": "blocks/schedule/occurrence/Block.dfy",
   "oracle": true,
-  "toolHash": "9f9e05146197173c",
-  "mutants": 105,
+  "toolHash": "3bf34288c20e1b8a",
+  "mutants": 118,
   "stillborn": 5,
-  "valid": 100,
-  "killed": 100,
+  "valid": 113,
+  "killed": 113,
   "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 445,
+  "seconds": 286,
   "score": 1,
   "unknown": 0,
-  "stillbornRatio": 0.048,
+  "stillbornRatio": 0.042,
   "filter": null,
-  "generated": 105,
+  "generated": 118,
   "pass": true,
-  "inputsHash": "6b1ccdadbb477188"
+  "inputsHash": "88ecabd339a63d34"
  },
  "perLaw": [
   {
    "law": "L1 next-sound",
-   "killed": 31,
+   "killed": 32,
    "only": 3
   },
   {
    "law": "L2 next-minimal",
-   "killed": 16,
-   "only": 1
+   "killed": 19,
+   "only": 0
   },
   {
    "law": "L3 next-none",
-   "killed": 8,
+   "killed": 11,
    "only": 0
   },
   {
    "law": "L4 first-interval",
-   "killed": 4,
+   "killed": 6,
    "only": 0
   },
   {
    "law": "L5 classify-not-due",
-   "killed": 6,
-   "only": 5
+   "killed": 7,
+   "only": 6
   },
   {
    "law": "L6 classify-due",
-   "killed": 73,
-   "only": 49
+   "killed": 82,
+   "only": 57
   },
   {
    "law": "L7 first-once",
-   "killed": 0,
-   "only": 0
+   "killed": 1,
+   "only": 1
   },
   {
-   "law": "L8 first-every-ms",
-   "killed": 30,
+   "law": "L8 first-after-occurrence",
+   "killed": 33,
    "only": 2
   }
  ],
@@ -212,6 +212,25 @@
    "oracleFailed": []
   },
   {
+   "id": "Next/constructor/Some(at)->None#1",
+   "sym": "Next",
+   "op": "constructor",
+   "line": 58,
+   "col": 41,
+   "from": "Some(at)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
    "id": "Next/branch/after < a->false#1",
    "sym": "Next",
    "op": "branch",
@@ -242,7 +261,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -261,7 +280,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -297,7 +316,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -317,7 +336,7 @@
     "L1 next-sound",
     "L2 next-minimal",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -353,7 +372,49 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/constructor/Some(a)->None#1",
+   "sym": "Next",
+   "op": "constructor",
+   "line": 60,
+   "col": 25,
+   "from": "Some(a)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none",
+    "L4 first-interval"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/constructor/Some(a + ((after - a) / e + 1) * e)->None#1",
+   "sym": "Next",
+   "op": "constructor",
+   "line": 60,
+   "col": 38,
+   "from": "Some(a + ((after - a) / e + 1) * e)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none",
+    "L4 first-interval",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -372,7 +433,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -392,7 +453,7 @@
     "L1 next-sound",
     "L2 next-minimal",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -411,7 +472,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -431,7 +492,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -450,7 +511,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 1,
@@ -468,7 +529,7 @@
    "status": "killed",
    "killedBy": [
     "L2 next-minimal",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 2,
@@ -488,7 +549,7 @@
     "L1 next-sound",
     "L2 next-minimal",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -509,7 +570,7 @@
     "L1 next-sound",
     "L2 next-minimal",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -526,11 +587,12 @@
    "to": "(a - 1)",
    "status": "killed",
    "killedBy": [
+    "L1 next-sound",
     "L2 next-minimal",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
-   "timeouts": 2,
+   "timeouts": 1,
    "error": null,
    "oracleFailed": []
   },
@@ -546,7 +608,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 1,
@@ -563,7 +625,8 @@
    "to": "*",
    "status": "killed",
    "killedBy": [
-    "L2 next-minimal"
+    "L2 next-minimal",
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 2,
@@ -585,7 +648,7 @@
     "L2 next-minimal"
    ],
    "unmapped": [],
-   "timeouts": 1,
+   "timeouts": 2,
    "error": null,
    "oracleFailed": []
   },
@@ -601,7 +664,7 @@
    "killedBy": [
     "L1 next-sound",
     "L2 next-minimal",
-    "L8 first-every-ms",
+    "L8 first-after-occurrence",
     "build: impl well-formedness"
    ],
    "unmapped": [],
@@ -621,7 +684,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 1,
@@ -640,7 +703,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -660,7 +723,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -679,7 +742,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -698,7 +761,7 @@
    "killedBy": [
     "L2 next-minimal",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -718,7 +781,7 @@
     "L1 next-sound",
     "L2 next-minimal",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -737,7 +800,8 @@
    "status": "killed",
    "killedBy": [
     "L1 next-sound",
-    "L6 classify-due"
+    "L6 classify-due",
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 1,
@@ -756,7 +820,7 @@
    "killedBy": [
     "L1 next-sound",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -776,7 +840,25 @@
     "L1 next-sound",
     "L2 next-minimal",
     "L6 classify-due",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/constructor/Some(at)->None#1",
+   "sym": "First",
+   "op": "constructor",
+   "line": 66,
+   "col": 22,
+   "from": "Some(at)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L7 first-once"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -809,7 +891,7 @@
    "to": "(now - 1)",
    "status": "killed",
    "killedBy": [
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 1,
@@ -827,7 +909,7 @@
    "status": "killed",
    "killedBy": [
     "L4 first-interval",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -845,7 +927,7 @@
    "status": "killed",
    "killedBy": [
     "L4 first-interval",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -864,7 +946,7 @@
    "status": "killed",
    "killedBy": [
     "L4 first-interval",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -882,7 +964,7 @@
    "status": "killed",
    "killedBy": [
     "L4 first-interval",
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 0,
@@ -899,7 +981,7 @@
    "to": "2",
    "status": "killed",
    "killedBy": [
-    "L8 first-every-ms"
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
    "timeouts": 1,
@@ -1064,6 +1146,24 @@
    "oracleFailed": []
   },
   {
+   "id": "Classify/constructor/Some(nxt)->None#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 74,
+   "col": 36,
+   "from": "Some(nxt)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
    "id": "Classify/swap-args/Some(nxt), None->None, Some(nxt)#1",
    "sym": "Classify",
    "op": "swap-args",
@@ -1165,6 +1265,41 @@
    "oracleFailed": []
   },
   {
+   "id": "Classify/constructor/Latest->Skip#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 77,
+   "col": 15,
+   "from": "Latest",
+   "to": "Skip",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(nxt)->None#2",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 77,
+   "col": 34,
+   "from": "Some(nxt)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
    "id": "Classify/swap-args/Some(nxt), None->None, Some(nxt)#2",
    "sym": "Classify",
    "op": "swap-args",
@@ -1191,6 +1326,24 @@
    "from": "None, Some(nxt)",
    "to": "Some(nxt), None",
    "note": "Result args 2<->3",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(nxt)->None#3",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 77,
+   "col": 81,
+   "from": "Some(nxt)",
+   "to": "None",
+   "note": "drop value",
    "status": "killed",
    "killedBy": [
     "L6 classify-due"
@@ -1870,6 +2023,23 @@
    "oracleFailed": []
   },
   {
+   "id": "Classify/constructor/Skip->Latest#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 82,
+   "col": 15,
+   "from": "Skip",
+   "to": "Latest",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
    "id": "Classify/swap-args/None, Some(n2)->Some(n2), None#1",
    "sym": "Classify",
    "op": "swap-args",
@@ -1878,6 +2048,24 @@
    "from": "None, Some(n2)",
    "to": "Some(n2), None",
    "note": "Result args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(n2)->None#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 82,
+   "col": 38,
+   "from": "Some(n2)",
+   "to": "None",
+   "note": "drop value",
    "status": "killed",
    "killedBy": [
     "L6 classify-due"
@@ -1906,6 +2094,42 @@
    "oracleFailed": []
   },
   {
+   "id": "Classify/constructor/Some(latest)->None#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 82,
+   "col": 48,
+   "from": "Some(latest)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(latest)->None#2",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 83,
+   "col": 19,
+   "from": "Some(latest)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
    "id": "Classify/swap-args/Some(latest), Some(n2)->Some(n2), Some(latest)#1",
    "sym": "Classify",
    "op": "swap-args",
@@ -1914,6 +2138,24 @@
    "from": "Some(latest), Some(n2)",
    "to": "Some(n2), Some(latest)",
    "note": "Result args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(n2)->None#2",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 83,
+   "col": 33,
+   "from": "Some(n2)",
+   "to": "None",
+   "note": "drop value",
    "status": "killed",
    "killedBy": [
     "L6 classify-due"
