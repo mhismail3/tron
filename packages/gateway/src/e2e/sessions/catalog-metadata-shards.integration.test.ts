@@ -20,8 +20,7 @@ import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 /**
  * `gateway/session-catalog` sharded catalog metadata store (#2164) over real
  * files: the store that replaced the single 8 MiB document, its bounds and
- * signals, migration of that document, pruning, and crash and corruption
- * isolation.
+ * signals, pruning, and crash and corruption isolation.
  */
 const MIB = 1_024 * 1_024;
 const LEGACY_BOUND = 8 * MIB;
@@ -336,87 +335,5 @@ describe("catalog metadata store (#2164)", () => {
 
     expect(await reader.save(root, reconciled!.rows)).toBe(true);
     expect(sortedCatalogRows(await new CatalogMetadataIndex(gateway).load(root))).toEqual(sortedCatalogRows(rows));
-  });
-
-  it("migrates a realistic v2 document on first load and removes it only after the shards read back", async () => {
-    const { root, gateway, index, failures } = await storeFixture("migrate");
-    // The live v2 document held 5,353 rows in 8,387,899 bytes, just under its
-    // bound. This fixture's temporary root is longer, so it holds as many
-    // realistic rows as fit in that many bytes.
-    const legacyRows = realisticCatalogRows(root, 5_353);
-    let legacyBytes = Buffer.byteLength(JSON.stringify({ version: 3, root, rows: legacyRows }));
-    while (legacyBytes > 8_387_899) legacyBytes -= Buffer.byteLength(JSON.stringify(legacyRows.pop())) + 1;
-    const legacy = JSON.stringify({ version: 3, root, rows: legacyRows });
-    expect(Buffer.byteLength(legacy)).toBe(legacyBytes);
-    expect(legacyRows.length).toBeGreaterThan(4_500);
-    await mkdir(gateway, { recursive: true });
-    await writeFile(join(gateway, "catalog-metadata-v2.json"), legacy, { mode: 0o600 });
-
-    expect(sortedCatalogRows(await index.load(root))).toEqual(sortedCatalogRows(legacyRows));
-    expect(failures).toEqual([]);
-    expect(await lstat(join(gateway, "catalog-metadata-v2.json")).then(() => true, () => false)).toBe(false);
-    expect(sortedCatalogRows(await new CatalogMetadataIndex(gateway).load(root))).toEqual(sortedCatalogRows(legacyRows));
-    const modes = await Promise.all((await readdir(join(gateway, "catalog-metadata-v3")))
-      .map(async (name) => (await stat(join(gateway, "catalog-metadata-v3", name))).mode & 0o777));
-    expect(new Set(modes)).toEqual(new Set([0o600]));
-  });
-
-  it("never lets a migration that read the v2 document publish it over a newer save", async () => {
-    const { root, gateway, index } = await storeFixture("migrate-race");
-    const legacyRows = realisticCatalogRows(root, 300, 1);
-    const newer = realisticCatalogRows(root, 300, 2);
-    await mkdir(gateway, { recursive: true });
-    await writeFile(join(gateway, "catalog-metadata-v2.json"), JSON.stringify({ version: 3, root, rows: legacyRows }), { mode: 0o600 });
-    // The load reads the v2 document before it can take the write mutex; the
-    // save queued at the same time takes it first.
-    const [, saved] = await Promise.all([index.load(root), index.save(root, newer)]);
-    expect(saved).toBe(true);
-    expect(sortedCatalogRows(await new CatalogMetadataIndex(gateway).load(root))).toEqual(sortedCatalogRows(newer));
-    expect(await lstat(join(gateway, "catalog-metadata-v2.json")).then(() => true, () => false)).toBe(false);
-  });
-
-  it("keeps the v2 document through a refused save and removes it with the first save that refuses nothing", async () => {
-    const { root, gateway, index } = await storeFixture("migrate-refused-save");
-    const legacyRows = realisticCatalogRows(root, 300, 1);
-    const legacyPath = join(gateway, "catalog-metadata-v2.json");
-    const legacy = JSON.stringify({ version: 3, root, rows: legacyRows });
-    const rows = realisticCatalogRows(root, 300, 2);
-    const target = catalogMetadataShard(root, rows[0]!.path);
-    const heavy: CatalogMetadataIndexRow[] = [];
-    for (let number = 10_000; heavy.length < 2_100; number += 1) {
-      const row = realisticCatalogRow(root, number);
-      if (catalogMetadataShard(root, row.path) === target) heavy.push({ ...row, cwd: "c".repeat(4_096) });
-    }
-    await mkdir(gateway, { recursive: true });
-    await writeFile(legacyPath, legacy, { mode: 0o600 });
-    expect(await index.save(root, [...rows, ...heavy])).toBe(false);
-    expect(await readFile(legacyPath, "utf8")).toBe(legacy);
-    expect(await index.save(root, rows)).toBe(true);
-    expect(await lstat(legacyPath).then(() => true, () => false)).toBe(false);
-    expect(sortedCatalogRows(await new CatalogMetadataIndex(gateway).load(root))).toEqual(sortedCatalogRows(rows));
-  });
-
-  it("keeps the v2 document and serves its rows when the shards cannot be written, then migrates on a later load", async () => {
-    const { root, gateway, index, failures } = await storeFixture("migrate-blocked");
-    const legacyRows = realisticCatalogRows(root, 300);
-    const legacy = JSON.stringify({ version: 3, root, rows: legacyRows });
-    const legacyPath = join(gateway, "catalog-metadata-v2.json");
-    await mkdir(gateway, { recursive: true });
-    await writeFile(legacyPath, legacy, { mode: 0o600 });
-    // A regular file where the store directory belongs makes every shard write fail.
-    await writeFile(join(gateway, "catalog-metadata-v3"), "");
-
-    expect(sortedCatalogRows(await index.load(root))).toEqual(sortedCatalogRows(legacyRows));
-    expect(failures.map(({ stage, reason }) => ({ stage, reason }))).toEqual([{ stage: "migrate", reason: "write" }]);
-    expect(await readFile(legacyPath, "utf8")).toBe(legacy);
-
-    await rm(join(gateway, "catalog-metadata-v3"));
-    // An interrupted earlier migration (shards without a manifest) is simply repeated.
-    await mkdir(join(gateway, "catalog-metadata-v3"));
-    await writeFile(join(gateway, "catalog-metadata-v3", `shard-${catalogMetadataShard(root, legacyRows[0]!.path)}.json`), "{");
-    failures.length = 0;
-    expect(sortedCatalogRows(await index.load(root))).toEqual(sortedCatalogRows(legacyRows));
-    expect(failures).toEqual([]);
-    expect(await lstat(legacyPath).then(() => true, () => false)).toBe(false);
   });
 });

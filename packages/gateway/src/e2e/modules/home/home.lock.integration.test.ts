@@ -2,13 +2,13 @@ import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, hashPromptText, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../test-support/scenario-lock.js";
-import { waitFor } from "../../../test-support/wait-for.js";
-import { NotificationGrantStore } from "../../notifications/grant-store.js";
-import { NotificationService } from "../../notifications/notification-service.js";
-import { PushRelayClient } from "../../notifications/relay-client.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { startLockGateway, type LockGateway } from "../../../../test-support/gateway-lock-harness.js";
+import { compareWithGolden, hashPromptText, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { waitFor } from "../../../../test-support/wait-for.js";
+import { NotificationGrantStore } from "../../../notifications/grant-store.js";
+import { NotificationService } from "../../../notifications/notification-service.js";
+import { PushRelayClient } from "../../../notifications/relay-client.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 /**
  * `gateway/home` scenario lock (restructure E0a, packages/gateway/docs/kernel.md §7):
@@ -31,7 +31,7 @@ import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
  * else is ordered by the scenario.
  */
 
-const MODULE = "gateway/home";
+const MODULE = "gateway/e2e";
 const LOCK = "home-activation-wake";
 const WORKER_MARKER = "This is a finite Home task.";
 const TASK_ID = "lock-task";

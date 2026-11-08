@@ -1,14 +1,14 @@
 import { chmod, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GatewayLogger } from "../../transport/logger.js";
+import { GatewayLogger } from "../../../transport/logger.js";
 import { fauxAssistantMessage, fauxToolCall, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { expectScenario } from "../../../test-support/lock-projections.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../test-support/scenario-lock.js";
-import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
-import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { startLockGateway, type LockGateway } from "../../../../test-support/gateway-lock-harness.js";
+import { expectScenario } from "../../../../test-support/lock-projections.js";
+import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
+import { awaitsWithin, waitFor } from "../../../../test-support/wait-for.js";
+import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
 /**
  * `gateway/home` contention, publication and restart lock (K-0 §7 E0a follow-up,
@@ -39,7 +39,7 @@ import { homeOwnerOf } from "../../../test-support/gateway-registry.js";
  * `{ narrowedGolden }` placeholder in the inline trace.
  */
 
-const MODULE = "gateway/home";
+const MODULE = "gateway/e2e";
 const NARROWED_ENTRY_TYPES = new Set(["tron.settings.v1", "tron.chat-invocation.v1", "tron.context-delivery.v4", "tron.home-task-result.v1"]);
 
 function narrowed(entry: TraceValue): boolean {

@@ -1,4 +1,4 @@
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,14 +9,14 @@ import {
   type AssistantMessage, type SimpleStreamOptions, type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { RuntimeRegistry } from "../kernel/session/runtime-registry.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import {
   clientEventTrace, collapseRepeatedRequests, compareWithGolden, eventShapePaths, hashPromptText,
   lockUpdateRequested, normalizeTraceValue, promptSectionHeadings,
   type BehaviorTrace, type ProviderRequestTrace, type TraceValue,
-} from "../../test-support/scenario-lock.js";
-import { WAIT_HANG_BOUND_MS, awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+} from "../../../test-support/scenario-lock.js";
+import { WAIT_HANG_BOUND_MS, awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * The SDK-boundary behavior trace (epic #468, layer L2).
@@ -44,7 +44,7 @@ import { WAIT_HANG_BOUND_MS, awaitsWithin, waitFor } from "../../test-support/wa
  * The comparison's diff is `git diff --no-index` over the two traces, so an
  * upgrade pull request reviews the behavior-delta inventory hunk by hunk.
  * It is the `gateway/pi-sdk` module's scenario lock: intended changes update the
- * golden with `npm run update:sdk-behavior-trace` (`TRON_UPDATE_LOCKS=gateway/pi-sdk`).
+ * golden with `npm run update:sdk-behavior-trace` (`TRON_UPDATE_LOCKS=gateway/e2e`).
  *
  * The golden is darwin-specific: Tron's `computer` module registers only on
  * darwin and its description and rule lines reach the prompt. The Gateway check
@@ -472,7 +472,7 @@ function expectScenarioValid(trace: BehaviorTrace): void {
   expect(trace.providerRequests.some((request) => request.promptSections.includes("tools"))).toBe(true);
 }
 
-const LOCK_MODULE = "gateway/pi-sdk";
+const LOCK_MODULE = "gateway/e2e";
 const updating = lockUpdateRequested(LOCK_MODULE);
 
 describe("Pi SDK boundary behavior trace", { timeout: SCENARIO_HANG_BOUND_MS }, () => {

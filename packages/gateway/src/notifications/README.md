@@ -120,9 +120,10 @@ scripts/tron test gateway src/notifications/notification-inbox.integration.test.
 real mobile open/sync/visible journey, writing
 `test-results/runtime-terminal-notifications.integration.json` and
 `test-results/home-title-payloads-{preview,redacted}.json`. Behavior locks:
-`notifications.store.lock.integration.test.ts` and `notifications.push.lock.integration.test.ts`
-(terminal and input-required pushes at the relay boundary, presence suppression, the
-task-worker skip). After initial open/sync, the lock asks the real runtime to publish
+`notifications.store.lock.integration.test.ts` (this module) and the
+`src/e2e/notifications/notifications.push.lock.integration.test.ts` journey (terminal and
+input-required pushes at the relay boundary, presence suppression, the task-worker skip), which
+runs in the batch: `verify --module` selects only this module's own tests. After initial open/sync, the lock asks the real runtime to publish
 its idle snapshot and requires that ordinary `session.snapshot` at the phone before
 admitting work. The failed-run step holds the phone's real socket writes through
 terminal ownership retirement, then requires an idle `session.rebaseline`. Both

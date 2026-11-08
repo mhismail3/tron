@@ -65,7 +65,7 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
   catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
   artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
   runtimeDisposeTimeout?: (graceMs: number) => void;
-  /** Admit one explicit delegated artifact root, as the production cutover
+  /** Admit one explicit delegated artifact root, as Gateway startup
    * does, so ambient discovery scans exactly that root. */
   delegatedRoot?: string;
   beforeInitialize?: (sessionFile: string, registry: RuntimeRegistry) => Promise<void>;

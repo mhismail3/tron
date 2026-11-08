@@ -3,11 +3,8 @@
   "owns": [
     "child-session-admission.ts",
     "delegated-provider.ts",
-    "delegated-root-migration.ts",
     "delegated-activity.md",
-    "delegation.lock.integration.test.ts",
     "delegation.module.json",
-    "locks/delegation-*.golden.json",
     "managed-producer.ts",
     "managed-subagents.install.integration.test.ts",
     "managed-subagents.invalid-entry.integration.test.ts",

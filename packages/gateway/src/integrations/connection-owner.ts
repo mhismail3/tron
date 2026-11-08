@@ -111,7 +111,6 @@ export class ConnectionOwner implements ConnectionAccess {
   constructor(
     private readonly tronHome: string,
     definitions: readonly IntegrationDefinition[] = [],
-    private readonly onLegacyJevRetired: (instanceIds: readonly string[]) => void = () => {},
   ) {
     this.definitions = definitions.map(definition => { validateIntegrationDefinition(definition); return copy(definition); });
     if (new Set(this.definitions.map(definition => definition.id)).size !== this.definitions.length) throw new Error("Integration definition IDs must be unique");
@@ -122,7 +121,7 @@ export class ConnectionOwner implements ConnectionAccess {
    * accepted setup/policy/disconnect command. */
   async snapshot(): Promise<ConnectionOwnerSnapshot> {
     return this.mutex.run(async () => {
-      const state = await this.load(false);
+      const state = await this.load();
       return this.snapshotOf(state);
     });
   }
@@ -143,8 +142,7 @@ export class ConnectionOwner implements ConnectionAccess {
   async execute(command: ConnectionCommand): Promise<unknown> {
     try { validateCommand(command); } catch (error) { if (error instanceof GatewayError) throw error; throw invalid(error instanceof Error ? error.message : "Connection command is invalid"); }
     return this.mutex.run(async () => {
-      const state = await this.load(true);
-      this.rejectLegacyJevInstance(state, command.instanceId);
+      const state = await this.load();
       const operation = command.kind;
       const hash = connectionRequestHash(operation, command);
       const prior = state.receipts[command.commandId];
@@ -153,17 +151,6 @@ export class ConnectionOwner implements ConnectionAccess {
         return copy(prior.result);
       }
       const value = this.apply(state, command);
-      const retiredLegacyJevIds = Object.values(state.instances)
-        .filter(instance => instance.definitionId === "knowledge.jev")
-        .map(instance => instance.id)
-        .sort();
-      for (const id of retiredLegacyJevIds) delete state.instances[id];
-      if (retiredLegacyJevIds.length > 0) {
-        const retired = new Set(retiredLegacyJevIds);
-        for (const [operationId, setup] of Object.entries(state.setupOperations)) {
-          if (retired.has(setup.instanceId)) delete state.setupOperations[operationId];
-        }
-      }
       const receipt: ConnectionOwnerReceipt = { operation, requestHash: hash, createdAt: now(), result: value as ConnectionOwnerReceipt["result"] };
       state.receipts[command.commandId] = receipt;
       const entries = Object.entries(state.receipts).sort(([, left], [, right]) => left.createdAt.localeCompare(right.createdAt));
@@ -171,7 +158,6 @@ export class ConnectionOwner implements ConnectionAccess {
       state.stateRevision += 1;
       validateConnectionState(state);
       await this.save(state);
-      if (retiredLegacyJevIds.length > 0) this.onLegacyJevRetired(retiredLegacyJevIds);
       return copy(value);
     });
   }
@@ -183,7 +169,7 @@ export class ConnectionOwner implements ConnectionAccess {
   async recordProviderObservation(instanceId: string, setupRevision: number, observation: ProviderAdmissionObservation): Promise<void> {
     assertConnectionId(instanceId);
     return this.mutex.run(async () => {
-      const state = await this.load(true);
+      const state = await this.load();
       const instance = state.instances[instanceId];
       if (!instance || instance.setupRevision !== setupRevision || !instance.policy.enabled || instance.health === "disconnected") throw conflict("Connection instance is no longer admitted");
       if (!["available", "unavailable", "unknown"].includes(observation.credentialAvailability) || !["admitted", "mismatch", "unknown"].includes(observation.providerIdentity)) throw invalid("Provider admission observation is invalid");
@@ -220,13 +206,9 @@ export class ConnectionOwner implements ConnectionAccess {
   async resolveInstance(instanceId: string): Promise<ConnectionInstance> {
     assertConnectionId(instanceId);
     return this.mutex.run(async () => {
-      const state = await this.load(false);
+      const state = await this.load();
       const instance = state.instances[instanceId];
       if (!instance) {
-        const persisted = await this.load(true);
-        if (persisted.instances[instanceId]?.definitionId === "knowledge.jev") {
-          throw conflict(`Persisted knowledge.jev connection '${instanceId}' is no longer supported; configure the typesafe provider credential instead`);
-        }
         throw conflict("Connection instance is unknown");
       }
       return copy(instance);
@@ -302,7 +284,7 @@ export class ConnectionOwner implements ConnectionAccess {
     return resultForInstance(instance);
   }
 
-  private async load(writable: boolean): Promise<ConnectionOwnerState> {
+  private async load(): Promise<ConnectionOwnerState> {
     const path = statePath(this.tronHome);
     let read;
     try { read = await readSecureJson<unknown>(path, STATE_MAX_BYTES); }
@@ -312,25 +294,8 @@ export class ConnectionOwner implements ConnectionAccess {
       const persisted = read.value as ConnectionOwnerState;
       const loaded = copy(persisted);
       validateConnectionState(loaded);
-      if (writable) return loaded;
-      const unsupported = new Set<string>();
-      for (const [id, instance] of Object.entries(loaded.instances)) {
-        if (instance.definitionId === "knowledge.jev") {
-          unsupported.add(id);
-          delete loaded.instances[id];
-        }
-      }
-      for (const [operationId, setup] of Object.entries(loaded.setupOperations)) {
-        if (unsupported.has(setup.instanceId)) delete loaded.setupOperations[operationId];
-      }
       return loaded;
     } catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
-  }
-
-  private rejectLegacyJevInstance(state: ConnectionOwnerState, instanceId: string): void {
-    if (state.instances[instanceId]?.definitionId === "knowledge.jev") {
-      throw conflict(`Persisted knowledge.jev connection '${instanceId}' is no longer supported; configure the typesafe provider credential instead`);
-    }
   }
 
   private async save(state: ConnectionOwnerState): Promise<void> {
