@@ -1528,8 +1528,8 @@ class BrowserForkProvisionTests(unittest.TestCase):
             ('src/e2e/sessions/browser-fork-receipts.integration.test.ts',): True,
             ('src/e2e/sessions/browser-fork-receipts.integration.test.ts:48',): True,
             (str(self.root / 'packages/gateway/src/e2e/sessions/browser-fork-receipts.integration.test.ts'),): True,
-            ('src/admin/package-updates.lock.integration.test.ts',): False,
-            ('--testTimeout', '5000', 'src/admin/package-updates.lock.integration.test.ts'): False,
+            ('src/e2e/admin/package-updates.lock.integration.test.ts',): False,
+            ('--testTimeout', '5000', 'src/e2e/admin/package-updates.lock.integration.test.ts'): False,
             ('--config', 'vitest.nested.config.ts'): False,
             ('--config=vitest.mac-terminal.config.ts',): False,
         }
@@ -1655,7 +1655,7 @@ with tarfile.open(destination / f'agent-browser-{{version}}.tgz', 'w:gz') as arc
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.engine_seen.read_text().split(), [str(self.engine / 'bin/agent-browser')])
         # A selection without the browser test keeps the inherited PATH.
-        done = self.run_gateway('src/admin/package-updates.lock.integration.test.ts', env={'PATH': self.decoy_path()})
+        done = self.run_gateway('src/e2e/admin/package-updates.lock.integration.test.ts', env={'PATH': self.decoy_path()})
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.engine_seen.read_text().split()[1], str(self.root / 'host-bin/agent-browser'))
 

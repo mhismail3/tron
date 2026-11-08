@@ -143,10 +143,10 @@ scripts/tron test gateway src/e2e/automations/automation-scheduler.integration.t
 `automation-scheduler.integration.test.ts` uses the real executor, SDK and canonical
 JSONL: fresh success, reserved-run cancellation, unreserved drain-time cancellation,
 durable reopen and explicit successor. Behavior locks:
-`automations.store.lock.integration.test.ts` and `automations.owned-run.lock.integration.test.ts`
+`automations.store.lock.integration.test.ts` and `src/e2e/automations/automations.owned-run.lock.integration.test.ts`
 (a session and a workspace prompt run now through the owned-session boundary on the real
 Gateway: provider requests, JSONL, frames, records and command receipts).
-`tests/automation-rpc.lock.integration.test.ts` adds real-socket schedule preview,
+`src/e2e/automations/tests/automation-rpc.lock.integration.test.ts` adds real-socket schedule preview,
 list and timeline admission: connection/window/revision-scoped cursors, stale-write
 refusal, actual wall-clock lease expiry and restart invalidation with persisted
 records. It waits the real 60-second lease, using unrelated status reads to keep

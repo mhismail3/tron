@@ -9,7 +9,6 @@
     "session-search-text.ts",
     "session-search.module.json",
     "session-search.store.lock.integration.test.ts",
-    "session-search.privacy.lock.integration.test.ts",
     "session-search.md"
   ],
   "verify": [

@@ -1,8 +1,8 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * Lifecycle RPC lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5's abort

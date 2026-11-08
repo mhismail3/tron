@@ -23,7 +23,7 @@ uses in-memory profile/token stores (`packages/ios-app/E2ETests/RealGatewayPiBou
 
 | Test (full ID) | Boundary | Input → behavioral assertion | Failure / recovery |
 |---|---|---|---|
-| `packages/gateway/src/sessions/run.lock.integration.test.ts` › gateway/run kernel locks › prompt/stream | Lock socket | `session.prompt` "read the notes" → canonical roles exactly user, assistant, toolResult, assistant; 2 provider requests; snapshot event seen | Sibling cases: abort settles `stopReason: aborted` with 1 request; steer/follow-up order |
+| `packages/gateway/src/e2e/sessions/run.lock.integration.test.ts` › gateway/run kernel locks › prompt/stream | Lock socket | `session.prompt` "read the notes" → canonical roles exactly user, assistant, toolResult, assistant; 2 provider requests; snapshot event seen | Sibling cases: abort settles `stopReason: aborted` with 1 request; steer/follow-up order |
 | `TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground` | Native | Pair by invitation, type unique prompt, Send → sent row present; streamed reply reaches its completion marker | Then reconnect phases (row 6) |
 | `TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools` | Process | Prompt with commandId, accepted response dropped → `command.status` completed with operationId; reconnect snapshot idle with reply; prompt appears exactly once | Lost response; detached completion after client retirement |
 
@@ -62,7 +62,7 @@ canonical-message check; the Process/Native rows assert presence, not exactly-on
 |---|---|---|---|
 | `packages/gateway/src/e2e/admin/settings-gate.e2e.test.ts` › typed settings at real runtime boundaries › open chats follow live retry defaults while a canonical Session override stays local… | Registry | Global retry 0→1→2 and a Session override change the *next* prompt's provider attempt counts per chat; unset restores Global | Session fence |
 | `packages/gateway/src/e2e/admin/settings-three-layer.e2e.test.ts` › approved three-layer settings at real Gateway boundaries › applies, logs and undoes through receipts…; refuses a stale expected value… | Registry | Change applied and logged; Undo restores; Undo of Undo linked | A second Undo command for the same change `conflict`; stale expected value refused with no effect |
-| `packages/gateway/src/admin/admin.lock.integration.test.ts` › gateway/admin kernel locks › settings change: a Global change is recorded… | Lock socket | WebSocket `settings.change` → applied, file and Global/Session resolve show new value | — |
+| `packages/gateway/src/e2e/admin/admin.lock.integration.test.ts` › gateway/admin kernel locks › settings change: a Global change is recorded… | Lock socket | WebSocket `settings.change` → applied, file and Global/Session resolve show new value | — |
 | `TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight` | Native | Worker/subagent/background queues: ordered save, reopen, remove, empty ≠ reset; Changes Before/After; Undo restores explicit empty queue in the Gateway store | Reset removes override |
 
 `TronSettingsChangesReviewUITests` is hosted renderer data: presentation only.
@@ -84,7 +84,7 @@ canonical-message check; the Process/Native rows assert presence, not exactly-on
 
 | Test | Boundary | Input → behavioral assertion | Failure / recovery |
 |---|---|---|---|
-| `packages/gateway/src/transport/transport.lock.integration.test.ts` › gateway/transport kernel locks › reconnect snapshot… | Lock socket | Client drops mid-run; live snapshot names the operation; settled snapshot has reply; 1 provider request; 1 user row | Same Gateway, client loss |
+| `packages/gateway/src/e2e/transport/transport.lock.integration.test.ts` › gateway/transport kernel locks › reconnect snapshot… | Lock socket | Client drops mid-run; live snapshot names the operation; settled snapshot has reply; 1 provider request; 1 user row | Same Gateway, client loss |
 | `packages/gateway/src/transport/command-receipts.lock.integration.test.ts` (3 cases) | Lock socket | Replay, fence, bound, prune of command receipts | Duplicate inside lane |
 | `packages/gateway/src/e2e/sessions/runtime-registry.integration.test.ts` › … › does not infer a completion from an unstamped accepted marker after restart; recovers a canonical successful completion missed before restart | Registry | Restart recovery of accepted markers | No inferred completion |
 | `TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools` (`exerciseForegroundReconnect`) | Process | `restart-gateway` with an **idle** session while app backgrounded → reconnect without Retry; transcript, user count and idle catalog row unchanged | Rejected upgrades 401/403/503, blackhole, frame ceiling |
@@ -100,12 +100,12 @@ only when the whole trace equals its golden, so these goldens gate the assertion
 
 | Journey | Golden (under `packages/gateway/src/`) | Whole-prompt / schema content | Owner |
 |---|---|---|---|
-| Prompt/reply | `test-fixtures/pi-sdk/session-shapes.golden.json` (`session-shapes.lock`); the transcript, messages and responses are inline checks in `sessions/run.lock.integration.test.ts` | prompt hash + section headings + system entry | #2189 |
+| Prompt/reply | `test-fixtures/pi-sdk/session-shapes.golden.json` (`session-shapes.lock`); the transcript, messages and responses are inline checks in `e2e/sessions/run.lock.integration.test.ts` | prompt hash + section headings + system entry | #2189 |
 | Delegate | `kernel/delegation/locks/delegation-subagent.golden.json` (narrowed: system entries and Tron entries); the rest inline in `kernel/delegation/delegation.lock.integration.test.ts` | tool parameter schemas | #2189 |
 | Home wake | `modules/home/locks/home-activation-wake.golden.json` | prompt hashes + full tool schemas | #2189 |
 | Home restart | `modules/home/locks/home-contention-restart.golden.json` (narrowed: Home's system entry and Tron entries); the rest inline in `modules/home/home-restart.lock.integration.test.ts` | full tool descriptions/schemas | #2236 |
-| Settings | `admin/admin.lock.integration.test.ts` (inline `expectScenario`) | whole exchange/file trace | #2236 |
-| Reconnect | `transport/transport.lock.integration.test.ts` (inline `expectScenario`); the reconnect, lifecycle and cold-load prompt hashes are in `test-fixtures/pi-sdk/session-shapes.golden.json` | prompt hash | #2189 |
+| Settings | `e2e/admin/admin.lock.integration.test.ts` (named checks) | whole exchange/file trace | #2236 |
+| Reconnect | `e2e/transport/transport.lock.integration.test.ts` (named checks); the reconnect, lifecycle and cold-load prompt hashes are in `test-fixtures/pi-sdk/session-shapes.golden.json` | prompt hash | #2189 |
 | Wire | `protocol/locks/protocol-wire.golden.json` | method shapes, prompt section headings | #2236 |
 
 Native pixel/geometry oracles in the reconnect journey
