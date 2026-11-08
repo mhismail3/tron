@@ -38,7 +38,8 @@ Tests default to fewer: agents read the code itself, so a test earns its place o
 real behaviour fault at a boundary. A fix's proof strengthens the owning E2E/integration test, or adds
 nothing when one already proves it; tests that restate code (structure locks, duplicate unit tests,
 implementation snapshots) are retired. Loosening an assertion that guards real behaviour is never
-allowed. Other additions are a fix, a consolidation that removes more than it adds, or a type
+allowed. Rendering needs a built-UI witness; accepted exception (#2332): `TronUILockTests` keeps only
+whole-tree accessibility witnesses, with no rendered (pixel) witness. Other additions are a fix, a consolidation that removes more than it adds, or a type
 change that deletes the runtime checks it replaces. No backward-compatibility code: no shims,
 aliases, old-format or fallback readers, flags or "just in case" wrappers; live old data moves once
 through a backed-up migration. Simplify by reusing and hardening existing primitives (approval

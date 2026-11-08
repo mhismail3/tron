@@ -186,10 +186,9 @@ own ordering. A proven foreground pi-subagents result list whose every result re
 child its parent's stop ended) is a stopped run with stopped children, not a failure, although
 the tool call ends in error. Terminal rows get `terminalAt`/`recentUntil` and stay recent 15 minutes (only they
 carry `remainingMs`); heartbeats publish one `session.extensionActivity` delta, not a snapshot.
-`extension-activity-history.v1`: `session.extensionActivity.list|get` page reserved
-`tron.extension-activity.v1` receipts (exactly once per activity; identity, label, lifecycle,
-counts only; out of transcript, tree and model), 256 KiB and 50 rows per page, cursors bound to
-the branch revision. The registry owns discovery scheduling; its frames' K5 owners watch only proven-owned
+Reserved `tron.extension-activity.v1` receipts record each terminal activity exactly once
+(identity, label, lifecycle, counts only; out of transcript, tree and model); process history
+reads them. The registry owns discovery scheduling; its frames' K5 owners watch only proven-owned
 artifacts. Timelines must satisfy `startedAt <= endedAt <= lastUpdate`; rejections log
 rate-limited hashed reasons (`invalid-timestamp`, `missing-terminal-time`,
 `ownership-mismatch`, `malformed-artifact`, `artifact-replacement-in-progress`). Drain refreshes

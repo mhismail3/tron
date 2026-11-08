@@ -11,8 +11,6 @@
     "sessions/catalog-metadata-index.ts",
     "sessions/catalog-metadata-index.lock.integration.test.ts",
     "sessions/session-settings.ts",
-    "sessions/retired-format-migration.ts",
-    "sessions/retired-format-migration.integration.test.ts",
     "sessions/fork-boundary.ts",
     "sessions/locks/store-session-archive-attention.golden.json",
     "sessions/session-archive-store.ts",

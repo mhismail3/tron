@@ -2,84 +2,58 @@
 
 ## Purpose
 
-Connection definitions, setup intent, policy and bounded provider admission
-observations. This owner does not hold credentials or run provider operations.
+Read-only projection of retained connection definitions, account envelopes and
+setup operations. This owner does not hold credentials or run provider operations.
 
 ## Owns
 
-`ConnectionOwner` serializes mutations and publishes
-`<tronHome>/gateway/integrations/connections.json`. The [pure L1 contract](../modules/integrations/contract.ts)
-owns schema/public/private values, the shared credential-service identifier and
-the existing peer operations consumed by tools, RPCs and connector adapters.
-`connection-contract.ts` retains hashing and runtime validation; `ConnectionOwner`
-implements the adapter contract without a second service or forwarding facade. The missing file is an empty
-read projection, not permission to initialize storage during startup or reads.
+`ConnectionOwner` reads `<tronHome>/gateway/integrations/connections.json`. The
+[pure L1 contract](../modules/integrations/contract.ts) owns schema/public/private
+values, the shared credential-service identifier and the read-only `ConnectionAccess`
+consumed by the agent `connections` tool. `connection-contract.ts` retains runtime
+validation of persisted state and definitions. The missing file is an empty read
+projection; the owner never creates, migrates or writes storage.
 
 ## Contract
 
-`connections.list` returns definitions, redacted instances, setup operations,
-capability availability and the state revision. Explicit mutations are
-`connections.setup.begin`, `.complete`, `.cancel`, `connections.policy.update`
-and `connections.disconnect`; `GatewayService` routes them to the owner.
-
-Setup carries an opaque credential reference, not credential bytes. The private
-instance is available to adapter owners; presentation snapshots omit the
-reference. Credential availability and provider identity are observations,
-not inferred from setup intent. A disabled, disconnected or unadmitted instance
-cannot advertise an available capability.
+`snapshot()` returns definitions, redacted instances, setup operations, capability
+availability and the state revision. Presentation snapshots omit the opaque credential
+reference. A disabled, disconnected or unadmitted instance cannot advertise an
+available capability. There are no connection RPCs or mutations.
 
 ## Invariants
 
-- Pending setup is completed or cancelled only for its named instance. A late
-  completion after cancellation refuses without publication.
-- Policy updates compare the observed setup revision under the publication
-  mutex. A stale sheet cannot restore an earlier policy.
-- Transport command receipts return the original device/method/command result.
-  The owner's persisted command receipt additionally fences operation and
-  request hash across transport identities and restarts. A rejected command
-  leaves connection-state bytes unchanged.
-- Disconnect disables the instance without deleting its retained history.
-  Directories and durable state are owner-only; unreadable state refuses rather
-  than silently rebuilding an empty store.
+- Credential references never leave the owner.
+- Reads leave connection-state bytes unchanged. Directories and durable state are
+  owner-only; unreadable state refuses rather than silently projecting an empty store.
 
 ## Entry points
 
-`GatewayService` serves connection RPCs. Production has no built-in connection
-definitions or X/Raindrop adapters and advertises no capabilities for historical
-instances. Existing connection state and credential references remain untouched;
-this retirement neither migrates nor deletes them. Native settings expose MCP
-servers, not retired Connected Services setup. The agent `connections` tool is
-read-only; it does not authorize setup, policy or credential changes.
+The agent `connections` tool (`workspace/tron-core-extension.ts`). Production has no
+built-in connection definitions or X/Raindrop adapters and advertises no capabilities
+for historical instances. Existing connection state and credential references remain
+untouched; this retirement neither migrates nor deletes them. Native settings expose
+MCP servers, not retired Connected Services setup.
 
 ## Signals
 
-`GatewayError` reports invalid input, unsupported adapters and conflicting or
-unreadable state. A stale setup revision requires re-reading the authoritative
-snapshot. No startup migration, polling or background credential probe occurs.
+`GatewayError` reports conflicting or unreadable state. No startup migration, polling
+or background credential probe occurs.
 
 ## Verify
 
 ```bash
 scripts/tron verify --module gateway/integrations
-scripts/tron test gateway src/e2e/integrations/tests/connections.lifecycle.lock.integration.test.ts
+scripts/tron test gateway src/e2e/integrations/tests/connections.projection.integration.test.ts
 ```
 
-The lifecycle lock crosses a paired loopback WebSocket, real Gateway service,
-transport receipts and durable `ConnectionOwner`: read-without-create, setup,
-exact replay, stale policy, cancellation/late completion, disconnect, restart,
-redaction and an owner request-hash conflict from a newly paired identity.
-It leaves a normalized exchange trace at
-`packages/gateway/test-results/connections-lifecycle/trace.json` (from repo root).
-The fixture explicitly injects historical definitions, uses only a synthetic
-credential reference and an offline faux model; it never reads the user's store
-or contacts a provider. A separate default-production case proves absent definitions
-and capabilities, refusal of removed vendor operations, and byte-identical retained
-credential references without exposing them in snapshots.
+The projection test seeds retained historical state, reads it through the real agent
+`connections` tool, and proves an empty projection without creating storage, exact
+redaction of the credential reference and byte-identical state after the read.
 
 ## Not here
 
-Provider owners retain credential resolution and provider activity;
-transport owns sockets and device-scoped command receipts. This module owns
-neither a provider usage ledger nor executable package discovery. Retirement
-of unsupported persisted definitions must preserve the existing admission
-contract rather than introducing another store or compatibility route.
+Provider owners retain credential resolution and provider activity. This module owns
+neither a provider usage ledger nor executable package discovery. Retirement of
+unsupported persisted definitions must preserve the existing admission contract rather
+than introducing another store or compatibility route.

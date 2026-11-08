@@ -10,7 +10,7 @@ definition, retry or ledger. iOS and the first-party `schedule` tool (including 
 ## Owns
 
 `automation-service.ts`, `automation-scheduler.ts`, `automation-executor.ts`,
-`automation-store.ts`, `automation-home-trigger.ts`, `automation-timeline.ts`, `schedule.ts`,
+`automation-store.ts`, `automation-home-trigger.ts`, `schedule.ts`,
 `schedule-module.ts` (optional-owner descriptor) and `tron-schedule-extension.ts`. Store: `gateway/automations/`, strict schema-version-2
 owner-only documents, each with one definition, one ordinary nonterminal run or a
 Home message outbox (`currentRun` plus `pendingHomeRuns`), and 64 retained terminal runs. Older shapes are not admitted, migrated or projected. Writes
@@ -59,8 +59,8 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   The execution chapter and operation bind only at actual admission, not while queued.
 - **Expiry and pause.** Optional `provenance.expiresAt` applies to every automation;
   create definitions and `schedule create` accept `expiresAt`. Existing provenance
-  loads unchanged. Expired definitions are shown as expired, contribute no future
-  timeline occurrences or definition-count slots, and cannot run manually or automatically.
+  loads unchanged. Expired definitions are shown as expired, contribute no
+  definition-count slots, and cannot run manually or automatically.
   The generic interval minimum is 60 seconds; no Home-only interval, lifetime or count limit exists.
   Paused definitions resume only through explicit enable, not run resolution or scheduler state writes.
   The canonical record validator fences all publication and disk admission, including internal mutations.
@@ -86,16 +86,10 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   exact operation-fenced cancellation and deadline, not a pause.
 - **RPCs.** Reads: `automation.status`, `.list` (no action bodies; paged under an
   opaque catalog lease), `.get`, `.schedule.preview {trigger, after?, limit 1–20}`
-  (never writes), `.timeline.list`, `.run.list`, `.run.get`. Receipt-backed:
+  (never writes), `.run.list`, `.run.get`. Receipt-backed:
   `automation.create`, `.update`, `.enable`, `.pause`, `.delete`, `.runNow`,
   `.run.cancel`, `.run.resolve`. Definitions use revision fences; scheduler state has
   its own revision. `automation.changed` is only an invalidation hint.
-- **Timeline** (`automations.timeline.v1`, advertised once recovery is ready):
-  `{from, through, displayTimezone, cursor?, limit 1–200}` over at most seven days,
-  grouped by local day; a cursor is bound to the client, window and revision and
-  expires after a minute. More than twelve occurrences of one automation in a day
-  become one `series` item, counted analytically across DST. Overflow is an explicit
-  retryable error, never dropped occurrences.
 - **`schedule` tool** targets its own persisted session, a new session in its
   workspace, or `home` for an attributed Home message, dedupes by tool-call identity, and refuses mutations from an
   automation/trigger-originated turn. One tool authority check uses live session profile
@@ -147,10 +141,7 @@ durable reopen and explicit successor. Behavior locks:
 (a session and a workspace prompt run now through the owned-session boundary on the real
 Gateway: provider requests, JSONL, frames, records and command receipts).
 `src/e2e/automations/tests/automation-rpc.lock.integration.test.ts` adds real-socket schedule preview,
-list and timeline admission: connection/window/revision-scoped cursors, stale-write
-refusal, actual wall-clock lease expiry and restart invalidation with persisted
-records. It waits the real 60-second lease, using unrelated status reads to keep
-the socket live without renewing that lease; no clock or timer is mocked.
+list, stale-write refusal and records persisted across a Gateway restart.
 Its disposable trace is `test-results/automation-rpc/trace.json`.
 
 ## Not here
