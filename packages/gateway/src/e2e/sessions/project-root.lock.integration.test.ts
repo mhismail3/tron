@@ -1,9 +1,9 @@
 import { readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { projectRootTrustScenario } from "../../test-support/lock-scenarios.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { projectRootTrustScenario } from "../../../test-support/lock-scenarios.js";
 
 /**
  * Project-root lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7 E0e) guarding the Pi seam

@@ -201,9 +201,9 @@ struct TronNativeSheetCanvas: ViewModifier {
 
     func body(content: Content) -> some View {
         let canvas = canvas
-        let reflows = role == .scene && presentsSheet && padSheetScene?.mode == .sideColumn
+        let isPanel = role == .scene && padSheetScene?.mode == .sideColumn
         return content
-            .modifier(TronSideColumnPanel(isOpen: reflows))
+            .modifier(TronSideColumnPanel(isOpen: isPanel && presentsSheet, isPanel: isPanel))
             .onPreferenceChange(TronPadSheetPresented.self) { presentsSheet = $0 }
             .overlayPreferenceValue(NativeSheetSources.self) { sources in
                 NativeSheetCanvasView(canvas: canvas, sources: sources)

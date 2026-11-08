@@ -50,7 +50,35 @@ struct TronMarkdownView: View {
                 // presentation slots while the authoritative source grows in
                 // place. Completed code blocks add their content identity below
                 // so copy state still resets when a block is replaced.
-                switch block.kind {
+                if !streaming, let annotationSource, let annotationPresenter, annotationPresenter.admitsAnnotations,
+                   Self.isSelectableProse(block.kind) {
+                    if let range = selectableProseRange(startingAt: index) {
+                        let blocks = Array(document.blocks[range])
+                        let blockKey = annotationSource.blockKey("prose:\(range.lowerBound):\(range.upperBound)")
+                        ChatSelectableInlineText(
+                            messageBlocks: blocks,
+                            style: textStyle,
+                            highlights: annotationPresenter.highlights(
+                                itemID: annotationSource.itemID,
+                                blockKey: blockKey
+                            ),
+                            onAnnotate: { quote, selectedRange, rect in
+                                annotationPresenter.begin(ChatAnnotationRequest(
+                                    quote: quote,
+                                    anchor: ChatAnnotationAnchor(
+                                        itemID: annotationSource.itemID,
+                                        blockKey: blockKey,
+                                        location: selectedRange.location,
+                                        length: selectedRange.length
+                                    ),
+                                    selectionRect: rect
+                                ))
+                            }
+                        )
+                        .frame(alignment: .topLeading)
+                    }
+                } else {
+                    switch block.kind {
                 case .paragraph(let value):
                     if selectableText {
                         // The native text view stays the element so its
@@ -111,6 +139,7 @@ struct TronMarkdownView: View {
                     MarkdownTable(rows: rows)
                 case .rule:
                     Divider()
+                    }
                 }
             }
         }
@@ -123,6 +152,20 @@ struct TronMarkdownView: View {
         // assistant row settles and place later rows against phantom geometry.
         .fixedSize(horizontal: false, vertical: true)
         .transcriptTextSelection(enabled: !dynamicTypeSize.isAccessibilitySize)
+    }
+
+    private func selectableProseRange(startingAt index: Int) -> Range<Int>? {
+        guard index == 0 || !Self.isSelectableProse(document.blocks[index - 1].kind) else { return nil }
+        var end = index + 1
+        while end < document.blocks.count, Self.isSelectableProse(document.blocks[end].kind) { end += 1 }
+        return index..<end
+    }
+
+    private static func isSelectableProse(_ kind: MarkdownPresentation.Block.Kind) -> Bool {
+        switch kind {
+        case .paragraph, .heading, .list: true
+        default: false
+        }
     }
 
     /// A completed assistant block in the transcript is natively selectable

@@ -1,11 +1,11 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { type LockGateway, type LockGatewayOptions } from "../../test-support/gateway-lock-harness.js";
-import { normalizeTraceValue } from "../../test-support/scenario-lock.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { awaitsWithin } from "../../test-support/wait-for.js";
-import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, gate, openLockSession, promptStreamScenario, type LockSession } from "../../test-support/lock-scenarios.js";
+import { type LockGateway, type LockGatewayOptions } from "../../../test-support/gateway-lock-harness.js";
+import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { awaitsWithin } from "../../../test-support/wait-for.js";
+import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, gate, openLockSession, promptStreamScenario, type LockSession } from "../../../test-support/lock-scenarios.js";
 
 /**
  * Kernel run locks (packages/gateway/docs/scenario-locks.md#locks) for the `gateway/run` module:

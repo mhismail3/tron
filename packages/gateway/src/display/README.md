@@ -136,7 +136,7 @@ Projection reads the persisted details live and after cold reload.
 ## Verify
 
 ```bash
-scripts/tron test gateway src/display/runtime-retirement.lock.integration.test.ts \
+scripts/tron test gateway src/e2e/display/runtime-retirement.lock.integration.test.ts \
   src/display/display.store.lock.integration.test.ts \
   src/e2e/display/display-image-lifetime.integration.test.ts \
   src/transport/server-live-view.integration.test.ts \
