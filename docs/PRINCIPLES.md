@@ -55,7 +55,8 @@ their name prefix (17 the same stem), and 792 added product-source lines named l
 delta that reviewers ACCEPT against: source and test lines added and removed, each new test file
 beside an existing owner, and each added line naming compatibility code. **Not yet
 enforced:** the unused-export and unused-file check (knip) and a net-diff line in commit messages
-are #2316 Phase 7.
+are #2316 Phase 7; reuse of existing primitives, kept-behaviour E2E proof before a deletion, and
+whole-capability preservation rely on review.
 
 ## P4 Parity is proven, and a fix is never mixed into a refactor
 

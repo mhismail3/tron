@@ -63,8 +63,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   behavior unless requested; protect chat identity, scroll, layout, composer/keyboard,
   accessibility, Dynamic Type and focus. UI reuses the shared owners
   ([Presentation parity](packages/ios-app/docs/architecture.md#presentation-parity)); a new pattern updates that owner and its docs, with proof.
-  All progressive disclosure (pickers, skill/command containers, custom chat UI, default sheets) uses one generic content-sized custom
-  sheet, built ground-up, never patched per surface. Apps show no read-only settings, except values that live in a repo/project file, shown read-only with where to edit them.
+  All progressive disclosure (pickers, skill/command containers, custom chat UI, default sheets) moves to one generic content-sized
+  custom sheet, built ground-up, never patched per surface ([Sheets](packages/ios-app/docs/presentation-parity.md#sheets-and-chrome)). Apps show no read-only settings, except values that live in a repo/project file, shown read-only with where to edit them.
 - **Prove rather than imply** (inspected ≠ inferred ≠ reproduced ≠ verified); label visuals honestly.
 - **Comments:** explain current-code invariants, ownership, ordering or non-obvious tradeoffs;
   never justify hacks/temporary workarounds or narrate dialogue/history. Delete stale comments,
@@ -102,8 +102,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 it touches (P1); the full suite and E2E journeys are batch and checkpoint signals (P2). No merge queue.
 1. Commit in your own worktree; enable rerere. Fetch main into private `FETCH_HEAD` and merge
    deliberately (see [Git/gh skill](.agents/skills/tron-work/SKILL.md)); never rewrite foreign work.
-   Choose no, partial or full verification per change: normally `scripts/tron verify --changed` plus the E2E journeys that
-   prove any behaviour you delete; serial or long checks run once per batch. Obtain required ACCEPTs. Never retry-to-green.
+   Every commit is gated by `scripts/tron verify --changed` plus the E2E journeys that prove any behaviour you delete; add partial
+   or full checks as needed; serial or long checks run once per batch. Obtain required ACCEPTs. Never retry-to-green.
 2. Land a `--no-ff` merge onto fetched main (main stays first parent) with plain Git `git push origin HEAD:main`; never
    force-push. On a race, fetch/merge and rerun only evidence invalidated by integration. A batch red is filed
    against its owning module, which root-fixes it or reverts its change.
