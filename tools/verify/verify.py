@@ -368,6 +368,33 @@ def delta(base: str) -> dict:
             "addedTestFiles": added, "deletedTestFiles": deleted, "besideExistingOwner": beside, "compatAdditions": bridges}
 
 
+def golden_readers(goldens: list[str], tests: list[str]) -> set[str]:
+    """The locks a golden change reruns. A Gateway E2E golden `<dir>/locks/<name>.golden.json` is read
+    only by the lock in `<dir>` naming it through `lockPaths(import.meta.url, "<name>")` (directly or
+    through a string constant); any other golden reruns every lock its module owns."""
+    locks = [path for path in tests if is_lock(path)]
+    readers: set[str] = set()
+    for golden in goldens:
+        if not golden.startswith(f"{GATEWAY}/src/e2e/"):
+            readers |= set(locks)
+            continue
+        name = Path(golden).name.removesuffix(".golden.json")
+        directory = str(Path(golden).parent.parent)
+        found = set()
+        for lock in (path for path in locks if str(Path(path).parent) == directory):
+            source = (ROOT / lock).read_text(errors="replace")
+            arguments = re.findall(r"lockPaths\(import\.meta\.url,\s*(\w+|\"[^\"]+\"|'[^']+')\s*\)", source)
+            names = {argument[1:-1] for argument in arguments if argument[0] in "\"'"}
+            for constant in (argument for argument in arguments if argument[0] not in "\"'"):
+                names.update(re.findall(rf"\b(?:const|let)\s+{re.escape(constant)}\s*=\s*['\"]([^'\"]+)['\"]", source))
+            if name in names:
+                found.add(lock)
+        if not found:
+            raise VerifyError(f"no lock beside {golden} reads it through lockPaths(import.meta.url, {name!r})")
+        readers |= found
+    return readers
+
+
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
     """The tests a run selects; `paths` stands in for the changed paths (the mutation sampler's one file)."""
     owner = {path: key for key, module in modules.items() for path in module["owned"]}
@@ -375,6 +402,7 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
     locks = sorted(path for path in tests if is_lock(path))
     reasons: list[str] = []
     declared: set[str] = set()
+    declared_tests: set[str] = set()
     selected: set[str] = set()
     narrow: set[str] = set()
     batch_tests: set[str] = set()
@@ -431,7 +459,8 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             owned = [path for path in modules.get(key, {"owned": []})["owned"] if is_test(path)]
             if key in narrow:
                 goldens = any(is_golden(path) for path in changes[key])
-                owned = [path for path in owned if path in changes[key] or (goldens and is_lock(path))]
+                readers = golden_readers([path for path in changes[key] if is_golden(path)], owned)
+                owned = [path for path in owned if path in changes[key] or (goldens and is_lock(path) and path in readers)]
                 reasons.append(f"{key}: changes only its tests{' and goldens' if goldens else ''}; those {len(owned)} test file(s)")
             else:
                 reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
@@ -478,13 +507,14 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             external |= declared_files(command, tracked)
         if external:
             selected |= external
+            declared_tests |= external
             reasons.append(f"{key}: declared verification ({len(external)} test file(s))")
     if mode == "changed":
         nested, _ = nested_files()
         golden_owners = {owner[path] for path in touched if is_golden(path) and path in owner}
         immediate = {path for path in selected if owner.get(path) in narrow
                      or (is_lock(path) and owner.get(path) in golden_owners)}
-        deferred = (selected & nested) - set(touched) - immediate
+        deferred = (selected & nested) - set(touched) - immediate - declared_tests
         selected -= deferred
         if deferred:
             batch_tests |= deferred

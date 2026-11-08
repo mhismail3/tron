@@ -3,5 +3,8 @@
   "owns": [
     "platform.module.json",
     "tailscale-status.ts"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/transport/tailscale-peer.integration.test.ts"
   ]
 }

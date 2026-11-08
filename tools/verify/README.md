@@ -142,9 +142,10 @@ modules' tests ([principles P1](../../docs/PRINCIPLES.md#p1-a-module-owns-its-co
 `--changed` and `--module` add no `dependsOn` consumer's tests; those run in the
 batch. The one consumer added is a module whose `dynamicEdges` name a selected
 module (today only the iOS UI tests' spawn edges to the hosted app): its locks are
-that module's rendered tests. A module with no test of its own declares the tests that prove it
-(`verify`, below), usually its `gateway/e2e` journeys. `--module` does not widen to
-unrelated kernel locks; `--update-locks` remains confined to the named owner's locks.
+that module's rendered tests. A module with no test declares its proving tests (`verify`, below), usually its
+`gateway/e2e` journeys; directory modules may also declare `verify`. A Gateway E2E golden
+selects only the lock in its directory whose `lockPaths(import.meta.url, name)` names it.
+`--module` does not widen to unrelated kernel locks; `--update-locks` stays with its owner.
 
 Small changes run only what can catch a regression in them:
 - **Documentation** (Markdown or assets owned by `repo/docs`, except module manifests)
@@ -168,7 +169,9 @@ A Swift or Gateway string edit is code: its tests and locks run (locks compare l
 
 Test/golden-only narrowing precedes module risk; a manifest/configuration edit still
 requires a full batch. Unchanged files in the existing serial `gateway-nested` list
-are deferred, never dropped: production changes selecting them require a full tier.
+are deferred, never dropped, unless explicitly declared as owner verification evidence;
+declared tests run immediately. Production changes selecting undeclared serial tests need
+a full tier.
 A changed serial test file and locks selected by a golden edit run immediately.
 `--all --base <green>` includes every serial file selected by that covered diff,
 including changed tests already run before landing: later integration may affect
