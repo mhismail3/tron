@@ -375,6 +375,12 @@ class GatewayFailureTests(VerifyCase):
         r = self.repo
         self.fixture()
         r.git("config", "tron.verify.mini", "nobody@mini.invalid")
+        # A refusing ssh first on PATH: the mini is unreachable without touching the network.
+        stub = Path(self.temp.name) / "bin"
+        stub.mkdir()
+        (stub / "ssh").write_text("#!/bin/sh\necho 'ssh: connect to host mini.invalid port 22: Connection refused' >&2\nexit 255\n")
+        (stub / "ssh").chmod(0o755)
+        r.env["PATH"] = f"{stub}:{r.env['PATH']}"
         result = r.verify("--module", "gateway/sample", "--gateway-host", "mini")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("gateway lanes: on the Mac mini", result.stdout)
@@ -382,6 +388,7 @@ class GatewayFailureTests(VerifyCase):
         step = next(step for step in report["steps"] if step["name"] == "tests: gateway")
         self.assertEqual((report["verdict"], step["status"], step["exit"]), ("failed", "failed", 2))
         self.assertIn("could not push", (r.path / step["log"]).read_text())
+        self.assertIn("Connection refused", (r.path / step["log"]).read_text())
         self.assertFalse((r.path / "packages/gateway/test-results/executed").exists(), "the local lane never ran")
 
 

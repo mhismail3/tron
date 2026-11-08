@@ -313,3 +313,7 @@ if __name__ == '__main__':
         sys.exit(local_main(sys.argv[1:]))
     except KeyboardInterrupt:
         sys.exit(130)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        # A broken session or frame is infrastructure, never a test failure.
+        print(f'mini: {error}; no result', file=sys.stderr)
+        sys.exit(EXIT_INFRA)

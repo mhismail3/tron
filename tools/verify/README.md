@@ -79,8 +79,8 @@ other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/t
 (`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the
 Gateway `node_modules`, refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
 only when `package.json`, `package-lock.json`, `third_party/` or the Node binary changed, and runs that commit's
-`gateway.py` with a minimal PATH and no caller environment. Output streams live; the Vitest output files come back
-with paths rewritten to this checkout, and the lane's exit code is the step's. An unconfigured or unreachable mini,
+`gateway.py` with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
+live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. An unconfigured or unreachable mini,
 an off-pin toolchain or a session without a result exits 2; nothing falls back to this Mac. Stopping verify ends
 the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
 `tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node is
