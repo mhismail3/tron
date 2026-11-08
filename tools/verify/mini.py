@@ -160,7 +160,8 @@ def remote_main(job: dict) -> int:
 
     def watch() -> None:
         # The local side never writes; end of input means it stopped or the connection dropped.
-        while sys.stdin.buffer.read(1):
+        # A raw read: a buffered one would hold the stdin lock while the interpreter exits.
+        while os.read(sys.stdin.fileno(), 4096):
             pass
         cancelled.set()
         if lane and lane[0].poll() is None:
