@@ -32,12 +32,23 @@ tracked as #2230–#2235.
 ## P3 Delete before adding
 
 **Rule.** Code, tests, scripts and docs must trace to a named consumer, contract or journey.
-Anything that cannot is deleted. An addition is a characterization or regression test, a fix, a
-consolidation that removes more than it adds, or a type change that deletes the runtime checks it
-replaces. No shims, aliases, fallback readers, flags or "just in case" wrappers.
+Anything that cannot is deleted. A replacement deletes the path it replaces in the same change.
+Tests default to fewer: agents read the code itself, so a test earns its place only by catching a
+real behaviour fault at a boundary. A fix's proof strengthens the owning E2E/integration test, or adds
+nothing when one already proves it; tests that restate code (structure locks, duplicate unit tests,
+implementation snapshots) are retired. Loosening an assertion that guards real behaviour is never
+allowed. Other additions are a fix, a consolidation that removes more than it adds, or a type
+change that deletes the runtime checks it replaces. No backward-compatibility code: no shims,
+aliases, old-format or fallback readers, flags or "just in case" wrappers; live old data moves once
+through a backed-up migration.
 **Evidence.** The #2297 structure program added custom governance tooling and ended at net +227
-lines. Governance tooling alone was about 14,000 lines (#2316 §0).
-**Enforced by** the Gateway compiler's `noUnusedLocals` setting for dead locals. **Not yet
+lines. Governance tooling alone was about 14,000 lines (#2316 §0). Tests reached about 127,000 lines:
+fail-before/pass-after named no owner for the proof and only deleting a test needed evidence, so each
+fix added a file. In the 60 days to 2026-11-08, 69 of 657 new test files sat beside a test sharing
+their name prefix (17 the same stem), and 792 added product-source lines named legacy, compat or shim code (#2327).
+**Enforced by** the Gateway compiler's `noUnusedLocals` setting for dead locals, and the `verify`
+delta that reviewers ACCEPT against: source and test lines added and removed, each new test file
+beside an existing owner, and each added line naming compatibility code. **Not yet
 enforced:** the unused-export and unused-file check (knip) and a net-diff line in commit messages
 are #2316 Phase 7.
 
@@ -45,8 +56,8 @@ are #2316 Phase 7.
 
 **Rule.** A refactor changes no observable behaviour: wire output, persisted bytes, errors callers
 match on, user-visible effects and their order. It leaves contract assertions untouched. A fix
-changes behaviour on purpose and lands its regression test first, marked expected-fail with its
-issue. Commits are prefixed `test:`, `delete:`, `refactor:`, `fix(#n):`, `docs:` or `chore:`.
+changes behaviour on purpose; its fail-before/pass-after proof goes in the owning test, in the
+same change. Commits are prefixed `test:`, `delete:`, `refactor:`, `fix(#n):`, `docs:` or `chore:`.
 **Evidence.** #2279 converted four whole-trace locks into behaviour checks. Each conversion was
 proven by injecting 8 mutants that failed both the old check and the new one.
 **Enforced by** the wire goldens (`protocol-wire`, `client-event-schemas`), the persisted-format
