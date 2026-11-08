@@ -17,7 +17,7 @@
     "ProfilingTests": {"name": "profiling", "layer": "L5"},
     "ShareExtension": {"name": "share-extension", "layer": "L5"},
     "Sources/Auth": {"name": "auth", "layer": "L3"},
-    "Sources/Features/SwiftApps/State": {"name": "swift-apps-state", "layer": "L2"},
+    "Sources/Features/SwiftApps/State": {"name": "swift-apps-state", "layer": "L2", "verify": ["scripts/tron test ios run --only-testing TronSwiftAppUITests/TronSwiftAppUITests"]},
     "Sources/Notifications": {"name": "notifications", "layer": "L3"},
     "Sources/UI/Automations": {"name": "automations", "layer": "L4"},
     "Sources/UI/Chat": {"name": "chat", "layer": "L4"},

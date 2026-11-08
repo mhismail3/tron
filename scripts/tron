@@ -87,6 +87,13 @@ Commands:
                                     reach another module's files, test-support, or
                                     import the registry directly (#2316)
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
+  proof bootstrap|doctor            Install (bootstrap) or re-verify (doctor) the pinned Dafny
+                                    proof toolchain in the per-user cache (tools/proof)
+  proof check [<block>...] [--json] Check proof blocks (packages/core/blocks) and the blocks
+                                    below them with the pinned toolchain; cached per worktree
+  proof mutate <block> [options]    Mutation gate: every change to a block's compiled functions
+                                    must be killed by a law (tools/proof/README.md)
+  proof packet <block> [options]    Render a block's hash-bound law review packet (LAWS.md)
   health [<rev>] [--baseline <rev>] [--github] [--evidence] [--deploy-log <jsonl>]
          [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
                                     Read-only outcome and diagnostic health signals diffed
@@ -230,6 +237,15 @@ case "$cmd" in
     ;;
   layers)
     exec python3 "$ROOT/tools/layers/layers.py" "$@"
+    ;;
+  proof)
+    case "${1:-}" in
+      bootstrap|doctor) exec /bin/bash "$ROOT/tools/proof/bootstrap.sh" "$@" ;;
+      check) shift; use_pinned_node; exec node "$ROOT/tools/proof/lawcheck/lawcheck.mjs" "$@" ;;
+      mutate) shift; use_pinned_node; exec node "$ROOT/tools/proof/mutate/mutate.mjs" "$@" ;;
+      packet) shift; use_pinned_node; exec node "$ROOT/tools/proof/packet/packet.mjs" "$@" ;;
+      *) usage >&2; exit 64 ;;
+    esac
     ;;
   verify)
     exec python3 "$ROOT/tools/verify/verify.py" "$@"

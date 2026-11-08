@@ -1,0 +1,14 @@
+{
+  "block": "demo/timeout",
+  "tier": "leaf",
+  "impl": "blocks/demo/timeout/Block.dfy",
+  "symbols": ["F"],
+  "verify": ["blocks/demo/timeout/Block.dfy"],
+  "laws": {
+    "T1 timeout-prone": ["Timeout.T1"]
+  },
+  "translate": "blocks/demo/timeout/Block.dfy",
+  "oracles": [],
+  "accepted": {},
+  "resourceLimit": 2000
+}

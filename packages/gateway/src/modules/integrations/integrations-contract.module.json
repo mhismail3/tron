@@ -8,6 +8,6 @@
     "gateway/protocol"
   ],
   "verify": [
-    "scripts/tron test gateway src/e2e/integrations/tests/connections.lifecycle.lock.integration.test.ts src/e2e/protocol/protocol.wire.lock.integration.test.ts"
+    "scripts/tron test gateway src/e2e/integrations/tests/connections.projection.integration.test.ts src/e2e/protocol/protocol.wire.lock.integration.test.ts"
   ]
 }
