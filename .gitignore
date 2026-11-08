@@ -1,6 +1,8 @@
 # TypeScript build outputs
 *.tsbuildinfo
 **/dist/
+# Generated proof-block cores and façades are checked in (scripts/tron proof facade --check keeps them fresh).
+!packages/core/dist/
 
 # IDE
 .idea/

@@ -12,6 +12,7 @@ scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--no-oracle] [--
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
 scripts/tron proof shadow <block> [--root <dir>] [--out <file>]
+scripts/tron proof facade <block> [--check]
 scripts/tron proof wire --inventory [--json] [--numbers float64|integer]
 scripts/tron proof wire --generate <in.dfy> <out-dir>
 ```
@@ -124,9 +125,20 @@ core to check `coreJsHash`, and `--recheck` re-runs the shadow.
 `oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
 inputs and print `{requests, agree, diffs}` (exit 0 iff all agree); a block's `mutate.json` uses its oracle
 both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
-imports `packages/gateway/src/automations/schedule.ts` directly (Node strips its types) and marshals values
-by hand. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
+imports `packages/gateway/src/automations/schedule.ts` directly (Node strips its types) and calls the core
+through the block's generated façade. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
+
+## Façade
+
+`dafny2wire/facade.mjs` (`proof facade`) writes `packages/core/dist/<block>/core.js`, the block's `translate` file
+compiled by the pinned Dafny (unedited, with a generated header), and `facade.ts`, a typed TypeScript wrapper
+generated from the datatypes and compiled signatures of the block's laws: `load(corePath)` binds it to any
+compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the bound
+checked-in one. Types: `int`/`nat` -> `number` (a safe integer, checked both ways), `bool` -> `boolean`, a
+datatype of nullary constructors -> a string union of their names, a one-constructor datatype named like its
+type -> a plain object, any other datatype -> an object tagged by `$`; other Dafny types are refused until a
+block needs them. `--check` regenerates into a temporary directory and exits 1 if the checked-in files differ.
 
 ## Wire
 
@@ -192,7 +204,8 @@ STALE. The oracle and `law-gap` path is exercised by the first core block's real
 `packages/core/package.module.json`, so any change under `packages/core` runs it: `proof check` passes on a
 fresh cache, and for each block with a `mutate.json` the regenerated packet equals the committed `LAWS.md`
 and shows proof PASS, a current mutation PASS, a current shadow match, and a `REVIEW.json` for the current
-block hash with every law ACCEPT. An edit that skips any gate fails it.
+block hash with every law ACCEPT, and `proof facade --check` finds `dist/` fresh. An edit that skips any gate
+fails it.
 
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: the inventory covers
 every export, every expansion is compiler-confirmed, at least 95% of the protocol types are expressible (the

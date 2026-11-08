@@ -7,6 +7,8 @@ For every block with a mutate.json, with the pinned toolchain and the repository
 2. `scripts/tron proof packet <block>` regenerates exactly the committed LAWS.md, has no packet problems,
    and its gates hold for the current sources: proof PASS, mutation report PASS and not STALE, shadow
    match and not STALE, REVIEW.json for the current block hash with every law ACCEPT.
+3. `scripts/tron proof facade <block> --check`: the checked-in compiled core and façade in
+   packages/core/dist/<block> are exactly what the current sources generate.
 
 So an edit to a block that does not re-run its mutation check, shadow and review, or regenerate its
 packet, fails here. The reviewer transcript check reads Pi's session store; it is not re-derived here.
@@ -54,6 +56,8 @@ class CoreBlocksTest(unittest.TestCase):
                 self.assertEqual(review["packetHash"], current, "REVIEW.json is for another version of the block")
                 laws = json.loads((directory / "mutate.json").read_text())["laws"]
                 self.assertEqual({law: review["laws"].get(law, {}).get("verdict") for law in laws}, {law: "ACCEPT" for law in laws})
+                facade = tron("facade", block, "--check")
+                self.assertEqual(facade.returncode, 0, facade.stdout + facade.stderr)
 
 
 if __name__ == "__main__":

@@ -4,8 +4,6 @@
 // firstAutomationOccurrence, classifyDueOccurrence), on seeded generated inputs (not real traffic).
 // Usage: node tools/proof/oracles/schedule-occurrence.mjs <compiled core.js> [count=20000] [seed=7]
 // Prints {requests, agree, diffs (first 5)}; exit 0 iff every request agrees.
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,19 +14,16 @@ if (!corePath) { console.error("usage: schedule-occurrence.mjs <compiled core.js
 const count = Number(countArg ?? 20000);
 let seed = Number(seedArg ?? 7);
 
-// Marshalling between the TS shapes and the emitted datatypes (BigNumber integers). The generated façade
-// (#2345) replaces this.
-const require = createRequire(join(REPO, "packages/core/package.json"));
-const { ScheduleOccurrence: Core, BigNumber } = new Function("require", `${readFileSync(resolve(corePath), "utf8")}\nreturn { ScheduleOccurrence, BigNumber };`)(require);
-const B = (n) => new BigNumber(n);
-const opt = (o) => (o.is_Some ? o.dtor_v.toNumber() : null);
-const trigger = (t) => (t.kind === "once" ? Core.Trigger.create_Once(B(t.at)) : Core.Trigger.create_Interval(B(t.anchor), B(t.every)));
-const policy = (p) => (p === "latest" ? Core.Policy.create_Latest() : Core.Policy.create_Skip());
+// The compiled core under test, through its generated façade (plain numbers and tagged objects).
+const { load } = await import(join(REPO, "packages/core/dist/schedule/occurrence/facade.ts"));
+const core = load(resolve(corePath));
+const opt = (o) => (o.$ === "Some" ? o.v : null);
+const trigger = (t) => (t.kind === "once" ? { $: "Once", at: t.at } : { $: "Interval", anchor: t.anchor, every: t.every });
 function candidate(q) {
-  if (q.op === "next") return opt(Core.__default.Next(trigger(q.trigger), B(q.after)));
-  if (q.op === "first") return opt(Core.__default.First(trigger(q.trigger), B(q.now)));
-  const r = Core.__default.Classify(trigger(q.trigger), B(q.next), B(q.now), policy(q.policy));
-  return { dispatchAt: opt(r.dtor_dispatchAt), next: opt(r.dtor_next), skipped: opt(r.dtor_skipped) };
+  if (q.op === "next") return opt(core.Next(trigger(q.trigger), q.after));
+  if (q.op === "first") return opt(core.First(trigger(q.trigger), q.now));
+  const r = core.Classify(trigger(q.trigger), q.next, q.now, q.policy === "latest" ? "Latest" : "Skip");
+  return { dispatchAt: opt(r.dispatchAt), next: opt(r.next), skipped: opt(r.skipped) };
 }
 
 // Inputs: triggers near and far from their reference time, periods from 1 s to a week (including odd ones),
