@@ -40,7 +40,7 @@ reclaims them with the worktree. A shard started while none of the run's other s
 acquires its slot exactly as a serial run did (below). A shard started beside one in flight takes a
 slot only if one is free at once (`--host-slot-wait-seconds 0`), so the run never queues behind its
 own work or holds a waiter against another worktree's job. Refused, it admitted no work: its attempt
-is withdrawn (`requeued`), its lane goes last for the retry, and no further lane starts until one of
+is withdrawn (`requeued`), its lane is tried last until it next admits a shard, and no further lane starts until one of
 the run's shards ends. A refusal while nothing else of the run is in flight is the busy exit 73:
 that shard and every unstarted one are `deferred`, never passed; admitted shards keep their
 outcomes. SIGINT/SIGTERM stops and joins every lane's process group.

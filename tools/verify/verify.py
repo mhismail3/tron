@@ -607,8 +607,9 @@ class Run:
     def step(self, name: str, command: list[str] | str, cwd: Path = ROOT, count=None, env: dict | None = None,
              accept=(0,)) -> dict:
         self.index += 1
-        launched = self.launch(self.index, name, command, cwd, env)
         try:
+            # Inside the try: a signal held during launch arrives as it returns.
+            launched = self.launch(self.index, name, command, cwd, env)
             code = launched.process.wait()
         except KeyboardInterrupt:
             self.stop(list(self.live))
@@ -865,6 +866,8 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
     run.index += len(shards)
     queue = sorted(range(len(shards)), key=lambda index: -shards[index].seconds)
     order = {lane: position for position, lane in enumerate(phone_lanes)}
+    refused: set[str | None] = set()  # lanes refused a slot since their last admitted shard, tried last
+    rank = lambda name: (name in refused, order.get(name, 0))  # noqa: E731
     free: dict[bool, list[str | None]] = {False: list(phone_lanes), True: [ios_pad_lane()]}
     limit = len(phone_lanes)
     running: dict[int, tuple[Launched, str | None, bool]] = {}
@@ -892,17 +895,18 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
             for index in finished:
                 launched, lane, opportunistic = running.pop(index)
                 shard = shards[index]
-                free[shard.pad] = sorted(free[shard.pad] + [lane], key=lambda name: order.get(name, 0))
+                free[shard.pad] = sorted(free[shard.pad] + [lane], key=rank)
                 code = launched.process.returncode
                 if code == 73 and opportunistic:
-                    # The refused lane goes last, so the retry tries another lane first.
-                    free[shard.pad].remove(lane)
-                    free[shard.pad].append(lane)
+                    refused.add(lane)
+                    free[shard.pad].sort(key=rank)
                     run.withdraw(launched)
                     print(f"{launched.label}: no host slot free beside this run's other lanes; requeued", flush=True)
                     queue.insert(0, index)
                     limit = max(1, len(running))
                     continue
+                refused.discard(lane)
+                free[shard.pad].sort(key=rank)
                 result = run.settle(launched, code, ios_count, (0,))
                 if code == 73:
                     # Admission refused: this shard and the rest wait for the batch, never pass.
