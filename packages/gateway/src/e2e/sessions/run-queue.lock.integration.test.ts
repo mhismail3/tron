@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { openLockSession, queueControlScenario } from "../../test-support/lock-scenarios.js";
+import { type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { openLockSession, queueControlScenario } from "../../../test-support/lock-scenarios.js";
 
 /**
  * Queue lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5 `kernel/run`'s

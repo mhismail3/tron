@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 
 /**
  * Kernel settings-change lock (packages/gateway/docs/scenario-locks.md#locks) for the `gateway/admin`
@@ -45,6 +45,7 @@ describe("gateway/admin kernel locks", () => {
     expect(resolved(before)).toEqual([`${KEY}=4 (4 retries) @global [global:4] overridden`]);
     expect(resolved(after)).toEqual([`${KEY}=6 (6 retries) @global [global:6] overridden`]);
     expect(resolved(chat)).toEqual([`${KEY}=6 (6 retries) @global [project:- session:- global:6]`]);
+    expect(before.result.keys[0].group).toBe("run");
     expect(before.result.keys[0].presentation).toMatchObject({ label: "Retries", effect: "next-request", timing: "live", editable: true, sessionOverridable: true });
     expect(changed.result).toMatchObject({ status: "applied",
       changes: [{ key: KEY, layer: "global", before: 4, after: 6, status: "applied", changeId: expect.any(String) }],

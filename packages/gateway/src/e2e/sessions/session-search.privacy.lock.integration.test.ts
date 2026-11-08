@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { ModelRuntime, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { expect, it, vi } from "vitest";
-import { createTestRegistry } from "../../test-support/gateway-registry.js";
-import { waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../kernel/resources/trust-service.js";
-import { SessionSearchIndex } from "./session-search-index.js";
-import { SessionSearchService } from "./session-search-service.js";
+import { createTestRegistry } from "../../../test-support/gateway-registry.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../kernel/resources/trust-service.js";
+import { SessionSearchIndex } from "../../sessions/session-search-index.js";
+import { SessionSearchService } from "../../sessions/session-search-service.js";
 
 // This adds cancellation/reopen coverage; the manifest also selects the existing
 // real Home-tool edit, credential, chapter-exclusion and exact-citation journeys.
