@@ -114,7 +114,7 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 ## Work tracking
 
 - Issues/Project coordinate, never approve ([Git/gh skill](.agents/skills/tron-work/SKILL.md)).
-  One writer/file; inspect with Git/gh; resume settled same-slice workers before replacing them.
+  One writer/file; inspect with Git/gh (hot shared files: [collision check](docs/HEALTH.md#collision-rule)); resume settled same-slice workers before replacing them.
   Never edit another worker's tree, delete its branch or take over unknown or live work;
   preserve unpublished or parked checkpoints. After each issue lands on origin/main, sync primary main
   with `git merge --ff-only origin/main` only if tracked-clean and strictly behind; keep untracked files, never reset/rebase.
@@ -130,7 +130,7 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
   test or rule before adding one. Otherwise record it and move on. Delete guards that cost more than they prevent.
 - Home decides objective gates; verify has [no exemptions](tools/verify/README.md#no-exemptions). Independent review covers test changes and security/data-loss/irreversible changes.
 - Keep one file owner and downward layer/cycle/Pi-seam ratchets, not phase handshakes,
-  file-length targets or blanket base-lock runs. Build ahead on branches.
+  file-length targets or blanket base-lock runs. Build ahead on branches. [Health](docs/HEALTH.md) metrics are signals, never gates; never drop a capability to move a metric.
 - Default 2h tasks, 30-minute SHA/change/blocker check-ins; land green or settle in ≤25 lines.
   Gateway/Mac/iPhone rebuilds wait until all workers stop/park cleanly; Home coordinates, the maintainer executes lockstep delivery.
 
