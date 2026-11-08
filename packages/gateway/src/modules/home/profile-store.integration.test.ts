@@ -108,7 +108,7 @@ it("admits only current data under a real 96 MiB heap despite a sealed 235-by-30
   await chmod(archive, 0o000);
   await f.workspace.dispose();
   const assignments = records.map((record, index) => ({ id: record.id, expectedRevision: record.revisionId, path: `engineering/group-${Math.floor(index / 10)}` }));
-  const result = await boundedProfilePartition(f.root, f.home, assignments, "migrate");
+  const result = await boundedProfilePartition(f.root, f.home, assignments);
   expect({ code: result.code, signal: result.signal }).toEqual({ code: 0, signal: null });
   expect(JSON.parse(result.stdout)).toEqual({ status: "committed", changes: 21 });
   await chmod(archive, 0o600);

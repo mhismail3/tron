@@ -28,7 +28,7 @@ async function setup(mode: "v2" | "migration" = "v2") {
     originals.push(mode === "migration" ? await legacyProfileFixture(resource, `create-original-${i}`, record) : (await knowledge.createNote({ commandId: `create-original-${i}`, record })).record);
   }
   const context = { commandId: "original-partition-command", actor: { kind: "ui" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason" };
-  const request = { commandId: context.commandId, mode: mode === "v2" ? "reorganize" as const : "migrate" as const,
+  const request = { commandId: context.commandId, mode: "reorganize" as const,
     assignments: originals.map((record, index) => ({ id: record.id, expectedRevision: record.revisionId, path: `engineering/selected-${index}` })) };
   const cold = async () => { const registry = await f.restartToReadiness(); resource = registry.moduleHost.contract(workspaceModule); knowledge = new ProfileStore(resource); return f.settings.settingsChanges; };
   return { f, resource, currentResource: () => resource, profile, originals, context, request, cold };

@@ -191,7 +191,7 @@ export type HomeProfileOp =
   | { action: "retire"; id: string; reason?: string; expectedRevision?: string };
 
 export type HomeProfileRequest = HomeProfileOp
-  | { action: "migrate" | "reorganize"; assignments: ProfilePartitionRequest["assignments"] }
+  | { action: "reorganize"; assignments: ProfilePartitionRequest["assignments"] }
   | { action: "retry"; commandId: string };
 
 /** Who writes. Home cites the maintainer message its turn answers. */
@@ -362,7 +362,7 @@ export class HomeProfileItems {
       };
       // Organization changes placement only, through the existing logged/undoable
       // transaction. Content and confirmation keep their authority checks.
-      const needsReview = requests.some(op => ["retry", "learn", "migrate", "reorganize"].includes(op.action) ? false
+      const needsReview = requests.some(op => ["retry", "learn", "reorganize"].includes(op.action) ? false
         : op.action === "retire" ? !own(op.id) : true);
       if (needsReview) {
         if (!context.reason?.trim()) throw new GatewayError("invalid_request", "An exact profile review requires a reason");
@@ -379,8 +379,8 @@ export class HomeProfileItems {
         return applied ?? { status: "declined", changes: [], saved: [], items: [] };
       }
     }
-    const partition = requests.find(op => op.action === "migrate" || op.action === "reorganize" || op.action === "retry");
-    if (partition && (partition.action === "migrate" || partition.action === "reorganize" || partition.action === "retry")) {
+    const partition = requests.find(op => op.action === "reorganize" || op.action === "retry");
+    if (partition && (partition.action === "reorganize" || partition.action === "retry")) {
       if (requests.length !== 1) throw new GatewayError("invalid_request", "Organization is one explicit operation");
       return partition.action === "retry" ? this.retryPartition(changes, partition.commandId, context.actor.kind)
         : this.partition(changes, { commandId: context.commandId, mode: partition.action, assignments: partition.assignments }, context);
@@ -679,7 +679,7 @@ function excerpt(text: string): string {
 function profileReview(read: HomeProfileRead, requests: readonly HomeProfileRequest[], reason: string): ChangeReview {
   const items: ChangeReview["items"] = [];
   for (const op of requests) {
-    if (op.action === "retry" || op.action === "learn" || op.action === "migrate" || op.action === "reorganize") throw new GatewayError("invalid_request", "This profile action needs no review");
+    if (op.action === "retry" || op.action === "learn" || op.action === "reorganize") throw new GatewayError("invalid_request", "This profile action needs no review");
     if (requests.length > 8) throw new GatewayError("invalid_request", "Review holds at most 8 exact profile changes");
     if (!("id" in op)) throw new GatewayError("invalid_request", "Review holds one kind of profile change");
     const item = read.items.find(item => item.id === op.id);

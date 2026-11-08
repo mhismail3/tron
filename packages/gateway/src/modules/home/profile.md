@@ -87,7 +87,7 @@ digest binds source revisions and exact before/after values. Supersede previews
 include the old note's status and replacement text, kind, confirmation, placement
 and source. Stale/expired cards refuse, never become publication retries.
 
-The maintainer's `home.profileChange` supports migrate/reorganize/retry. Its tap
+The maintainer's `home.profileChange` supports reorganize/retry. Its tap
 already supplies authority, so no second card opens. Retry names the original
 operation inside a fresh RPC receipt and retains exact-revision fencing and Undo.
 
@@ -108,8 +108,7 @@ notes per subarea. The serialized file owner checks the entire after-state befor
 publication. Overflow refuses, never evicts. Exact Undo may restore an over-bound
 original state; subsequent writes cannot grow an exceeded dimension.
 
-`migrate` requires exactly the active Prior Core/Home members; inactive and scoped
-originals stay unchanged. `reorganize` names selected notes. Explicit destinations,
+`reorganize` names selected notes. Explicit destinations,
 visibility, expected revisions and bounds are checked without dropping members.
 Only placement and old `home-file-*` labels change; other labels retain order.
 
