@@ -138,10 +138,5 @@ unimplemented namespace API or by arbitrary filesystem tools today.
 
 The pinned `pi-subagents` provider reads `PI_SUBAGENTS_TEMP_ROOT` before its
 module initializes and derives its provider-owned trees from that root. Gateway
-startup sets `<tronHome>/internal/subagents` only after a read-only inventory
-proves the legacy temporary provider root has no retained work. Project/session
-artifact history remains at its configured location; it is not part of the
-temporary-store move. Discovery never includes similarly named test directories
-or retired copies. If retained artifacts are found, startup fails with a
-migration-required diagnostic; it never silently adopts a new root. The gate and
-its inventory live in `delegated-root-migration.ts`.
+startup sets `<tronHome>/internal/subagents` before Pi loads any extension.
+Project/session artifact history remains at its configured location.
