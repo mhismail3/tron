@@ -178,7 +178,7 @@ LaunchAgents, starts or stops Gateways or approves permissions. The first call v
 apps and teams and records the candidate's code and resource seals
 (`scripts/verify-mac-install.sh --artifact-only` plus the signed Pi smoke test). Offline means
 `com.tron.server` and `com.tron.mac.native-host` registered with `state = not running` and no
-PID, and no loaded Debug, Preview or takeover job (`service-loaded`). Private
+PID, and no loaded Debug job (`service-loaded`). Private
 `~/.tron-maintenance/<operation-id>/` receipts hold revision, phase, identities, backups (agent
 home, every other `~/.tron` entry, the old app, machine-group file, browser config; never
 Keychain or browser profiles) and SHA-256 manifests with modes, ACLs, xattrs and link text; only
