@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { expectRequestShapes, expectSystemShapes } from "../../test-support/lock-projections.js";
-import { normalizeTraceValue } from "../../test-support/scenario-lock.js";
-import { automationOwnedRunScenario } from "../../test-support/lock-scenarios.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
+import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
+import { automationOwnedRunScenario } from "../../../test-support/lock-scenarios.js";
 
 /**
  * Automation owned-run lock (restructure E0c, `packages/gateway/docs/kernel.md` §7)

@@ -3,6 +3,72 @@ import XCTest
 /// Select → annotate → chip → edit → send, on the real ChatView over the
 /// annotation fixture socket (#899). Screenshots are kept as attachments.
 final class TronChatAnnotationUITests: XCTestCase {
+    @MainActor func testSelectionAcrossMarkdownBlocksCanBeAnnotated() {
+        continueAfterFailure = false
+        let app = launch(); defer { app.terminate() }
+
+        let heading = assistantBlock(app, containing: "Retry policy")
+        let listItem = assistantBlock(app, containing: "Accepted prompts continue")
+        XCTAssertTrue(listItem.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertLessThan(heading.frame.midY, listItem.frame.midY, "Heading and list items keep separate accessibility frames")
+        let start = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
+        // End inside the next item so the whole first item is selected; the
+        // native end handle settles about a line above a drag's final point.
+        let nextItem = assistantBlock(app, containing: "authoritative snapshot")
+        let end = nextItem.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9))
+        start.press(forDuration: 1.0, thenDragTo: end)
+
+        let annotate = menuAction(app, "Annotate")
+        XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(app, "1112-cross-block-selection")
+        annotate.tap()
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Save annotation"].firstMatch.tap()
+
+        let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
+        chip.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+        // The sheet's combined quote can surface as either element type.
+        let quote = app.descendants(matching: .any)["chat.annotation.quote"]
+        XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(quote.label.contains("Retry policy"), quote.label)
+        XCTAssertTrue(quote.label.contains("Accepted prompts continue on the Mac."), quote.label)
+        keepScreenshot(app, "1112-cross-block-quote")
+        app.buttons["Save annotation"].tap()
+        XCTAssertTrue(wait(for: quote, exists: false))
+
+        // Copy the same cross-heading/list range and paste it into the composer
+        // so the journey verifies the plain-text markers and block separation.
+        // Saving hands the keyboard to the composer; put it away first so the
+        // list items are on screen for the drag.
+        if app.keyboards.firstMatch.exists {
+            // The transcript dismisses the keyboard interactively.
+            let window = app.windows.firstMatch
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10), app.debugDescription)
+        let startAgain = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
+        let endAgain = nextItem.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9))
+        startAgain.press(forDuration: 1.0, thenDragTo: endAgain)
+        let copy = menuAction(app, "Copy")
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        copy.tap()
+        let composer = app.textViews["Message input"]
+        composer.tap()
+        composer.press(forDuration: 1.0)
+        let paste = menuAction(app, "Paste")
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
+        paste.tap()
+        let pasted = composer.value as? String ?? ""
+        XCTAssertTrue(pasted.contains("Retry policy"), pasted)
+        XCTAssertTrue(pasted.contains("• Accepted prompts continue on the Mac."), pasted)
+        XCTAssertTrue(pasted.contains("\n"), pasted)
+        keepScreenshot(app, "1112-cross-block-copy-pasted")
+        XCTAssertLessThan(try XCTUnwrap(pasted.range(of: "Retry policy")).lowerBound, try XCTUnwrap(pasted.range(of: "• Accepted prompts")).lowerBound)
+    }
+
     @MainActor func testAnnotateSelectionEditChipAndSend() {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
@@ -281,8 +347,12 @@ final class TronChatAnnotationUITests: XCTestCase {
     }
 
     @MainActor private func assistantBlock(_ app: XCUIApplication, containing text: String) -> XCUIElement {
-        // Completed assistant blocks keep the static-text accessibility shape.
-        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        // Each completed assistant block is its own static-text accessibility
+        // element; inside the message's one text view XCUITest types it TextView.
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ AND (elementType == %d OR elementType == %d)",
+                                  text, XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.textView.rawValue))
+            .firstMatch
     }
 
     @MainActor private func menuAction(_ app: XCUIApplication, _ title: String) -> XCUIElement {
