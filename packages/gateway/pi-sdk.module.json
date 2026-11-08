@@ -20,13 +20,12 @@
     "scripts/update-pi-sdk.mjs",
     "scripts/update-pi-subagents.integration.test.mjs",
     "scripts/update-pi-subagents.mjs",
-    "src/sessions/pi-persisted-state-corpus.integration.test.ts",
-    "src/sessions/sdk-behavior-trace.integration.test.ts",
-    "src/sessions/session-shapes.lock.integration.test.ts",
-    "src/sessions/session-entries.lock.integration.test.ts",
     "test-fixtures/pi-sdk/**",
     "test-support/pi-persisted-state-corpus.ts",
     "third_party/**",
     "vitest.corpus.config.ts"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/sessions/sdk-behavior-trace.integration.test.ts src/e2e/sessions/session-shapes.lock.integration.test.ts src/e2e/sessions/session-entries.lock.integration.test.ts src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"
   ]
 }

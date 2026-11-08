@@ -33,7 +33,7 @@ OUTCOMES = [
     ("Independent SSH access and protocol/release identity", [
         "testMacReplacementRowAndProgressFollowTheJournal"], [
         "src/e2e/security/mac-terminal.e2e.test.ts",
-        "src/protocol/protocol.wire.lock.integration.test.ts"]),
+        "src/e2e/protocol/protocol.wire.lock.integration.test.ts"]),
 ]
 
 

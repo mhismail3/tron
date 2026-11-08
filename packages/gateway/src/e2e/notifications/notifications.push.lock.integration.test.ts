@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../test-support/scenario-lock.js";
-import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../test-support/lock-scenarios.js";
+import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
+import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../../test-support/lock-scenarios.js";
 
 /**
  * Push lock (restructure E0b, `packages/gateway/docs/kernel.md` §2.1 `runTerminal`
@@ -23,7 +23,7 @@ import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../test-support
  * messages, including the task worker's report reminder).
  */
 
-const MODULE = "gateway/notifications";
+const MODULE = "gateway/e2e";
 const owned: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
 
