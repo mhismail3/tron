@@ -109,6 +109,30 @@ A gate for another hash shows STALE. Exit 1 lists packet problems: a missing Eng
 found, a lemma neither a law nor a declared helper, a law-marked lemma not listed, an escape hatch, an
 unaccounted law kind (high-stakes) or a report acceptance not in mutate.json.
 
+## Traffic corpus
+
+Shadows need real inputs. `packages/gateway/src/proof/traffic-recorder.ts` records, at each seam where a
+block will replace TypeScript logic, the exact typed inputs and the output the TypeScript returned:
+`recordSeam(block, seam, input, output)`, a no-op unless enabled. The first seams are
+`nextAutomationOccurrence`, `firstAutomationOccurrence` and `classifyDueOccurrence` in
+`packages/gateway/src/automations/schedule.ts`, for once and interval triggers (the block's domain); nested
+calls are not seams.
+
+- **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
+  `TRON_PROOF_TRAFFIC=1` for that launch. The Gateway honours it only with `TRON_GATEWAY_CHANNEL=dev` and
+  never for the Stable home, so Stable and Release builds ignore it. It is an environment variable rather
+  than a typed setting because every settings key appears in iOS Settings and the settings tool; making it
+  a setting is a later product decision.
+- **Format:** JSONL under `<Debug home>/gateway/proof-traffic/<block>/<yyyy-mm-dd>.jsonl` (UTC days), one
+  record `{schema: "tron-proof-traffic/1", block, seam, seq, at, input, output}` per call (`output` null
+  for no value); at most 20,000 records per block and day, newest 14 days kept. Appends are synchronous and
+  unsynced: a lost tail record costs one comparison, and a write error never reaches the caller.
+- **Privacy:** seams pass typed values only (times, trigger shapes, policies); free text and identities are
+  not recorded. A seam that carries an identity must pseudonymise it before it is added. The corpus stays on
+  the Mac and is never committed.
+- **Determinism:** time enters as a value, the recorder feeds nothing back, and every record carries the
+  TypeScript output, so a replay is offline and exact.
+
 ## Wire
 
 `dafny2wire/inventory.mjs` (`proof wire --inventory`) classifies every export of
@@ -177,3 +201,9 @@ H5 kill criterion), every form they need is exercised by the codec fixture, and 
 keys and strings, TypeScript and Swift (`swiftc -O`) produce identical bytes and identical normalisations of
 non-canonical inputs (and a Swift-built map encodes in JavaScript order), and both reject 16 malformed inputs
 at the same path.
+
+`scripts/tron test gateway src/proof/traffic-recorder.integration.test.ts` proves the recorder is refused
+outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
+seeded schedule journey through the real seams writes one record per call (none for calendar triggers or
+nested calls) that replays through the same TypeScript to the recorded outputs, and that the daily cap and
+retention hold.

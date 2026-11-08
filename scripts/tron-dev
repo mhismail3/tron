@@ -31,18 +31,22 @@ DEPLOY="$ROOT/scripts/gateway-payload-deploy.mjs"
 command="${1:-start}"; [[ $# -eq 0 ]] || shift
 HOST=""
 HOST_EXPLICIT=no
+# Debug-only proof traffic recorder (packages/gateway/src/proof): off unless this launch asks for it.
+PROOF_TRAFFIC=no
 while (($#)); do
   case "$1" in
     --loopback) HOST=127.0.0.1; HOST_EXPLICIT=yes ;;
     --tailscale) HOST=tailscale; HOST_EXPLICIT=yes ;;
+    --proof-traffic) PROOF_TRAFFIC=yes ;;
     *) echo "unknown Debug Gateway option: $1" >&2; exit 64 ;;
   esac
   shift
 done
 case "$command" in
   __supervise|status|preflight|start|restart|stop|handoff) ;;
-  *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback]" >&2; exit 64 ;;
+  *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback] [--proof-traffic]" >&2; exit 64 ;;
 esac
+PROOF_TRAFFIC_ENV=""; [[ "$PROOF_TRAFFIC" == yes ]] && PROOF_TRAFFIC_ENV=TRON_PROOF_TRAFFIC=1
 
 # The one repository resolver chooses the pinned development Node (#242); a
 # missing toolchain fails here, before any Debug state is touched.
@@ -176,6 +180,7 @@ supervise() {
       IFS= read -r -u 8 go && [[ "$go" == start ]] || exit 0
       exec 8<&- env -u TRON_DATA_DIR -u PI_CODING_AGENT_DIR -u TRON_AGENT_DIR_NAME \
         TRON_HOME_NAME=.tron-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 \
+        ${PROOF_TRAFFIC_ENV:+"$PROOF_TRAFFIC_ENV"} \
         "$LAUNCHER" --host "$HOST" --port 9848
     ) &
     child=$!
@@ -322,7 +327,8 @@ case "$command" in
       if [[ "$HOST" == tailscale ]]; then supervisor_host_arg=--tailscale; else supervisor_host_arg=--loopback; fi
       # Its own session without the task scope anchor (fd 19): the shared Debug Gateway outlives
       # the task that started it (packages/gateway/docs/host-load.md).
-      nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$0" __supervise "$supervisor_host_arg" >"$LOG_FILE" 2>&1 19<&- &
+      supervisor_args=("$supervisor_host_arg"); [[ "$PROOF_TRAFFIC" == yes ]] && supervisor_args+=(--proof-traffic)
+      nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$0" __supervise "${supervisor_args[@]}" >"$LOG_FILE" 2>&1 19<&- &
       supervisor_pid=$!
       printf '%s\n' "$supervisor_pid" >"$PID_FILE"
       for _ in $(seq 1 80); do
@@ -337,5 +343,5 @@ case "$command" in
       exit 1
     fi
     ;;
-  *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback]" >&2; exit 64 ;;
+  *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback] [--proof-traffic]" >&2; exit 64 ;;
 esac
