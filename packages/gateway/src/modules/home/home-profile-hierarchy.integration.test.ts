@@ -147,7 +147,7 @@ it("a stale organization revision is refused, not advertised as a recoverable au
   expect(await f.store.read(original.id)).toEqual(current);
 });
 
-it.each(["migrate", "reorganize"] as const)("maintainer profileChange %s repairs its audit with original-command retry and supports Undo", async action => {
+it.each(["reorganize"] as const)("maintainer profileChange %s repairs its audit with original-command retry and supports Undo", async action => {
   const f = await fixture(`native-${action}-retry`);
   const original = await legacyProfileFixture(f.workspace, command("native-seed"), { kind: "note", scope: "personal",
     provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],

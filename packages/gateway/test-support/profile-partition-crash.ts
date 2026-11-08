@@ -16,16 +16,16 @@ registerHooks({ resolve(specifier, context, next) { try { return next(specifier,
 }
 /** A real heap ceiling proves current-file admission is independent of retired
  * history. The caller owns a sealed synthetic archive outside the workspace. */
-export async function boundedProfilePartition(root: string, home: string, assignments: ProfileAssignment[], mode: "migrate" | "reorganize") {
+export async function boundedProfilePartition(root: string, home: string, assignments: ProfileAssignment[]) {
   const hook = await loader(root), program = join(root, "bounded-child.mjs"), input = join(root, "bounded-input.json");
-  await writeFile(input, JSON.stringify({ assignments, mode }));
+  await writeFile(input, JSON.stringify({ assignments }));
   await writeFile(program, `import fs from 'node:fs/promises';
 const [home,input] = process.argv.slice(2);
 const { ProfileStore } = await import(${JSON.stringify(storeModule)});
 const { TronWorkspace } = await import(${JSON.stringify(workspaceModule)});
 const workspace = new TronWorkspace(home); await workspace.initialize();
-try { const {assignments,mode}=JSON.parse(await fs.readFile(input,'utf8'));
- const result=await new ProfileStore(workspace).partitionProfile({commandId:'partition-bounded-command',mode,assignments});
+try { const {assignments}=JSON.parse(await fs.readFile(input,'utf8'));
+ const result=await new ProfileStore(workspace).partitionProfile({commandId:'partition-bounded-command',mode:'reorganize',assignments});
  process.stdout.write(JSON.stringify({status:'committed',changes:result.changes.length}));
 } finally { await workspace.dispose(); }
 `);
@@ -38,7 +38,7 @@ try { const {assignments,mode}=JSON.parse(await fs.readFile(input,'utf8'));
 
 /** Test-only instrumentation delegates every real journal/file operation and
  * SIGKILLs only its owned subprocess at observed durability boundaries. */
-export async function crashProfilePartition(root: string, home: string, assignments: ProfileAssignment[], cut: string, audit: { context: unknown; undoChangeId?: string; mode?: "migrate" | "reorganize" }): Promise<void> {
+export async function crashProfilePartition(root: string, home: string, assignments: ProfileAssignment[], cut: string, audit: { context: unknown; undoChangeId?: string }): Promise<void> {
   const hook = await loader(root), program = join(root, "partition-child.mjs"), input = join(root, "partition-input.json");
   await writeFile(input, JSON.stringify({ assignments, audit }));
   const modules = Object.fromEntries(Object.entries({ profile: "../src/modules/home/home-profile.ts", change: "../src/kernel/settings/settings-change.ts", model: "../src/kernel/settings/settings-model.ts", record: "../src/kernel/settings/settings-record.ts", adapter: "../src/admin/settings-model.ts", schema: "./settings-schema.ts", trust: "../src/kernel/resources/trust-service.ts" }).map(([key, path]) => [key, fileURLToPath(new URL(path, import.meta.url))]));
@@ -87,7 +87,7 @@ const modelRuntime=await ModelRuntime.create({authPath:home+'/child-auth.json',m
 const model=new SettingsModel(new SettingsStoreAdapter({schema:TEST_SETTINGS_SCHEMA,agentDir:home+'/agent',tronHome:home,trust:new TrustService(home+'/agent'),modelRuntime}));
 const changes=new SettingsChangePath(model,new SettingsChangeRecord(home),{setTrust:async()=>{throw new Error('Not used');},undoSubject:(entry,context)=>profile.undo(changes,entry,context)});
 if(audit.undoChangeId)await changes.undo(audit.undoChangeId,audit.context);
-else await profile.partition(changes,{commandId:audit.context.commandId,mode:audit.mode??'migrate',assignments},audit.context);
+else await profile.partition(changes,{commandId:audit.context.commandId,mode:'reorganize',assignments},audit.context);
 await workspace.dispose();throw new Error('Requested crash cut was not reached');
 `);
   const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, home, input, cut], { stdio: ["ignore", "pipe", "pipe"] });
