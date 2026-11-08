@@ -1,0 +1,7 @@
+{
+  "layer": "L5",
+  "purpose": "Pinned Dafny proof toolchain: digest-verified user-local install and its doctor check.",
+  "owns": [
+    "**"
+  ]
+}
