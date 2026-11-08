@@ -322,11 +322,7 @@ const globalProviderResources = await GlobalProviderResources.create({
   broadcast: () => transport?.broadcast("providers.changed", {}),
 });
 startupCheckpoint("global-provider-resources");
-const connections = new ConnectionOwner(config.tronHome, undefined, (instanceIds) => logger.log(
-  "info",
-  "Retired unsupported legacy Jev connection instances",
-  { event: "connection.legacy-jev-retired", source: "connections", instanceIds },
-));
+const connections = new ConnectionOwner(config.tronHome);
 
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
