@@ -25,9 +25,9 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  * chapter the Home ledger records as sealed is never rewritten: Home memory pins
  * its exact bytes and blocks on any change (`episodic/home-source.ts`). It
  * refuses a configured `sessionDir`, an unsupported Home ledger and an
- * uncommitted Profile organization. The
- * shared Changes record is append-only history and is not rewritten. Delete this
- * module with the retired readers once the live run is verified.
+ * uncommitted Profile organization. The shared Changes record is append-only
+ * history and is not rewritten. This module goes with the retired readers once
+ * #2329 decides how sealed Home chapters that keep retired names are read.
  */
 
 const PROFILE_FILE = "workspace/files/Profile.json";
