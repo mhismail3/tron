@@ -55,6 +55,9 @@ export function readLaws(text) {
     if (!f) throw new UsageError(`cannot read signature: ${text.slice(0, 80)}`);
     if (f[3]) throw new UsageError(`${f[2]}: generic functions are not supported by the façade`);
     const params = splitTop(f[4], ",").map(param);
+    // The generated wrapper's own names; a parameter with one of them would shadow it.
+    const taken = params.find((p) => ["M", "BigNumber", "require", "int", "nat", "bool", "num", "natNum", "bad", "unknown"].includes(p.name));
+    if (taken) throw new UsageError(`${f[2]}: parameter name ${taken.name} is reserved by the façade`);
     // Preconditions the façade checks before calling: each must be a call of a compiled predicate on parameters.
     const spec = f[6].split("{")[0];
     const requires = [...spec.matchAll(/\brequires\b([\s\S]*?)(?=\brequires\b|\bensures\b|\bdecreases\b|\breads\b|$)/g)].map((r) => r[1].trim());
@@ -63,7 +66,8 @@ export function readLaws(text) {
       if (!c) throw new UsageError(`${f[2]}: precondition '${clause}' cannot be checked by the façade`);
       return { predicate: c[1], args: splitTop(c[2], ",") };
     });
-    functions.push({ name: f[2], params, returns: f[1] === "predicate" ? "bool" : f[5], checks });
+    const unique = checks.filter((c, i) => checks.findIndex((d) => d.predicate === c.predicate && d.args.join() === c.args.join()) === i);
+    functions.push({ name: f[2], params, returns: f[1] === "predicate" ? "bool" : f[5], checks: unique });
   });
   for (const fn of functions) for (const c of fn.checks) {
     if (!functions.some((g) => g.name === c.predicate && g.returns === "bool")) throw new UsageError(`${fn.name}: precondition ${c.predicate} is not a compiled predicate of the laws`);
