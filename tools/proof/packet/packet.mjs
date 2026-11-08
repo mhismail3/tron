@@ -129,7 +129,12 @@ function packet(root, block, opts = {}) {
   // whole shadow comparison; READY requires both to reproduce.
   let mutRecheck = null, shadowRecheck = null;
   if (opts.recheck && ms && mutFresh) { const r = sh([process.execPath, join(REPO, "tools/proof/mutate/mutate.mjs"), block, "--root", root, "--recheck", join(root, cfg.report), "--sample", "12", "--jobs", "2"], REPO); try { mutRecheck = JSON.parse(r.out.trim().split("\n").pop()); } catch { mutRecheck = { recheck: "error", why: r.out.slice(-200) }; } }
-  if (opts.recheck && cfg.shadow) { const tmp = join(tmpdir(), `shadow-recheck-${process.pid}.json`); sh([process.execPath, join(REPO, "tools/proof/shadow/shadow.mjs"), block, "--root", root, "--out", tmp], REPO); shadowRecheck = readJson(tmp); rmSync(tmp, { force: true }); }
+  // A recorded-traffic shadow is re-run over the same window of the (growing) corpus; a generated one exactly.
+  if (opts.recheck && cfg.shadow && shadow) {
+    const tmp = join(tmpdir(), `shadow-recheck-${process.pid}.json`);
+    sh([process.execPath, join(REPO, "tools/proof/shadow/shadow.mjs"), block, "--root", root, "--out", tmp, ...(shadow.realTraffic ? ["--days", String(shadow.windowDays)] : [])], REPO);
+    shadowRecheck = readJson(tmp); rmSync(tmp, { force: true });
+  }
   // The report must come from the current checker (a semantics change re-runs every block).
   const toolNow = toolHash();
   const toolFresh = ms?.toolHash === toolNow;
@@ -149,7 +154,8 @@ function packet(root, block, opts = {}) {
     } finally { rmSync(work, { recursive: true, force: true }); }
   }
   const shadowOk = shadow?.status === "match" && shadow.compared > 0 && shadow.mismatches === 0 && shadowFresh && shadow.coreJsHash === coreHashNow
-    && (!opts.recheck || (shadowRecheck?.status === "match" && shadowRecheck.compared === shadow.compared && shadowRecheck.realTraffic === shadow.realTraffic));
+    && (!opts.recheck || (shadowRecheck?.status === "match" && shadowRecheck.realTraffic === shadow.realTraffic
+      && (shadow.realTraffic ? shadowRecheck.compared >= shadow.compared : shadowRecheck.compared === shadow.compared)));
   const realOk = shadowOk && shadow.realTraffic === true && shadow.windowDays >= windowNeed;
   const ready = opts.recheck === true && verify.ok === true && reviewOk && mutOk && realOk;
 

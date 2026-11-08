@@ -12,14 +12,14 @@
   "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 286,
+  "seconds": 300,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.042,
   "filter": null,
   "generated": 118,
   "pass": true,
-  "inputsHash": "88ecabd339a63d34"
+  "inputsHash": "edee583831e67e12"
  },
  "perLaw": [
   {
