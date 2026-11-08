@@ -17,6 +17,7 @@ behaviour across modules, so they belong to no single module.
   tailnet host and runs only through `npm run test:mac-terminal`. `verify --changed` runs a
   journey when the journey itself changes, or when a changed module's manifest declares it
   as that module's verification; a module with no test of its own declares the tests that
-  prove it that way. A module's own tests stay in the module; scenario locks
-  (`*.lock.integration.test.ts`) and their goldens stay with their owner.
+  prove it that way. A module's own tests stay in the module. Scenario locks live here at
+  `src/e2e/<path>`; store locks (`*.store.lock.integration.test.ts`) stay with their store's
+  owner.
 - **Running one.** `scripts/tron test gateway src/e2e/<path>.test.ts`.

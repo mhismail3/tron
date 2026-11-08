@@ -10,6 +10,6 @@
     "gateway/pi"
   ],
   "verify": [
-    "scripts/tron test gateway src/sessions/run.lock.integration.test.ts src/sessions/session-entries.lock.integration.test.ts src/modules/home/home-wake-inbox.integration.test.ts"
+    "scripts/tron test gateway src/e2e/sessions/run.lock.integration.test.ts src/sessions/session-entries.lock.integration.test.ts src/modules/home/home-wake-inbox.integration.test.ts"
   ]
 }
