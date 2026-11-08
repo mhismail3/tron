@@ -188,6 +188,18 @@ it("leaves every retained settings entry, sealed Home chapters included, readabl
   expect(await settingsEntries()).toHaveLength(retained);
 });
 
+it("cuts the torn re-seal record an interrupted append left", async () => {
+  const f = await fixture();
+  const h = await homeChapters(f);
+  // Longer than any record, so only cutting it leaves a ledger of complete lines.
+  const torn = '{"version":1,"sessionId":"chapter-1","path":"agent/sessions/--home--/sealed.jsonl","at":"2026-' + "x".repeat(4_096);
+  await writeFile(h.ledger, torn, { mode: 0o600 });
+  expect(await applyRetiredFormatMigration(f.home, join(f.root, "backup"), await planRetiredFormatMigration(f.home, 600))).toMatchObject({ failed: [] });
+  const text = await readFile(h.ledger, "utf8");
+  expect(text.endsWith("\n")).toBe(true);
+  expect(await reseals(h.ledger)).toEqual([expect.objectContaining({ sessionId: "chapter-1", after: { sha256: sha256(await readFile(h.sealed)), size: (await readFile(h.sealed)).length } })]);
+});
+
 it.each(["before its re-seal record is appended", "after its re-seal record is appended"] as const)(
   "leaves a sealed chapter whole when killed %s; a rerun completes it once and a restore undoes it bit-identically", async point => {
   const f = await fixture();

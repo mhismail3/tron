@@ -215,8 +215,11 @@ async function planSession(path: string, settleBefore: number, sealedHome: Reado
     lines[index] = current.line; entries += 1; values.push(...current.values);
   }
   if (!entries) return;
-  const sessionId = (JSON.parse(lines[0]!) as { id?: unknown }).id;
-  // A sealed chapter is never written by the Gateway, so it is not deferred.
+  // A chapter is named by its session header on line 0, so every recorded value
+  // of a re-seal sits on a later line. A sealed chapter is never written by the
+  // Gateway, so it is not deferred.
+  const header = JSON.parse(lines[0]!) as { type?: unknown; id?: unknown };
+  const sessionId = header.type === "session" ? header.id : undefined;
   const sealed = typeof sessionId === "string" && sealedHome.has(sessionId);
   if (!sealed && info.mtimeMs > settleBefore) { plan.sessions.deferred.push(path); return; }
   plan.sessions.files += 1; plan.sessions.entries += entries; plan.sessions.values += values.length;
