@@ -1,0 +1,76 @@
+{
+ "block": "fixture/mutate-demo",
+ "tier": "high-stakes",
+ "impl": "Core.dfy",
+ "symbols": [
+  "Wf",
+  "Next",
+  "First",
+  "Classify"
+ ],
+ "verify": [
+  "Laws.dfy"
+ ],
+ "laws": {
+  "L1 next-sound": [
+   "Laws.L1NextSound"
+  ],
+  "L2 next-minimal": [
+   "Laws.L2NextMinimal"
+  ],
+  "L3 next-none": [
+   "Laws.L3NextNone"
+  ],
+  "L4 first-interval": [
+   "Laws.L4FirstInterval"
+  ],
+  "L5 classify-not-due": [
+   "Laws.L5ClassifyNotDue"
+  ],
+  "L6 classify-due": [
+   "Laws.L6ClassifyDue",
+   "Laws.L6IntervalLatest",
+   "Laws.L6IntervalNext",
+   "Laws.NoOccBetween"
+  ],
+  "L7 first-once": [
+   "Laws.L7FirstOnce"
+  ],
+  "L8 first-every-ms": [
+   "Laws.L8FirstEveryMs"
+  ]
+ },
+ "translate": "Core.dfy",
+ "oracles": [],
+ "accepted": {},
+ "report": "tools/proof/tests/fixtures/mutate-demo/report.json",
+ "shadow": null,
+ "tierReason": "decides when automation runs dispatch or skip (feeds the automation-run lifecycle); \"when unsure, high-stakes\"",
+ "kinds": {
+  "safety": [
+   "L1 next-sound",
+   "L2 next-minimal"
+  ],
+  "progress": "n/a: pure functions, no workflow",
+  "recovery": "n/a: stateless; the scheduler's restart behaviour is the automation-run lifecycle block (P4)",
+  "stale-inputs": [
+   "L5 classify-not-due"
+  ],
+  "exact-results": [
+   "L3 next-none",
+   "L4 first-interval",
+   "L6 classify-due",
+   "L7 first-once",
+   "L8 first-every-ms"
+  ],
+  "uncertain-outcomes": "n/a: no effects"
+ },
+ "helpers": [
+  "OccInterval",
+  "DivMod",
+  "MulNonNeg",
+  "MulLeMono",
+  "DivNonNeg",
+  "ShiftDiv"
+ ]
+}
