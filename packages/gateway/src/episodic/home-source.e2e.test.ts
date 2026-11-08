@@ -188,9 +188,10 @@ it("does not reopen sealed raw history during delta ingestion", async () => {
   expect(reads.filter(path => path === fx.chapters[0]!.path)).toHaveLength(0);
 });
 
-it.each(["changed", "missing"])("blocks %s sealed evidence without changing prior projected facts", async mode => {
+it.each(["changed", "grown", "missing"])("blocks %s sealed evidence without changing prior projected facts", async mode => {
   const fx = await fixture(); const memory = await fx.open(); await memory.entriesCommitted("home");
   if (mode === "missing") await rm(fx.chapters[0]!.path);
+  else if (mode === "grown") await appendFile(fx.chapters[0]!.path, entry("late", "b", "late sealed orange fact"));
   else { const text = await readFile(fx.chapters[0]!.path, "utf8"); await writeFile(fx.chapters[0]!.path, text.replace("violet", "orange")); }
   await memory.entriesCommitted("home");
   expect(memory.status().blocked?.reason).toBe("source-unavailable");
