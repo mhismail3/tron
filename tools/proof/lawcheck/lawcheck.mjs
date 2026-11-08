@@ -5,8 +5,9 @@
 // A block is a directory under <root>/blocks holding block.json:
 //   {"interface": [laws files], "impl": [definition and proof files], "deps": [block names]}
 // Paths are relative to <root>; the block's name is its directory relative to <root>/blocks.
-// A dependent may use ONLY its deps' interfaces (Dafny abstract-module refinement), and every
-// `include` must name the block's own files or a transitive dep's interface file. Therefore
+// A dependent may use ONLY its deps' interfaces (Dafny abstract-module refinement). Impl files include only
+// the block's own files and its transitive deps' interface files; interface files include only interface
+// files (dependents follow them). Therefore
 //   key(block) = H(toolchain pin, this checker, own files, interfaces of every transitive dep)
 // so an impl/proof edit re-checks that block alone and a law edit re-checks it and every block above it.
 // Passing keys are cached per worktree (<git dir>/proof/lawcheck-cache.json unless --cache).
@@ -109,7 +110,11 @@ function checkIncludes(root, blocks, b) {
   const all = new Set([...laws, ...b.impl.map((f) => resolve(root, f))]);
   for (const [files, visible, what] of [[b.interface, laws, "an interface file of this block or a dep"], [b.impl, all, "its own file nor a dep's interface"]]) {
     for (const f of files.map((x) => resolve(root, x))) {
-      for (const m of code(readFileSync(f, "utf8")).matchAll(/\binclude\s*"([^"]+)"/g)) {
+      const text = code(readFileSync(f, "utf8"));
+      const found = [...text.matchAll(/\binclude\s*@?"([^"]+)"/g)];
+      // Fail closed: every `include` token must be one this check understood.
+      if (found.length !== [...text.matchAll(/\binclude\b/g)].length) throw new UsageError(`${b.name}: ${relative(root, f)} has an include this check cannot read`);
+      for (const m of found) {
         if (!visible.has(resolve(dirname(f), m[1]))) throw new UsageError(`${b.name}: ${relative(root, f)} includes ${m[1]}, which is neither ${what}`);
       }
     }
@@ -165,10 +170,11 @@ function main(argv) {
       cwd: args.root, encoding: "utf8", timeout: 900_000, env: { ...process.env, DAFNY_CORES: "1" },
     });
     const seconds = +((performance.now() - started) / 1000).toFixed(2);
-    if (run.error) throw new UsageError(`${n}: could not run the pinned dafny: ${run.error.message}`);
+    if (run.error && run.error.code !== "ETIMEDOUT") throw new UsageError(`${n}: could not run the pinned dafny: ${run.error.message}`);
     const summary = (run.stdout.match(/Dafny program verifier finished[^\n]*/) ?? [""])[0];
     if (run.status !== 0) {
-      report.push({ block: n, status: "FAIL", seconds, output: `${run.stdout}${run.stderr}`.trim().slice(-4000) });
+      const timedOut = run.error ? `timed out after ${seconds}s\n` : "";
+      report.push({ block: n, status: "FAIL", seconds, output: `${timedOut}${run.stdout}${run.stderr}`.trim().slice(-4000) });
       ok = false;
       break;
     }
