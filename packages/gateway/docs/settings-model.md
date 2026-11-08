@@ -5,7 +5,7 @@ An index. The settings model is documented in:
 - [gateway/admin README](../src/admin/README.md): owners, entry points,
   invariants, signals and verification.
 - [Settings contract](settings-contract.md): foundations, layers, the generated
-  key table, timing, change path, native review, outside changes, project writes, the
+  key table, timing, change path, native review, outside changes, the read-only Project layer, the
   Home profile and presentation.
 
 The headings below keep this doc's section numbers and anchors resolving.
