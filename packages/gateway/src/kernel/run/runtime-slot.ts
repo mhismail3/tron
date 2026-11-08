@@ -2602,6 +2602,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   public persistVerifiedCustomEntry(options: {
+    /** The manager the entry is appended through; its file is the one probed. */
+    manager: SessionManager;
     describe: string;
     existing: () => "absent" | "matching" | "contradictory";
     append: () => void;
@@ -2617,13 +2619,13 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     // file's only writer: an unchanged length proves the failed append wrote
     // nothing, so the bounded retry may append it. Anything else may hold the
     // record and a retry could duplicate it, so fail closed as an unknown outcome.
-    const before = sessionFileLength(this.sessionManager.getSessionFile());
+    const before = sessionFileLength(options.manager.getSessionFile());
     try {
       options.append();
     } catch (error) {
       if (this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).isPreAppendRefusal(error)) throw error;
       if (options.existing() !== "matching" && before !== undefined
-        && before === sessionFileLength(this.sessionManager.getSessionFile())) throw error;
+        && before === sessionFileLength(options.manager.getSessionFile())) throw error;
       throw asUncertainOutcome(error, `The ${options.describe} could not be proven persisted; refresh session state before retrying`);
     }
   }
@@ -2640,6 +2642,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return this.runPersistence.trackOwnershipWrite(
       () => this.runPersistence.retryDurableWrite(`canonical:${customType}:${identity}`, async () => {
         this.persistVerifiedCustomEntry({
+          manager,
           describe: "canonical receipt",
           existing: () => {
             const entry = manager.getBranch().find((candidate) => {
