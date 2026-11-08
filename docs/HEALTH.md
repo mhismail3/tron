@@ -50,7 +50,7 @@ attribution (±10%). As a target it rewards merging or dropping capabilities and
 | SWE-Bench Pro, arXiv 2509.16941 | Reference fixes span 4.1 files; resolve rate falls sharply with file count | Medium; supports D3, which Tron's data only partly confirms |
 | "Evaluating AGENTS.md" (ETH), arXiv 2602.11988 | Context files do not raise task success and add over 20% cost; only non-standard practices help | High for D6: rules and docs are not navigability |
 | Wang, Pradel, Liu, arXiv 2503.15223 | 7.8% of "passing" patches fail the developer tests; 29.6% behave differently | High for O4: a green that a weak oracle gives is not a fix |
-| Google Testing Blog, "Flaky tests at Google", 2016 | 84% of pass→fail transitions involve a flaky test; 16% of tests are somewhat flaky | High for O4; Tron: at least 14% of red issues led to a product fix |
+| Google Testing Blog, "Flaky tests at Google", 2016 | 84% of pass→fail transitions involve a flaky test; 16% of tests are somewhat flaky | High for O4; Tron: about 11% of red issues led to a product fix |
 | Inozemtseva & Holmes, ICSE 2014; Just et al., FSE 2014 | Coverage barely predicts suite effectiveness; mutant detection tracks real-fault detection | High for D5: count mutation kills, not test lines |
 | DORA (dora.dev metrics, 2024 five-metric model) | Lead time, deploy frequency, recovery time, change-fail rate, rework rate | High: O1, O3, O4 are its one-maintainer analogues |
 
@@ -94,8 +94,8 @@ Replaced, never appended, at each re-score. Oct 20 (`4c046a814`) in brackets whe
   sampling error.
 - O3: bug opened → closed p50 2.2 h, p90 53 h [3.2 h, 117 h]; landed → Mac deploy p50 11 h, p90 40 h
   [8 h, 42 h]; 11 of 56 deploys failed or rolled back [13 of 62]; the week of Nov 2 had 0 of 6.
-- O4: of 129 red or flake issues opened, a commit naming the issue changed production code for 14.7%,
-  only tests or tooling for 20.9%, and 64.3% have no naming commit. Batch: 1 of 15 runs green; the green head
+- O4: of 105 red or flake issues opened, a commit naming the issue changed production code for 11.4%,
+  only non-production paths for 20%, and 68.6% have no naming commit. Batch: 1 of 15 runs green; the green head
   (`efa0efe43`) went red on both repeats; no batch has run since Nov 4. 50% of landed issue merges
   had their issue named again later, 22% by a fix.
 - Diagnostics: file score 5.75 [4.87]; fix share 15.0% [17.7%]; reverts 5 [12]; fix commits on

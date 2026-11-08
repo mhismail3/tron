@@ -34,8 +34,8 @@ SCORED = metrics.HAND_WRITTEN + metrics.SEPARATE
 FIX = re.compile(r"\bfix(e[sd])?\b|^revert\b", re.IGNORECASE)
 ISSUE_REF = re.compile(r"#(\d{3,5})")
 # An issue about a red verdict rather than a feature (docs/HEALTH.md O4).
-RED = re.compile(r"\bred\b|flak|fails? on (main|base)|timed? ?out|timeout|under load|load-sensitive|intermittent|"
-                 r"nondetermin|spurious|stall", re.IGNORECASE)
+RED = re.compile(r"\bred\b|\bflak|\bfails? on (main|base)\b|\btimed? ?out\b|\btimeouts?\b|\bunder load\b|"
+                 r"\bload-sensitive\b|\bintermittent|\bnondetermin|\bspurious|\bstall(s|ed)?\b", re.IGNORECASE)
 BROAD = 40  # a commit touching more files is a sweep; it says nothing about coupling
 HASH_PIN = re.compile(rb"\b[0-9a-f]{64}\b|promptHash")
 # A maintainer message that asks for status instead of deciding something (docs/HEALTH.md O2).
@@ -214,12 +214,12 @@ def github_outcomes(head: dict) -> list[str]:
             named[int(n)].update(c["paths"])
     reds = [i for i in issues if RED.search(i["title"])]
     causes = Counter("product" if any(metrics.classify(p, "100644", b"") == "production" for p in named[i["number"]])
-                     else "test or tooling" if named[i["number"]] else "no commit" for i in reds)
+                     else "no production change" if named[i["number"]] else "no commit" for i in reds)
     out = [f"  O1 kind:bug issues opened: {len(bugs)} ({ratio(len(bugs), head['landed'])} per landed change); "
            f"closed not planned {sum(b['stateReason'] == 'NOT_PLANNED' for b in bugs)}",
            f"  O3 bug opened -> closed completed, hours p50 / p90: {pct(hours, 50)} / {pct(hours, 90)} (n={len(hours)})",
            f"  O4 red or flake issues opened: {len(reds)}; a commit naming it changed production code "
-           f"{ratio(causes['product'], len(reds))}, only tests or tooling {ratio(causes['test or tooling'], len(reds))}, "
+           f"{ratio(causes['product'], len(reds))}, only non-production paths {ratio(causes['no production change'], len(reds))}, "
            f"no naming commit {ratio(causes['no commit'], len(reds))}"]
     return out + ([f"  warning: a weekly GitHub query hit the {limit}-issue limit; counts are truncated"] if truncated else [])
 

@@ -404,6 +404,31 @@ class HealthTests(RepoCase):
         self.assertFalse((self.repo.path / "test-results").exists())
         self.assertEqual(self.repo.git("status", "--porcelain"), "")
 
+    def test_github_outcomes_classify_red_issues_by_the_commits_that_name_them(self) -> None:
+        r, bin_dir = self.repo, Path(self.temp.name) / "bin"
+        r.write("mods/a/core.ts", lines(5))
+        r.commit("fix: timeout root cause (#901)", T0 + 9 * DAY)
+        r.write("mods/a/core.test.ts", lines(5))
+        r.commit("test: settle the flake (#902)", T0 + 9 * DAY + 60)
+        issue = lambda n, title, labels: {"number": n, "title": title, "labels": [{"name": l} for l in labels],  # noqa: E731
+                                          "createdAt": "2023-11-20T00:00:00Z", "closedAt": "2023-11-20T02:00:00Z",
+                                          "stateReason": "COMPLETED"}
+        issues = [issue(901, "Gateway lane timeout under load", ["kind:bug"]), issue(902, "iOS flake: sheet tap", []),
+                  issue(903, "Red on main: chapter row", []), issue(904, "Installer fails on install step", ["kind:bug"])]
+        bin_dir.mkdir()
+        (bin_dir / "gh").write_text("#!/usr/bin/env python3\nimport sys\nprint(" + repr(json.dumps(issues))
+                                     + " if '2023-11-1' in ' '.join(sys.argv) else '[]')\n")
+        (bin_dir / "gh").chmod(0o755)
+        result = subprocess.run([str(r.path / "scripts/tron"), "health", "--baseline", "HEAD", "--github"], cwd=r.path,
+                                env={**r.env, "PATH": f"{bin_dir}:{r.env['PATH']}"}, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # "install" is not a stall: three reds, one fixed in production, one only in tests, one never named.
+        self.assertIn("O4 red or flake issues opened: 3; a commit naming it changed production code 0.333, "
+                      "only non-production paths 0.333, no naming commit 0.333", result.stdout)
+        self.assertIn("O1 kind:bug issues opened: 2", result.stdout)
+        self.assertIn("O3 bug opened -> closed completed, hours p50 / p90: 2.0 / 2.0 (n=2)", result.stdout)
+
     def test_unreadable_input_exits_2_without_a_traceback(self) -> None:
         result = self.health("--deploy-log", str(Path(self.temp.name) / "missing.jsonl"))
         self.assertEqual(result.returncode, 2)
