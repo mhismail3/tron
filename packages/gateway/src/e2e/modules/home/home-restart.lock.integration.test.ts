@@ -1371,7 +1371,7 @@ const EXPECTED: unknown = {
             "spend": {
               "cacheReadTokens": 0,
               "cacheWriteTokens": "<size>",
-              "inputTokens": "<size>",
+              "inputTokens": 0,
               "outputTokens": "<size>",
               "sourceDigest": "<base64:64>"
             },
@@ -2649,7 +2649,7 @@ const EXPECTED: unknown = {
       "spend": {
         "cacheReadTokens": 0,
         "cacheWriteTokens": "<size>",
-        "inputTokens": "<size>",
+        "inputTokens": 0,
         "outputTokens": "<size>",
         "sourceDigest": "<base64:64>"
       },

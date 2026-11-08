@@ -184,7 +184,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     expect(offered).toEqual(["openai/gpt-5.5", "openai/gpt-5.6-sol"]);
     expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-5.5")?.name).toBe("GPT 5.5");
     expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-6-luna")?.available).toBe(false);
-    expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-realtime-2.1")?.available).toBe(false);
+    expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-5.6-luna")?.available).toBe(false);
     expect(server.requests.at(-1)?.authorization).toBe("Bearer safe-test-token");
     expect(upstreamUrls.every(raw => {
       const url = new URL(raw);
