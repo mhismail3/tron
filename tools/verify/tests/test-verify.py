@@ -236,6 +236,12 @@ class ExternalVerificationTests(VerifyCase):
         groups = json.loads(planned.stdout[planned.stdout.index("{"):])["groups"]
         for group, path in zip(("gateway", "gateway-nested", "mac", "node-gateway"), files):
             self.assertEqual(groups[group], [f"packages/gateway/{path}"])
+        # --gateway-host picks the lanes' runner: the same gateway.py here, or mini.py running it on the mini.
+        for host, runner in (("mini", "mini.py"), ("local", "gateway.py")):
+            planned = r.verify("--module", "repo/alpha", "--plan", "--gateway-host", host)
+            commands = json.loads(planned.stdout[planned.stdout.index("{"):])["commands"]
+            self.assertEqual({c["name"]: Path(c["command"][1]).name for c in commands if c["name"].startswith("tests: gateway")},
+                             {"tests: gateway": runner, "tests: gateway-nested": runner})
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")
         refused = r.verify("--module", "repo/alpha", "--plan")

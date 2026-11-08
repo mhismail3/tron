@@ -217,6 +217,8 @@ def remote_main(job: dict) -> int:
             result = run(*command)
             if result.returncode:
                 return refuse(f'{shlex.join(command)} failed: {(result.stdout + result.stderr).strip()}')
+        # The lane's own paths are resolved (its ROOT); rewriting must match them, symlinked homes included.
+        checkout = checkout.resolve()
         head = run('git', '-C', str(checkout), 'rev-parse', 'HEAD').stdout.strip()
         dirty = run('git', '-C', str(checkout), 'status', '--porcelain', '--untracked-files=normal').stdout.strip()
         if head != sha or dirty:
@@ -257,6 +259,7 @@ def remote_main(job: dict) -> int:
                             cwd=checkout, stream=True)
             if installed.returncode:
                 return refuse(f'npm ci failed (exit {installed.returncode})')
+            stamp.parent.mkdir(exist_ok=True)  # npm creates no node_modules for a manifest without dependencies
             stamp.write_text(install)
         say(f'prepared in {time.time() - prepared:.1f}s; running the lane, load {os.getloadavg()[0]:.1f}')
         if cancelled.is_set():
