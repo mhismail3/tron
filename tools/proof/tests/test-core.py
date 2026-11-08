@@ -9,6 +9,7 @@ For every block with a mutate.json, with the pinned toolchain and the repository
    match and not STALE, REVIEW.json for the current block hash with every law ACCEPT.
 3. `scripts/tron proof facade <block> --check`: the checked-in compiled core and façade in
    packages/core/dist/<block> are exactly what the current sources generate.
+4. `scripts/tron proof shadow <block>` still matches today's shipped TypeScript.
 
 So an edit to a block that does not re-run its mutation check, shadow and review, or regenerate its
 packet, fails here. The review row is verified against the reviewer's transcript in this machine's Pi
@@ -62,6 +63,13 @@ class CoreBlocksTest(unittest.TestCase):
                 self.assertEqual({law: review["laws"].get(law, {}).get("verdict") for law in laws}, {law: "ACCEPT" for law in laws})
                 facade = tron("facade", block, "--check")
                 self.assertEqual(facade.returncode, 0, facade.stdout + facade.stderr)
+                # The shadow comparison still runs against today's shipped TypeScript (a change there, such as a
+                # new import, must not break the block's oracle).
+                with tempfile.TemporaryDirectory(prefix="tron-proof-shadow.") as tmp:
+                    out = Path(tmp) / "SHADOW.json"
+                    shadow = tron("shadow", block, "--out", str(out))
+                    self.assertEqual(shadow.returncode, 0, shadow.stderr)
+                    self.assertEqual(json.loads(out.read_text())["status"], "match")
 
 
 if __name__ == "__main__":

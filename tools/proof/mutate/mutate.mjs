@@ -231,8 +231,8 @@ process.on("exit", killAll);
 async function sh(cmd, opts) {
   const p = run(cmd[0], cmd.slice(1), { maxBuffer: 1 << 26, timeout: 600_000, killSignal: "SIGKILL", detached: true, ...opts });
   children.add(p.child.pid);
-  try { const r = await p; return { code: 0, out: r.stdout + r.stderr }; }
-  catch (e) { return { code: e.code ?? 1, out: (e.stdout ?? "") + (e.stderr ?? "") + (e.killed ? "\n[killed: timeout]" : "") }; }
+  try { const r = await p; return { code: 0, out: r.stdout + r.stderr, stdout: r.stdout }; }
+  catch (e) { return { code: e.code ?? 1, out: (e.stdout ?? "") + (e.stderr ?? "") + (e.killed ? "\n[killed: timeout]" : ""), stdout: e.stdout ?? "" }; }
   finally { try { process.kill(-p.child.pid, "SIGKILL"); } catch {} children.delete(p.child.pid); }
 }
 function lawOf(symbol) {
@@ -281,7 +281,8 @@ async function oracles(dir, work) {
     const e = { ...env }; for (const [k, v] of Object.entries(o.env ?? {})) e[k] = fill(v, vars);
     const r = await sh(o.cmd.map((c) => fill(c, vars)), { cwd: REPO, env: e });
     let ok = r.code === 0;
-    if (ok && o.jsonEq) { try { const j = JSON.parse(r.out.slice(r.out.indexOf("{"))); ok = j[o.jsonEq[0]] === j[o.jsonEq[1]]; } catch { ok = false; } }
+    // An oracle's verdict is its stdout JSON; stderr (warnings) is diagnostics only.
+    if (ok && o.jsonEq) { try { const j = JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))); ok = j[o.jsonEq[0]] === j[o.jsonEq[1]]; } catch { ok = false; } }
     if (!ok) failed.push(o.name);
   }
   return { compiled: true, failed };

@@ -76,6 +76,16 @@
     ],
     "source": "compiled core vs packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic)"
   },
+  "replay": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/schedule-occurrence.mjs",
+      "{core}",
+      "--replay",
+      "{corpus}"
+    ],
+    "source": "compiled core vs the schedule seams' recorded Debug-Gateway calls (packages/gateway/src/automations/schedule.ts)"
+  },
   "kinds": {
     "safety": [
       "L1 next-sound",

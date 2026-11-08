@@ -11,7 +11,7 @@ scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--no-oracle] [--
                           [--config <mutate.json>] [--only <id>] [--list] [--equiv <id>] [--recheck <report.json> [--sample N]]
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
-scripts/tron proof shadow <block> [--root <dir>] [--out <file>]
+scripts/tron proof shadow <block> [--root <dir>] [--out <file>] [--days N [--corpus <dir>]]
 scripts/tron proof facade <block> [--check]
 scripts/tron proof wire --inventory [--json] [--numbers float64|integer]
 scripts/tron proof wire --generate <in.dfy> <out-dir>
@@ -144,14 +144,25 @@ calls are not seams.
 temporary directory and runs `mutate.json` `shadow.cmd` with `{core}` set to the compiled `core.js`; it writes
 `blocks/<block>/SHADOW.json` `{status: match|mismatch|error, compared, mismatches, firstMismatch, source,
 realTraffic, windowDays, inputsHash, coreJsHash, command, date}`, deleting the old file first, so a failed run
-never leaves a stale match. The command must exit 0 with every request agreeing or 1 with mismatches; a crash,
+never leaves a stale match.
+With `--days N` it replays recorded Debug traffic instead: the newest N day files of
+`~/.tron-dev/gateway/proof-traffic/<block>/` (read only; `--corpus` names another directory) go to
+`mutate.json` `replay.cmd` (`{corpus}` expands to the files), and the result is `realTraffic: true`,
+`windowDays` = the non-empty day files with a real date replayed (gaps allowed; a file is a day), and `corpus: {first, last, hash}` (dates and a digest, no paths). No
+recorded traffic is an error. The packet's `--recheck` re-runs a recorded shadow over the same number of days
+and requires a match on at least as many calls; a real-traffic shadow counts for cut-over only while its
+newest recorded day is at most three days old. The oracle refuses (exit 2) any record the recorder would
+not write: another schema, block or seam, a missing `output`, an `at` off the file's day, or an input or
+output of the wrong shape. The command must exit 0 with every request agreeing or 1 with mismatches; a crash,
 a signal, unparsable output, nothing compared, or an exit status that contradicts the counts is `error`. Generated-input comparisons are `realTraffic: false`. The packet re-compiles the
 core to check `coreJsHash`, and `--recheck` re-runs the shadow.
 
 `oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
-inputs and print `{requests, agree, diffs}` (exit 0 iff all agree); a block's `mutate.json` uses its oracle
+inputs, or with `--replay <files>` on recorded calls (the recorded TypeScript output is the expectation), and
+print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a record it cannot read); a block's `mutate.json` uses its oracle
 both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
-imports `packages/gateway/src/automations/schedule.ts` directly (Node strips its types) and calls the core
+imports `packages/gateway/src/automations/schedule.ts` through `oracles/gateway-source.mjs` (module hooks
+that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript transform) and calls the core
 through the block's generated façade. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
@@ -259,3 +270,8 @@ retention hold.
 full, an opaque function; no ghost or commented-out one), round trips values, refuses unknown constructors,
 non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
 either file; and `function method`, an uncheckable precondition and an unsupported type are refused.
+
+`scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format
+calls of the shipped schedule functions through the real block: two faithful days are a real-traffic match
+over two days, a recorded output nudged by 1 ms is a mismatch naming that record, `--days 1` replays only the
+newest day, and a malformed line, a foreign record or an empty corpus is an error.
