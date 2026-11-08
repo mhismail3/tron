@@ -4,15 +4,10 @@ import { expect } from "vitest";
 import { withoutSharedToolSchemas } from "./scenario-lock.js";
 
 /**
- * A behavior lock's inline expectation (#2279). The lock builds the same trace the
- * harness normalizes (`scenario-lock.ts`: per-run identities, times and token
- * counts become `<id>`, `<timestamp>`, `<value>`) and compares it exactly with its
- * expectation, so a changed response, transcript row, canonical entry, receipt,
- * provider conversation or observed state fails it. Two parts have one owner each
- * and are checked here by reference: client event schemas (`client-event-schemas`)
- * leave the trace, and each provider request's tools, prompt sections and prompt
- * hash, and each system entry's prompt sections and tools, must equal a session
- * shape in `session-shapes`, named in the expectation as `{ sessionShape }`.
+ * Session-shape references for behavior locks (#2279). Each provider request's
+ * tools, prompt sections and prompt hash, and each system entry's prompt sections
+ * and tools, must equal a session shape in `session-shapes`; a lock asserts the
+ * ordered shape names instead of repeating those model-visible parts.
  */
 
 interface SessionShape {
@@ -46,28 +41,6 @@ function systemShape(message: { sections: Record<string, unknown>; toolsAdded?: 
   return undefined;
 }
 
-/** The trace with its model-visible parts replaced by the session shape each one equals (unmatched parts stay, and fail). */
-export function shapeReferenced(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(shapeReferenced);
-  if (value === null || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  if (typeof record.promptHash === "string" && Array.isArray(record.tools) && Array.isArray(record.promptSections)) {
-    const name = requestShape(record);
-    if (name !== undefined) {
-      const { tools: _tools, promptSections: _sections, promptHash: _hash, ...rest } = record;
-      return { sessionShape: name, ...(shapeReferenced(rest) as Record<string, unknown>) };
-    }
-  }
-  if (record.role === "system" && record.sections !== null && typeof record.sections === "object") {
-    const name = systemShape(record as { sections: Record<string, unknown>; toolsAdded?: unknown });
-    if (name !== undefined) {
-      const { sections, toolsAdded: _tools, ...rest } = record as { sections: Record<string, unknown> } & Record<string, unknown>;
-      return { ...(shapeReferenced(rest) as Record<string, unknown>), sections: { cwd: sections.cwd, sessionShape: name } };
-    }
-  }
-  return Object.fromEntries(Object.entries(record).map(([key, child]) => [key, shapeReferenced(child)]));
-}
-
 /**
  * Assert the session shape of each provider request, in order: its tools, prompt
  * sections and prompt hash equal that `session-shapes` shape (undefined when none does).
@@ -92,13 +65,4 @@ export function expectSystemShapes(canonicalJsonl: readonly unknown[], shapes: r
   };
   visit(withoutSharedToolSchemas(JSON.parse(JSON.stringify(canonicalJsonl))));
   expect(found, "each system entry's session shape").toEqual(shapes);
-}
-
-/**
- * Assert a lock's normalized trace exactly against its expectation, without its
- * event schemas and with its model-visible parts checked against `session-shapes`.
- */
-export function expectScenario(trace: Record<string, unknown>, expected: unknown): void {
-  const { events: _events, ...rest } = trace;
-  expect(shapeReferenced(withoutSharedToolSchemas(JSON.parse(JSON.stringify(rest)))), `${String(trace.lock)}: the scenario's trace`).toEqual(expected);
 }
