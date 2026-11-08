@@ -17,7 +17,7 @@ import { historyPage, historyEntry, type HistoryCursor } from "../projection/his
 import { delegatedProviderToolVersion } from "../delegation/delegated-provider.js";
 import type { AgentMessage, ThinkingLevel } from "../pi/agent-core.js";
 import { SESSION_SETTINGS_ENTRY, changeSessionSetting, readSessionSettings, readSessionRequestPins, readSessionFixedSettings, readSessionToolChoice } from "../../sessions/session-settings.js";
-import { constants, existsSync, lstatSync, realpathSync } from "node:fs";
+import { constants, existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2612,16 +2612,19 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
     if (state === "matching") return;
     this.assertChapterWritable();
+    // Pi removes an entry from its live branch when writing it fails, so the
+    // branch cannot show whether bytes reached the JSONL. This runtime is the
+    // file's only writer: an unchanged length proves the failed append wrote
+    // nothing, so the bounded retry may append it. Anything else may hold the
+    // record and a retry could duplicate it, so fail closed as an unknown outcome.
+    const before = sessionFileLength(this.sessionManager.getSessionFile());
     try {
       options.append();
     } catch (error) {
-      // A failure before Pi staged the entry (nothing in the live branch) leaves
-      // the canonical record absent, so rethrow and let the bounded retry try
-      // again. A failure after staging means the SDK mutated its in-memory branch
-      // without persisting; retrying would append a contradictory duplicate
-      // canonical record, so fail closed and report an unknown outcome.
-      if (options.existing() !== "matching") throw error;
-      throw asUncertainOutcome(error, `The ${options.describe} could not be persisted after Pi admitted it; refresh session state before retrying`);
+      if (this.dependencies.modules.policy("appendGuard")?.(this.canonicalAppendContext).isPreAppendRefusal(error)) throw error;
+      if (options.existing() !== "matching" && before !== undefined
+        && before === sessionFileLength(this.sessionManager.getSessionFile())) throw error;
+      throw asUncertainOutcome(error, `The ${options.describe} could not be proven persisted; refresh session state before retrying`);
     }
   }
 
@@ -4821,4 +4824,15 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     }
   }
 
+}
+
+/** The session file's byte length, "absent" before Pi first writes it, or undefined when unprovable. */
+function sessionFileLength(path: string | undefined): number | "absent" | undefined {
+  if (!path) return "absent";
+  try {
+    const stats = statSync(path);
+    return stats.isFile() ? stats.size : undefined;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : undefined;
+  }
 }
