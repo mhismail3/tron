@@ -29,7 +29,9 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  test gateway [vitest args...]      Run Gateway tests directly with pinned Node
+  test gateway [--mini] [vitest args...]
+                                    Run Gateway tests directly with pinned Node; --mini
+                                    runs them on the Mac mini test host (tools/verify/README.md)
   test ios [runner args...]         Run the owned iOS test runner directly (3 host-wide simulator
                                     slots; a 4th job waits; `test ios slots` shows holders)
   test tooling [test files...]      Run Python script integration suites directly
@@ -56,6 +58,7 @@ Commands:
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
+         [--gateway-host local|mini]
                                     Mechanical none/partial/full tier; affected checks
                                     now, full coverage in the async main batch.
                                     --plan includes dirty paths and exact commands.
@@ -165,6 +168,7 @@ case "$cmd" in
     suite="${1:-}"; shift || true
     case "$suite" in
       gateway)
+        if [[ "${1:-}" == --mini ]]; then shift; exec python3 "$ROOT/tools/verify/mini.py" "$@"; fi
         exec python3 "$ROOT/tools/verify/gateway.py" "$@"
         ;;
       ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;

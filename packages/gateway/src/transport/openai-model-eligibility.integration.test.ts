@@ -183,7 +183,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     const offered = catalog.filter(model => model.available).map(model => `${model.provider}/${model.id}`);
     expect(offered).toEqual(["openai/gpt-5.5", "openai/gpt-5.6-sol"]);
     expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-5.5")?.name).toBe("GPT 5.5");
-    expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-5.2-chat-latest")?.available).toBe(false);
+    expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-6-luna")?.available).toBe(false);
     expect(catalog.find(model => model.provider === "openai" && model.id === "gpt-realtime-2.1")?.available).toBe(false);
     expect(server.requests.at(-1)?.authorization).toBe("Bearer safe-test-token");
     expect(upstreamUrls.every(raw => {
@@ -214,9 +214,9 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     now += 60_001;
     expect(await openAIChoices()).toEqual(["gpt-5.5"]);
     status = 200;
-    visible = ["gpt-5.2-chat-latest"];
+    visible = ["gpt-6-luna"];
     now += 60_001;
-    expect(await openAIChoices()).toEqual(["gpt-5.2-chat-latest"]);
+    expect(await openAIChoices()).toEqual(["gpt-6-luna"]);
   });
 
   it("concatenates account pagination in order and fails closed on a repeated cursor", async () => {
@@ -332,7 +332,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     const snapshot = runtime.getAvailableSnapshot().map(model => `${model.provider}/${model.id}`);
     expect(snapshot).not.toContain("restricted-test/withheld");
     expect(snapshot.filter(id => id.startsWith("openai/"))).toEqual(expect.arrayContaining(["openai/gpt-5.5", "openai/gpt-5.6-sol"]));
-    expect(snapshot).not.toContain("openai/gpt-5.2-chat-latest");
+    expect(snapshot).not.toContain("openai/gpt-6-luna");
 
     // A first-party metadata-only extension contribution replaces the SDK filter
     // decoration; Gateway catalog admission must still come from the owner.

@@ -18,6 +18,7 @@ scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun ev
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
+scripts/tron verify ... --gateway-host mini     # run the Gateway Vitest lanes on the Mac mini, not this Mac
 ```
 
 ## Worktree dependencies
@@ -68,6 +69,23 @@ waiter's ticket is pruned, and only the earliest live ticket tries the lock. `ho
 the lock's one owner; the runner and the batch import it.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
 user's settings or profile. Test input and output must not depend on live stores.
+
+## Gateway lanes on the Mac mini
+
+`--gateway-host mini` (or `scripts/tron test gateway --mini [vitest args]`) runs the Gateway Vitest lanes on the
+Mac mini through `mini.py`; the default, and `--update-locks` always, runs them here. Making the mini the default
+waits on an exact pass/fail match with this Mac at one commit (#2334). `mini.py` refuses a dirty tree, or a HEAD
+other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/tron.git`. One job at a time
+(`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the
+Gateway `node_modules`, refuses a Node binary or npm off the commit's `config/ci-toolchain.env`, reruns `npm ci`
+only when `package.json`, `package-lock.json`, `third_party/` or the Node binary changed, and runs that commit's
+`gateway.py` with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
+live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. An unconfigured or unreachable mini,
+an off-pin toolchain or a session without a result exits 2; nothing falls back to this Mac. Stopping verify ends
+the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
+`tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node is
+installed there, the first job refuses with the `scripts/tron-node install` command to run in its checkout.
+`verify --batch` and `mutate` run their Gateway lanes here.
 
 ## Run output
 

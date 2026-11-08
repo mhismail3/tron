@@ -236,6 +236,14 @@ class ExternalVerificationTests(VerifyCase):
         groups = json.loads(planned.stdout[planned.stdout.index("{"):])["groups"]
         for group, path in zip(("gateway", "gateway-nested", "mac", "node-gateway"), files):
             self.assertEqual(groups[group], [f"packages/gateway/{path}"])
+        # The lanes' runner: gateway.py here by default (a configured mini host changes nothing), mini.py on request.
+        r.git("config", "tron.verify.mini", "mini.invalid")
+        for options, runner in (([], "gateway.py"), (["--gateway-host", "mini"], "mini.py"), (["--gateway-host", "local"], "gateway.py")):
+            planned = r.verify("--module", "repo/alpha", "--plan", *options)
+            commands = json.loads(planned.stdout[planned.stdout.index("{"):])["commands"]
+            self.assertEqual({c["name"]: Path(c["command"][1]).name for c in commands if c["name"].startswith("tests: gateway")},
+                             {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
+        r.git("config", "--unset", "tron.verify.mini")
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")
         refused = r.verify("--module", "repo/alpha", "--plan")
@@ -361,6 +369,27 @@ class GatewayFailureTests(VerifyCase):
                 self.assertNotIn("expiredEntries", report)
                 if change != "missing-report":
                     self.assertTrue((r.path / "packages/gateway/test-results/executed").exists())
+
+
+    def test_an_unreachable_mini_fails_the_gateway_lane_without_running_it_here(self):
+        r = self.repo
+        self.fixture()
+        r.git("config", "tron.verify.mini", "nobody@mini.invalid")
+        # A refusing ssh first on PATH: the mini is unreachable without touching the network.
+        stub = Path(self.temp.name) / "bin"
+        stub.mkdir()
+        (stub / "ssh").write_text("#!/bin/sh\necho 'ssh: connect to host mini.invalid port 22: Connection refused' >&2\nexit 255\n")
+        (stub / "ssh").chmod(0o755)
+        r.env["PATH"] = f"{stub}:{r.env['PATH']}"
+        result = r.verify("--module", "gateway/sample", "--gateway-host", "mini")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("gateway lanes: on the Mac mini", result.stdout)
+        report = r.report()
+        step = next(step for step in report["steps"] if step["name"] == "tests: gateway")
+        self.assertEqual((report["verdict"], step["status"], step["exit"]), ("failed", "failed", 2))
+        self.assertIn("could not push", (r.path / step["log"]).read_text())
+        self.assertIn("Connection refused", (r.path / step["log"]).read_text())
+        self.assertFalse((r.path / "packages/gateway/test-results/executed").exists(), "the local lane never ran")
 
 
 class GatewayDependenciesTests(VerifyCase):
