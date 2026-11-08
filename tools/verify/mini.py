@@ -186,107 +186,110 @@ def remote_main(job: dict) -> int:
 
     if not (repository / 'HEAD').is_file():
         return refuse(f'{repository} is not a bare repository; set it up with `git init --bare {repository}`')
-    (base / 'jobs').mkdir(exist_ok=True)
-    with open(base / 'jobs/gateway.lock', 'a+') as lock:
-        announced = 0.0
-        while True:
+    try:
+        (base / 'jobs').mkdir(exist_ok=True)
+        with open(base / 'jobs/gateway.lock', 'a+') as lock:
+            announced = 0.0
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if cancelled.is_set():
+                        return refuse('stopped while waiting for the mini Gateway job lock')
+                    if time.time() - announced >= 60:
+                        lock.seek(0)
+                        say(f'waiting for the mini Gateway job lock, held by {lock.read().strip() or "an unrecorded job"}')
+                        announced = time.time()
+                    time.sleep(2)
+            lock.seek(0)
+            lock.truncate()
+            lock.write(json.dumps({**job['requester'], 'sha': sha}))
+            lock.flush()
+
+            prepared = time.time()
+            if (checkout / '.git').exists():
+                steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
+                         ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules')]
+            else:
+                steps = [('git', '-C', str(repository), 'worktree', 'prune'),
+                         ('git', '-C', str(repository), 'worktree', 'add', '--quiet', '--detach', str(checkout), sha)]
+            for command in steps:
+                result = run(*command)
+                if result.returncode:
+                    return refuse(f'{shlex.join(command)} failed: {(result.stdout + result.stderr).strip()}')
+            # The lane's own paths are resolved (its ROOT); rewriting must match them, symlinked homes included.
+            checkout = checkout.resolve()
+            head = run('git', '-C', str(checkout), 'rev-parse', 'HEAD').stdout.strip()
+            dirty = run('git', '-C', str(checkout), 'status', '--porcelain', '--untracked-files=normal').stdout.strip()
+            if head != sha or dirty:
+                return refuse(f'the mini checkout is not exactly {sha} (HEAD {head or "unknown"}; changes: {dirty or "none"})')
+            # The last checked-out commit stays referenced, so the next push sends only new objects.
+            run('git', '-C', str(repository), 'update-ref', 'refs/tron-jobs/gateway', sha)
+
+            # The commit's own pins: exact Node version, official binary digest, bundled npm version.
+            pins = dict(line.split('=', 1) for line in (checkout / 'config/ci-toolchain.env').read_text().splitlines()
+                        if '=' in line and not line.lstrip().startswith('#'))
+            resolved = run(str(checkout / 'scripts/tron-node'))
+            node = Path(resolved.stdout.strip()) if resolved.returncode == 0 else None
+            if node is None:
+                return refuse(f'no pinned Node on the mini: {resolved.stderr.strip()}\n'
+                              f'    install it there with: cd {checkout} && scripts/tron-node install')
+            architecture = {'arm64': 'ARM64', 'aarch64': 'ARM64', 'x86_64': 'X64'}.get(platform.machine(), platform.machine().upper())
+            digest = hashlib.sha256(node.read_bytes()).hexdigest()
+            npm = run(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--version').stdout.strip()
+            expected = {'node digest': (digest, pins.get(f'TRON_NODE_{architecture}_RUNTIME_SHA256')),
+                        'npm': (npm, pins.get('TRON_NODE_NPM_VERSION'))}
+            differing = [f'{name} {actual or "missing"}, pinned {pin}' for name, (actual, pin) in expected.items() if actual != pin]
+            if differing:
+                return refuse(f'the mini toolchain differs from the pins at {sha[:12]}: {"; ".join(differing)} ({node})\n'
+                              f'    reinstall it there with: cd {checkout} && scripts/tron-node install')
+            version = (checkout / '.node-version').read_text().strip()
+            say(f'checkout {sha[:12]} ready; Node v{version} ({digest[:12]}) npm {npm}, macOS {platform.mac_ver()[0]}, '
+                f'Python {platform.python_version()}')
+
+            # `npm ci` runs again exactly when an input it reads changes: the manifest, lockfile, vendored tarballs or Node.
+            inputs = run('git', '-C', str(checkout), 'rev-parse', *(f'HEAD:packages/gateway/{path}' for path in
+                                                                   ('package.json', 'package-lock.json', 'third_party'))).stdout
+            install = hashlib.sha256(f'{inputs}{digest}'.encode()).hexdigest()
+            stamp = checkout / 'packages/gateway/node_modules/.tron-mini-install'
+            if not stamp.is_file() or stamp.read_text() != install:
+                say('Gateway dependencies changed; npm ci')
+                installed = run(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--prefix', 'packages/gateway', 'ci', '--include=dev',
+                                cwd=checkout, stream=True)
+                if installed.returncode:
+                    return refuse(f'npm ci failed (exit {installed.returncode})')
+                stamp.parent.mkdir(exist_ok=True)  # npm creates no node_modules for a manifest without dependencies
+                stamp.write_text(install)
+            say(f'prepared in {time.time() - prepared:.1f}s; running the lane, load {os.getloadavg()[0]:.1f}')
+            if cancelled.is_set():
+                return refuse('stopped before the lane started')
+
+            results.mkdir(parents=True, exist_ok=True)
             try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if cancelled.is_set():
-                    return refuse('stopped while waiting for the mini Gateway job lock')
-                if time.time() - announced >= 60:
-                    lock.seek(0)
-                    say(f'waiting for the mini Gateway job lock, held by {lock.read().strip() or "an unrecorded job"}')
-                    announced = time.time()
-                time.sleep(2)
-        lock.seek(0)
-        lock.truncate()
-        lock.write(json.dumps({**job['requester'], 'sha': sha}))
-        lock.flush()
-
-        prepared = time.time()
-        if (checkout / '.git').exists():
-            steps = [('git', '-C', str(checkout), 'checkout', '--quiet', '--detach', '--force', sha),
-                     ('git', '-C', str(checkout), 'clean', '-ffdxq', '-e', '/packages/gateway/node_modules')]
-        else:
-            steps = [('git', '-C', str(repository), 'worktree', 'prune'),
-                     ('git', '-C', str(repository), 'worktree', 'add', '--quiet', '--detach', str(checkout), sha)]
-        for command in steps:
-            result = run(*command)
-            if result.returncode:
-                return refuse(f'{shlex.join(command)} failed: {(result.stdout + result.stderr).strip()}')
-        # The lane's own paths are resolved (its ROOT); rewriting must match them, symlinked homes included.
-        checkout = checkout.resolve()
-        head = run('git', '-C', str(checkout), 'rev-parse', 'HEAD').stdout.strip()
-        dirty = run('git', '-C', str(checkout), 'status', '--porcelain', '--untracked-files=normal').stdout.strip()
-        if head != sha or dirty:
-            return refuse(f'the mini checkout is not exactly {sha} (HEAD {head or "unknown"}; changes: {dirty or "none"})')
-        # The last checked-out commit stays referenced, so the next push sends only new objects.
-        run('git', '-C', str(repository), 'update-ref', 'refs/tron-jobs/gateway', sha)
-        run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/run-{sha}')
-
-        # The commit's own pins: exact Node version, official binary digest, bundled npm version.
-        pins = dict(line.split('=', 1) for line in (checkout / 'config/ci-toolchain.env').read_text().splitlines()
-                    if '=' in line and not line.lstrip().startswith('#'))
-        resolved = run(str(checkout / 'scripts/tron-node'))
-        node = Path(resolved.stdout.strip()) if resolved.returncode == 0 else None
-        if node is None:
-            return refuse(f'no pinned Node on the mini: {resolved.stderr.strip()}\n'
-                          f'    install it there with: cd {checkout} && scripts/tron-node install')
-        architecture = {'arm64': 'ARM64', 'aarch64': 'ARM64', 'x86_64': 'X64'}.get(platform.machine(), platform.machine().upper())
-        digest = hashlib.sha256(node.read_bytes()).hexdigest()
-        npm = run(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--version').stdout.strip()
-        expected = {'node digest': (digest, pins.get(f'TRON_NODE_{architecture}_RUNTIME_SHA256')),
-                    'npm': (npm, pins.get('TRON_NODE_NPM_VERSION'))}
-        differing = [f'{name} {actual or "missing"}, pinned {pin}' for name, (actual, pin) in expected.items() if actual != pin]
-        if differing:
-            return refuse(f'the mini toolchain differs from the pins at {sha[:12]}: {"; ".join(differing)} ({node})\n'
-                          f'    reinstall it there with: cd {checkout} && scripts/tron-node install')
-        version = (checkout / '.node-version').read_text().strip()
-        say(f'checkout {sha[:12]} ready; Node v{version} ({digest[:12]}) npm {npm}, macOS {platform.mac_ver()[0]}, '
-            f'Python {platform.python_version()}')
-
-        # `npm ci` runs again exactly when an input it reads changes: the manifest, lockfile, vendored tarballs or Node.
-        inputs = run('git', '-C', str(checkout), 'rev-parse', *(f'HEAD:packages/gateway/{path}' for path in
-                                                               ('package.json', 'package-lock.json', 'third_party'))).stdout
-        install = hashlib.sha256(f'{inputs}{digest}'.encode()).hexdigest()
-        stamp = checkout / 'packages/gateway/node_modules/.tron-mini-install'
-        if not stamp.is_file() or stamp.read_text() != install:
-            say('Gateway dependencies changed; npm ci')
-            installed = run(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--prefix', 'packages/gateway', 'ci', '--include=dev',
-                            cwd=checkout, stream=True)
-            if installed.returncode:
-                return refuse(f'npm ci failed (exit {installed.returncode})')
-            stamp.parent.mkdir(exist_ok=True)  # npm creates no node_modules for a manifest without dependencies
-            stamp.write_text(install)
-        say(f'prepared in {time.time() - prepared:.1f}s; running the lane, load {os.getloadavg()[0]:.1f}')
-        if cancelled.is_set():
-            return refuse('stopped before the lane started')
-
-        results.mkdir(parents=True, exist_ok=True)
-        try:
-            files = [results / f'output-{index}' for index in range(job['outputs'])]
-            args = []
-            for word in job['args']:
+                files = [results / f'output-{index}' for index in range(job['outputs'])]
+                args = []
+                for word in job['args']:
+                    for index, path in enumerate(files):
+                        word = word.replace(f'@output:{index}', str(path))
+                    args.append(word.replace(job['localRoot'], str(checkout)))
+                with subprocess.Popen(['/usr/bin/python3', str(checkout / 'tools/verify/gateway.py'), *args], cwd=checkout / 'packages/gateway',
+                                      env=clean, stdin=subprocess.DEVNULL) as child:
+                    lane.append(child)
+                    if cancelled.is_set():
+                        child.send_signal(signal.SIGTERM)
+                    code = child.wait()
+                    code = 128 - code if code < 0 else code  # killed by a signal: the shell's convention
                 for index, path in enumerate(files):
-                    word = word.replace(f'@output:{index}', str(path))
-                args.append(word.replace(job['localRoot'], str(checkout)))
-            with subprocess.Popen(['/usr/bin/python3', str(checkout / 'tools/verify/gateway.py'), *args], cwd=checkout / 'packages/gateway',
-                                  env=clean, stdin=subprocess.DEVNULL) as child:
-                lane.append(child)
-                if cancelled.is_set():
-                    child.send_signal(signal.SIGTERM)
-                code = child.wait()
-                code = 128 - code if code < 0 else code  # killed by a signal: the shell's convention
-            for index, path in enumerate(files):
-                if path.is_file():
-                    content = path.read_text(errors='replace').replace(str(checkout), job['localRoot'])
-                    out.write(b'\n' + frame(nonce) + f'output {index} '.encode() + base64.b64encode(content.encode()) + b'\n')
-            return finish(code)
-        finally:
-            shutil.rmtree(results, ignore_errors=True)
+                    if path.is_file():
+                        content = path.read_text(errors='replace').replace(str(checkout), job['localRoot'])
+                        out.write(b'\n' + frame(nonce) + f'output {index} '.encode() + base64.b64encode(content.encode()) + b'\n')
+                return finish(code)
+            finally:
+                shutil.rmtree(results, ignore_errors=True)
+    finally:
+        # The pushed ref only carried the commit here; a checkout or the gateway ref keeps what is needed.
+        run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/run-{sha}')
 
 
 if __name__ == '__main__':
