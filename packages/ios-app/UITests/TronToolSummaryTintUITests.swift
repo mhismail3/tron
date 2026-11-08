@@ -47,7 +47,9 @@ import UIKit
         app.launchArguments = ["-tron-subagent-parity-fixture", "-tool-summary-tint", scenario,
                                "-\(mode)", "-themeColor", "emerald", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Tool summary review · \(scenario)"].waitForExistence(timeout: 12), app.debugDescription)
+        // The fixture's assistant line renders as selectable text (#1112), not a static label.
+        let header = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tool summary review · \(scenario)")).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 12), app.debugDescription)
         let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '3 tools,'")).firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
         return (app, chip)
