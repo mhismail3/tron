@@ -29,7 +29,7 @@ async function seed(index: number, path?: string[], retired = false): Promise<No
   const record = {
     kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [], reason: `Original capture ${index}` }, relations: [],
     content: { title: `Exact original note ${index}`, role: "fact", confirmed: false, ...(retired ? { retired: true } : {}),
-      tags: path ? ["home-profile", "kind-fact"] : ["fixture-label", "home-file-home", "home-profile", "kind-fact"], ...(path ? { profile: { version: 2, path } } : {}) },
+      tags: path ? ["home-profile", "kind-fact"] : ["fixture-label", "home-profile", "kind-fact"], ...(path ? { profile: { version: 2, path } } : {}) },
   } as const;
   if (!path) return legacyProfileFixture(resource, `v2-seed-${index}`, structuredClone(record));
   return (await knowledge!.createNote({ commandId: `v2-seed-${index}`, record: structuredClone(record) })).record as Note;

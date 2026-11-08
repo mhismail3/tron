@@ -63,7 +63,7 @@ it("keeps Not now until a new note, never reinstating it through receipt replay 
 });
 
 it("retains Prior placement as current data and refuses an empty replacement for lost initialized data", async () => {
-  const f = await fixture(), record = draft("Prior exact data"); delete record.content.profile; record.content.tags!.push("home-file-home");
+  const f = await fixture(), record = draft("Prior exact data"); delete record.content.profile;
   const prior = await legacyProfileFixture(f.workspace, "prior-fixture-command", record);
   expect(await f.store.read(prior.id)).toEqual(prior);
   expect((await readProfileFile(f.workspace))!.sections.prior!.notes).toHaveLength(1);

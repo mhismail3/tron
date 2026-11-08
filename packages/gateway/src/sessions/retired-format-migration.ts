@@ -5,7 +5,6 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
-import { RETIRED_SCOPES } from "../kernel/settings/tool-contract.js";
 import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
 
 /**
@@ -13,7 +12,7 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  * form (#2329), run by the maintainer while the Gateway is listening and never
  * during startup (#1649):
  * - `tron.settings.v1` session entries whose `fixed`/`requestPins` provenance
- *   still names a scope #1634 retired (`RETIRED_SCOPES`);
+ *   still names a scope #1634 retired (`RETIRED_SCOPES` below);
  * - Profile note tags carrying the retired `home-file-*` placement labels, and
  *   the `beforeFile`/`file` label fields of committed partition receipts.
  *
@@ -36,6 +35,12 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  * append-only history and is not rewritten. This module and the re-seal check in
  * Home memory are deleted together once the live run is verified.
  */
+
+/** The scope names #1634 retired, as old session entries recorded them, and the
+ * current layer each became. The migration's own map: no reader accepts them. */
+const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
+  mac: "global", builtin: "global", chat: "session", profile: "session",
+});
 
 const PROFILE_FILE = "workspace/files/Profile.json";
 const HOME_LEDGER = "gateway/home/home.json";

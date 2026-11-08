@@ -8,27 +8,28 @@ import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, 
 
 profileReportFile("test-results/home-profile/hierarchy.json");
 
-it("malformed partition labels leave valid discovery/read intact and disclose exact repair references", async () => {
+it("an unknown kind leaves valid discovery/read intact and discloses its exact repair reference", async () => {
   const f = await fixture("hierarchy-malformed");
   const seeded = [];
-  for (const [title, labels] of [["Valid context stays readable.", ["kind-fact", "home-file-core"]], ["Bad file remains recoverable.", ["kind-fact", "home-file-unknown"]], ["Ambiguous file stays unassigned.", ["kind-fact", "home-file-core", "home-file-home"]], ["Unknown kind remains a canonical note.", ["kind-unknown"]]] as const) {
+  for (const [title, labels] of [["Valid context stays readable.", ["kind-fact"]], ["Unplaced Prior context stays unassigned.", ["kind-fact"]], ["Unknown kind remains a canonical note.", ["kind-unknown"]]] as const) {
     const record = { kind: "note" as const, scope: "personal" as const, provenance: { actor: "agent" as const, source: "malformed-fixture", evidence: [] }, relations: [], content: { title, role: "fact" as const, confirmed: false, tags: ["home-profile", ...labels] } };
-    seeded.push(labels.length === 2 && labels[1] === "home-file-core"
-      ? (await f.store.createNote({ commandId: command("valid-seed"), record: { ...record, content: { ...record.content, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["communication"] } } } })).record
+    seeded.push(seeded.length === 0
+      ? (await f.store.createNote({ commandId: command("valid-seed"), record: { ...record, content: { ...record.content, profile: { version: 2, path: ["communication"] } } } })).record
       : await legacyProfileFixture(f.workspace, command("malformed-seed"), record));
   }
   const turn = await homeActivation(f, "Inspect the index without choosing a repair.", [profileCall({ action: "read" }, "malformed-index"), say("inspection only")]);
   const result = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-index")?.details as { status: string; index: string; unclassified: number };
   expect(result.status).toBe("read");
   expect(result.index).toContain("Communication (communication): 1 active / 1 total");
-  expect(result.unclassified).toBe(3);
-  for (const note of seeded.slice(1)) { expect(result.index).toContain(note.id); expect(result.index).toContain(note.revisionId); }
+  expect(result.unclassified).toBe(1);
+  expect(result.index).toContain(seeded[2]!.id); expect(result.index).toContain(seeded[2]!.revisionId);
+  expect(result.index).not.toContain(seeded[1]!.id);
   for (const note of seeded) expect(turn.first.systemPrompt).not.toContain(note.kind === "note" ? note.content.title : "unexpected");
   const read = await homeActivation(f, "Read only Communication, not malformed Prior organization.", [profileCall({ action: "read", path: "communication" }, "malformed-core"), say("read")]);
   const core = read.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-core")?.details as { items: Array<{ id: string }> };
   expect(core.items.map(item => item.id)).toEqual([seeded[0]!.id]);
   expect(await Promise.all(seeded.map(note => f.store.read(note.id)))).toEqual(seeded);
-  recordCase("malformed-partition-isolation", { diagnosticNotes: result.unclassified, coreReadIds: core.items.map(item => item.id), unchangedRevisions: seeded.map(note => note.revisionId) });
+  recordCase("malformed-kind-isolation", { diagnosticNotes: result.unclassified, coreReadIds: core.items.map(item => item.id), unchangedRevisions: seeded.map(note => note.revisionId) });
 });
 
 it("file and diagnostic metadata both page without inserting note text or dropping references", async () => {
@@ -72,12 +73,12 @@ it("file and diagnostic metadata both page without inserting note text or droppi
   recordCase("paged-file-and-diagnostic-discovery", { metadataWindowBytes: windows.map(value => Buffer.byteLength(value)), scopedNotes: scoped.length, diagnosticNotes: diagnostics.length });
 });
 
-it("the real Home profile tool retries one original label group and native Changes Undo restores malformed labels at their exact positions", async () => {
+it("the real Home profile tool retries one original placement group and native Changes Undo restores its exact Prior placement and label order", async () => {
   const f = await fixture("hierarchy-organize-tool");
   const original = await legacyProfileFixture(f.workspace, command("organize-seed"), { kind: "note", scope: "personal",
     provenance: { actor: "user", source: "explicit-standing-rule", evidence: [] }, relations: [],
     content: { title: "Never publish without approval.", body: "Preserve the full binding instruction.", role: "decision", confirmed: true,
-      tags: ["home-file-unknown", "home-profile", "kind-standing-decision", "home-file-home", "fixture-label"] } });
+      tags: ["fixture-first", "home-profile", "kind-standing-decision", "fixture-label"] } });
   await mkdir(f.record.path, { recursive: true });
   const parent = await stat(f.record.path);
   const sync = durability.syncDurably;
@@ -108,8 +109,7 @@ it("the real Home profile tool retries one original label group and native Chang
   expect(advertised.commandId).toBe(pending.commandId);
   expect((await history(f)).map(entry => entry.status)).toEqual(["started"]);
   const committed = await f.store.read(original.id) as typeof original;
-  expect(committed).toEqual({ ...original, revisionId: committed.revisionId, content: { ...original.content,
-    tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["engineering", "release"] } } });
+  expect(committed).toEqual({ ...original, revisionId: committed.revisionId, content: { ...original.content, profile: { version: 2, path: ["engineering", "release"] } } });
   fault.mockRestore(); preparation.mockRestore();
   const next = await homeActivation(f, "Retry only the original organization operation.", [profileCall({ action: "retry", commandId: advertised.commandId }, "organize-tool-retry"), say("acknowledged")]);
   const organized = next.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "organize-tool-retry")?.details as { status: string; commandId: string; changeIds: string[] };
@@ -121,15 +121,15 @@ it("the real Home profile tool retries one original label group and native Chang
   const audit = completeHistory.filter(entry => entry.status === "applied");
   expect(audit).toHaveLength(1);
   expect(audit[0]).toMatchObject({ commandId: pending.commandId, actor: { kind: "home", toolCallId: "organize-tool-first" },
-    before: { text: "Never publish without approval.", confirmed: true, fileLabels: [{ index: 0, tag: "home-file-unknown" }, { index: 3, tag: "home-file-home" }] },
+    before: { text: "Never publish without approval.", confirmed: true },
     after: { text: "Never publish without approval.", confirmed: true, profile: { version: 2, path: ["engineering", "release"] } } });
-  expect(audit[0]!.after).not.toHaveProperty("fileLabels");
-  await undo(f, organized.changeIds[0]!, "native-undo-labels");
+  expect(audit[0]!.before).not.toHaveProperty("profile");
+  await undo(f, organized.changeIds[0]!, "native-undo-prior");
   const restored = await f.store.read(original.id);
   expect({ ...restored, revisionId: original.revisionId }).toEqual(original);
   const undoEntries = (await history(f)).filter(entry => entry.undoOf && entry.status === "applied");
   expect(undoEntries.map(entry => entry.undoOf)).toEqual(organized.changeIds);
-  recordCase("tool-original-envelope-retry-native-label-undo", { originalCommand: pending.commandId, originalToolCall: "organize-tool-first", changeIds: organized.changeIds, exactMalformedLabelsRestored: true });
+  recordCase("tool-original-envelope-retry-native-prior-undo", { originalCommand: pending.commandId, originalToolCall: "organize-tool-first", changeIds: organized.changeIds, exactPriorRestored: true });
 });
 
 it("a stale organization revision is refused, not advertised as a recoverable audit failure", async () => {
@@ -151,7 +151,7 @@ it.each(["reorganize"] as const)("maintainer profileChange %s repairs its audit 
   const f = await fixture(`native-${action}-retry`);
   const original = await legacyProfileFixture(f.workspace, command("native-seed"), { kind: "note", scope: "personal",
     provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],
-    content: { title: "Keep this exact instruction.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision", "home-file-core"] } });
+    content: { title: "Keep this exact instruction.", role: "decision", confirmed: true, tags: ["home-profile", "kind-standing-decision"] } });
   await mkdir(f.record.path, { recursive: true });
   const parent = await stat(f.record.path);
   const sync = durability.syncDurably;

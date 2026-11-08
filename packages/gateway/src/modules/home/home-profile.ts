@@ -1,4 +1,4 @@
-import { profileFile, profileLabels, type ProfileLabel, type ProfilePartitionRequest, type ProfileFile } from "./profile-notes.js";
+import type { ProfilePartitionRequest } from "./profile-notes.js";
 import { profileIndex, PROFILE_SECTION_HEADING } from "./home-profile-hierarchy.js";
 import { randomUUID } from "node:crypto";
 import { profilePath, type ProfileMetadata } from "./profile-placement.js";
@@ -22,7 +22,7 @@ import type { ProfileMutationResult, ProfileSortingState } from "./profile-store
  *
  * Membership is the `home-profile` tag alone, never provenance: provenance changes
  * when the maintainer edits a note natively. A profile item's kind is its one
- * `kind-*` label. File labels are mechanical organization, not binding authority.
+ * `kind-*` label. Placement is organization, not binding authority.
  */
 
 /** The label that makes a personal note a Home profile item. */
@@ -47,7 +47,6 @@ type ProfileNote = ProfileNoteRecord & { kind: "note" };
 interface HomeProfileItem {
   id: string;
   revisionId: string;
-  file: ProfileFile | null | undefined;
   path: string;
   kind: HomeProfileKind;
   text: string;
@@ -65,7 +64,7 @@ export interface HomeProfileRead {
   /** Existing native-list count: notes without one recognized kind. */
   unclassified: number;
   /** Mechanical metadata failures, with exact canonical references for explicit repair. */
-  diagnostics: Array<{ id: string; revisionId: string; issues: Array<"kind" | "partition"> }>;
+  diagnostics: Array<{ id: string; revisionId: string; issues: Array<"kind"> }>;
 }
 
 /** Every profile note in the personal scope, classified. A pure read through Profile's
@@ -101,16 +100,11 @@ function classifyProfile(notes: ProfileNote[]): HomeProfileRead {
   for (const note of notes) {
     const tags = note.content.tags ?? [];
     const kinds = HOME_PROFILE_KINDS.filter((kind) => tags.includes(kindTag(kind)));
-    const file = profileFile(tags);
-    const issues: HomeProfileRead["diagnostics"][number]["issues"] = [];
-    if (kinds.length !== 1) issues.push("kind");
-    if (file === null) issues.push("partition");
-    if (issues.length) diagnostics.push({ id: note.id, revisionId: note.revisionId, issues });
-    if (kinds.length !== 1) continue;
+    if (kinds.length !== 1) { diagnostics.push({ id: note.id, revisionId: note.revisionId, issues: ["kind"] }); continue; }
     const by = supersededBy.get(note.id);
     const status: HomeProfileStatus = note.content.retired ? "retired" : by ? "superseded" : "active";
     const supersedes = note.relations.find(relation => relation.type === "supersedes" && profileIds.has(relation.recordId))?.recordId;
-    items.push({ id: note.id, revisionId: note.revisionId, file, path: note.content.profile?.path.join("/") ?? "prior", kind: kinds[0]!, text: note.content.title, confirmed: note.content.confirmed, status,
+    items.push({ id: note.id, revisionId: note.revisionId, path: note.content.profile?.path.join("/") ?? "prior", kind: kinds[0]!, text: note.content.title, confirmed: note.content.confirmed, status,
       ...(supersedes ? { supersedes } : {}), ...(by ? { supersededBy: by } : {}), record: note });
   }
   items.sort((left, right) => HOME_PROFILE_KINDS.indexOf(left.kind) - HOME_PROFILE_KINDS.indexOf(right.kind)
@@ -131,11 +125,8 @@ export async function readHomeProfileIndex(knowledge: ProfileStore): Promise<Hom
   const items: HomeProfileIndexRead["items"] = [], diagnostics: HomeProfileRead["diagnostics"] = [];
   for (const row of rows) {
     const kinds = HOME_PROFILE_KINDS.filter(kind => row.tags.includes(kindTag(kind)));
-    const issues: HomeProfileRead["diagnostics"][number]["issues"] = [];
-    if (kinds.length !== 1) issues.push("kind");
-    if (profileFile(row.tags) === null) issues.push("partition");
-    if (issues.length) diagnostics.push({ id: row.id, revisionId: row.revisionId, issues });
-    if (kinds.length === 1) items.push({ id: row.id, revisionId: row.revisionId, path: row.profile?.path.join("/") ?? "prior", kind: kinds[0]!, text: row.title,
+    if (kinds.length !== 1) diagnostics.push({ id: row.id, revisionId: row.revisionId, issues: ["kind"] });
+    else items.push({ id: row.id, revisionId: row.revisionId, path: row.profile?.path.join("/") ?? "prior", kind: kinds[0]!, text: row.title,
       confirmed: row.confirmed, status: row.retired ? "retired" : superseded.has(row.id) ? "superseded" : "active", createdAt: row.createdAt, updatedAt: row.updatedAt });
   }
   // Both native lists and cursor pages use the kind/creation/ID order of the
@@ -209,8 +200,7 @@ interface HomeProfileValue {
   revisionId: string;
   supersedes?: string;
   supersededBy?: string;
-  /** Exact owner labels AND positions; absent means the original flat note. */
-  fileLabels?: ProfileLabel[];
+  /** Absent means Prior organization. */
   profile?: ProfileMetadata;
 }
 
@@ -222,11 +212,13 @@ interface PartitionEnvelope {
   context: SubjectContext;
   writes: SubjectWrite[];
 }
-function labelOnlyWrite(before: unknown, after: unknown): boolean {
+/** Whether a recorded write changed only placement. It compares the named content
+ * fields, so any other recorded field is not part of the comparison. */
+function placementOnlyWrite(before: unknown, after: unknown): boolean {
   if (!before || !after || typeof before !== "object" || typeof after !== "object") return false;
-  const { revisionId: _before, fileLabels: labelsBefore, profile: profileBefore, ...one } = before as HomeProfileValue;
-  const { revisionId: _after, fileLabels: labelsAfter, profile: profileAfter, ...two } = after as HomeProfileValue;
-  return JSON.stringify(one) === JSON.stringify(two) && JSON.stringify({ labels: labelsBefore ?? [], profile: profileBefore }) !== JSON.stringify({ labels: labelsAfter ?? [], profile: profileAfter });
+  const content = (value: HomeProfileValue) => JSON.stringify([value.kind, value.text, value.confirmed, value.state, value.supersedes, value.supersededBy]);
+  const one = before as HomeProfileValue, two = after as HomeProfileValue;
+  return content(one) === content(two) && JSON.stringify(one.profile ?? null) !== JSON.stringify(two.profile ?? null);
 }
 function validatePartitionEnvelope(changes: ProfileChangePath, raw: unknown, commandId: string, originals: ProfileNote[], prepared: ProfileNote[]): PartitionEnvelope {
   const fail = (): never => { throw new GatewayError("conflict", "Original profile audit envelope is invalid"); };
@@ -240,12 +232,11 @@ function validatePartitionEnvelope(changes: ProfileChangePath, raw: unknown, com
     const write = envelope.writes[index]!;
     const before = write.before as HomeProfileValue | null;
     const after = write.after as HomeProfileValue | null;
-    if (write.id !== pair.before.id || pair.after.id !== pair.before.id || !before || !after || write.direction !== "widen" || !labelOnlyWrite(before, after)) fail();
+    if (write.id !== pair.before.id || pair.after.id !== pair.before.id || !before || !after || write.direction !== "widen" || !placementOnlyWrite(before, after)) fail();
     for (const [value, record] of [[before!, pair.before], [after!, pair.after]] as const) {
       const kinds = HOME_PROFILE_KINDS.filter(kind => record.content.tags?.includes(kindTag(kind)));
       const expected = { kind: kinds[0], text: record.content.title, confirmed: record.content.confirmed, state: value.state, revisionId: record.revisionId,
         ...(value.supersedes ? { supersedes: value.supersedes } : {}), ...(value.supersededBy ? { supersededBy: value.supersededBy } : {}),
-        ...(profileLabels(record.content.tags).length ? { fileLabels: profileLabels(record.content.tags) } : {}),
         ...(record.content.profile ? { profile: record.content.profile } : {}) };
       if (kinds.length !== 1 || JSON.stringify(expected) !== JSON.stringify(value) || !["active", "retired", "superseded"].includes(value.state)
         || (record.content.retired === true) !== (value.state === "retired")) fail();
@@ -272,7 +263,6 @@ function profileValue(item: HomeProfileItem | undefined): HomeProfileValue | nul
   if (!item) return null;
   return { kind: item.kind, text: item.text, confirmed: item.confirmed, state: item.status, revisionId: item.revisionId,
     ...(item.supersedes ? { supersedes: item.supersedes } : {}), ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}),
-    ...(profileLabels(item.record.content.tags).length ? { fileLabels: profileLabels(item.record.content.tags) } : {}),
     ...(item.record.content.profile ? { profile: item.record.content.profile } : {}) };
 }
 
@@ -458,7 +448,7 @@ export class HomeProfileItems {
     if (envelope.context.commandId !== commandId || envelope.writes.length !== recovery.result.changes.length
       || envelope.writes.some((write, index) => {
         const proof = recovery.result.changes[index]!;
-        return write.id !== proof.id || !labelOnlyWrite(write.before, write.after)
+        return write.id !== proof.id || !placementOnlyWrite(write.before, write.after)
           || (write.before as HomeProfileValue)?.revisionId !== proof.beforeRevision || (write.after as HomeProfileValue)?.revisionId !== proof.revisionId;
       })) throw new GatewayError("conflict", "Shared Profile audit differs from its committed command proof");
     changes.validateSubjectAudit(envelope.writes, envelope.context, envelope.replayAt);
@@ -474,7 +464,7 @@ export class HomeProfileItems {
     if (!this.available()) throw new GatewayError("unsupported", "Profile is not available on this Gateway");
     if (context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer undoes a profile change");
     const group = entry.group ? await changes.record.group(entry.group.id, entry.group.size) : [entry];
-    if (group.every(member => labelOnlyWrite(member.before, member.after))) {
+    if (group.every(member => placementOnlyWrite(member.before, member.after))) {
       const commandId = context.commandId ?? randomUUID();
       // A retry after a committed domain/failed audit must not apply Undo twice.
       try {
@@ -491,7 +481,7 @@ export class HomeProfileItems {
       }
       return this.partition(changes, { commandId, mode: "reorganize", assignments: group.map(member => ({
         id: member.qualifiers!.note!, expectedRevision: (member.after as HomeProfileValue).revisionId,
-        ...((member.before as HomeProfileValue).profile ? { profile: (member.before as HomeProfileValue).profile! } : { labels: (member.before as HomeProfileValue).fileLabels ?? [] }),
+        ...((member.before as HomeProfileValue).profile ? { profile: (member.before as HomeProfileValue).profile! } : { prior: true as const }),
       })) }, { commandId, actor: context.actor, ...(context.reason ? { reason: context.reason } : {}) },
       new Map(group.map(member => [member.qualifiers!.note!, member.changeId])));
     }

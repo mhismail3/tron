@@ -1,7 +1,7 @@
 import { getCurrentTools } from "../kernel/pi/ai.js";
 import type { SessionEntry } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
-import { RETIRED_SCOPES, type FixedSetting } from "../kernel/settings/tool-contract.js";
+import type { FixedSetting } from "../kernel/settings/tool-contract.js";
 import { hasSessionSettingsApplier, type SettingsSchema } from "../kernel/settings/settings-schema.js";
 
 export const SESSION_SETTINGS_ENTRY = "tron.settings.v1";
@@ -45,16 +45,10 @@ export function readSessionFixedSettings(entries: readonly SessionEntry[]): Reco
 function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "requestPins"): Record<string, FixedSetting> {
   const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY);
   if (!entry || entry.type !== "custom") return {};
-  const stored = (entry.data as Record<string, unknown> | null)?.[field];
-  if (stored === undefined) return {};
-  if (!stored || typeof stored !== "object" || Array.isArray(stored)) throw new GatewayError("conflict", "Canonical Chat snapshots are invalid");
-  const snapshots: Record<string, unknown> = {};
-  for (const [id, value] of Object.entries(stored)) {
-    const from = (value as { from?: unknown } | null)?.from;
-    const current = typeof from === "string" && Object.hasOwn(RETIRED_SCOPES, from) ? { ...value, from: RETIRED_SCOPES[from] } : value;
-    Object.defineProperty(snapshots, id, { value: current, enumerable: true, writable: true, configurable: true });
-  }
-  for (const value of Object.values(snapshots as object)) {
+  const snapshots = (entry.data as Record<string, unknown> | null)?.[field];
+  if (snapshots === undefined) return {};
+  if (!snapshots || typeof snapshots !== "object" || Array.isArray(snapshots)) throw new GatewayError("conflict", "Canonical Chat snapshots are invalid");
+  for (const value of Object.values(snapshots)) {
     if (!value || typeof value !== "object" || typeof value.at !== "string" || !Number.isFinite(Date.parse(value.at))
       || typeof value.ref !== "string" || !value.ref
       || !["global", "project", "session", "delegate"].includes(value.from)
