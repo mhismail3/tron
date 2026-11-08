@@ -366,8 +366,8 @@ private struct SettingsChangeDetailView: View {
             ScrollView {
                 TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                     ChangeReviewCard(title: entry.title, reason: entry.reason,
-                                     before: entry.presentation?.display.before ?? beforeValue,
-                                     after: entry.presentation?.display.after ?? afterValue)
+                                     before: entry.presentation.display.before,
+                                     after: entry.presentation.display.after)
                     TronStatusPill(text: entry.status.capitalized, accent: statusAccent)
                     if let undoConflict {
                         TronSettingsGroup("Undo conflict") {
@@ -377,9 +377,9 @@ private struct SettingsChangeDetailView: View {
                     }
                     TronSettingsGroup("Details") {
                         VStack(spacing: 0) {
-                            detailRow("person.crop.circle", "Changed by", entry.presentation?.actor ?? entry.actor.kind.capitalized)
+                            detailRow("person.crop.circle", "Changed by", entry.presentation.actor)
                             divider
-                            detailRow("square.3.layers.3d", "Layer", entry.presentation?.layer ?? entry.layer.capitalized)
+                            detailRow("square.3.layers.3d", "Layer", entry.presentation.layer)
                             divider
                             detailRow("clock", "When", whenText)
                             if let reason = entry.reason, !reason.isEmpty { divider; detailRow("text.quote", "Reason", reason) }
@@ -404,7 +404,7 @@ private struct SettingsChangeDetailView: View {
                             ForEach(Array(history.enumerated()), id: \.element.id) { index, item in
                                 if index > 0 { divider }
                                 TronSettingsRow(icon: nil,
-                                                title: "\(item.presentation?.display.before ?? "—") → \(item.presentation?.display.after ?? "—")",
+                                                title: "\(item.presentation.display.before) → \(item.presentation.display.after)",
                                                 subtitle: Self.relative(item), subtitleLineLimit: nil)
                             }
                             if history.isEmpty && !loading {
@@ -456,12 +456,6 @@ private struct SettingsChangeDetailView: View {
         .onDisappear { generation &+= 1; loading = false }
     }
 
-    private var beforeValue: String {
-        entry.redacted == true ? "Hidden" : entry.before.map(String.init(describing:)) ?? "—"
-    }
-    private var afterValue: String {
-        entry.redacted == true ? "Changed" : entry.after.map(String.init(describing:)) ?? "—"
-    }
     private var statusAccent: Color { entry.status == "failed" ? .tronError : .tronPrimary }
     private var divider: some View { TronSettingsDivider() }
 

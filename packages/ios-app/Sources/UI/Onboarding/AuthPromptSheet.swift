@@ -263,7 +263,7 @@ private struct AuthPromptContent: View {
 
             TronPrimaryActionButton(
                 title: submitting ? "Submitting…" : (prompt.kind == .manualCode ? "Complete Login" : "Save"),
-                systemImage: prompt.kind == .manualCode ? "checkmark.shield" : TronSaveActionPresentation.systemImage,
+                systemImage: prompt.kind == .manualCode ? "checkmark.shield" : "externaldrive",
                 isBusy: submitting,
                 isEnabled: !value.wrappedValue.isEmpty && !submitting
             ) { submit(value.wrappedValue) }

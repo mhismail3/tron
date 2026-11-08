@@ -4,15 +4,6 @@ import UIKit
 /// Gateway transcript DTOs pass through the real mounted ChatView/projector and
 /// native chip. Color is observed from rendered title ink, not a policy probe.
 @MainActor final class TronToolSummaryTintUITests: XCTestCase {
-    func testCaptureForVisualApproval() {
-        for mode in ["light", "dark"] {
-            for scenario in ["recovered", "latest-failed"] {
-                let (app, _) = launch(scenario, mode: mode)
-                capture(app, "\(scenario)-\(mode)")
-                app.terminate()
-            }
-        }
-    }
 
     func testRestingTintFollowsCanonicalLatestInvocation() {
         continueAfterFailure = false
@@ -56,15 +47,12 @@ import UIKit
         app.launchArguments = ["-tron-subagent-parity-fixture", "-tool-summary-tint", scenario,
                                "-\(mode)", "-themeColor", "emerald", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Tool summary review · \(scenario)"].waitForExistence(timeout: 12), app.debugDescription)
+        // The fixture's assistant line renders as selectable text (#1112), not a static label.
+        let header = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tool summary review · \(scenario)")).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 12), app.debugDescription)
         let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '3 tools,'")).firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
         return (app, chip)
-    }
-
-    private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 
     private func verifyInk(_ app: XCUIApplication, chip: XCUIElement, expected: Ink, name: String) {

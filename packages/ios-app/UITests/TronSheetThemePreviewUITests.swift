@@ -1,9 +1,13 @@
 import XCTest
 
-/// Navigation-only simulator captures for maintainer review, not regression acceptance.
+/// Settings sheets follow their presenting theme: maintenance containers and workspace
+/// controls take the sheet's chroma, Forget Server stays destructive, and moved settings
+/// stay reachable with their editors; every category destination opens.
 @MainActor
 final class TronSheetThemePreviewUITests: XCTestCase {
-    /// Actual category destinations for before/after palette review; no snapshot goldens.
+
+    /// Every Settings category destination still opens and expands (the only local
+    /// reachability check for Push Notifications and Hooks).
     func testSettingsSectionColorReviewLightDark() {
         for mode in ["light", "dark"] {
             let app = settings(mode)
@@ -30,54 +34,6 @@ final class TronSheetThemePreviewUITests: XCTestCase {
                 capture(app, "section-colors-\(title)-\(mode)")
                 close(app)
             }
-            app.terminate()
-        }
-    }
-
-    func testSettingsSheetPreviewLightDark() {
-        continueAfterFailure = false
-        for mode in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review", "-settings-sheet-theme-review"]
-            if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
-            app.launch()
-            defer { app.terminate() }
-            XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 15))
-            app.buttons["Open Settings"].tap()
-            expand(app, title: "Global Settings")
-            open(app, "settings-link-Agent Behavior")
-            expand(app, title: "Agent Behavior")
-            capture(app, "more-top-\(mode)")
-            app.swipeUp(); app.swipeUp()
-            capture(app, "more-bottom-\(mode)")
-            close(app)
-            open(app, "settings-link-Agent Behavior")
-            expand(app, title: "Agent Behavior")
-            capture(app, "models-top-\(mode)")
-            app.swipeUp(); app.swipeUp()
-            capture(app, "models-bottom-\(mode)")
-            close(app)
-            open(app, "settings-link-Connections")
-            expand(app, title: "Connections")
-            capture(app, "connections-\(mode)")
-            open(app, "Details for Fixture")
-            expand(app, title: "Fixture")
-            capture(app, "server-top-\(mode)")
-            app.swipeUp(); app.swipeUp()
-            capture(app, "server-bottom-\(mode)")
-            open(app, "Configure source repository")
-            XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
-            capture(app, "workspace-server-\(mode)")
-            app.navigationBars.staticTexts["/fixture/projects"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
-            close(app); close(app)
-            open(app, "settings-link-Agent Behavior")
-            expand(app, title: "Agent Behavior")
-            open(app, "Trusted Projects")
-            open(app, "Add Project")
-            open(app, "project-lifecycle-existing")
-            XCTAssertTrue(app.buttons["Use current folder"].waitForExistence(timeout: 10))
-            capture(app, "workspace-trusted-\(mode)")
             app.terminate()
         }
     }

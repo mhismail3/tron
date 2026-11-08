@@ -2,10 +2,9 @@ import SwiftUI
 import TronMobileCore
 
 /// The learned profile: what Home has saved about the maintainer as Knowledge
-/// notes, grouped by personal area and exact scope rather than instruction kind. On a Gateway with
-/// `home-profile-edit.v1` the maintainer confirms, edits, replaces and retires items
-/// here; every change goes through the settings change path, shows in Changes and
-/// can be undone. An older Gateway keeps the sheet read-only.
+/// notes, grouped by personal area and exact scope rather than instruction kind. The
+/// maintainer confirms, edits, replaces and retires items here; every change goes
+/// through the settings change path, shows in Changes and can be undone.
 extension HomeSheet {
     func profile(_ list: HomeProfileListDTO) -> some View {
         let active = list.active
@@ -71,7 +70,7 @@ extension HomeSheet {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home-profile-item-detail")
-            if model.homeProfileEditable, item.status == .active, item.path != "prior" {
+            if item.status == .active, item.path != "prior" {
                 profileItemActions(item)
             }
             if item.path == "prior" {
@@ -169,7 +168,7 @@ extension HomeSheet {
     /// One accepted profile command: it runs under the admission the tap captured and
     /// publishes only while this sheet still shows that profile.
     func changeProfile(_ changes: [HomeProfileChange], done summary: String) {
-        guard model.homeProfileEditable, let admission = profileAdmission() else { return }
+        guard let admission = profileAdmission() else { return }
         profileEdit.working = true
         profileEdit.failure = nil
         Task { @MainActor in

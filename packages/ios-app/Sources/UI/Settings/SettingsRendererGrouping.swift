@@ -7,7 +7,7 @@ extension SettingsRendererView {
     /// A group whose every row already names it (Home's Tools; Session's
     /// Resize/Block images) needs no heading.
     static func rowsNameGroup(_ group: DetailGroup) -> Bool {
-        group.keys.allSatisfy { $0.presentation?.label.localizedCaseInsensitiveContains(group.title) == true }
+        group.keys.allSatisfy { $0.presentation.label.localizedCaseInsensitiveContains(group.title) }
     }
 
     struct DetailGroup {
@@ -39,7 +39,7 @@ extension SettingsRendererView {
         }
         for key in keys where instanceCount(key, in: keys) > 1 {
             let many = instanceCount(key, in: keys) > inlineInstanceLimit
-            add(key.presentation?.label ?? key.key, key, detail: many ? nil : key.presentation?.help, instanced: true)
+            add(key.presentation.label, key, detail: many ? nil : key.presentation.help, instanced: true)
         }
         return groups
     }
@@ -70,6 +70,6 @@ extension SettingsRendererView {
     }
 
     static func sorted(_ keys: [ResolvedSetting]) -> [ResolvedSetting] {
-        keys.sorted { ($0.presentation?.order ?? .max, $0.id) < ($1.presentation?.order ?? .max, $1.id) }
+        keys.sorted { ($0.presentation.order, $0.id) < ($1.presentation.order, $1.id) }
     }
 }

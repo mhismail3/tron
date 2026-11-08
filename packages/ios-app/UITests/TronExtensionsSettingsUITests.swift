@@ -63,23 +63,6 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         XCTAssertLessThan(npm.frame.maxY, searchPaths.frame.minY)
     }
 
-    /// Captures the whole sheet, top to the Search paths group, per appearance.
-    @MainActor
-    func testExtensionsSheetCaptures() {
-        for (name, dark, large) in [("light", false, false), ("dark", true, false), ("large", false, true)] {
-            let app = openExtensions(dark: dark, large: large)
-            let searchPaths = app.descendants(matching: .any)["settings-row-sources.themes"]
-            var reachedEnd = false
-            for page in 0..<(large ? 14 : 6) {
-                keep(app, "1482-extensions-\(name)-\(page)")
-                if reachedEnd { break }
-                reachedEnd = searchPaths.exists && searchPaths.isHittable
-                app.swipeUp(velocity: .slow)
-            }
-            app.terminate()
-        }
-    }
-
     // MARK: #1491 Default Tools while a built-in extension is off
 
     @MainActor

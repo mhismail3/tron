@@ -116,25 +116,3 @@ struct ChangeReviewSheet: View {
         .tronTopBlur(.sheet)
     }
 }
-
-/// One exact review waiting for the maintainer's tap, and the typed owner call
-/// that answers it with the review's digest. The call reports its own outcome.
-struct PendingChangeReview: Identifiable {
-    let review: ChangeReview
-    let confirm: @MainActor (String) async -> Void
-    var id: String { review.digest }
-}
-
-extension View {
-    /// Presents a pending review in the shared sheet. Approve retires the sheet and
-    /// answers once; Cancel or dismissal leaves nothing applied.
-    func changeReviewSheet(_ pending: Binding<PendingChangeReview?>, identity: String) -> some View {
-        tronManagedSheet(item: pending, identity: { "\(identity).\($0.id)" }) { item in
-            ChangeReviewSheet(review: item.review, approve: {
-                guard pending.wrappedValue?.id == item.id else { return }
-                pending.wrappedValue = nil
-                Task { @MainActor in await item.confirm(item.review.digest) }
-            }, cancel: { pending.wrappedValue = nil })
-        }
-    }
-}
