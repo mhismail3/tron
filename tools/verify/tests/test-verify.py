@@ -639,6 +639,12 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 echo "$*" >>"$FIXTURE_IOS_CALLS"
 if [[ "${FIXTURE_IOS_BUSY:-}" == "$1" && "$*" == *"${FIXTURE_IOS_BUSY_IN:-}"* ]]; then echo 'host slot wait expired; deferred'; exit 73; fi
+# A run's wall-clock span, for proving that shards on different lanes overlap.
+if [[ "$1" == run && -n "${FIXTURE_IOS_PIDS:-}" ]]; then echo "$$" >>"$FIXTURE_IOS_PIDS"; fi
+if [[ "$1" == run && -n "${FIXTURE_IOS_SECONDS:-}" ]]; then
+  begun="$(python3 -c 'import time; print(time.time())')"; sleep "$FIXTURE_IOS_SECONDS"
+  echo "$begun $(python3 -c 'import time; print(time.time())') $*" >>"$FIXTURE_IOS_SPANS"
+fi
 case "$1" in
   build)
     mkdir -p "$TRON_IOS_TEST_DERIVED_DATA/Build/Products"
@@ -667,10 +673,16 @@ class IosLaneTests(VerifyCase):
         r = self.repo
         products = Path(self.temp.name) / "products"
         calls = Path(self.temp.name) / "ios-calls.txt"
-        r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls))
+        # No runner logs: packing never reads this host's real test history.
+        (Path(self.temp.name) / "ios-runs").mkdir()
+        r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls),
+                     TRON_IOS_TEST_RESULTS_DIR=str(Path(self.temp.name) / "ios-runs"))
         tooling = json.loads((r.path / "tooling.module.json").read_text())
-        tooling["owns"].append("scripts/tron-ios-test")
+        # verify reads the host-wide slot count, one lane per slot, from the slot owner: the shipped count.
+        tooling["owns"] += ["scripts/tron-ios-test", "scripts/ios-test-lock.py"]
         r.write("tooling.module.json", json.dumps(tooling))
+        slots = next(line for line in (ROOT / "scripts/ios-test-lock.py").read_text().splitlines() if line.startswith("HOST_SLOTS = "))
+        r.write("scripts/ios-test-lock.py", slots + "\n")
         r.write("packages/ios-app/scripts/test-source-policy.sh", "#!/bin/sh\nexit ${FIXTURE_IOS_POLICY_EXIT:-0}\n")
         (r.path / "packages/ios-app/scripts/test-source-policy.sh").chmod(0o755)
         r.write("scripts/tron-ios-test", IOS_TEST_STUB)
@@ -828,62 +840,151 @@ class IosLaneTests(VerifyCase):
             self.assertIn(lane, owning[0], f"{method} must run on the iPad lane: {owning[0]}")
             self.assertNotIn(f"{journey}/testPhoneReturn", owning[0])
 
-    def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes(self) -> None:
-        """#2173: a selected class runs as method shards of at most IOS_SHARD_TESTS, each its own
-        runner process under the unchanged deadline, and a red shard does not stop the rest."""
+    def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes_on_concurrent_lanes(self) -> None:
+        """#2173: a selected class runs as method shards, each its own runner process under the
+        unchanged deadline, packed by the longest time this Mac's runner logs record for each method
+        (unmeasured methods three to a process), on one lane per host slot at once. A red shard does
+        not stop the rest; a lane refused a slot beside the run's others requeues its shard, only a
+        refusal with nothing else in flight defers it and the rest, and SIGTERM stops every lane."""
         r = self.repo
         calls = self.ios_fixture()
         ios = "packages/ios-app/UITests"
         import importlib.util
         spec = importlib.util.spec_from_file_location("shipped_verify", ROOT / "tools/verify/verify.py")
         shipped = importlib.util.module_from_spec(spec); spec.loader.exec_module(shipped)
-        size = shipped.IOS_SHARD_TESTS  # the shipped shard size; the class holds one full shard plus two
-        self.assertGreaterEqual(size, 2, "this fixture's two method shards need at least two tests per shard")
-        methods = [f"testCase{index}" for index in range(size + 2)]
-        split = size - 1  # the class file's methods; the extension file holds the other three
+        methods = [f"testCase{index}" for index in range(5)]
+        split = 2  # the class file's methods; the extension file holds the other three
         body = "\n".join(f"    @MainActor func {name}() {{}}" for name in methods[:split])
         r.write(f"{ios}/FixtureJourneyUITests.swift", "final class FixtureJourneyUITests {\n"
                 + body + "\n    private func testHelper() {}\n    func testWithArgument(_ value: Int) {}\n}\n")
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
                 + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n}\nstruct Other {\n    func testNotAMethodOfTheClass() {}\n}\n")
+        (r.path / f"{ios}/TronMacTerminalUITests.swift").unlink()  # its harness lane would make the run incomplete
         r.commit("a large class")
-        owner = "TronMobileUITests/FixtureJourneyUITests"
-        planned = r.verify("--module", "ios-app/ui-tests", "--plan")
-        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
-        self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios ")], ["tests: ios 1/3", "tests: ios 2/3", "tests: ios 3/3"])
-        calls.write_text("")
+        owner, lock = "TronMobileUITests/FixtureJourneyUITests", "TronMobileUITests/FixtureLockTests"
         # Sources are read in path order, so the extension file's methods come first.
         ordered = methods[split:] + methods[:split]
+        selectors = lambda names: " ".join(f"--only-testing {owner}/{name}" for name in names)  # noqa: E731
+        lane = lambda kind: f"verify-{kind}-" + hashlib.sha256(str(r.path.resolve()).encode()).hexdigest()[:12]  # noqa: E731
+
+        def planned_shards() -> list[str]:
+            planned = r.verify("--module", "ios-app/ui-tests", "--plan")
+            plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+            return [" ".join(c["command"][2:]) for c in plan["commands"] if c["name"].startswith("tests: ios") and "command" in c]
+
+        # With no recorded times every method counts a third of the budget: three to a process.
+        self.assertEqual(planned_shards(), [f"--host-slot-wait-seconds 30 {selectors(ordered[:3])}",
+                                            f"--host-slot-wait-seconds 30 {selectors(ordered[3:])}",
+                                            f"--host-slot-wait-seconds 30 --only-testing {lock}"])
+
+        # The shards run at once, one per host slot, longest estimate first (a class run whole counts
+        # the full budget; ties keep plan order): the worktree's lane first, with the bounded serial
+        # wait, then this worktree's verify lanes, which take a slot only if one is free.
+        spans = Path(self.temp.name) / "spans.txt"
         red = ordered[0]
-        r.env.update(FIXTURE_IOS_FAIL=f"{owner}/{red}()", FIXTURE_IOS_FAIL_IN=f"{owner}/{red} ")
-        result = r.verify("--module", "ios-app/ui-tests")
+        r.env.update(FIXTURE_IOS_SECONDS="2", FIXTURE_IOS_SPANS=str(spans),
+                     FIXTURE_IOS_FAIL=f"{owner}/{red}()", FIXTURE_IOS_FAIL_IN=f"{owner}/{red} ")
+        result = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         runs = [line for line in calls.read_text().splitlines() if line.startswith("run ")]
-        self.assertEqual(runs, [
-            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[:size]),
-            "run --host-slot-wait-seconds 30 " + " ".join(f"--only-testing {owner}/{name}" for name in ordered[size:]),
-            "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"], result.stdout)
+        self.assertEqual(sorted(runs), sorted([
+            f"run --host-slot-wait-seconds 30 {selectors(ordered[:3])}",
+            f"run --lane {lane('iphone2')} --host-slot-wait-seconds 0 --only-testing {lock}",
+            f"run --lane {lane('iphone3')} --host-slot-wait-seconds 0 {selectors(ordered[3:])}"]), result.stdout)
+        bounds = [line.split()[:2] for line in spans.read_text().splitlines()]
+        self.assertLess(max(float(begun) for begun, _ in bounds), min(float(ended) for _, ended in bounds),
+                        f"the three shards must overlap: {bounds}")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("tests: ios 1/3 FAILED", result.stdout)
         self.assertIn(f"failed: {owner}/{red}(): a11y differs", result.stdout)
         self.assertIn("tests: ios 2/3 OK", result.stdout)
         self.assertIn("tests: ios 3/3 OK", result.stdout)
-
-        # A busy runner after the first shard defers that shard and the rest: never a pass.
+        self.assertEqual([step["name"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")],
+                         ["tests: ios 1/3", "tests: ios 2/3", "tests: ios 3/3"])
         r.env.pop("FIXTURE_IOS_FAIL"); r.env.pop("FIXTURE_IOS_FAIL_IN")
-        (r.path / f"{ios}/TronMacTerminalUITests.swift").unlink()  # its harness lane would make the run incomplete
-        r.commit("no harnessed journey")
-        r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=f"{owner}/{ordered[size]}")
+
+        # A verify lane refused a slot beside running shards admitted no work: its shard runs later
+        # on a lane that is admitted, and the run passes without deferring anything.
+        calls.write_text("")
+        r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=lane("iphone2"))
+        requeued = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
+        self.assertEqual(requeued.returncode, 0, requeued.stdout + requeued.stderr)
+        self.assertIn("requeued", requeued.stdout)
+        self.assertEqual(r.report()["verdict"], "passed")
+        self.assertEqual(r.report()["passingTests"], len(methods) + 1)
+        locks = [line for line in calls.read_text().splitlines() if line.endswith(f"--only-testing {lock}")]
+        self.assertIn(f"--lane {lane('iphone2')} --host-slot-wait-seconds 0", locks[0], calls.read_text())
+        self.assertNotIn(lane("iphone2"), locks[-1], calls.read_text())
+
+        # A refusal with none of the run's other shards in flight is the serial busy exit:
+        # that shard is deferred, never passed, while admitted shards keep their outcomes.
+        r.env.update(FIXTURE_IOS_BUSY_IN=f"{owner}/{ordered[3]} ")
         deferred = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         steps = {step["name"]: step["status"] for step in r.report()["steps"]}
-        self.assertEqual([steps[f"tests: ios {index}/3"] for index in (1, 2, 3)], ["ok", "deferred", "deferred"], deferred.stdout)
+        self.assertEqual([steps[f"tests: ios {index}/3"] for index in (1, 2, 3)], ["ok", "deferred", "ok"], deferred.stdout)
         self.assertEqual(r.report()["verdict"], "deferred", deferred.stdout)
+
+        # Recorded times pack the processes: the longest time any retained runner log records
+        # (failed runs too) is a method's estimate, consecutive methods share a process up to the
+        # budget, and one estimated above it runs alone.
+        results = Path(self.temp.name) / "ios-runs"
+        case = lambda name, outcome, seconds: f"Test Case '-[TronMobileUITests.FixtureJourneyUITests {name}]' {outcome} ({seconds} seconds).\n"  # noqa: E731
+        (results / "a-run.1").mkdir()
+        (results / "a-run.1/test.log").write_text(case(ordered[0], "passed", "0.5") + case(ordered[1], "passed", "0.5")
+                                                 + case(ordered[2], "passed", shipped.IOS_SHARD_SECONDS + 100))
+        (results / "b-run.2").mkdir()
+        (results / "b-run.2/test.log").write_text(case(ordered[1], "failed", shipped.IOS_SHARD_SECONDS) + case(ordered[3], "passed", "0.5"))
+        self.assertEqual(planned_shards(), [f"--host-slot-wait-seconds 30 {selectors(ordered[:1])}",
+                                            f"--host-slot-wait-seconds 30 {selectors(ordered[1:2])}",
+                                            f"--host-slot-wait-seconds 30 {selectors(ordered[2:3])}",
+                                            f"--host-slot-wait-seconds 30 {selectors(ordered[3:])}",
+                                            f"--host-slot-wait-seconds 30 --only-testing {lock}"])
+        # With every lane refused, nothing runs and every shard is deferred, including those never started.
+        calls.write_text("")
+        r.env.update(FIXTURE_IOS_BUSY_IN="")
+        refused = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
+        self.assertEqual(refused.returncode, 0, refused.stdout + refused.stderr)
+        self.assertEqual(r.report()["verdict"], "deferred", refused.stdout)
+        self.assertEqual({step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")}, {"deferred"})
+        self.assertEqual(len([step for step in r.report()["steps"] if step["name"].startswith("tests: ios")]), 5)
         r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN")
+        for item in results.iterdir():
+            shutil.rmtree(item)
+
+        # SIGTERM stops and joins every lane's shard: none outlives verify, none starts after it,
+        # and the run is interrupted, never a pass.
+        pids = Path(self.temp.name) / "pids.txt"
+        calls.write_text("")
+        r.env.update(FIXTURE_IOS_SECONDS="120", FIXTURE_IOS_PIDS=str(pids))
+        process = subprocess.Popen([str(r.path / "scripts/tron"), "verify", "--base", "base", "--module", "ios-app/ui-tests",
+                                    "--skip", "mac"], cwd=r.path, env=r.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        try:
+            deadline = time.monotonic() + 60
+            while (not pids.exists() or len(pids.read_text().split()) < 3) and time.monotonic() < deadline:
+                time.sleep(.05)
+            started = [int(pid) for pid in pids.read_text().split()]
+            self.assertEqual(len(started), 3, "every lane's shard must start before the signal")
+            process.send_signal(signal.SIGTERM)
+            # Within the 30 s SIGKILL grace: each runner stops on SIGTERM itself.
+            output, _ = process.communicate(timeout=20)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        self.assertEqual(process.returncode, 130, output)
+        self.assertEqual(r.report()["verdict"], "interrupted", output)
+        self.assertEqual(sorted(step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")),
+                         ["interrupted"] * 3, output)
+        for pid in started:
+            with self.assertRaises(ProcessLookupError, msg=f"shard runner {pid} outlived verify"):
+                os.kill(pid, 0)
+        self.assertEqual(len([line for line in calls.read_text().splitlines() if line.startswith("run ")]), 3)
+        r.env.pop("FIXTURE_IOS_SECONDS"); r.env.pop("FIXTURE_IOS_PIDS")
 
         # A shard whose runner passes fewer tests than it names fails: a selector matched nothing.
-        r.env.update(FIXTURE_IOS_PASSED=str(size - 1))
-        short = r.verify("--module", "ios-app/ui-tests")
+        r.env.update(FIXTURE_IOS_PASSED="2")
+        short = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         self.assertEqual(short.returncode, 1, short.stdout)
-        self.assertIn(f"tests: ios 1/3 passed {size - 1} of its {size} named test(s)", short.stdout)
+        self.assertIn("tests: ios 1/3 passed 2 of its 3 named test(s)", short.stdout)
         r.env.pop("FIXTURE_IOS_PASSED")
 
         # A test-shaped method the reader cannot place makes the class run whole, never dropped.
