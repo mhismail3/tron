@@ -38,7 +38,6 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     /// Static choices, or field names/labels for a `numberMap` list.
     let options: [SettingsChoice]?
     let optionsSource: SettingsOptionsSource?
-    let confirm: String?
     let redacted: Bool?
     /// What to type into the key's text field or a list's new value (#939).
     let entry: SettingsEntryGuidance?
@@ -155,8 +154,6 @@ struct SettingsChangeResult: Decodable, Equatable, Sendable {
         }
 
         let error: Failure?
-        /// The key's `confirm` text when the change needs the maintainer's tap first.
-        let confirm: String?
     }
 
     let status: String?

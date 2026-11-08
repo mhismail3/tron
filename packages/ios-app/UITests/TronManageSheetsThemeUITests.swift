@@ -2,11 +2,8 @@ import XCTest
 
 /// Manage Session, Manage Home and the sheets they open share one emerald sheet
 /// theme; each sub-sheet is titled by the row that opens it; Instructions rows
-/// keep their summary on the title's line (#1680). The Capture journeys keep the
-/// light/dark review images; the Behavior tests are the regression oracle.
+/// keep their summary on the title's line (#1680).
 final class TronManageSheetsThemeUITests: XCTestCase {
-
-    // MARK: Behavior
 
     /// Each editor is the first interaction on a newly opened Home model card.
     @MainActor func testFirstOpenHomeEffortAndContextExposeUsableSliders() {
@@ -144,18 +141,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["agent-instructions-section-preamble"].waitForExistence(timeout: 10), app.debugDescription)
         return app
-    }
-
-    /// Taps a Manage Session row by its label and waits for its sheet to settle large.
-    @MainActor private func open(_ app: XCUIApplication, row label: String) {
-        let row = app.buttons[label].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
-        for _ in 0..<6 where !row.isHittable { app.swipeUp() }
-        row.tap()
-        Thread.sleep(forTimeInterval: 1.0)
-        let title = app.navigationBars.staticTexts.allElementsBoundByIndex.last?.label ?? label
-        expand(app, title: title)
-        Thread.sleep(forTimeInterval: 1.0)
     }
 
     // MARK: Helpers

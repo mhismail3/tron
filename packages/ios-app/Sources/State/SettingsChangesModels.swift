@@ -55,7 +55,6 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
     let undoOf: String?
     /// A later fact's subject: for an outside change, the Tron change whose value it replaced.
     let refersTo: String?
-    let applyAgainOf: String?
     let presentation: Presentation
 
     var id: String { changeId }

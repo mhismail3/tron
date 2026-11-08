@@ -53,8 +53,8 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     func value(at layer: String) -> JSONValue? { layers.first { $0.layer == layer }?.value }
 }
 
-/// `settings.resolve`: the key instances and, when the request negotiated the
-/// renderer contract, the sections that summarize them in the Gateway's order.
+/// `settings.resolve`: the key instances and the sections that summarize them in
+/// the Gateway's order.
 struct SettingsProjectSource: Decodable, Equatable, Sendable {
     let file: String
     let path: String
