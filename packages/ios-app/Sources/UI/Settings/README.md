@@ -24,7 +24,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 ## Contract
 
-- **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, App Customizations),
+- **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet for color mode, theme, fonts, dashboard and subagent activity),
   Accounts (indigo: Connections, Model Providers),
   Agent & Tools (the fixed Emerald identity ink: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
   System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination

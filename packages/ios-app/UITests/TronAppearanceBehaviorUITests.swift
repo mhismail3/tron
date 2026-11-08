@@ -14,6 +14,7 @@ final class TronAppearanceBehaviorUITests: XCTestCase {
             XCTAssertTrue(choice.waitForExistence(timeout: 8), "Appearance must expose all persisted identity choices")
             choice.tap()
             XCTAssertEqual(choice.value as? String, "Selected")
+            assertThemeRow(app, selected: theme)
             app.terminate()
             app.launch()
             openAppearance(app)
@@ -60,6 +61,26 @@ final class TronAppearanceBehaviorUITests: XCTestCase {
         openAppearance(app)
         XCTAssertTrue(app.staticTexts["Text Font"].exists, "Structural counting must retain headings on a multi-section page")
         app.terminate()
+    }
+
+    /// The three themes are one row of third-width tiles, each a 44pt+ target
+    /// that VoiceOver reads as the theme's name with only the chosen one selected.
+    private func assertThemeRow(_ app: XCUIApplication, selected: String) {
+        let themes = [("emerald", "Emerald"), ("burgundy", "Deep Burgundy"), ("oliveGold", "Olive Gold")]
+        let tiles = themes.map { app.buttons["theme-color-\($0.0)"] }
+        let row = tiles[2].frame.maxX - tiles[0].frame.minX
+        XCTAssertGreaterThan(row, app.windows.firstMatch.frame.width * 0.75, "The row spans the sheet's content width")
+        for (index, tile) in tiles.enumerated() {
+            let (id, name) = themes[index]
+            XCTAssertTrue(tile.isHittable, "\(name) is visible without scrolling")
+            XCTAssertEqual(tile.label, name)
+            XCTAssertEqual(tile.isSelected, id == selected, "Only the chosen theme carries the selected trait")
+            XCTAssertEqual(tile.value as? String ?? "", id == selected ? "Selected" : "")
+            XCTAssertGreaterThanOrEqual(tile.frame.height, 44)
+            XCTAssertEqual(tile.frame.width, (row - 20) / 3, accuracy: 1, "Each tile is a third of the row")
+            XCTAssertEqual(tile.frame.minY, tiles[0].frame.minY, accuracy: 0.5, "Tiles share one horizontal row")
+            if index > 0 { XCTAssertGreaterThan(tile.frame.minX, tiles[index - 1].frame.maxX) }
+        }
     }
 
     private func openAppearance(_ app: XCUIApplication) {

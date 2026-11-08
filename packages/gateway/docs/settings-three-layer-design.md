@@ -140,9 +140,9 @@ Device-local settings (S=no, P=no, safety=no, immediate presentation effect; not
 | `fontFamily` | This iPhone / Appearance | `FontSettings`, UserDefaults |
 | `monoFontFamily` | This iPhone / Appearance | `FontSettings`, UserDefaults |
 | `fontAxisValues` | This iPhone / Appearance | `FontSettings`, UserDefaults |
-| `subagentRecentFinishedRetentionMinutes.v1` | This iPhone / App Customizations | `AppLocalBehaviorSettings`, UserDefaults |
-| `dashboardChatsPerProject.v1` | This iPhone / App Customizations | `AppLocalBehaviorSettings`, UserDefaults |
-| `dashboard.serverFilter.preferences.v2` | This iPhone / App Customizations | `DashboardServerFilterPreferences`, UserDefaults |
+| `subagentRecentFinishedRetentionMinutes.v1` | This iPhone / Appearance | `AppLocalBehaviorSettings`, UserDefaults |
+| `dashboardChatsPerProject.v1` | This iPhone / Appearance | `AppLocalBehaviorSettings`, UserDefaults |
+| `dashboard.serverFilter.preferences.v2` | This iPhone / Appearance | `DashboardServerFilterPreferences`, UserDefaults |
 | `dashboard.automations.preferences.v1` | Dashboard local presentation | Existing Dashboard preferences owner, UserDefaults |
 | `dashboard.homeUsage.hiddenProviders.v1` | Dashboard Home usage visibility | Existing Home usage preferences owner, UserDefaults |
 
