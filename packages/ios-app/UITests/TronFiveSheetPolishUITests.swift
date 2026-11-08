@@ -16,6 +16,7 @@ import Vision
             link.tap()
             let field = app.textFields["Chats per project"]
             XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 8), app.debugDescription)
+            XCTAssertTrue(field.waitForExistence(timeout: 8), app.debugDescription)
             reveal(field, app: app)
             XCTAssertTrue(field.isHittable, app.debugDescription)
             field.tap()

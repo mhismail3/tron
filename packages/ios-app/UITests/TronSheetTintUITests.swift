@@ -62,6 +62,7 @@ final class TronSheetTintUITests: XCTestCase {
             done.first?.tap()
             XCTAssertTrue(sessions.waitForExistence(timeout: 5)); sessions.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(retention.waitForExistence(timeout: 5), app.debugDescription)
             for _ in 0..<10 where !retention.isHittable { app.swipeUp() }
             XCTAssertTrue(retention.isHittable, app.debugDescription)
             XCTAssertEqual(retention.value as? String, selected, "The value survives reopening Appearance")

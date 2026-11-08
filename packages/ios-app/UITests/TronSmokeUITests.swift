@@ -918,10 +918,8 @@ final class TronSmokeUITests: XCTestCase {
                 for _ in 0..<8 where !theme.isHittable || theme.frame.maxY > app.windows.firstMatch.frame.height * 0.8 { app.swipeUp(velocity: .slow) }
                 XCTAssertTrue(theme.isHittable, "The theme row is reachable in the Appearance sheet")
                 keepScreenshot(named: "1325-expanded-appearance-theme-\(suffix)")
-                for _ in 0..<8 where !app.buttons["Dashboard View"].firstMatch.isHittable { app.swipeDown() }
                 if !large {
-                    // The combined row inherits its child's button trait but its
-                    // center is a label. Tap the actual trailing value control.
+                    for _ in 0..<8 where !app.buttons["Dashboard View"].firstMatch.isHittable { app.swipeDown() }
                     tapScrolling(app.buttons["Dashboard View"].firstMatch, in: app)
                     XCTAssertTrue(app.buttons["settings-option-By Project / Server"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-dashboard-view-\(suffix)")
@@ -3421,7 +3419,7 @@ final class TronSmokeUITests: XCTestCase {
         setCount(originalCount)
         closeTopSheet(app)
         tapScrolling(app.buttons["settings-link-Appearance"], in: app)
-        XCTAssertTrue(app.staticTexts["Color Mode"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5))
         closeTopSheet(app)
         tapScrolling(app.buttons["settings-link-Setup"], in: app)
         let experiment = app.switches["Run Swift files"]

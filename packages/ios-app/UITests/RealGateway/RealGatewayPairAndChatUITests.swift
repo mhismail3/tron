@@ -1203,6 +1203,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             revealBelowNavigationBar(app, link)
             link.tap()
             XCTAssertTrue(app.navigationBars.staticTexts[name].waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(marker.waitForExistence(timeout: 30), app.debugDescription)
             revealBelowNavigationBar(app, marker)
             XCTAssertTrue(marker.isHittable, app.debugDescription)
             dismissTopSheet(app)
