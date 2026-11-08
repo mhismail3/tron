@@ -77,12 +77,12 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). On iPad
   only, Return sends like an enabled Send (hardware Shift+Return, IME commits, paste and dictation
   still edit) and saves the annotation bubble like its check (hardware Shift+Return adds a line). The `testPad*` journeys run on an iPad
-  simulator and skip elsewhere; `testPhoneReturnInsertsNewline` keeps iPhone Return a newline. 
+  simulator and skip elsewhere; `testPhoneReturnInsertsNewline` keeps iPhone Return a newline.
   A completed assistant message's adjacent paragraphs, headings and list items are one TextKit
   run, so native Copy/Annotate ranges cross those block boundaries with emphasis, links, heading
   levels and list markers intact; each block keeps its own static-text accessibility element
-  and frame, and a list item reads its marker. Selection stays on at accessibility text sizes. Staged selections anchor by run-scoped UTF-16 range for their highlight (not
-  persisted). Code blocks, tables and blockquotes keep their own renderers, and a selection
+  and frame, and a list item reads its marker. Selection stays on at accessibility text sizes.
+  Staged selections anchor by run-scoped UTF-16 range for their highlight (not persisted). Code blocks, tables and blockquotes keep their own renderers, and a selection
   does not cross them (#1112). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
