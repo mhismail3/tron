@@ -16,7 +16,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 test("replayed Debug traffic is a real-traffic shadow that catches a corrupted record", async (t) => {
   const base = mkdtempSync(join(tmpdir(), "tron-proof-replay-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
-  const ts = await import(join(ROOT, "packages/gateway/src/automations/schedule.ts"));
+  const { importGatewaySource } = await import(join(ROOT, "tools/proof/oracles/gateway-source.mjs"));
+  const ts = await importGatewaySource("automations/schedule.ts");
   let seed = 3;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   const start = Date.parse("2026-11-01T00:00:00.000Z");
@@ -67,12 +68,30 @@ test("replayed Debug traffic is a real-traffic shadow that catches a corrupted r
   files["2026-11-07.jsonl"] = day("2026-11-07");
   write();
   const window = shadow(1);
-  assert.deepEqual([window.result.status, window.result.compared, window.result.windowDays], ["match", 300, 1]);
+  assert.deepEqual([window.result.status, window.result.compared, window.result.windowDays, window.result.corpus.first], ["match", 300, 1, "2026-11-07"]);
+  // An empty or impossible day file is not a covered day.
+  writeFileSync(join(corpus, "2026-11-08.jsonl"), "");
+  writeFileSync(join(corpus, "2026-13-45.jsonl"), files["2026-11-07.jsonl"].join("\n"));
+  const days = shadow();
+  assert.deepEqual([days.result.windowDays, days.result.corpus.last], [2, "2026-11-07"]);
+  rmSync(join(corpus, "2026-11-08.jsonl")); rmSync(join(corpus, "2026-13-45.jsonl"));
 
-  for (const [name, line] of [["not JSON", "{"], ["foreign record", JSON.stringify({ schema: "tron-proof-traffic/1", block: "other/block", seam: "next", input: {}, output: null })]]) {
+  // Records the recorder never writes are refused with their cause, never compared.
+  const good = JSON.parse(files["2026-11-07.jsonl"][0]);
+  const without = (key) => { const r = { ...good }; delete r[key]; return r; };
+  for (const [line, cause] of [
+    ["{", /not JSON/],
+    [JSON.stringify({ ...good, block: "other/block" }), /not a schedule\/occurrence tron-proof-traffic\/1 record/],
+    [JSON.stringify(without("output")), /seq, at \(on the file's day\) or output missing or malformed/],
+    [JSON.stringify({ ...good, at: "2026-11-06T12:00:00.000Z" }), /on the file's day/],
+    [JSON.stringify({ ...good, input: { ...good.input, afterMs: undefined } }), /next input or output is not what the seam records/],
+    [JSON.stringify({ ...good, input: { ...good.input, trigger: { kind: "once", at: "soon" } } }), /next input or output is not what the seam records/],
+  ]) {
     writeFileSync(join(corpus, "2026-11-07.jsonl"), `${line}\n`);
     const broken = shadow();
-    assert.deepEqual([broken.status, broken.result.status], [1, "error"], name);
+    assert.deepEqual([broken.status, broken.result.status], [1, "error"], line);
+    assert.match(broken.result.error, /exited 2/, line);
+    assert.match(broken.result.error, cause, line);
   }
   rmSync(corpus, { recursive: true });
   const empty = shadow();

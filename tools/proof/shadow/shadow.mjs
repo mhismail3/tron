@@ -11,7 +11,7 @@
 // Exit 0: match. 1: mismatch or failed comparison. 2: usage or toolchain error.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,8 +26,9 @@ if (!block || block.startsWith("-")) { console.error("usage: scripts/tron proof 
 const root = resolve(opt("--root") ?? join(REPO, "packages/core"));
 const dir = join(root, "blocks", block);
 const full = JSON.parse(readFileSync(join(dir, "mutate.json"), "utf8"));
-const days = opt("--days") === undefined ? null : Number(opt("--days"));
+const days = args.includes("--days") ? Number(opt("--days")) : null;
 if (days !== null && !(Number.isInteger(days) && days > 0)) { console.error("--days must be a positive integer"); process.exit(2); }
+if (days === null && args.includes("--corpus")) { console.error("--corpus needs --days"); process.exit(2); }
 const cfg = days === null ? full.shadow : full.replay;
 if (!cfg) { console.error(`block ${block} has no mutate.json ${days === null ? "shadow" : "replay"}`); process.exit(2); }
 // The recorder's corpus of this block on the Debug Gateway (read only), or --corpus.
@@ -49,7 +50,10 @@ work = mkdtempSync(join(tmpdir(), "tron-proof-shadow-"));
 try {
   const core = join(work, "core.js");
   execFileSync(DAFNY, ["translate", "js", "--no-verify", "--include-runtime", full.translate, "-o", join(work, "core")], { cwd: root, env, stdio: "ignore" });
-  const corpus = days === null ? [] : (existsSync(corpusDir) ? readdirSync(corpusDir) : []).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort().slice(-days);
+  // Day files the recorder writes: a real calendar date, never empty (an empty or invalid file is not a day).
+  const isDay = (f) => { const m = /^(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(f); if (!m) return false; const d = new Date(`${m[1]}T00:00:00Z`); return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(m[1]); };
+  const corpus = days === null ? [] : (existsSync(corpusDir) ? readdirSync(corpusDir) : []).filter(isDay)
+    .filter((f) => statSync(join(corpusDir, f)).size > 0).sort().slice(-days);
   if (days !== null && corpus.length === 0) fail(`no recorded traffic for ${block} (scripts/tron dev start --proof-traffic records it)`);
   const argv = cfg.cmd.slice(1).flatMap((c) => (c === "{corpus}" ? corpus.map((f) => join(corpusDir, f)) : [c.replaceAll("{core}", core)]));
   const run = spawnSync(cfg.cmd[0], argv, { cwd: REPO, env, encoding: "utf8", maxBuffer: 1 << 26 });

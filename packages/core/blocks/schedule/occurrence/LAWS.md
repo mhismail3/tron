@@ -9,7 +9,7 @@ Block hash: `edee583831e67e12` (over `blocks/schedule/occurrence/Block.dfy`, `la
 | Independent review | ACCEPT by law-reviewer (run 77119584, rounds 491045bd, 32260c52, a8140703) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-opus-5-5); 2026-11-08 |
 | Mutation check | PASS: 113 valid mutants, 113 killed by laws, 0 law-gap, 0 survived, 0 accepted (blocks/schedule/occurrence/MUTATION.json) |
 | Shadow | match: 20000 inputs compared, 0 mismatches; lab traffic only; compiled core vs packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic) |
-| **Ready for cut-over** | no (READY is only computed with --recheck) (needs real-traffic shadow over >= 7 days; starts in P1) |
+| **Ready for cut-over** | no (READY is only computed with --recheck) (needs a current real-traffic shadow over >= 7 days) |
 
 ## L1 next-sound
 

@@ -148,9 +148,12 @@ never leaves a stale match.
 With `--days N` it replays recorded Debug traffic instead: the newest N day files of
 `~/.tron-dev/gateway/proof-traffic/<block>/` (read only; `--corpus` names another directory) go to
 `mutate.json` `replay.cmd` (`{corpus}` expands to the files), and the result is `realTraffic: true`,
-`windowDays` = the day files replayed, and `corpus: {first, last, hash}` (dates and a digest, no paths). No
+`windowDays` = the non-empty day files with a real date replayed (gaps allowed; a file is a day), and `corpus: {first, last, hash}` (dates and a digest, no paths). No
 recorded traffic is an error. The packet's `--recheck` re-runs a recorded shadow over the same number of days
-and requires a match on at least as many calls. The command must exit 0 with every request agreeing or 1 with mismatches; a crash,
+and requires a match on at least as many calls; a real-traffic shadow counts for cut-over only while its
+newest recorded day is at most three days old. The oracle refuses (exit 2) any record the recorder would
+not write: another schema, block or seam, a missing `output`, an `at` off the file's day, or an input or
+output of the wrong shape. The command must exit 0 with every request agreeing or 1 with mismatches; a crash,
 a signal, unparsable output, nothing compared, or an exit status that contradicts the counts is `error`. Generated-input comparisons are `realTraffic: false`. The packet re-compiles the
 core to check `coreJsHash`, and `--recheck` re-runs the shadow.
 
@@ -158,7 +161,8 @@ core to check `coreJsHash`, and `--recheck` re-runs the shadow.
 inputs, or with `--replay <files>` on recorded calls (the recorded TypeScript output is the expectation), and
 print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a record it cannot read); a block's `mutate.json` uses its oracle
 both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
-imports `packages/gateway/src/automations/schedule.ts` directly (Node strips its types) and calls the core
+imports `packages/gateway/src/automations/schedule.ts` through `oracles/gateway-source.mjs` (module hooks
+that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript transform) and calls the core
 through the block's generated façade. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 

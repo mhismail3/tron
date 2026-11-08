@@ -10,9 +10,10 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { importGatewaySource } from "./gateway-source.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const oracle = await import(join(REPO, "packages/gateway/src/automations/schedule.ts"));
+const oracle = await importGatewaySource("automations/schedule.ts");
 const [corePath, countArg, seedArg, ...replayFiles] = process.argv.slice(2);
 if (!corePath) { console.error("usage: schedule-occurrence.mjs <compiled core.js> [count] [seed] | --replay <corpus.jsonl>..."); process.exit(2); }
 const replay = countArg === "--replay";
@@ -37,13 +38,28 @@ if (replay) {
   // Recorded calls: the recorded TypeScript output is the expectation; the core gets the same inputs.
   const files = [seedArg, ...replayFiles].filter(Boolean);
   const requests = [];
+  // Exactly the records the recorder writes; anything else is refused (exit 2), never compared.
+  const iso = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)) && new Date(Date.parse(v)).toISOString() === v;
+  const integer = (v) => Number.isSafeInteger(v);
+  const okTrigger = (t) => t && ((t.kind === "once" && iso(t.at) && Object.keys(t).length === 2)
+    || (t.kind === "interval" && iso(t.anchorAt) && integer(t.everySeconds) && t.everySeconds > 0 && Object.keys(t).length === 3));
+  const okInput = (seam, i) => i && okTrigger(i.trigger) && (seam === "next" ? integer(i.afterMs) && Object.keys(i).length === 2
+    : seam === "first" ? integer(i.nowMs) && Object.keys(i).length === 2
+    : iso(i.nextOccurrenceAt) && integer(i.nowMs) && ["latest", "skip"].includes(i.policy) && Object.keys(i).length === 4);
+  const okOutput = (seam, o) => (seam === "classify"
+    ? o && typeof o === "object" && Array.isArray(o.skipped) && o.skipped.length <= 1 && o.skipped.every(iso)
+      && (o.dispatchAt === undefined || iso(o.dispatchAt)) && (o.nextOccurrenceAt === undefined || iso(o.nextOccurrenceAt))
+      && Object.keys(o).every((k) => ["dispatchAt", "nextOccurrenceAt", "skipped"].includes(k))
+    : o === null || iso(o));
   for (const file of files) {
+    const day = /(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(file)?.[1];
     readFileSync(file, "utf8").split("\n").forEach((line, i) => {
       if (!line) return;
-      let r; try { r = JSON.parse(line); } catch { console.error(`${file}:${i + 1}: not JSON`); process.exit(2); }
-      if (r.schema !== "tron-proof-traffic/1" || r.block !== "schedule/occurrence" || !["next", "first", "classify"].includes(r.seam) || !fromTs(r.input?.trigger ?? {})) {
-        console.error(`${file}:${i + 1}: not a schedule/occurrence tron-proof-traffic/1 record`); process.exit(2);
-      }
+      const refuse = (why) => { console.error(`${file}:${i + 1}: ${why}`); process.exit(2); };
+      let r; try { r = JSON.parse(line); } catch { refuse("not JSON"); }
+      if (r?.schema !== "tron-proof-traffic/1" || r.block !== "schedule/occurrence" || !["next", "first", "classify"].includes(r.seam)) refuse("not a schedule/occurrence tron-proof-traffic/1 record");
+      if (!integer(r.seq) || !iso(r.at) || (day && r.at.slice(0, 10) !== day) || !("output" in r)) refuse("seq, at (on the file's day) or output missing or malformed");
+      if (!okInput(r.seam, r.input) || !okOutput(r.seam, r.output)) refuse(`${r.seam} input or output is not what the seam records`);
       requests.push({ where: `${file}:${i + 1}`, record: r });
     });
   }
@@ -53,8 +69,7 @@ if (replay) {
     const t = fromTs(input.trigger);
     const got = seam === "next" ? core.Next(t, input.afterMs) : seam === "first" ? core.First(t, input.nowMs)
       : core.Classify(t, Date.parse(input.nextOccurrenceAt), input.nowMs, input.policy === "latest" ? "Latest" : "Skip");
-    if (seam === "classify" && (output?.skipped ?? []).length > 1) { console.error(`${where}: more than one skipped occurrence`); process.exit(2); }
-    const want = seam === "classify" ? { dispatchAt: ms(output?.dispatchAt), next: ms(output?.nextOccurrenceAt), skipped: ms(output?.skipped?.[0]) } : ms(output);
+    const want = seam === "classify" ? { dispatchAt: ms(output.dispatchAt), next: ms(output.nextOccurrenceAt), skipped: ms(output.skipped[0]) } : ms(output);
     if (JSON.stringify(want) === JSON.stringify(got)) agree++;
     else if (diffs.length < 5) diffs.push({ where, seam, input, want, got });
   }

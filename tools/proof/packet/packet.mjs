@@ -156,7 +156,9 @@ function packet(root, block, opts = {}) {
   const shadowOk = shadow?.status === "match" && shadow.compared > 0 && shadow.mismatches === 0 && shadowFresh && shadow.coreJsHash === coreHashNow
     && (!opts.recheck || (shadowRecheck?.status === "match" && shadowRecheck.realTraffic === shadow.realTraffic
       && (shadow.realTraffic ? shadowRecheck.compared >= shadow.compared : shadowRecheck.compared === shadow.compared)));
-  const realOk = shadowOk && shadow.realTraffic === true && shadow.windowDays >= windowNeed;
+  // Real traffic must also be current: its newest recorded day at most two days old.
+  const recent = shadow?.corpus?.last !== undefined && Date.now() - Date.parse(`${shadow.corpus.last}T00:00:00Z`) <= 2 * 86_400_000 + 86_400_000;
+  const realOk = shadowOk && shadow.realTraffic === true && shadow.windowDays >= windowNeed && recent;
   const ready = opts.recheck === true && verify.ok === true && reviewOk && mutOk && realOk;
 
   const tierRules = cfg.tier === "high-stakes"
@@ -170,7 +172,7 @@ function packet(root, block, opts = {}) {
     `| Independent review | ${!review ? "MISSING" : reviewOk ? `ACCEPT by ${review.reviewer.agent} (${review.reviewer.model}, transcript-verified); writer ${review.writer.agent} (${review.writer.model}); ${review.date}` : `NOT ACCEPTED: ${reviewProblems.join("; ")}`} |`,
     `| Mutation check | ${!ms ? "MISSING" : `${!mutFresh ? `STALE (report for ${ms.inputsHash}) ` : ""}${!toolFresh ? "STALE (older mutation checker) " : ""}${ms.pass ? "PASS" : "FAIL"}${mutRecheck ? ` [recheck ${mutRecheck.recheck}: ${mutRecheck.sampled?.length ?? 0} sampled mutants re-run]` : ""}: ${ms.valid} valid mutants, ${ms.killed} killed by laws, ${ms.lawGap} law-gap, ${ms.survived} survived, ${ms.accepted} accepted (${cfg.report})`} |`,
     `| Shadow | ${!shadow ? "MISSING" : `${!shadowFresh ? `STALE (run for ${shadow.inputsHash}) ` : ""}${shadow.status}: ${shadow.compared} ${shadow.unit ?? ""} compared, ${shadow.mismatches} mismatches; ${(opts.recheck ? shadowRecheck?.realTraffic : shadow.realTraffic) ? `real traffic, ${shadow.windowDays} days` : "lab traffic only"}; ${shadow.source ?? shadow.error}${coreHashNow === null ? "; compiled core not checked (--no-verify or translate failed)" : shadow.coreJsHash !== coreHashNow ? "; STALE: compiled core changed" : ""}${shadowRecheck ? ` [recheck: ${shadowRecheck.status}, ${shadowRecheck.compared} compared]` : ""}`} |`,
-    `| **Ready for cut-over** | ${ready ? "**YES**" : `no${!opts.recheck ? " (READY is only computed with --recheck)" : ""}${shadowOk && !realOk ? ` (needs real-traffic shadow over >= ${windowNeed} days; starts in P1)` : ""}`} |`, "");
+    `| **Ready for cut-over** | ${ready ? "**YES**" : `no${!opts.recheck ? " (READY is only computed with --recheck)" : ""}${shadowOk && !realOk ? ` (needs a current real-traffic shadow over >= ${windowNeed} days)` : ""}`} |`, "");
   const per = (law) => report?.perLaw?.find((p) => p.law === law);
   for (const { law, items } of laws) {
     const [main, ...helpers] = items; if (!main) continue; const p = per(law), r = review?.laws?.[law];
