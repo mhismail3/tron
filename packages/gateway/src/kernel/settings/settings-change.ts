@@ -523,20 +523,16 @@ export class SettingsChangePath {
 
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
     const key = keyForHome(declaredKey(this.model.schema, request.key), stores.layers.includes("home"));
-    // The retained repository applier is reachable only through verified Undo,
-    // never through a new agent/UI request or Apply again.
-    if (request.layer === "project" && !context.undoOf) {
+    // The repository owns Project settings: no request, Undo or Apply again writes them.
+    if (request.layer === "project") {
       throw new GatewayError("invalid_request", "Project settings are read-only; edit the repository");
     }
     const store = storeForScope(request.layer, stores.layers);
-    const binding = scopeAdmitted(key, store) || (request.layer === "project" && context.undoOf) ? key.layers[store] : undefined;
+    const binding = scopeAdmitted(key, store) ? key.layers[store] : undefined;
     if (!binding) throw new GatewayError("invalid_request", `${key.label} cannot be set at the ${LAYER_LABELS[request.layer]} layer`);
     if (!stores.layers.includes(store)) throw new GatewayError("invalid_request", `This target has no ${LAYER_LABELS[request.layer]} layer`);
     const writer = context.actor.kind === "outside" ? undefined : context.actor.kind;
     if (!writer || !key.writers.includes(writer)) throw new GatewayError("invalid_request", `${key.label} cannot be changed by ${context.actor.kind}`);
-    if (request.layer === "project" && stores.project && !stores.project.applied) {
-      throw new GatewayError("trust_required", "Trust this project before changing its project settings");
-    }
     for (const [name, value] of Object.entries(key.fixed ?? {})) {
       const named = request.qualifiers?.[name as keyof Qualifiers];
       if (named !== undefined && named !== value) throw new GatewayError("invalid_request", `${key.id} is the ${name}=${value} instance; ${name}=${named} is a different setting`);

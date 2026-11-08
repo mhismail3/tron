@@ -99,9 +99,8 @@ function canonical(value: string): string {
 
 /**
  * Accepts only the provider's own run directory or one of its direct lifecycle
- * files under the explicitly admitted Tron-home root. The optional legacy roots
- * are retained only for isolated pre-cutover callers; production passes the
- * resolved root and therefore has no dual writable authority. Lexical traversal
+ * files under the explicitly admitted Tron-home root; production passes that
+ * resolved root, so there is one writable authority. Lexical traversal
  * is rejected before canonicalization, and the canonical shape rejects symlinked
  * escapes.
  */

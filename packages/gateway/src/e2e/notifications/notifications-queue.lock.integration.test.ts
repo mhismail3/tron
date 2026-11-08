@@ -2,12 +2,12 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockClient, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../test-support/scenario-lock.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { NotificationGrantStore } from "./grant-store.js";
-import { NotificationService } from "./notification-service.js";
-import { PushRelayClient } from "./relay-client.js";
+import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
+import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
+import { NotificationGrantStore } from "../../notifications/grant-store.js";
+import { NotificationService } from "../../notifications/notification-service.js";
+import { PushRelayClient } from "../../notifications/relay-client.js";
 
 /**
  * Push delivery locks (restructure E0b follow-up, K-0 §2.1 `runTerminal`;
@@ -275,7 +275,7 @@ describe("gateway/notifications delivery locks", () => {
     // model-visible text; this session's tool list, with its extension tool, is pinned
     // only here, so it stays a golden.
     await compareWithGolden({
-      module: "gateway/notifications", ...lockPaths(import.meta.url, "notifications-waiting"), update: lockUpdateRequested("gateway/notifications"),
+      module: "gateway/e2e", ...lockPaths(import.meta.url, "notifications-waiting"), update: lockUpdateRequested("gateway/e2e"),
       trace: { lock: "notifications-waiting", providerRequests: providerRequests as unknown as TraceValue[] },
       validate: () => { expect(providerRequests).toHaveLength(4); },
     });

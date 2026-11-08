@@ -38,7 +38,7 @@ and the test assert that from the JSONL rather than from this list:
 | `context_edit`, compaction | their own canonical entries |
 | a sibling branch | two entries sharing one parent |
 
-`src/sessions/pi-persisted-state-corpus.integration.test.ts` reopens the corpus
+`src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts` reopens the corpus
 with the **installed** SDK and compares it against the manifest. For a differential
 reopen of a prior corpus outside the worktree, set
 `TRON_PI_PERSISTED_STATE_CORPUS_DIR` to that corpus directory; the same assertions

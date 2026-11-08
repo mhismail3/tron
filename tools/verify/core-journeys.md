@@ -34,7 +34,7 @@ canonical-message check; the Process/Native rows assert presence, not exactly-on
 
 | Test | Boundary | Input → behavioral assertion | Failure / recovery |
 |---|---|---|---|
-| `packages/gateway/src/kernel/delegation/delegation.lock.integration.test.ts` › gateway/delegation kernel locks › subagent: a foreground subagent runs a real child… | Child (foreground) | "delegate the lock task" → non-error subagent result containing child answer; parent idle, no active child; 2 parent requests; child JSONL has task | Success only |
+| `packages/gateway/src/e2e/kernel/delegation/delegation.lock.integration.test.ts` › gateway/delegation kernel locks › subagent: a foreground subagent runs a real child… | Child (foreground) | "delegate the lock task" → non-error subagent result containing child answer; parent idle, no active child; 2 parent requests; child JSONL has task | Success only |
 | `packages/gateway/src/e2e/modules/home/home-task-subagents-settlement.e2e.test.ts` (11 cases, e.g. "stops a running async run when the task is stopped, and no turn starts after settlement") | Child | Home task launches real runs → task settles only after runs join; counts | Stop, error, 24 h deadline, bounded stop join → `unknown` |
 | `…/home-task-subagents-controls.e2e.test.ts`, `…/home-task-subagents-reports.e2e.test.ts` (26 cases) | Child | Waits/wakes, steer, supervisor reply, report refused while run live | Foreign-run control refused; restart finds live run → `detached-work-outlived-task` |
 | `packages/gateway/src/e2e/kernel/delegation/process-transcript-stop.integration.test.ts` › stops only the exact connection-owned child transcript… | Child | Stop targets exact child only | Other children untouched |
@@ -101,12 +101,12 @@ only when the whole trace equals its golden, so these goldens gate the assertion
 | Journey | Golden (under `packages/gateway/src/`) | Whole-prompt / schema content | Owner |
 |---|---|---|---|
 | Prompt/reply | `test-fixtures/pi-sdk/session-shapes.golden.json` (`session-shapes.lock`); the transcript, messages and responses are inline checks in `e2e/sessions/run.lock.integration.test.ts` | prompt hash + section headings + system entry | #2189 |
-| Delegate | `kernel/delegation/locks/delegation-subagent.golden.json` (narrowed: system entries and Tron entries); the rest inline in `kernel/delegation/delegation.lock.integration.test.ts` | tool parameter schemas | #2189 |
-| Home wake | `modules/home/locks/home-activation-wake.golden.json` | prompt hashes + full tool schemas | #2189 |
-| Home restart | `modules/home/locks/home-contention-restart.golden.json` (narrowed: Home's system entry and Tron entries); the rest inline in `modules/home/home-restart.lock.integration.test.ts` | full tool descriptions/schemas | #2236 |
+| Delegate | `e2e/kernel/delegation/locks/delegation-subagent.golden.json` (narrowed: system entries and Tron entries); the rest inline in `e2e/kernel/delegation/delegation.lock.integration.test.ts` | tool parameter schemas | #2189 |
+| Home wake | `e2e/modules/home/locks/home-activation-wake.golden.json` | prompt hashes + full tool schemas | #2189 |
+| Home restart | `e2e/modules/home/locks/home-contention-restart.golden.json` (narrowed: Home's system entry and Tron entries); the rest inline in `e2e/modules/home/home-restart.lock.integration.test.ts` | full tool descriptions/schemas | #2236 |
 | Settings | `e2e/admin/admin.lock.integration.test.ts` (named checks) | whole exchange/file trace | #2236 |
 | Reconnect | `e2e/transport/transport.lock.integration.test.ts` (named checks); the reconnect, lifecycle and cold-load prompt hashes are in `test-fixtures/pi-sdk/session-shapes.golden.json` | prompt hash | #2189 |
-| Wire | `protocol/locks/protocol-wire.golden.json` | method shapes, prompt section headings | #2236 |
+| Wire | `e2e/protocol/locks/protocol-wire.golden.json` | method shapes, prompt section headings | #2236 |
 
 Native pixel/geometry oracles in the reconnect journey
 (`packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift`): anchored rows

@@ -370,10 +370,15 @@ export async function payloadFingerprint(root) {
 // Callers must run completePayload on this root first. validatePayload already
 // does, so it must not pay for the npm runtime digest a second time.
 async function payloadTreeFingerprint(root) {
-  const files = [
-    ...(await regularFiles(root, "app")),
-    ...(await regularFiles(root, "runtime")),
-  ].sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
+  return digestEntries(root, [...(await regularFiles(root, "app")), ...(await regularFiles(root, "runtime"))]);
+}
+
+async function payloadSubtreeFingerprint(root, prefix) {
+  return digestEntries(root, await regularFiles(root, prefix));
+}
+
+async function digestEntries(root, entries) {
+  const files = entries.sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
   const lines = [];
   for (let start = 0; start < files.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
     const batch = files.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY);
@@ -385,19 +390,6 @@ async function payloadTreeFingerprint(root) {
       const digest = createHash("sha256").update(await readFile(join(root, entry.path))).digest("hex");
       return `${digest}  ${entry.path}\n`;
     })));
-  }
-  return createHash("sha256").update(lines.join("")).digest("hex");
-}
-
-async function payloadSubtreeFingerprint(root, prefix) {
-  const files = (await regularFiles(root, prefix))
-    .sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
-  const lines = [];
-  for (const entry of files) {
-    const digest = entry.target !== undefined
-      ? createHash("sha256").update(`${entry.target}\n`).digest("hex")
-      : createHash("sha256").update(await readFile(join(root, entry.path))).digest("hex");
-    lines.push(`${entry.target !== undefined ? "symlink:" : ""}${digest}  ${entry.path}\n`);
   }
   return createHash("sha256").update(lines.join("")).digest("hex");
 }
@@ -1595,10 +1587,6 @@ async function cleanupPayloadVersionsUnlocked(paths, maximum = MAX_RETAINED_VERS
     removed.push(entry.name);
   }
   return removed;
-}
-
-export async function cleanupPayloadVersions(paths, maximum = MAX_RETAINED_VERSIONS) {
-  return withStoreLock(paths, () => cleanupPayloadVersionsUnlocked(paths, maximum));
 }
 
 // Signed Node enforces library validation. Its native npm artifacts share the

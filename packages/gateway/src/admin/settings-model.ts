@@ -13,7 +13,7 @@ import { contextWindowLimits, parseContextModelKey, validateContextWindow } from
 import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { updateJsonLocked } from "../foundation/json.js";
-import { gitHeadState, projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
+import { gitHeadState, projectGitState, readProjectDocument } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
@@ -262,10 +262,6 @@ export class SettingsStoreAdapter {
           }
           return document;
         };
-        if (plan.request.layer === "project") {
-          const { git } = await writeProjectSettings(stores.project!.root, write);
-          return { git };
-        }
         await updateJsonLocked<Record<string, unknown>>(join(this.dependencies.agentDir, "settings.json"), {}, write);
         return {};
       }

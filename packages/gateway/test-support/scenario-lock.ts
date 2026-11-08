@@ -426,7 +426,8 @@ function renderTrace(trace: unknown): string {
 }
 
 export interface GoldenComparison<Trace = BehaviorTrace> {
-  /** The module that owns the golden; `TRON_UPDATE_LOCKS` names it to rewrite it. */
+  /** The module id `TRON_UPDATE_LOCKS` names to rewrite the golden. The golden's manifest owner
+   * can differ: the Pi seam goldens in `test-fixtures/pi-sdk/` are rewritten as `gateway/e2e`. */
   readonly module: string;
   readonly goldenPath: string;
   /** Where the exact trace that produced the diff is retained. */

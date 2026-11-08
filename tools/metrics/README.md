@@ -116,6 +116,15 @@ hand-written category contributes its full lines). Files over 500 lines are
 followed through renames and listed as `renamed`, `left` (deleted, or now at or
 under the threshold) or `entered`.
 
+## Health
+
+`scripts/tron health` (`health.py`) builds on this inventory and the module owners. It scores
+every file from its size, churn, cross-module co-change and fix commits, prints the outcome
+signals and diagnostics of [docs/HEALTH.md](../../docs/HEALTH.md) diffed against the baseline
+commit, and backtests diagnostics with `--backtest <t0>`. The Git part is deterministic; the
+optional `--github`, `--evidence`, `--deploy-log` and `--home-sessions` inputs are local reads,
+labelled in the output. It never writes outside `--csv <dir>` and never gates.
+
 ## Verify
 
 `scripts/tron test tooling tools/metrics/tests/test-metrics.py` runs the CLI against
