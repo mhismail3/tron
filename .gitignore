@@ -44,6 +44,7 @@ node_modules/
 package-lock.json
 !packages/gateway/package-lock.json
 !packages/push-relay/package-lock.json
+!packages/core/package-lock.json
 
 # Python (utility scripts)
 __pycache__/
