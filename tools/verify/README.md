@@ -80,7 +80,7 @@ live log, result and wall time. The first failure stops the run and prints its t
 step process group while retaining partial results. Full logs are in
 `test-results/verify/<sha>/`. `--changed` prints and records a `delta`: source, test and doc lines
 added and removed (tests include fixtures, support and goldens), added and deleted test files,
-each new test file beside a same-named existing one, and each added source line naming
+each new or renamed-in test file beside an existing test of the same stem, and each added source line naming
 legacy, compat, shim or deprecated code. It never fails a run; the reviewer ACCEPTs against it
 ([oracle policy](test-oracles.md)). Repeating a selection at one SHA overwrites this local
 report; batch evidence is copied separately before another run. The `resultDigest` covers the

@@ -44,8 +44,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 - Exposure binds explicitly: loopback by default; Tailscale its own interface; LAN (on
   unless the main listener is loopback; own off setting) only a private host address,
   never a wildcard, TLS-only, certificate kept until an explicit rotation.
-- iOS, Gateway and Mac ship in lockstep; a version mismatch refuses clearly. Persisted
-  data stays readable; format changes are dedicated migrations: forward-only, run once, automatic backup first, maintainer-approved each time.
+- iOS, Gateway and Mac ship in lockstep; a version mismatch refuses clearly. A persisted format change is
+  a dedicated migration: forward-only, run once, automatic backup first, maintainer-approved each time.
 
 ## Engineering rules
 
@@ -78,8 +78,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   cleanup and rendering still need actual Gateway/Pi/process/socket/built/UI boundaries.
 - **Fewer tests by default:** a fix's fail-before/pass-after proof strengthens the owning E2E/integration
   test; add nothing when a test already proves it, and a new file only when no owner exists. Retiring tests that
-  restate code (structure locks, duplicate unit tests, implementation snapshots) or duplicate another's fault is
-  not weakening; loosening an assertion that guards real behaviour is. Preserve the first failure.
+  restate code (structure locks, duplicate unit tests, implementation snapshots) or duplicate another's fault, naming
+  the survivor, is not weakening; loosening an assertion that guards real behaviour is. Preserve the first failure.
 - Test additions, edits and retirements need no maintainer tap; a non-author reviewer ACCEPTs them
   against `verify`'s delta (what was deleted; why a new file is not its owner; any compat wording).
   Subjective design goes to the maintainer. See the [oracle policy](tools/verify/test-oracles.md).
