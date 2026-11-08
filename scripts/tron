@@ -37,7 +37,7 @@ Commands:
   test tooling [test files...]      Run Python script integration suites directly
   build gateway                     Build Gateway directly with pinned Node
   migrate retired-formats --tron-home <dir> [--apply --backup <new dir>] [--settle-seconds N]
-  migrate retired-formats --restore --backup <dir>
+  migrate retired-formats --restore --tron-home <dir> --backup <dir>
                                     One-shot #2329 rewrite of retired session scope names
                                     and Profile file labels; dry run unless --apply; run
                                     with the Gateway listening, never at startup

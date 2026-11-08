@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { ProfileStore } from "../modules/home/profile-store.js";
@@ -91,7 +94,7 @@ it("backs up, rewrites only retired forms, defers recent sessions, is idempotent
   await expect(readdir(join(f.root, "backup-3"))).rejects.toMatchObject({ code: "ENOENT" });
 
   // Rollback restores this run's originals byte-for-byte.
-  expect(await restoreRetiredFormatMigration(backup)).toEqual({ restored: 2, skipped: [] });
+  expect(await restoreRetiredFormatMigration(f.home, backup)).toEqual({ restored: 2, skipped: [] });
   expect(await readFile(f.old)).toEqual(originals.old);
   expect(await readFile(f.profile)).toEqual(originals.profile);
 });
@@ -109,7 +112,48 @@ it("refuses a run whose input changed after planning, and never restores over a 
   expect(await applyRetiredFormatMigration(f.home, backup, await planRetiredFormatMigration(f.home, 0))).toEqual({ published: 3, failed: [] });
   const edited = (await readFile(f.profile, "utf8")).replace("An unlabelled Prior original.", "An edited Prior original.");
   await writeFile(f.profile, edited, { mode: 0o600 });
-  expect(await restoreRetiredFormatMigration(backup)).toEqual({ restored: 2, skipped: [expect.stringMatching(/^workspace\/files\/Profile\.json: changed after the migration/)] });
+  expect(await restoreRetiredFormatMigration(f.home, backup)).toEqual({ restored: 2, skipped: [expect.stringMatching(/^workspace\/files\/Profile\.json: changed after the migration/)] });
   expect(await readFile(f.old, "utf8")).toBe(later);
   expect(await readFile(f.profile, "utf8")).toBe(edited);
+});
+
+it("puts a session back complete and unmigrated when an append reaches it during publication", async () => {
+  const f = await fixture();
+  const original = await readFile(f.old, "utf8");
+  const appended = JSON.stringify(settings("s3", { "model.default": snapshot("session") })) + "\n";
+  // A child process applies the real migration; its rename first appends by path,
+  // as Pi does, after the tool's last check and before the replacement lands.
+  const hook = join(f.root, "loader.mjs"), program = join(f.root, "racing-apply.mjs");
+  await writeFile(hook, `import { registerHooks } from 'node:module';
+registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });\n`);
+  await writeFile(program, `import fs from 'node:fs/promises';
+import { appendFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const [home, backup, target, line] = process.argv.slice(2);
+const rename = fs.rename;
+fs.rename = async function (from, to) { if (to === target && String(from).includes('.migration-')) appendFileSync(target, line); return rename.call(this, from, to); };
+syncBuiltinESMExports();
+const { planRetiredFormatMigration, applyRetiredFormatMigration } = await import(${JSON.stringify(fileURLToPath(new URL("./retired-format-migration.ts", import.meta.url)))});
+process.stdout.write(JSON.stringify(await applyRetiredFormatMigration(home, backup, await planRetiredFormatMigration(home, 600))));
+`);
+  const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, f.home, join(f.root, "backup"), f.old, appended], { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.on("data", chunk => { stdout += String(chunk); }); child.stderr.on("data", chunk => { stderr += String(chunk); });
+  expect(await once(child, "exit"), stderr).toEqual([0, null]);
+  expect(JSON.parse(stdout)).toEqual({ published: 1, failed: [expect.stringMatching(/^agent\/sessions\/--fixture--\/old\.jsonl: was written during publication; its complete original was put back unmigrated; rerun$/)] });
+  expect(await readFile(f.old, "utf8")).toBe(original + appended);
+  await utimes(f.old, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000));
+  const rerun = await planRetiredFormatMigration(f.home, 600);
+  expect(rerun.files.map(file => file.path)).toEqual([f.old]);
+});
+
+it("refuses a configured session directory and an unsettled Profile organization", async () => {
+  const f = await fixture();
+  await writeFile(join(f.home, "agent", "settings.json"), JSON.stringify({ sessionDir: "/elsewhere" }));
+  await expect(planRetiredFormatMigration(f.home, 600)).rejects.toThrow(/sets sessionDir/);
+  await rm(join(f.home, "agent", "settings.json"));
+  const profile = JSON.parse(await readFile(f.profile, "utf8")) as { control: { commands: Record<string, { auditPending?: true }> } };
+  Object.values(profile.control.commands).find(command => (command as { operation?: string }).operation === "knowledge.profile.partition")!.auditPending = true;
+  await writeFile(f.profile, JSON.stringify(profile, null, 2) + "\n", { mode: 0o600 });
+  await expect(planRetiredFormatMigration(f.home, 600)).rejects.toThrow(/uncommitted or unacknowledged/);
 });

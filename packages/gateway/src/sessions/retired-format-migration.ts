@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { durablePublishBoundedJson, syncDurably } from "../foundation/durable-json.js";
+import { syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 import { RETIRED_SCOPES } from "../kernel/settings/tool-contract.js";
 import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
@@ -19,14 +19,15 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  *
  * It is idempotent: a second run plans nothing. Every replacement first clones
  * its original into the backup directory with a manifest of both digests, then
- * publishes atomically only if the file is unchanged since it was read. Session
- * files written within `--settle-seconds` are deferred to a later run. The
+ * publishes atomically only if the file is unchanged since it was read (see
+ * `publish` for a write racing the rename). Session files written within
+ * `--settle-seconds` are deferred to a later run; run it while Home is idle. It
+ * refuses a configured `sessionDir` and an uncommitted Profile organization. The
  * shared Changes record is append-only history and is not rewritten. Delete this
  * module with the retired readers once the live run is verified.
  */
 
 const PROFILE_FILE = "workspace/files/Profile.json";
-const PROFILE_BYTES = 64 * 1_048_576;
 const RETIRED_LABEL = "home-file-";
 const SETTINGS_MARK = `"customType":"${SESSION_SETTINGS_ENTRY}"`;
 
@@ -113,7 +114,8 @@ async function planProfile(path: string, plan: MigrationPlan): Promise<void> {
   for (const section of Object.values(file.sections ?? {})) visit(section);
   for (const anchor of file.anchors ?? []) strip(anchor as never);
   let receipts = 0;
-  for (const receipt of Object.values(file.control?.commands ?? {})) {
+  for (const receipt of Object.values(file.control?.commands ?? {}) as Array<{ operation?: unknown; partition?: unknown; auditPending?: unknown; result?: { kind?: unknown; value?: { changes?: Array<Record<string, unknown>> } } }>) {
+    if (receipt.operation === "knowledge.profile.partition" && (receipt.partition !== undefined || receipt.auditPending !== undefined)) throw new Error("A Profile organization is uncommitted or unacknowledged; retry or settle it before migrating");
     if (receipt.operation !== "knowledge.profile.partition" || receipt.result?.kind !== "value") continue;
     const changes = receipt.result.value?.changes ?? [];
     if (!changes.some(change => "beforeFile" in change || "file" in change)) continue;
@@ -127,32 +129,54 @@ async function planProfile(path: string, plan: MigrationPlan): Promise<void> {
 }
 
 export async function planRetiredFormatMigration(tronHome: string, settleSeconds: number, now = Date.now()): Promise<MigrationPlan> {
+  const settings = await readFile(tronHomePath(tronHome, "agent/settings.json"), "utf8").then(text => JSON.parse(text) as { sessionDir?: unknown }, (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return {} as { sessionDir?: unknown }; throw error; });
+  if (settings.sessionDir !== undefined) throw new Error("agent/settings.json sets sessionDir; this migration covers only agent/sessions");
   const plan: MigrationPlan = { sessions: { scanned: 0, files: 0, entries: 0, values: 0, deferred: [] }, profile: { notes: 0, labels: 0, receipts: 0 }, files: [] };
   for await (const path of sessionFiles(tronHomePath(tronHome, "agent/sessions"))) await planSession(path, now - settleSeconds * 1_000, plan);
   await planProfile(tronHomePath(tronHome, PROFILE_FILE), plan);
   return plan;
 }
 
-/** Atomic same-directory replacement, published only while the original is unchanged. */
-async function publishSession(file: PlannedFile): Promise<void> {
-  const mode = (await stat(file.path)).mode & 0o777;
-  const temporary = `${file.path}.migration-${process.pid}.tmp`;
-  const handle = await open(temporary, "wx", mode);
+/**
+ * Stages the replacement durably, then renames it over the path only while the path
+ * is still the original that was read. The original stays open across the rename:
+ * a write that reached it after the check (an append by path that opened it first)
+ * is detected, and the path is put back to the complete, un-migrated original so
+ * nothing is lost; a later run migrates it. Another writer's rename after ours wins
+ * and is reported the same way. Both writers here are the Gateway's: Pi appends
+ * session entries by path and the Profile owner publishes by rename.
+ */
+async function publish(file: PlannedFile, raced: string): Promise<void> {
+  const original = await open(file.path, "r");
   try {
-    try { await handle.writeFile(file.after); await syncDurably(handle); } finally { await handle.close(); }
-    if (!same(identity(await lstat(file.path)), file.identity)) throw new Error(`${file.path} changed since it was read; rerun to include it`);
-    await rename(temporary, file.path);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-  const directory = await open(dirname(file.path), "r");
-  try { await syncDurably(directory); } finally { await directory.close(); }
+    if (!same(identity(await original.stat()), file.identity)) throw new Error("changed since it was read; rerun to include it");
+    const temporary = `${file.path}.migration-${process.pid}.tmp`;
+    const handle = await open(temporary, "wx", (await original.stat()).mode & 0o777);
+    try {
+      try { await handle.writeFile(file.after); await syncDurably(handle); } finally { await handle.close(); }
+      if (!same(identity(await lstat(file.path)), file.identity)) throw new Error("changed since it was read; rerun to include it");
+      await rename(temporary, file.path);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+    await syncDirectory(file.path);
+    const published = identity(await stat(file.path));
+    if (same(identity(await original.stat()), file.identity) && digest(await readFile(file.path)) === digest(file.after)) return;
+    const late = await original.readFile();
+    if (same(identity(await lstat(file.path)), published)) {
+      await writeFile(temporary, late, { mode: (await original.stat()).mode & 0o777, flag: "wx" });
+      await rename(temporary, file.path);
+      await syncDirectory(file.path);
+      throw new Error("was written during publication; its complete original was put back unmigrated; rerun");
+    }
+    await writeFile(raced, late, { mode: 0o600, flag: "wx" });
+    throw new Error(`was written during publication; the original's final bytes are kept at ${raced} for a manual merge`);
+  } finally { await original.close(); }
 }
-
-async function publishProfile(file: PlannedFile): Promise<void> {
-  if (!same(identity(await lstat(file.path)), file.identity) || !(await readFile(file.path)).equals(file.before)) throw new Error("Profile.json changed since it was read; rerun");
-  await durablePublishBoundedJson(file.path, JSON.parse(file.after.toString("utf8")), PROFILE_BYTES);
+async function syncDirectory(path: string): Promise<void> {
+  const directory = await open(dirname(path), "r");
+  try { await syncDurably(directory); } finally { await directory.close(); }
 }
 
 /** Clones every original and writes the manifest before the first replacement. */
@@ -175,16 +199,17 @@ export async function applyRetiredFormatMigration(tronHome: string, backup: stri
   if (!plan.files.length) return { published: 0, failed: [] };
   await backUp(tronHome, backup, plan.files);
   let published = 0; const failed: string[] = [];
-  for (const file of plan.files) {
-    try { await (file.kind === "profile" ? publishProfile(file) : publishSession(file)); published += 1; }
+  for (const [index, file] of plan.files.entries()) {
+    try { await publish(file, join(backup, `raced-${index}`)); published += 1; }
     catch (error) { failed.push(`${relative(tronHome, file.path)}: ${(error as Error).message}`); }
   }
   return { published, failed };
 }
 
 /** Rollback: restores each original whose current bytes are still exactly what this run published. */
-export async function restoreRetiredFormatMigration(backup: string): Promise<{ restored: number; skipped: string[] }> {
+export async function restoreRetiredFormatMigration(tronHome: string, backup: string): Promise<{ restored: number; skipped: string[] }> {
   const manifest = JSON.parse(await readFile(join(backup, "manifest.json"), "utf8")) as Manifest;
+  if (manifest.tronHome !== tronHome) throw new Error(`Backup ${backup} belongs to ${manifest.tronHome}, not ${tronHome}`);
   let restored = 0; const skipped: string[] = [];
   for (const file of manifest.files) {
     const live = join(manifest.tronHome, file.path), original = join(backup, "files", file.path);
@@ -210,11 +235,11 @@ async function main(argv: readonly string[]): Promise<number> {
     const argument = argv[index]!;
     if (argument === "--apply" || argument === "--restore") flags.add(argument);
     else if (["--tron-home", "--backup", "--settle-seconds"].includes(argument) && argv[index + 1] !== undefined) options.set(argument, argv[++index]!);
-    else { process.stderr.write(`unknown argument ${argument}\nusage: migrate retired-formats --tron-home <dir> [--apply --backup <new dir>] [--settle-seconds N] | --restore --backup <dir>\n`); return 64; }
+    else { process.stderr.write(`unknown argument ${argument}\nusage: migrate retired-formats --tron-home <dir> [--apply --backup <new dir>] [--settle-seconds N] | --restore --tron-home <dir> --backup <dir>\n`); return 64; }
   }
   if (flags.has("--restore")) {
-    if (!options.has("--backup")) { process.stderr.write("--restore needs --backup\n"); return 64; }
-    const result = await restoreRetiredFormatMigration(resolve(options.get("--backup")!));
+    if (!options.has("--backup") || !options.has("--tron-home")) { process.stderr.write("--restore needs --tron-home and --backup\n"); return 64; }
+    const result = await restoreRetiredFormatMigration(resolve(options.get("--tron-home")!), resolve(options.get("--backup")!));
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.skipped.length ? 1 : 0;
   }
@@ -228,7 +253,9 @@ async function main(argv: readonly string[]): Promise<number> {
   if (!flags.has("--apply")) return 0;
   const result = await applyRetiredFormatMigration(resolve(tronHome), resolve(options.get("--backup")!), plan);
   process.stdout.write(`applied ${JSON.stringify(result)}\n`);
-  return result.failed.length ? 1 : 0;
+  const remaining = await planRetiredFormatMigration(resolve(tronHome), settle);
+  process.stdout.write(`remaining ${summary(remaining)}\n`);
+  return result.failed.length || remaining.files.length ? 1 : 0;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
