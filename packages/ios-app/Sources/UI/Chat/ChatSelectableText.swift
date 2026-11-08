@@ -99,7 +99,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     var messageBlocks: [MarkdownPresentation.Block]? = nil
     var highlights: [NSRange] = []
     var detectsLinks = false
-    var isSelectable = true
     let onAnnotate: ((String, NSRange, CGRect) -> Void)?
 
     init(
@@ -107,14 +106,12 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         style: ChatSelectableTextStyle,
         highlights: [NSRange] = [],
         detectsLinks: Bool = false,
-        isSelectable: Bool = true,
         onAnnotate: ((String, NSRange, CGRect) -> Void)?
     ) {
         self.inline = inline
         self.style = style
         self.highlights = highlights
         self.detectsLinks = detectsLinks
-        self.isSelectable = isSelectable
         self.onAnnotate = onAnnotate
     }
 
@@ -122,14 +119,13 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         messageBlocks: [MarkdownPresentation.Block],
         style: ChatSelectableTextStyle,
         highlights: [NSRange],
-        isSelectable: Bool = true,
         onAnnotate: ((String, NSRange, CGRect) -> Void)?
     ) {
-        self.inline = MarkdownPresentation.Inline(source: Self.plainText(messageBlocks))
+        // The message run renders `messageBlocks`; its plain text needs no Markdown parse.
+        self.inline = MarkdownPresentation.Inline(source: Self.plainText(messageBlocks), attributedString: nil)
         self.style = style
         self.messageBlocks = messageBlocks
         self.highlights = highlights
-        self.isSelectable = isSelectable
         self.onAnnotate = onAnnotate
     }
 
@@ -157,7 +153,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         let messageBlocks: [MarkdownPresentation.Block]?
         let highlights: [NSRange]
         let detectsLinks: Bool
-        let isSelectable: Bool
         let sizeCategory: ContentSizeCategory
         let colorScheme: ColorScheme
         let fontRevision: String
@@ -215,7 +210,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             ? UITextView(usingTextLayoutManager: true)
             : ChatSelectableMessageTextView(frame: .zero, textContainer: nil)
         view.isEditable = false
-        view.isSelectable = isSelectable
+        view.isSelectable = true
         view.isScrollEnabled = false
         view.backgroundColor = .clear
         view.textContainerInset = .zero
@@ -243,8 +238,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     }
 
     private func configure(_ view: UITextView, coordinator: Coordinator) {
-        coordinator.onAnnotate = isSelectable ? onAnnotate : nil
-        view.isSelectable = isSelectable
+        coordinator.onAnnotate = onAnnotate
         let family = fontSettings.selectedFamily
         let key = RenderKey(
             inline: inline,
@@ -252,7 +246,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             messageBlocks: messageBlocks,
             highlights: highlights,
             detectsLinks: detectsLinks,
-            isSelectable: isSelectable,
             sizeCategory: sizeCategory,
             colorScheme: colorScheme,
             fontRevision: "\(family.rawValue):\(fontSettings.axisValue(for: family, axis: .weight)):\(fontSettings.axisValue(for: family, axis: .casual)):\(fontSettings.selectedMonoFamily.rawValue)"
@@ -401,7 +394,9 @@ enum ChatSelectableTextLayout {
         traits: UITraitCollection
     ) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
+        // One separator between blocks, as `accessibilitySegments` counts them.
         for (index, block) in blocks.enumerated() {
+            if index > 0 { result.append(NSAttributedString(string: "\n")) }
             let start = result.length
             switch block.kind {
             case .paragraph(let inline):
@@ -433,9 +428,8 @@ enum ChatSelectableTextLayout {
                     result.addAttribute(.paragraphStyle, value: paragraph, range: range)
                 }
             default:
-                continue
+                break
             }
-            if index + 1 < blocks.count { result.append(NSAttributedString(string: "\n")) }
         }
         let highlight = UIColor(Color.tronAmber).resolvedColor(with: traits).withAlphaComponent(highlightOpacity)
         for range in highlights where range.location != NSNotFound && NSMaxRange(range) <= result.length {
