@@ -31,32 +31,32 @@
   "accepted": {
     "Clamp/off-by-one/x->(x - 1)#1": {
       "kind": "equivalent",
-      "reason": "differs only at a boundary where both branches return the same value",
+      "reason": "on Clamp's domain (lo <= hi) both branches return the same value wherever the mutated expression changes the branch taken",
       "reviewer": "fixture author"
     },
     "Clamp/boundary/<-><=#1": {
       "kind": "equivalent",
-      "reason": "differs only at a boundary where both branches return the same value",
+      "reason": "on Clamp's domain (lo <= hi) both branches return the same value wherever the mutated expression changes the branch taken",
       "reviewer": "fixture author"
     },
     "Clamp/off-by-one/lo->(lo + 1)#1": {
       "kind": "equivalent",
-      "reason": "differs only at a boundary where both branches return the same value",
+      "reason": "on Clamp's domain (lo <= hi) both branches return the same value wherever the mutated expression changes the branch taken",
       "reviewer": "fixture author"
     },
     "Clamp/off-by-one/hi->(hi - 1)#1": {
       "kind": "equivalent",
-      "reason": "differs only at a boundary where both branches return the same value",
+      "reason": "on Clamp's domain (lo <= hi) both branches return the same value wherever the mutated expression changes the branch taken",
       "reviewer": "fixture author"
     },
     "Clamp/boundary/<-><=#2": {
       "kind": "equivalent",
-      "reason": "differs only at a boundary where both branches return the same value",
+      "reason": "on Clamp's domain (lo <= hi) both branches return the same value wherever the mutated expression changes the branch taken",
       "reviewer": "fixture author"
     },
     "Clamp/off-by-one/x->(x + 1)#2": {
       "kind": "equivalent",
-      "reason": "differs only at a boundary where both branches return the same value",
+      "reason": "on Clamp's domain (lo <= hi) both branches return the same value wherever the mutated expression changes the branch taken",
       "reviewer": "fixture author"
     }
   },

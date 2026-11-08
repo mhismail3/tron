@@ -41,7 +41,7 @@ function decls(sources) {
       const lines = src.slice(0, m.index).split("\n"); lines.pop();
       const comment = []; while (lines.length && /^\s*\/\//.test(lines[lines.length - 1])) comment.unshift(lines.pop().replace(/^\s*\/\/\s?/, ""));
       // The body's `{` is the first one not preceded by an operator (`== {s}` is a set literal).
-      let i = src.indexOf("{", m.index); while (i > 0 && /[=<>+\-*(,|&:]\s*$/.test(src.slice(m.index, i))) i = src.indexOf("{", i + 1);
+      let i = src.indexOf("{", m.index); while (i > 0 && /(?:[=<>+\-*(,|&:]|\bin)\s*$/.test(src.slice(m.index, i))) i = src.indexOf("{", i + 1);
       // An abstract (laws) declaration has no body: it ends at the next line that is a comment, a blank line,
       // another declaration or the module's closing brace.
       const end = /\n[ \t]*(?:\/\/|\n|(?:ghost\s+)?(?:lemma|predicate|function|method|datatype|type|const|import)\b|\})/.exec(src.slice(m.index + m[0].length));
@@ -59,6 +59,7 @@ const idsIn = (text) => new Set(text.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? [])
 function packet(root, block, opts = {}) {
   const dir = join(root, "blocks", block); const cfg = readJson(join(dir, "mutate.json"));
   if (!cfg) throw new Error(`no mutate.json for block ${block} under ${root}`);
+  if (cfg.block !== block) throw new Error(`mutate.json block "${cfg.block}" is not ${block}`);
   const sources = sourcesOf(root, cfg); const all = decls(sources);
   const hash = blockHash(root, cfg);
   const review = readJson(join(dir, "REVIEW.json")), shadow = readJson(join(dir, "SHADOW.json"));
