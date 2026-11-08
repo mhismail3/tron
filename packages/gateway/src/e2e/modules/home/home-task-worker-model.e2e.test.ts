@@ -228,7 +228,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(task.intent.text).toContain("high clamped to off");
     const evidence = await f.registry.readTaskEvidence(task.sessionId!);
     expect(readSessionFixedSettings(evidence)["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
-    // A scope name #1634 retired is not a current layer: the session refuses rather than reinterprets it.
+    // A scope name that is not a current layer is refused; the session does not reinterpret it.
     const settings = evidence.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY)!;
     const retired = structuredClone(settings) as typeof settings & { data: { fixed: Record<string, { from: string }> } };
     retired.data.fixed["model.thinking[role=chat]"]!.from = "mac";
