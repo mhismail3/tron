@@ -92,6 +92,8 @@ Commands:
                                     reach another module's files, test-support, or
                                     import the registry directly (#2316)
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
+  proof bootstrap|doctor            Install (bootstrap) or re-verify (doctor) the pinned Dafny
+                                    proof toolchain in the per-user cache (tools/proof)
   health [<rev>] [--baseline <rev>] [--github] [--evidence] [--deploy-log <jsonl>]
          [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
                                     Read-only outcome and diagnostic health signals diffed
@@ -244,6 +246,12 @@ case "$cmd" in
     ;;
   layers)
     exec python3 "$ROOT/tools/layers/layers.py" "$@"
+    ;;
+  proof)
+    case "${1:-}" in
+      bootstrap|doctor) exec /bin/bash "$ROOT/tools/proof/bootstrap.sh" "$@" ;;
+      *) usage >&2; exit 64 ;;
+    esac
     ;;
   verify)
     exec python3 "$ROOT/tools/verify/verify.py" "$@"
