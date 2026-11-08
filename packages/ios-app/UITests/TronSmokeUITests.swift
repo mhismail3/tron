@@ -856,7 +856,7 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertLessThanOrEqual(glyph.maxX, title.frame.minX - 12 * presentationScale + 1,
                                          "Preserve the shared 12pt icon-to-label gap")
                 row.tap()
-                XCTAssertTrue(app.staticTexts["Color Mode"].waitForExistence(timeout: 5),
+                XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5),
                               "The unchanged row target still opens Appearance")
             }
         }
@@ -914,14 +914,19 @@ final class TronSmokeUITests: XCTestCase {
                 tapScrolling(app.buttons["settings-link-Appearance"], in: app)
                 expandSettingsSheet(app, title: "Appearance")
                 keepScreenshot(named: "1325-expanded-appearance-\(suffix)")
+                let theme = app.buttons["theme-color-emerald"]
+                for _ in 0..<8 where !theme.isHittable || theme.frame.maxY > app.windows.firstMatch.frame.height * 0.8 { app.swipeUp(velocity: .slow) }
+                XCTAssertTrue(theme.isHittable, "The theme row is reachable in the Appearance sheet")
+                keepScreenshot(named: "1325-expanded-appearance-theme-\(suffix)")
+                for _ in 0..<8 where !app.buttons["Dashboard View"].firstMatch.isHittable { app.swipeDown() }
                 if !large {
                     // The combined row inherits its child's button trait but its
                     // center is a label. Tap the actual trailing value control.
-                    tapScrolling(app.buttons["Dashboard View"].firstMatch.buttons["Dashboard View"].firstMatch, in: app)
+                    tapScrolling(app.buttons["Dashboard View"].firstMatch, in: app)
                     XCTAssertTrue(app.buttons["settings-option-By Project / Server"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-dashboard-view-\(suffix)")
                     closeTopSheet(app)
-                    tapScrolling(app.buttons["Visible Servers"].firstMatch.buttons["Visible Servers"].firstMatch, in: app)
+                    tapScrolling(app.buttons["Visible Servers"].firstMatch, in: app)
                     XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Workshop Mac")).firstMatch.waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-visible-servers-\(suffix)")
                     closeTopSheet(app)
@@ -3349,7 +3354,7 @@ final class TronSmokeUITests: XCTestCase {
             for _ in 0..<8 where !count.isHittable { app.swipeUp() }
             XCTAssertTrue(count.isHittable, "Dashboard preferences are in the Appearance sheet: \(app.debugDescription)")
         }
-        func choice(_ name: String) -> XCUIElement { app.buttons[name].firstMatch.buttons[name].firstMatch }
+        func choice(_ name: String) -> XCUIElement { app.buttons[name].firstMatch }
         func setCount(_ text: String) {
             let field = app.textFields["Chats per project"]
             field.tap()

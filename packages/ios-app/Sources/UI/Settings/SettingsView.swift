@@ -26,7 +26,7 @@ struct SettingsView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
                     SettingsGroupCard(.iphone) {
-                        settingsLink("Appearance", summary: "Theme, fonts, dashboard, and activity",
+                        settingsLink("Appearance", summary: "Dashboard, activity, theme, and fonts",
                                      icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
                     }
                     SettingsGroupCard(.accounts) {

@@ -215,7 +215,7 @@ final class TronHomeDashboardUITests: XCTestCase {
     @MainActor private func toggleVisibleServer(_ app: XCUIApplication, _ label: String) {
         app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
         for id in ["Settings", "settings-link-Appearance"] { XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5)); app.buttons[id].tap() }
-        let servers = app.buttons["Visible Servers"].firstMatch.buttons["Visible Servers"].firstMatch
+        let servers = app.buttons["Visible Servers"].firstMatch
         XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5), app.debugDescription)
         for _ in 0..<8 where !servers.isHittable { app.swipeUp() }
         XCTAssertTrue(servers.isHittable, app.debugDescription)

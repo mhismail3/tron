@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// This iPhone's look and local behaviour: color mode, theme, fonts, the
-/// dashboard and subagent activity, in one sheet.
+/// This iPhone's local preferences in one sheet: dashboard, subagent activity,
+/// color mode, theme and fonts. The dashboard's number field sits near the top
+/// so focusing it never needs keyboard avoidance under the floating Done.
 struct AppearanceSettingsView: View {
     @Environment(AppModel.self) private var model
     @PresentationState private var behavior = AppLocalBehaviorSettings.shared
@@ -12,6 +13,47 @@ struct AppearanceSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             TronSettingsSections(alignment: .leading, spacing: 20, lazy: true, hidesLoneHeading: true) {
+                TronSettingsGroup("Dashboard", accent: .tronPrimary) {
+                    TronChoiceRow(icon: "rectangle.3.group", title: "Dashboard View",
+                                  choices: DashboardSessionSortMode.allCases.map { TronChoice(id: $0, label: $0.rawValue, detail: $0.detail) },
+                                  selected: behavior.dashboardFilter.sortMode) { behavior.dashboardFilter.setSortMode($0) }
+                    TronSettingsDivider()
+                    TronSelectionSheetRow(icon: "server.rack", title: "Visible Servers",
+                        value: behavior.dashboardFilter.isAllSelected ? "All servers" : "\(behavior.dashboardFilter.selectedProfileIDs.count) server\(behavior.dashboardFilter.selectedProfileIDs.count == 1 ? "" : "s")") {
+                        VisibleServersSettingsView(settings: behavior)
+                    }
+                    TronSettingsDivider()
+                    TronNumberSettingRow(
+                        icon: "bubble.left.and.bubble.right",
+                        title: "Chats per project",
+                        detail: "Shown by default",
+                        value: $behavior.dashboardChatsPerProject
+                    )
+                }
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
+                .tronSettingsCaption("Choose 1–100 chats (default 10). Show more reveals another batch of this size. Applies to every project on this iPhone.")
+
+                TronSettingsGroup("Subagent Activity", accent: .tronPrimary) {
+                    TronValueRow(
+                        icon: "circle.dotted",
+                        title: "Show finished subagents",
+                        detail: "Keep the subagent button visible after work finishes",
+                        accent: .tronPrimary
+                    ) {
+                        TronInlineMenu(retentionLabel(behavior.subagentRecentFinishedRetentionMinutes), accent: .tronPrimary) {
+                            ForEach(Array(AppLocalBehaviorSettings.subagentRecentFinishedRetentionRange), id: \.self) { minutes in
+                                Button(retentionLabel(minutes)) {
+                                    behavior.subagentRecentFinishedRetentionMinutes = minutes
+                                }
+                            }
+                        }
+                        .accessibilityLabel("Show finished subagents")
+                        .accessibilityValue(retentionLabel(behavior.subagentRecentFinishedRetentionMinutes))
+                    }
+                }
+                .tronSettingsVisualTheme(inheriting: .tronPrimary)
+                .tronSettingsCaption("Only active hides the button as soon as all subagents finish. This applies to every session on this iPhone. Finished subagents are always available in Manage Session’s Subagent History.")
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Color Mode")
                         .tronSectionHeading()
@@ -129,47 +171,6 @@ struct AppearanceSettingsView: View {
                 }
 
                 .tronSettingsCaption("Text and code font choices match the established Tron experience. Terminal themes on the Mac remain independent.")
-
-                TronSettingsGroup("Dashboard", accent: .tronPrimary) {
-                    TronChoiceRow(icon: "rectangle.3.group", title: "Dashboard View",
-                                  choices: DashboardSessionSortMode.allCases.map { TronChoice(id: $0, label: $0.rawValue, detail: $0.detail) },
-                                  selected: behavior.dashboardFilter.sortMode) { behavior.dashboardFilter.setSortMode($0) }
-                    TronSettingsDivider()
-                    TronSelectionSheetRow(icon: "server.rack", title: "Visible Servers",
-                        value: behavior.dashboardFilter.isAllSelected ? "All servers" : "\(behavior.dashboardFilter.selectedProfileIDs.count) server\(behavior.dashboardFilter.selectedProfileIDs.count == 1 ? "" : "s")") {
-                        VisibleServersSettingsView(settings: behavior)
-                    }
-                    TronSettingsDivider()
-                    TronNumberSettingRow(
-                        icon: "bubble.left.and.bubble.right",
-                        title: "Chats per project",
-                        detail: "Shown by default",
-                        value: $behavior.dashboardChatsPerProject
-                    )
-                }
-                .tronSettingsVisualTheme(inheriting: .tronPrimary)
-                .tronSettingsCaption("Choose 1–100 chats (default 10). Show more reveals another batch of this size. Applies to every project on this iPhone.")
-
-                TronSettingsGroup("Subagent Activity", accent: .tronPrimary) {
-                    TronValueRow(
-                        icon: "circle.dotted",
-                        title: "Show finished subagents",
-                        detail: "Keep the subagent button visible after work finishes",
-                        accent: .tronPrimary
-                    ) {
-                        TronInlineMenu(retentionLabel(behavior.subagentRecentFinishedRetentionMinutes), accent: .tronPrimary) {
-                            ForEach(Array(AppLocalBehaviorSettings.subagentRecentFinishedRetentionRange), id: \.self) { minutes in
-                                Button(retentionLabel(minutes)) {
-                                    behavior.subagentRecentFinishedRetentionMinutes = minutes
-                                }
-                            }
-                        }
-                        .accessibilityLabel("Show finished subagents")
-                        .accessibilityValue(retentionLabel(behavior.subagentRecentFinishedRetentionMinutes))
-                    }
-                }
-                .tronSettingsVisualTheme(inheriting: .tronPrimary)
-                .tronSettingsCaption("Only active hides the button as soon as all subagents finish. This applies to every session on this iPhone. Finished subagents are always available in Manage Session’s Subagent History.")
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -221,7 +222,10 @@ struct AppearanceSettingsView: View {
 
 /// Theme choices as one horizontally scrolling row of Liquid Glass tiles, each
 /// a third of the row and tinted with the theme it names; more themes scroll.
+/// Accessibility sizes widen each tile to most of the row, peeking the next,
+/// so names wrap by word rather than by letter.
 private struct ThemeColorPicker: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let selection: ThemeColor
     let isApplying: Bool
     let select: (ThemeColor) -> Void
@@ -232,12 +236,14 @@ private struct ThemeColorPicker: View {
             HStack(alignment: .top, spacing: Self.spacing) {
                 ForEach(ThemeColor.allCases) { color in
                     tile(color)
-                        .containerRelativeFrame(.horizontal, count: 3, spacing: Self.spacing)
+                        .containerRelativeFrame(.horizontal, count: dynamicTypeSize.isAccessibilitySize ? 5 : 3,
+                                                span: dynamicTypeSize.isAccessibilitySize ? 4 : 1, spacing: Self.spacing)
                 }
             }
             .scrollTargetLayout()
         }
         .scrollTargetBehavior(.viewAligned)
+        .scrollClipDisabled()
     }
 
     private func tile(_ color: ThemeColor) -> some View {
