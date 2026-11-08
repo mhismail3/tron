@@ -158,8 +158,7 @@ Running. Do not install a new iOS app before `scripts/tron mac verify` passes: i
 Stable's launchd PID to be the sole 9847 listener running the validated payload with matching
 authenticated `system.info`, the current runtime contract (including the pinned XcodeGen tree,
 signed or the pinned upstream digest), an incompatible older selection only if the launcher
-rejected it, a coherent Debug if present, and no loaded or on-disk legacy Debug, Preview or
-dev-takeover job. It probes each exact owner's listeners in order (LAN TLS may refuse) and
+rejected it, a coherent Debug if present, and no loaded legacy Debug job. It probes each exact owner's listeners in order (LAN TLS may refuse) and
 executes only the host-native runtime. Then check a historical chat, a fresh worker, browser,
 Ask User, pairing, settings, trust, models and packages; a pass proves supervision, not data
 continuity.
@@ -192,10 +191,7 @@ fresh inventory (refused mid-step or after verify); `--abandon` archives a super
 `--finish` removes only the active pointer. Rollback restores the protected backup only when no
 accepted new work would be lost.
 
-`~/.tron-maintenance` is the single local recovery root. Register a separately verified
-pre-cutover set with `scripts/tron mac reinstall --recovery-relocate --operation-id <id>
---source <root>` and check it with `--recovery-verify --operation-id <id>`; the rename is
-exclusive and resumable. Retention is manual: keep one coherent set until its successor passed
+`~/.tron-maintenance` is the single local recovery root. Retention is manual: keep one coherent set until its successor passed
 restore and continuity checks. These are local checkpoints, not off-device backups. A rehearsal
 copy is scratch of the operation it rehearses: delete it when that operation finishes. A
 forward-only migration keeps its original archive and the prior app and payloads it needs in its
