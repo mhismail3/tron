@@ -53,6 +53,9 @@ Wire-traffic profiling and multi-session qualification:
   `com.tron.server` are the maintainer's ([charter](../../AGENTS.md#safety-boundaries)).
 - **Persisted bytes.** A change to stored JSON or JSONL bytes is a migration decision, not a
   refactor ([charter](../../AGENTS.md#architecture-invariants)).
+- **Home.** Home memory, the endless Home chat, summarization and chapters keep working exactly as
+  they do; cleanup there only preserves behaviour. Triggers and automations stay generic
+  Gateway primitives: they carry no Home-specific logic that steers how Home behaves.
 
 ## gateway/platform
 
