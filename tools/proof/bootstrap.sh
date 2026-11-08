@@ -26,9 +26,14 @@ wrapper() {
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 # Solver parallelism cap (shared Mac): each verifying command uses DAFNY_CORES Z3 processes (default 1)
 # unless the caller passes --cores itself. Callers that run several commands at once bound their own jobs.
-case "${1:-}" in
-  verify|translate|build|run|test)
-    case " $* " in *" --cores"*) ;; *) set -- "$1" --cores "${DAFNY_CORES:-1}" "${@:2}" ;; esac ;;
+case " $* " in
+  *" --cores"*) ;;
+  *)
+    case "${1:-}" in
+      verify|build|run|test) set -- "$1" --cores "${DAFNY_CORES:-1}" "${@:2}" ;;
+      # translate takes its target language first: `dafny translate js --cores 1 ...`.
+      translate) set -- "$1" "${2:-}" --cores "${DAFNY_CORES:-1}" "${@:3}" ;;
+    esac ;;
 esac
 exec "$DAFNY_BIN" "$@"
 SH
