@@ -111,7 +111,7 @@ scripts/tron test gateway src/e2e/admin/native-change.e2e.test.ts \
   src/e2e/admin/settings-worker-fences.e2e.test.ts \
   src/e2e/admin/settings-three-layer.e2e.test.ts \
   src/e2e/admin/settings-change.integration.test.ts \
-  src/admin/settings-subject-audit.e2e.test.ts
+  src/e2e/admin/settings-subject-audit.e2e.test.ts
 ```
 
 Concrete store/catalog I/O and presentation belong to [admin](../../admin/README.md);

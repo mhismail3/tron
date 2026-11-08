@@ -27,8 +27,8 @@ GATEWAY = "packages/gateway"
 WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 # Locks not named `*.lock.integration.test.ts`: the Pi SDK seam's behavior trace and corpus.
-NAMED_LOCKS = {f"{GATEWAY}/src/sessions/sdk-behavior-trace.integration.test.ts",
-               f"{GATEWAY}/src/sessions/pi-persisted-state-corpus.integration.test.ts"}
+NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
+               f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
 SKIPPABLE = ("ios", "mac", "relay")
 IOS = "packages/ios-app"
 # The UIValidation test plan's targets, which scripts/tron-ios-test builds and runs. The Gateway E2E
@@ -43,6 +43,10 @@ NOT_DRIVEN = ("ios-lanes", "mac", "relay")
 # Six HomeSheets methods overran the 1200 s deadline on a quiet host: journeys there take ~150-290 s
 # and the tool-detail journey 250-450 s. Three methods fit two such journeys plus ~35 s of launch.
 IOS_SHARD_TESTS = 3
+# An iPad-only UI test skips on the iPhone lane (`XCTSkipUnless(... == .pad ...)`), so
+# its shard runs on this worktree's iPad lane with this device type instead.
+IOS_PAD_GATE = re.compile(r"XCTSkipUnless\(\s*UIDevice\.current\.userInterfaceIdiom\s*==\s*\.pad\b")
+IOS_PAD_DEVICE_TYPE = "iPad Pro 13-inch (M5)"
 
 
 class VerifyError(Exception):
@@ -50,7 +54,7 @@ class VerifyError(Exception):
 
 
 def git(*args: str) -> str:
-    done = subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotepath=false", *args], capture_output=True, text=True)
+    done = subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotepath=false", *args], capture_output=True, text=True, errors="replace")
     if done.returncode:
         raise VerifyError(done.stderr.strip() or f"git {args[0]} failed")
     return done.stdout
@@ -148,9 +152,10 @@ def ios_selectors(paths: list[str]) -> list[str]:
     return owners
 
 
-def ios_test_methods(owner: str) -> list[str]:
+def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
     """`Target/Class/testMethod` owners XCTest runs for `Target/Class`: the no-argument, non-private
-    `test` methods declared in the class or its top-level extensions in that target's sources.
+    `test` methods declared in the class or its top-level extensions in that target's sources, and
+    the subset that is iPad-only (the method, or the class's setUp, skips unless on an iPad).
     Fails closed: a test-shaped method whose enclosing top-level type cannot be read makes the
     class run whole (an empty result) rather than silently dropping a test."""
     target, name = owner.split("/")
@@ -160,37 +165,74 @@ def ios_test_methods(owner: str) -> list[str]:
     method = re.compile(r"^\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:override\s+)?func\s+(test\w*)\(\)")
     shaped = re.compile(r"\bfunc\s+(test\w*)\s*\(\s*\)")
     hidden = re.compile(r"\b(?:private|fileprivate|static|class)\s+func\b")
+    member_line = re.compile(r"^\s+(?:(?:@\w+(?:\([^)]*\))?|override|private|fileprivate|public|open|internal|static|class|nonisolated)\s+)*func\s+(\w+)")
     found: list[str] = []
+    pad: set[str] = set()
+    bodies: dict[str, str] = {}
+    class_pad = False
     unplaced = False
     for source in sorted((ROOT / IOS / folder).rglob("*.swift")):
         text = source.read_text(errors="replace")
         if not re.search(rf"\b(?:class|extension)\s+{re.escape(name)}\b", text):
             continue
         scope: str | None = None
+        member: str | None = None
         for line in text.splitlines():
+            if scope == name and (declared_member := member_line.match(line)):
+                member = declared_member.group(1)
+            if scope == name and member:
+                bodies[member] = bodies.get(member, "") + line + "\n"
+            if scope == name and member and IOS_PAD_GATE.search(line):
+                class_pad = class_pad or member in ("setUp", "setUpWithError")
+                pad.add(member)
             # A top-level line opens a type's scope, or an unknown one; a bare attribute line does not.
             if line[:1] not in ("", " ", "\t", "}", "/", "#") and (
                     line[:1] != "@" or re.search(r"\b(?:class|struct|enum|actor|extension|protocol|func|var|let)\b", line)):
                 declared = top_level.match(line)
                 scope = declared.group(1) if declared else None
+                member = None
             elif scope == name and (match := method.match(line)):
                 found += [] if match.group(1) in found else [match.group(1)]
             elif scope == name and shaped.search(line) and not hidden.search(line):
                 unplaced = True  # a test spelled in a way the reader does not select
             elif scope is None and shaped.search(line) and not hidden.search(line):
                 unplaced = True
-    return [] if unplaced else [f"{owner}/{test}" for test in found]
+    if unplaced:
+        return [], set()
+    # A test that calls a gated helper of its class is iPad-only too (one call level).
+    helpers = [helper for helper in pad if helper not in found]
+    gated = {test for test in found if class_pad or test in pad
+             or any(re.search(rf"\b{re.escape(helper)}\(", bodies.get(test, "")) for helper in helpers)}
+    return [f"{owner}/{test}" for test in found], {f"{owner}/{test}" for test in gated}
 
 
-def ios_shards(selectors: list[str]) -> list[list[str]]:
-    """The selected classes' test methods in runs of at most IOS_SHARD_TESTS; classes whose methods
-    cannot be read run whole, together, in one final shard."""
-    methods, whole = [], []
+class IosShard(list):
+    """Selectors one runner process executes; `pad` shards run on the iPad lane."""
+    pad = False
+
+
+def ios_shards(selectors: list[str]) -> list[IosShard]:
+    """The selected classes' test methods in runs of at most IOS_SHARD_TESTS, iPhone methods first,
+    then iPad-only methods in their own shards; classes whose methods cannot be read run whole,
+    together, in one final shard."""
+    methods, pad_methods, whole = [], [], []
     for owner in selectors:
-        found = ios_test_methods(owner)
-        methods += found
+        found, pad = ios_test_methods(owner)
+        methods += [method for method in found if method not in pad]
+        pad_methods += [method for method in found if method in pad]
         whole += [] if found else [owner]
-    return [methods[index:index + IOS_SHARD_TESTS] for index in range(0, len(methods), IOS_SHARD_TESTS)] + ([whole] if whole else [])
+    shards = []
+    for group, is_pad in ((methods, False), (pad_methods, True)):
+        for index in range(0, len(group), IOS_SHARD_TESTS):
+            shard = IosShard(group[index:index + IOS_SHARD_TESTS])
+            shard.pad = is_pad
+            shards.append(shard)
+    return shards + ([IosShard(whole)] if whole else [])
+
+
+def ios_pad_lane() -> str:
+    """This worktree's own iPad lane, so concurrent worktrees never share one lease."""
+    return "verify-ipad-" + hashlib.sha256(str(ROOT).encode()).hexdigest()[:12]
 
 
 def ios_index_stale() -> str | None:
@@ -269,6 +311,61 @@ def changed_paths(base: str, working: bool = False) -> list[str]:
     if working:
         names.update(filter(None, git("ls-files", "--others", "--exclude-standard", "-z").split("\0")))
     return sorted(names)
+
+
+def is_test_code(path: str) -> bool:
+    """Test files and the fixtures, support and goldens that exist only for them."""
+    parts = path.split("/")
+    return is_test(path) or is_golden(path) or any(part in parts for part in ("test-support", "test-fixtures", "Fixtures", "tests", "locks"))
+
+
+COMPAT_WORDS = re.compile(r"\b(legacy|compat|compatibility|shim|deprecated)\b", re.IGNORECASE)
+
+
+def test_stem(path: str) -> str:
+    name = path.rsplit("/", 1)[-1]
+    return name[:-len("Tests.swift")] if name.endswith("Tests.swift") else re.sub(r"^test-", "", name).split(".")[0]
+
+
+def delta(base: str) -> dict:
+    """What the change adds and deletes, split into source and test code. A new test file
+    whose stem an existing test file in the same directory already carries is listed with
+    that owner: the reviewer decides whether the proof belonged in it (test-oracles.md)."""
+    counts = {"source": [0, 0], "tests": [0, 0], "docs": [0, 0]}
+    for line in git("diff", "--numstat", "-M", f"{base}..HEAD").splitlines():
+        added, removed, path = line.split("\t", 2)
+        if added == "-":
+            continue  # binary
+        path = re.sub(r"\{[^{}]* => ([^{}]*)\}", r"\1", path).split(" => ")[-1].replace("//", "/")
+        side = counts["docs" if is_doc(path) else "tests" if is_test_code(path) else "source"]
+        side[0] += int(added)
+        side[1] += int(removed)
+    status = git("diff", "--name-status", "-M", f"{base}..HEAD").splitlines()
+    rows = [row.split("\t") for row in status]
+    # A rename into a new test path is reviewed like an addition; its source left as a deletion.
+    added = [fields[-1] for fields in rows if fields[0][0] in "AR" and is_test(fields[-1])
+             and not (fields[0][0] == "R" and is_test(fields[1]) and test_stem(fields[1]) == test_stem(fields[-1]))]
+    deleted = [fields[1] for fields in rows if fields[0][0] in "DR" and is_test(fields[1])
+               and not (fields[0][0] == "R" and is_test(fields[-1]) and test_stem(fields[1]) == test_stem(fields[-1]))]
+    beside = {}
+    base_tests = [name for name in git("ls-tree", "-r", "--name-only", base).splitlines() if is_test(name)] if added else []
+    for path in added:
+        owners = [name for name in base_tests if name != path and name.rpartition("/")[0] == path.rpartition("/")[0]
+                  and test_stem(name) == test_stem(path)]
+        if owners:
+            beside[path] = sorted(owners)
+    # Added source lines that name compatibility machinery, which AGENTS.md forbids.
+    bridges, path = [], None
+    for line in git("diff", "-U0", "-M", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", f"{base}..HEAD").splitlines():
+        if line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else None
+            path = path if path and not is_test_code(path) and not is_doc(path) else None
+        elif path and line.startswith("+") and COMPAT_WORDS.search(line):
+            bridges.append(f"{path}: {line[1:].strip()[:160]}")
+    return {"sourceLines": {"added": counts["source"][0], "removed": counts["source"][1]},
+            "testLines": {"added": counts["tests"][0], "removed": counts["tests"][1]},
+            "docLines": {"added": counts["docs"][0], "removed": counts["docs"][1]},
+            "addedTestFiles": added, "deletedTestFiles": deleted, "besideExistingOwner": beside, "compatAdditions": bridges}
 
 
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
@@ -586,7 +683,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
                         f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]],
                 ROOT / GATEWAY, vitest_count(report))
     if group == "ios":
-        return ([str(ROOT / "scripts/tron-ios-test"), "run", *(["--host-slot-wait-seconds", "30"] if ios_wait else []), *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
+        lane = ["--lane", ios_pad_lane(), "--device-type", IOS_PAD_DEVICE_TYPE] if getattr(selectors, "pad", False) else []
+        return ([str(ROOT / "scripts/tron-ios-test"), "run", *lane, *(["--host-slot-wait-seconds", "30"] if ios_wait else []), *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group == "node-gateway":
         return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
     if group == "node":
@@ -623,6 +721,7 @@ def main(argv: list[str]) -> int:
         modules = result["modules"]
         paths = changed_paths(base, working=True) if args.plan and name == "changed" else None
         selection = select(name, args.module or args.update_locks, base, modules, result["tracked"], paths=paths)
+        change = delta(base) if name == "changed" else None
     except (VerifyError, ownership.GitError) as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
@@ -652,6 +751,16 @@ def main(argv: list[str]) -> int:
         "; full coverage deferred to explicit verify --batch after landing" if selection["tier"] == "full" and name != "all" else ""), flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
+    if change:
+        source, tests = change["sourceLines"], change["testLines"]
+        docs = change["docLines"]
+        print(f"  delta: source +{source['added']}/-{source['removed']}, tests +{tests['added']}/-{tests['removed']},"
+              f" docs +{docs['added']}/-{docs['removed']};"
+              f" test files +{len(change['addedTestFiles'])}/-{len(change['deletedTestFiles'])}", flush=True)
+        for path, owners in change["besideExistingOwner"].items():
+            print(f"  delta: new {path} beside existing owner {', '.join(owners)}: extend it or say why not", flush=True)
+        for addition in change["compatAdditions"]:
+            print(f"  delta: compatibility wording added in {addition}: no compat code (AGENTS.md); delete it or ask", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
@@ -700,7 +809,7 @@ def main(argv: list[str]) -> int:
         if selection["deferredTests"]:
             command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha)
             deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
-        print(json.dumps({"selection": selection, "groups": groups, "steps": plan_steps, "commands": commands,
+        print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "deferredCommands": deferred_commands, "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
 
@@ -734,7 +843,7 @@ def main(argv: list[str]) -> int:
                   "endedAt": datetime.now(timezone.utc).isoformat() if verdict != 'running' else None,
                   "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
-                  "selection": selection, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
+                  "selection": selection, "delta": change, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
                   # A selection, even --all, is not the complete post-land batch.
                   "checkpointEligible": False,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}

@@ -56,7 +56,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   writes) or `.anchored` (top retention, target-free). Only explicit intent changes mode.
   `ChatScrollCoordinator` owns the bounded commands: catch-up, semantic restore (within one point,
   one-second deadline) and prepend (eight-second deadline); every `ChatLayoutTransaction` ends
-  settled or abandoned. A detached reader keeps one frozen installed commit until it returns.
+  settled or abandoned. Catch up from far back first jumps to a staged frame at the reveal (80–140
+  points) above the newest end, measured from the pinned end so the composer and keyboard
+  obstruction never shrink it, then scrolls smoothly (`TronChatCatchUpUITests`, #330). A detached reader keeps one frozen installed commit until it returns.
   UIKit owns keyboard motion and the composer's single first responder; the composer is the
   ScrollView's sole bottom safe-area inset. Exactly one scroll owns the status-bar gesture.
 - **Spatial roles.** User prompts right-anchored (≤ 364 points, emerald glass), agent prose and
@@ -77,7 +79,13 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   blocks into the sent text; Save hands the keyboard straight to the composer input (#1597). On iPad
   only, Return sends like an enabled Send (hardware Shift+Return, IME commits, paste and dictation
   still edit) and saves the annotation bubble like its check (hardware Shift+Return adds a line). The `testPad*` journeys run on an iPad
-  simulator and skip elsewhere; `testPhoneReturnInsertsNewline` keeps iPhone Return a newline. Camera, photo and file attachments stage locally (10 items, 25 MiB);
+  simulator and skip elsewhere; `testPhoneReturnInsertsNewline` keeps iPhone Return a newline.
+  A completed assistant message's adjacent paragraphs, headings and list items are one TextKit
+  run, so native Copy/Annotate ranges cross those block boundaries with emphasis, links, heading
+  levels and list markers intact; each block keeps its own static-text accessibility element
+  and frame, and a list item reads its marker. Selection stays on at accessibility text sizes.
+  Staged selections anchor by run-scoped UTF-16 range for their highlight (not persisted). Code blocks, tables and blockquotes keep their own renderers, and a selection
+  does not cross them (#1112). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
   nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Resting

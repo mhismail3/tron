@@ -46,10 +46,7 @@ Commands:
   mac replace --plan|--start|--status [--follow] [--json]
                                     One-tap app replacement (also from iPhone Settings)
   mac reinstall --app <Release.app> [--select-bundled-offline|--confirm-offline|--verify|--status|--restart|--abandon|--finish]
-  mac reinstall --recovery-relocate --operation-id <id> --source <root>
-  mac reinstall --recovery-verify --operation-id <id>
-                                    Resumable preparation or archive-only recovery
-                                    registration (manual path)
+                                    Resumable manual reinstall preparation
   checkpoint [--test-mode|--prepare-reinstall]
                                     Rebuild main; five isolated simulator/Gateway smoke outcomes
                                     --prepare-reinstall writes a manual maintenance receipt, never installs
@@ -87,6 +84,10 @@ Commands:
                                     reach another module's files, test-support, or
                                     import the registry directly (#2316)
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
+  health [<rev>] [--baseline <rev>] [--github] [--evidence] [--deploy-log <jsonl>]
+         [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
+                                    Read-only outcome and diagnostic health signals diffed
+                                    against the baseline (docs/HEALTH.md); never a gate
   home-layout check                 Tron-home path registry (docs/tron-home.md): check
                                     source literals (tools/home-layout)
   docs modules [<path>]|signals|rpc|settings
@@ -216,6 +217,9 @@ case "$cmd" in
     ;;
   budgets)
     exec python3 "$ROOT/tools/budgets/budgets.py" "$@"
+    ;;
+  health)
+    exec python3 "$ROOT/tools/metrics/health.py" "$@"
     ;;
   home-layout)
     exec python3 "$ROOT/tools/home-layout/home_layout.py" "$@"

@@ -9,7 +9,7 @@ import { RunMarkerStore } from "./run-markers.js";
 /**
  * `gateway/run` run-marker store: mark, assistant completion, terminal reassertion and
  * clear, their bounds and conflicts, the exact documents each commits, and which
- * hand-written markers (legacy and current) a read admits. The committed-corpus
+ * hand-written markers a read admits. The committed-corpus
  * read-back is `store-run-markers`.
  */
 it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", async () => {
@@ -143,13 +143,9 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
 
   const operation = (id: string, extra: Record<string, unknown> = {}) => ({ operationId: id, acceptedAt: at(6), ...extra });
   const marker = (sessionId: string, document: unknown) => writeFile(join(directory, `${sessionId}.json`), JSON.stringify(document));
-  const legacy = { version: 1, operationId: "legacy-op", acceptedAt: at(7) };
   const written: Record<string, unknown> = {
-    "legacy-complete": { ...legacy, sessionId: "legacy-complete", assistantCompletionId: "c-l", assistantCompletedAt: at(8) },
-    "legacy-open": { ...legacy, sessionId: "legacy-open" },
-    "legacy-other-session": { ...legacy, sessionId: "someone-else" },
-    "legacy-half-complete": { ...legacy, sessionId: "legacy-half-complete", assistantCompletionId: "c-l" },
-    "legacy-version-3": { ...legacy, version: 3, sessionId: "legacy-version-3" },
+    "version-1": { version: 1, sessionId: "version-1", operationId: "op", acceptedAt: at(7) },
+    "version-3": { version: 3, sessionId: "version-3", operations: [operation("a")] },
     "current-other-session": { version: 2, sessionId: "someone-else", operations: [operation("a")] },
     "current-empty": { version: 2, sessionId: "current-empty", operations: [] },
     "current-object-operations": { version: 2, sessionId: "current-object-operations", operations: { length: 1 } },
@@ -170,8 +166,6 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   expect(await markers(), "write hand-made markers").toEqual({ ...written, s2 });
   const sixteen = Array.from({ length: 16 }, (_v, index) => operation(`op-${index}`));
   const admitted: Record<string, unknown[]> = {
-    "legacy-complete": [op("legacy-op", at(7), ["c-l", at(8)])],
-    "legacy-open": [op("legacy-op", at(7))],
     "current-sixteen": sixteen,
     "current-complete": [operation("a", { assistantCompletionId: "c-a", assistantCompletedAt: at(9) }), operation("b")],
   };
@@ -179,11 +173,8 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
     "each hand-made marker's admitted evidence").toEqual(Object.fromEntries(Object.keys(written).map((sessionId) => [sessionId, admitted[sessionId] ?? []])));
   expect(await all(), "evidence and interrupted ids over hand-made markers: every marker file is interrupted, only admitted ones carry evidence")
     .toEqual({ evidence: { ...admitted, s2: s2.operations }, interrupted: [...Object.keys(written), "s2"].sort() });
-  await store.markAssistantCompletion("legacy-open", "legacy-op", "c-l", at(10));
-  const afterLegacy = { ...written, s2, "legacy-open": doc("legacy-open", [op("legacy-op", at(7), ["c-l", at(10)])]) };
-  expect(await markers(), "complete the legacy marker rewrites it as current").toEqual(afterLegacy);
   await store.mark("current-duplicate", "fresh");
-  const afterFresh = { ...afterLegacy, "current-duplicate": doc("current-duplicate", [op("fresh", second(2))]) };
+  const afterFresh = { ...written, s2, "current-duplicate": doc("current-duplicate", [op("fresh", second(2))]) };
   expect(await markers(), "mark over an unreadable marker replaces it").toEqual(afterFresh);
   await store.clear("current-complete", "b");
   const afterClear = { ...afterFresh, "current-complete": doc("current-complete", [operation("a", { assistantCompletionId: "c-a", assistantCompletedAt: at(9) })]) };

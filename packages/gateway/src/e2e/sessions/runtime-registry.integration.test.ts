@@ -6334,6 +6334,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         ctx.ui.setWidget("factory", () => ({
           render: () => ["must mount"], invalidate: () => {}
         }));
+        ctx.ui.setWidget("custom:broken", () => { throw new Error("factory failed"); });
         try {
           await ctx.ui.custom(() => {
             invoked = true;
@@ -6353,17 +6354,20 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    const internal = slot as unknown as { extensionHost: { isTuiStarted: boolean; mountedComponentCount: number } };
-    await waitFor(() => internal.extensionHost.mountedComponentCount === 1, "the mounted extension component");
-    expect(internal.extensionHost.isTuiStarted).toBe(true);
+    await waitFor(() => slot.snapshot().extensionPresentation.surfaces.some((surface) => surface.frame.plainText.includes("must mount")), "the mounted extension component frame");
     const snapshot = slot.snapshot();
     expect(snapshot.extensionPresentation.semanticState.statuses).toMatchObject({
       "context-has-ui": "true", "context-mode": "rpc", "custom-deferred": "not-invoked",
     });
     expect(snapshot.extensionPresentation.semanticState.widgets).toEqual([]);
+    // A widget key is opaque: one that looks like a reserved prefix still gets its own fallback frame.
+    expect(snapshot.extensionPresentation.surfaces).toHaveLength(2);
     expect(snapshot.extensionPresentation.surfaces).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "widget:ZmFjdG9yeQ", kind: "widget", placement: "aboveEditor", inputMode: "none" }),
+      expect.objectContaining({ id: "widget:ZmFjdG9yeQ", kind: "widget", placement: "aboveEditor", lifecycle: "retained", focused: false, inputMode: "none" }),
+      expect.objectContaining({ id: "widget:Y3VzdG9tOmJyb2tlbg", kind: "widget", lifecycle: "retained", focused: false, inputMode: "none",
+        frame: expect.objectContaining({ plainText: "[Extension component unavailable: factory failed]" }) }),
     ]));
+    expect(snapshot.extensionPresentation.diagnostics).toContainEqual({ code: "component.render-invalid", message: "Blocking component UI is deferred in RPC mode" });
   });
 
   it("keeps ask-style semantic selection on the RPC interaction path", async () => {

@@ -416,6 +416,9 @@ class SelectionTests(VerifyCase):
         self.assertEqual(report["selection"]["modules"], ["repo/alpha"])
         self.assertEqual(report["selection"]["tests"], ["mods/alpha/test-alpha.py"])
         self.assertEqual(report["verdict"], "passed")
+        self.assertEqual(report["delta"], {"sourceLines": {"added": 1, "removed": 1}, "testLines": {"added": 0, "removed": 0},
+                                           "docLines": {"added": 0, "removed": 0},
+                                           "addedTestFiles": [], "deletedTestFiles": [], "besideExistingOwner": {}, "compatAdditions": []})
         self.assertEqual([step["name"] for step in report["steps"]][:9],
                          ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy",
                           "home layout", "privacy guard", "git diff --check"])
@@ -427,6 +430,19 @@ class SelectionTests(VerifyCase):
         self.assertIn("tests: python FAILED", failed.stdout)
         self.assertIn("AssertionError: 1 != 2", failed.stdout)
         self.assertNotIn("mods/beta/test-beta.py", json.dumps(r.report()["selection"]["tests"]))
+        # A proof added as a new file beside the test that already owns its behaviour is named for review.
+        r.git("reset", "-q", "--hard", "base")
+        r.write("mods/alpha/test-alpha.edge.py", "import sys, unittest\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parent))\n"
+                "import alpha\nclass Edge(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(alpha.VALUE, 'alpha')\nunittest.main()\n")
+        r.git("rm", "-q", "mods/beta/test-beta.py")
+        r.write("mods/alpha/alpha.py", "VALUE = 'alpha'\nOLD = VALUE  # legacy alias\n")
+        r.commit("parallel proof and a compat alias")
+        parallel = r.verify("--changed")
+        self.assertIn("delta: new mods/alpha/test-alpha.edge.py beside existing owner mods/alpha/test-alpha.py", parallel.stdout)
+        self.assertIn("delta: compatibility wording added in mods/alpha/alpha.py: OLD = VALUE  # legacy alias", parallel.stdout)
+        change = r.report()["delta"]
+        self.assertEqual((change["addedTestFiles"], change["deletedTestFiles"], change["testLines"]["removed"]),
+                         (["mods/alpha/test-alpha.edge.py"], ["mods/beta/test-beta.py"], PASSING.count("\n")))
 
     def test_ignored_residue_with_no_named_writer_fails_the_run(self) -> None:
         r = self.repo
@@ -722,6 +738,37 @@ class IosLaneTests(VerifyCase):
         self.assertIn("StrayUITests.swift declares or extends no XCTestCase class", refused.stderr)
         skipped = r.verify("--module", "ios-app/ui-tests", "--skip", "ios", "--plan")
         self.assertEqual(skipped.returncode, 0, skipped.stderr)
+
+    def test_ipad_only_methods_run_in_their_own_shards_on_the_worktrees_ipad_lane(self) -> None:
+        """#2331: a test that skips unless on an iPad (in itself, its class's setUp or a helper it
+        calls) runs on this worktree's iPad lane, never alone on the iPhone lane where its shard
+        passes nothing; iPhone methods stay on the default lane."""
+        r = self.repo
+        calls = self.ios_fixture()
+        ios = "packages/ios-app/UITests"
+        gate = "try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, \"iPad\")"
+        r.write(f"{ios}/FixtureJourneyUITests.swift", "final class FixtureJourneyUITests: XCTestCase {\n"
+                f"    @MainActor func testPadReturn() throws {{\n        {gate}\n    }}\n"
+                "    @MainActor func testPhoneReturn() throws {\n        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, \"iPhone\")\n    }\n"
+                "    func testWindowed() throws {\n        try windowed()\n    }\n"
+                f"    private func windowed() throws {{\n        {gate}\n    }}\n}}\n")
+        r.write(f"{ios}/FixturePadUITests.swift", "final class FixturePadUITests: XCTestCase {\n"
+                f"    override func setUpWithError() throws {{\n        {gate}\n    }}\n"
+                "    func testColumn() {}\n}\n")
+        r.commit("ipad-only journeys")
+        planned = r.verify("--module", "ios-app/ui-tests", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        commands = {c["name"]: " ".join(c["command"][1:]) for c in plan["commands"] if c["name"].startswith("tests: ios") and "command" in c}
+        journey, pad = "TronMobileUITests/FixtureJourneyUITests", "TronMobileUITests/FixturePadUITests"
+        lane = "--lane verify-ipad-" + hashlib.sha256(str(r.path.resolve()).encode()).hexdigest()[:12] + " --device-type iPad Pro 13-inch (M5)"
+        iphone = [command for command in commands.values() if f"{journey}/testPhoneReturn" in command]
+        self.assertEqual(len(iphone), 1, commands)
+        self.assertNotIn("--lane", iphone[0])
+        for method in (f"{journey}/testPadReturn", f"{journey}/testWindowed", f"{pad}/testColumn"):
+            owning = [command for command in commands.values() if method in command]
+            self.assertEqual(len(owning), 1, commands)
+            self.assertIn(lane, owning[0], f"{method} must run on the iPad lane: {owning[0]}")
+            self.assertNotIn(f"{journey}/testPhoneReturn", owning[0])
 
     def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes(self) -> None:
         """#2173: a selected class runs as method shards of at most IOS_SHARD_TESTS, each its own

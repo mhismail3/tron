@@ -89,7 +89,7 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
 
 | Signal | One-step diagnosis / surviving oracle |
 | --- | --- |
-| `ENOTEMPTY` removing a fixture's `agent` directory, or SDK files reappearing after removal | Run `scripts/tron test gateway src/sessions/model-runtime-config-lifetime.integration.test.ts`. Its real filesystem gate distinguishes an older detached config read from the later awaited Gateway readiness, then checks actual registry disposal/root removal. Other downstream lock lifetimes still require their own writer trace. |
+| `ENOTEMPTY` removing a fixture's `agent` directory, or SDK files reappearing after removal | Run `scripts/tron test gateway src/e2e/sessions/model-runtime-config-lifetime.integration.test.ts`. Its real filesystem gate distinguishes an older detached config read from the later awaited Gateway readiness, then checks actual registry disposal/root removal. Other downstream lock lifetimes still require their own writer trace. |
 
 ## Tron-owned `pi-subagents` build
 
@@ -146,7 +146,7 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
 ## Persisted-state corpus
 
 `test-fixtures/pi-sdk/corpus/` holds an agent directory and sessions the outgoing SDK wrote
-through the real Gateway, plus Tron's observation of reopening them. Regenerate with `npm run record:pi-corpus` before bumping, so `src/sessions/pi-persisted-state-corpus.integration.test.ts`
+through the real Gateway, plus Tron's observation of reopening them. Regenerate with `npm run record:pi-corpus` before bumping, so `src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts`
 fails when a session, tool selection, model, provider key or MCP credential stops resolving
 ([corpus README](../test-fixtures/pi-sdk/README.md)).
 
@@ -164,7 +164,7 @@ switches over ends in a `never` default (`compatibility-manifest.ts`, `projectio
 
 ## Pi SDK behavior trace
 
-`src/sessions/sdk-behavior-trace.integration.test.ts` locks what the pinned SDK makes Tron emit,
+`src/e2e/sessions/sdk-behavior-trace.integration.test.ts` locks what the pinned SDK makes Tron emit,
 persist and send: one faux-provider scenario through the real `RuntimeRegistry`/`RuntimeSlot`
 with codemode, tool search and MCP (text and thinking, direct and nested tools,
 `models.classify()` and `image()`, MCP tools, steer and follow-up, abort, manual compaction, a

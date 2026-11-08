@@ -57,6 +57,10 @@ the `computer` module registers only on darwin.
 
 ## Locks
 
+Scenario lock files live in `gateway/e2e`, at the path of the module they lock
+(`src/e2e/<path under src>/`); the Module column names that module. Store locks
+(`store-*`) stay with their store's owner.
+
 | Module | Lock | Scenario |
 |---|---|---|
 | `gateway/run` | `run-prompt-stream` | streamed thinking and text, a `read` round trip. Named checks: the idle snapshot a client opens, transcript rows (semantics, tool and content text, including thinking), canonical entry types and roles, invocation receipts and their identities, each provider request's messages, and `chat` shapes for the requests and system entry |
@@ -220,7 +224,7 @@ These are follow-ups, not exemptions.
 
 ## Wire contract (V7)
 
-`src/protocol/protocol.wire.lock.integration.test.ts` records from real frames:
+`src/e2e/protocol/protocol.wire.lock.integration.test.ts` records from real frames:
 - the declared lockstep contract (`config/GatewayProtocol.json` and the shared
   `packages/protocol-fixtures` connection values);
 - the accepted hello frame's structure;
@@ -237,13 +241,15 @@ a lockstep slice that updates both ends ([charter](../../../AGENTS.md#architectu
 cd packages/gateway
 npx vitest run .lock.integration                                      # parallel-pass locks
 npx vitest run --config vitest.nested.config.ts delegation.lock       # subagent lock
-TRON_UPDATE_LOCKS=gateway/run npx vitest run src/sessions/run.lock.integration.test.ts
+TRON_UPDATE_LOCKS=gateway/e2e npx vitest run src/e2e/protocol/protocol.wire.lock.integration.test.ts
 ```
 
 Store and wire locks run in the parallel pass: `npx vitest run .lock.integration`.
 
 `TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose goldens
-a run may rewrite. Qualify exact deltas; never auto-bless unexplained failures.
+a run may rewrite: `gateway/e2e` for the scenario locks, including the Pi seam locks whose
+goldens sit in `test-fixtures/pi-sdk/` (`scripts/tron verify --update-locks gateway/e2e`, or
+`npm run update:sdk-behavior-trace`), and the store's owner for a store lock. Qualify exact deltas; never auto-bless unexplained failures.
 Human before/after approval is for new design or intended visible changes, not
 unchanged behavior or repeated schema metadata. A refactor never rewrites one.
 

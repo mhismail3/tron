@@ -32,7 +32,7 @@ import { isGatewayTimestamp } from "../../util/timestamp.js";
 import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../../util/bounded-text.js";
 import type { BlobStore } from "../../sessions/blob-store.js";
 import { projectForkBoundary, type ForkBoundaryAnchor } from "../../sessions/fork-boundary.js";
-import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../../protocol/types.js";
+import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "../receipts/context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "../receipts/invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "../receipts/extension-notification-receipts.js";
@@ -892,20 +892,11 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // Retain actionable frames first. Omitted identities/revisions remain a
-  // bounded delta baseline, so an exact-next full-frame upsert can converge.
-  const surfacePriority = (surface: ExtensionSurface): number => {
-    const leased = projected.extensionPresentation.inputLease?.surfaceId === surface.id;
-    if (leased || surface.lifecycle === "blocking") return 100;
-    if (surface.focused) return 90;
-    if (surface.kind === "overlay" || surface.kind === "editor" || surface.inputMode !== "none") return 80;
-    if (surface.lifecycle === "transient") return 40;
-    return 0;
-  };
+  // Every surface is a decorative retained widget. Omitted identities/revisions
+  // remain a bounded delta baseline, so an exact-next full-frame upsert can converge.
   const completeSurfaces = [...projected.extensionPresentation.surfaces];
-  const removalOrder = [...completeSurfaces].sort((left, right) => surfacePriority(left) - surfacePriority(right));
   const omittedSurfaceRevisions: Array<{ id: string; revision: number }> = [];
-  for (const removed of removalOrder) {
+  for (const removed of completeSurfaces) {
     omittedSurfaceRevisions.push({ id: removed.id, revision: removed.revision });
     const retained = completeSurfaces.filter((surface) => !omittedSurfaceRevisions.some((item) => item.id === surface.id));
     projected = {

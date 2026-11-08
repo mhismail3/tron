@@ -121,6 +121,13 @@ final class ChatScrollCoordinator {
     private(set) var targetReleaseGeneration = 0
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
+    #if HOSTED_TEST
+    /// The distance above the newest end that the last staged catch-up frame
+    /// showed before its smooth final step; read by hosted journeys.
+    private(set) var hostedStagedCatchUpGap: CGFloat?
+    /// The reader's distance from the newest end when Catch up was requested.
+    private(set) var hostedCatchUpRequestDistance: CGFloat?
+    #endif
     private var catchUpUnreadBeforeJump = false
     private var layoutRestore: LayoutRestore?
     private var prepend: PrependContext?
@@ -512,11 +519,18 @@ extension ChatScrollCoordinator {
         reduceViewport(.catchUpRequested)
         isAtBottom = false
         let threshold = max(320, geometry.containerHeight * 0.8)
+        #if HOSTED_TEST
+        hostedCatchUpRequestDistance = geometry.distanceFromBottom
+        hostedStagedCatchUpGap = nil
+        #endif
         if !reduceMotion, geometry.distanceFromBottom > threshold {
             let reveal = min(140, max(80, geometry.containerHeight * 0.18))
-            let bottomOffset = geometry.contentHeight + geometry.bottomInset - geometry.containerHeight
+            // The pinned end's model offset, which the orientation reflects to the
+            // native origin, so the staged frame shows `reveal` points of gap
+            // whatever the composer and keyboard obstruct.
+            let pinnedOffset = geometry.offsetY + geometry.distanceFromBottom
             catchUpPhase = .staged
-            publish(.offsetY(max(0, bottomOffset - reveal)), animation: .disabled, origin: .catchUp)
+            publish(.offsetY(max(0, pinnedOffset - reveal)), animation: .disabled, origin: .catchUp)
         } else {
             catchUpPhase = .final
             publish(.tail, animation: ChatMotion.catchUpScroll(reduceMotion: reduceMotion), origin: .catchUp)
@@ -741,6 +755,9 @@ extension ChatScrollCoordinator {
                     }
                     guard let self, self.presentation == admittedPresentation,
                           self.catchUpPhase == .staged, !self.isUserInteracting else { return }
+                    #if HOSTED_TEST
+                    self.hostedStagedCatchUpGap = self.geometry.distanceFromBottom
+                    #endif
                     self.catchUpTask = nil
                     self.catchUpPhase = .final
                     self.publish(.tail, animation: ChatMotion.catchUpScroll(reduceMotion: false), origin: .catchUp)

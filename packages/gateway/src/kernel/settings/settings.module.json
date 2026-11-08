@@ -9,5 +9,8 @@
   "dependsOn": [
     "gateway/receipts",
     "gateway/pi"
+  ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/kernel/settings/settings-change.preparation.test.ts"
   ]
 }

@@ -49,14 +49,6 @@ Owner: `gateway/session-catalog` (`session-catalog.ts`, `catalog-jsonl.ts`,
   reports `catalog-index.failure`. Rows leave only when their canonical file leaves
   the cut; an unprovable file keeps its row. Index version 3 rebuilds counts on
   demand; `messageCount` excludes Pi `system` deltas.
-- Migration: while `gateway/catalog-metadata-v2.json` (the former single
-  document) exists, a read migrates it to shards and deletes it only after the
-  read-back equals it; a failure keeps it and serves its rows. A save that refuses
-  nothing removes it before committing its manifest, so a migration never
-  overwrites a newer cut; a refused save keeps it. Rollback to a build without
-  shards finds no v2 once any save or migration has completed and rebuilds once
-  from canonical files; if v2 is still present it is reused. The v3 directory is
-  ignored by such a build and may be deleted.
 - A file the owner cannot prove keeps its old row and refuses retryably
   (`catalog_not_ready`). User-scoped reads filter by each row's delegated flag and
   duplicates are quarantined, so a child write cannot fail a dashboard list. A read

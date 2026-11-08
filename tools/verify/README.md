@@ -78,7 +78,11 @@ live log, result and wall time. The first failure stops the run and prints its t
 `test-results/verify/<sha>.json` is atomically updated before/after every step;
 `running` and `interrupted` are not passes. SIGINT/SIGTERM stops and joins the owned
 step process group while retaining partial results. Full logs are in
-`test-results/verify/<sha>/`. Repeating a selection at one SHA overwrites this local
+`test-results/verify/<sha>/`. `--changed` prints and records a `delta`: source, test and doc lines
+added and removed (tests include fixtures, support and goldens), added and deleted test files,
+each new or renamed-in test file beside an existing test of the same stem, and each added source line naming
+legacy, compat, shim or deprecated code. It never fails a run; the reviewer ACCEPTs against it
+([oracle policy](test-oracles.md)). Repeating a selection at one SHA overwrites this local
 report; batch evidence is copied separately before another run. The `resultDigest` covers the
 selection, each step's outcome and test count, and the verdict, but not timing,
 so two runs of one commit against one base can be compared (a reused iOS build compares equal to
@@ -222,7 +226,9 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
    file) runs as its `test` methods, at most three per runner process (`tests: ios 1/N`), so
    every process keeps the runner's focused deadline; a class whose methods cannot be read
    or that holds test-shaped methods the reader cannot place runs whole. Each method shard must
-   pass exactly its named tests. Every admitted shard runs before a failure is reported; a busy
+   pass exactly its named tests. A method that skips unless on an iPad (in itself, its class's
+   `setUp` or a helper it calls directly) runs in its own shards on this worktree's iPad lane
+   (`verify-ipad-<hash>`, `iPad Pro 13-inch (M5)`), on the same products. Every admitted shard runs before a failure is reported; a busy
    exit 73 defers that shard and the rest, which is never a pass. Harnessed journeys use their own lanes. A file naming
    neither fails unless iOS is skipped. Counts/failures come from XCTest `summary.json`
    (`passedTests`); `--update-locks` passes `TEST_RUNNER_TRON_UPDATE_LOCKS`. Goldens are
