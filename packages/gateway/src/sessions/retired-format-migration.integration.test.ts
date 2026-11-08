@@ -99,6 +99,31 @@ it("backs up, rewrites only retired forms, defers recent sessions, is idempotent
   expect(await readFile(f.profile)).toEqual(originals.profile);
 });
 
+it("never rewrites a sealed Home chapter, whose bytes Home memory pins", async () => {
+  const f = await fixture();
+  const sessions = join(f.home, "agent", "sessions", "--home--");
+  await mkdir(sessions, { recursive: true });
+  const chapter = (id: string) => jsonl([{ type: "session", version: 3, id, timestamp: "2026-10-01T00:00:00.000Z", cwd: "/home" }, settings("s1", {}, { "context.images.block": snapshot("builtin") })]);
+  const sealed = join(sessions, "sealed.jsonl"), active = join(sessions, "active.jsonl");
+  await writeFile(sealed, chapter("chapter-1"));
+  await writeFile(active, chapter("chapter-2"));
+  const past = new Date(Date.now() - 3_600_000);
+  for (const path of [sealed, active]) await utimes(path, past, past);
+  await mkdir(join(f.home, "gateway", "home"), { recursive: true });
+  await writeFile(join(f.home, "gateway", "home", "home.json"), JSON.stringify({ version: 2, chapters: [{ sessionId: "chapter-1", state: "sealed" }, { sessionId: "chapter-2", state: "active" }] }));
+  const original = await readFile(sealed);
+
+  const plan = await planRetiredFormatMigration(f.home, 600);
+  expect(plan.sealedHome).toEqual([sealed]);
+  expect(plan.files.map(file => file.path).sort()).toEqual([f.old, active, f.profile].sort());
+  expect(await applyRetiredFormatMigration(f.home, join(f.root, "backup"), plan)).toEqual({ published: 3, failed: [] });
+  expect(await readFile(sealed)).toEqual(original);
+  expect((await planRetiredFormatMigration(f.home, 600)).files).toEqual([]);
+
+  await writeFile(join(f.home, "gateway", "home", "home.json"), JSON.stringify({ version: 1, chapters: [] }));
+  await expect(planRetiredFormatMigration(f.home, 600)).rejects.toThrow(/Unsupported Home ledger/);
+});
+
 it("refuses a run whose input changed after planning, and never restores over a later write", async () => {
   const f = await fixture();
   const stale = await planRetiredFormatMigration(f.home, 600);

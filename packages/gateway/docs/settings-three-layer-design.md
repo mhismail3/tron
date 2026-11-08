@@ -196,7 +196,9 @@ readable in Global Changes; no request, Undo or Apply again writes Project setti
 - Startup never rewrites session JSONL. `RETIRED_SCOPES` (`kernel/settings/tool-contract.ts`) maps
   `mac`/`builtin` → Global and `chat`/`profile` → Session for the Session reader until the one-shot,
   backed-up `scripts/tron migrate retired-formats` (#2329), run by the maintainer with the Gateway
-  listening and Home idle, rewrites retained entries; both are then deleted. The Home record model moves into the Profile when none is saved.
+  listening and Home idle, rewrites retained entries. It never rewrites a sealed Home chapter: Home
+  memory pins its exact bytes, so those chapters keep the retired names and `RETIRED_SCOPES` still reads them.
+  The Home record model moves into the Profile when none is saved.
 - Preserve saved Global values in their owned stores as Global. Active Home chapter sessions are
   not read or folded; Home's saved choices live in the Profile.
 - Explicit/legacy Session values remain overrides; old inherited `mac`/`builtin` frames are
