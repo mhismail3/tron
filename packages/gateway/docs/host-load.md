@@ -9,7 +9,9 @@ admission, gate, merge lock, hosted check workflow or automatic main revert; the
 post-land batch ([principles P2](../../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)) never blocks a worker.
 One worktree runs at most one iOS simulator job at a time, and at most three
 simulator jobs run at once across all worktrees: a fourth waits for a free slot
-(`scripts/ios-test-lock.py --host-slot`) and never while one is free. Exact-device/simulator leases
+(`scripts/ios-test-lock.py --host-slot`) and never while one is free. A job may spread
+over several of its worktree's own lanes, each taking a slot (verify's iOS shards,
+the real-UI journeys); verify's extra lanes take only a slot that is already free. Exact-device/simulator leases
 still prevent simultaneous use of the same resource, and each command cleans
 up its own processes and simulator. Do not kill another worker or Stable.
 

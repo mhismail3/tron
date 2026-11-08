@@ -104,7 +104,8 @@ legacy, compat, shim or deprecated code. It never fails a run; the reviewer ACCE
 report; batch evidence is copied separately before another run. The `resultDigest` covers the
 selection, each step's outcome and test count, and the verdict, but not timing,
 so two runs of one commit against one base can be compared (a reused iOS build compares equal to
-the build that stamped it). Python unittest counts exclude skipped and expected-failure
+the build that stamped it). The iOS shards count as one entry there (their status, passing count and
+failed and deferred tests), because packing and lanes vary between runs. Python unittest counts exclude skipped and expected-failure
 cases; a file with no executed passes cannot hide beside a passing neighbour.
 
 ## Static checks (existing tools only)
@@ -237,30 +238,9 @@ even beside another passing suite. `--plan` shows selection, not test evidence.
 
 ## iOS lane
 
-`--all`, `ios` tests, or a changed `ios-app/` module runs this lane unless `--skip ios`:
-1. **`ios source policy`** runs `packages/ios-app/scripts/test-source-policy.sh` (about 1 s);
-   a violation fails the run before anything builds.
-2. **`ios build`** reuses clean, current-commit stamped products/index; otherwise builds
-   with `scripts/tron-ios-test build`. Subsequent runs reuse that build.
-3. **`layers ios`** reads that index. Stale/missing indexes fail; no symbol-scan fallback.
-4. **`tests: ios`** uses the same products. Each selected class (named or extended by the
-   file) runs as its `test` methods, at most three per runner process (`tests: ios 1/N`), so
-   every process keeps the runner's focused deadline; a class whose methods cannot be read
-   or that holds test-shaped methods the reader cannot place runs whole. Each method shard must
-   pass exactly its named tests. A method that skips unless on an iPad (in itself, its class's
-   `setUp` or a helper it calls directly) runs in its own shards on this worktree's iPad lane
-   (`verify-ipad-<hash>`, `iPad Pro 13-inch (M5)`), on the same products. Every admitted shard runs before a failure is reported; a busy
-   exit 73 defers that shard and the rest, which is never a pass. Harnessed journeys use their own lanes. A file naming
-   neither fails unless iOS is skipped. Counts/failures come from XCTest `summary.json`
-   (`passedTests`); `--update-locks` passes `TEST_RUNNER_TRON_UPDATE_LOCKS`. Goldens are
-   source: commit and rebuild before comparing.
-
-The existing runner owns lanes, leases, cleanup and the three host-wide slots; run
-one job per worktree. Pre-land build/run passes `--host-slot-wait-seconds 30`, bounding
-only acquisition, never admitted work. No option retains unbounded waiting (including
-batch `--all`). Busy exit 73 records named checks/tests as `deferred`, exit 0, never
-passed. A deferred build also defers its index/tests; other affected checks still run.
-The batch covers those files. Genuine build/test errors and zero-test runs still fail.
+`--all`, `ios` tests, or a changed `ios-app/` module runs the iOS lane unless `--skip ios`:
+source policy, a stamped build, `layers ios`, then the selected UI test methods packed into runner
+processes on concurrent lanes. Its contract is in [ios.md](ios.md).
 
 ## Asynchronous full-main batches
 

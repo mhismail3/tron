@@ -38,11 +38,17 @@ IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppU
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
 NOT_DRIVEN = ("ios-lanes", "mac", "relay")
-# Test methods per iOS runner process. Each process keeps the runner's focused
-# deadline, so a selected class larger than one deadline runs as several processes, not one longer one.
-# Six HomeSheets methods overran the 1200 s deadline on a quiet host: journeys there take ~150-290 s
-# and the tool-detail journey 250-450 s. Three methods fit two such journeys plus ~35 s of launch.
-IOS_SHARD_TESTS = 3
+# Estimated test seconds per iOS runner process: half the runner's unchanged 1200 s focused
+# deadline, so a shard keeps it even when every method takes twice its longest recorded time.
+# A method's estimate is the longest this Mac's retained runner logs record for it; a method
+# with none counts a third of the budget, three to a process (six 150-450 s HomeSheets journeys
+# overran one deadline).
+IOS_SHARD_SECONDS = 600.0
+IOS_UNMEASURED_SECONDS = IOS_SHARD_SECONDS / 3
+# Runner logs scripts/tron-ios-test keeps for every worktree and lane (its RESULTS_ROOT), and the
+# line XCTest prints for each finished case.
+IOS_RESULTS_ROOT = Path(os.environ.get("TRON_IOS_TEST_RESULTS_DIR") or Path.home() / "Library/Developer/Tron/ios/test-runs")
+IOS_CASE_LINE = re.compile(rb"^Test Case '-\[(\w+)\.(\w+) (\w+)\]' (?:passed|failed) \((\d+(?:\.\d+)?) seconds\)", re.M)
 # An iPad-only UI test skips on the iPhone lane (`XCTSkipUnless(... == .pad ...)`), so
 # its shard runs on this worktree's iPad lane with this device type instead.
 IOS_PAD_GATE = re.compile(r"XCTSkipUnless\(\s*UIDevice\.current\.userInterfaceIdiom\s*==\s*\.pad\b")
@@ -207,32 +213,76 @@ def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
 
 
 class IosShard(list):
-    """Selectors one runner process executes; `pad` shards run on the iPad lane."""
+    """Selectors one runner process executes; `pad` shards run on the iPad lane. `seconds` is
+    the shard's estimate, which orders the queue (longest first)."""
     pad = False
+    seconds = 0.0
 
 
-def ios_shards(selectors: list[str]) -> list[IosShard]:
-    """The selected classes' test methods in runs of at most IOS_SHARD_TESTS, iPhone methods first,
-    then iPad-only methods in their own shards; classes whose methods cannot be read run whole,
-    together, in one final shard."""
+def ios_method_seconds(results: Path = IOS_RESULTS_ROOT) -> dict[str, float]:
+    """`Target/Class/testMethod` to the longest it took in any runner log under `results`. An
+    estimate for packing only: it never selects, skips or judges a test."""
+    longest: dict[str, float] = {}
+    try:
+        entries = list(os.scandir(results))
+    except OSError:
+        return longest
+    for entry in entries:
+        try:
+            text = (Path(entry.path) / "test.log").read_bytes()
+        except OSError:
+            continue
+        for target, owner, method, seconds in IOS_CASE_LINE.findall(text):
+            key = f"{target.decode()}/{owner.decode()}/{method.decode()}"
+            longest[key] = max(longest.get(key, 0.0), float(seconds))
+    return longest
+
+
+def ios_shards(selectors: list[str], seconds: dict[str, float]) -> list[IosShard]:
+    """The selected classes' test methods in selection order, iPhone methods first, then iPad-only
+    methods in their own shards, cut into consecutive runs whose estimates (`seconds`, else
+    IOS_UNMEASURED_SECONDS) fit IOS_SHARD_SECONDS; a method estimated above it runs alone. Classes
+    whose methods cannot be read run whole, together, in one final shard."""
     methods, pad_methods, whole = [], [], []
     for owner in selectors:
         found, pad = ios_test_methods(owner)
         methods += [method for method in found if method not in pad]
         pad_methods += [method for method in found if method in pad]
         whole += [] if found else [owner]
-    shards = []
+    shards: list[IosShard] = []
     for group, is_pad in ((methods, False), (pad_methods, True)):
-        for index in range(0, len(group), IOS_SHARD_TESTS):
-            shard = IosShard(group[index:index + IOS_SHARD_TESTS])
-            shard.pad = is_pad
-            shards.append(shard)
-    return shards + ([IosShard(whole)] if whole else [])
+        shard = None
+        for method in group:
+            estimate = seconds.get(method, IOS_UNMEASURED_SECONDS)
+            if shard is None or (shard and shard.seconds + estimate > IOS_SHARD_SECONDS):
+                shard = IosShard()
+                shard.pad = is_pad
+                shards.append(shard)
+            shard.append(method)
+            shard.seconds += estimate
+    if whole:
+        shards.append(IosShard(whole))
+        shards[-1].seconds = IOS_SHARD_SECONDS
+    return shards
+
+
+def ios_lane_name(kind: str) -> str:
+    """One of this worktree's own verify lanes, so concurrent worktrees never share one lease."""
+    return f"verify-{kind}-" + hashlib.sha256(str(ROOT).encode()).hexdigest()[:12]
 
 
 def ios_pad_lane() -> str:
-    """This worktree's own iPad lane, so concurrent worktrees never share one lease."""
-    return "verify-ipad-" + hashlib.sha256(str(ROOT).encode()).hexdigest()[:12]
+    return ios_lane_name("ipad")
+
+
+def ios_phone_lanes() -> list[str | None]:
+    """The iPhone lanes shards run on at once: the worktree's own lane (None), then one
+    verify lane per further host slot (scripts/ios-test-lock.py owns the slot count)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("verify_ios_lock", ROOT / "scripts/ios-test-lock.py")
+    locker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(locker)
+    return [None] + [ios_lane_name(f"iphone{index}") for index in range(2, locker.HOST_SLOTS + 1)]
 
 
 def ios_index_stale() -> str | None:
@@ -540,6 +590,11 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
 
 # ---------------------------------------------------------------------------- steps
 
+class Launched:
+    def __init__(self, label: str, result: dict, process: subprocess.Popen, log: Path, started: float):
+        self.label, self.result, self.process, self.log, self.started = label, result, process, log, started
+
+
 class Run:
     def __init__(self, sha: str, total: int):
         self.sha, self.total, self.index, self.steps = sha, total, 0, []
@@ -550,34 +605,55 @@ class Run:
     def step(self, name: str, command: list[str] | str, cwd: Path = ROOT, count=None, env: dict | None = None,
              accept=(0,)) -> dict:
         self.index += 1
-        label = f"[{self.index}/{self.total}] {name}"
-        started = time.time()
-        log = self.logs / f"{self.index:02d}-{re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}.log"
-        print(f"{label} … (live log: {log.relative_to(ROOT)})", flush=True)
+        launched = self.launch(self.index, name, command, cwd, env)
+        try:
+            code = launched.process.wait()
+        except KeyboardInterrupt:
+            self.stop([launched])
+            raise
+        return self.settle(launched, code, count, accept)
+
+    def launch(self, index: int, name: str, command: list[str] | str, cwd: Path = ROOT, env: dict | None = None,
+               note: str = "") -> "Launched":
+        """Start one step's process in its own session, its output in the step's live log."""
+        log = self.logs / f"{index:02d}-{re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}.log"
+        label = f"[{index}/{self.total}] {name}"
+        print(f"{label} …{note} (live log: {log.relative_to(ROOT)})", flush=True)
         result = {"name": name, "status": "running", "command": command, "cwd": str(cwd.relative_to(ROOT)),
                   "tests": None, "seconds": 0, "log": str(log.relative_to(ROOT))}
         self.steps.append(result)
         self.on_update()
-        interrupted = False
         with log.open("w") as stream:
             process = subprocess.Popen(command, cwd=cwd, shell=isinstance(command, str), stdout=stream,
                                        stderr=subprocess.STDOUT, env={**os.environ, **(env or {})}, start_new_session=True)
+        return Launched(label, result, process, log, time.time())
+
+    def stop(self, launched: list["Launched"]) -> None:
+        """Stop and join the owned process groups (SIGTERM, then SIGKILL after 30 s); each is interrupted."""
+        for item in launched:
             try:
-                code = process.wait()
-            except KeyboardInterrupt:
-                interrupted = True
-                os.killpg(process.pid, signal.SIGTERM)
+                os.killpg(item.process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        deadline = time.time() + 30
+        for item in launched:
+            try:
+                item.process.wait(timeout=max(0.0, deadline - time.time()))
+            except subprocess.TimeoutExpired:
                 try:
-                    process.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                code = 130
-        output = log.read_text(errors="replace")
+                    os.killpg(item.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                item.process.wait()
+            self.settle(item, 130, None, (0,), interrupted=True)
+
+    def settle(self, launched: "Launched", code: int, count, accept, interrupted: bool = False) -> dict:
+        result, label = launched.result, launched.label
+        output = launched.log.read_text(errors="replace")
         ok = code in accept and not interrupted
         tests = count(output) if count and ok else None
         status = "interrupted" if interrupted else "ok" if ok else "failed"
-        seconds = round(time.time() - started, 1)
+        seconds = round(time.time() - launched.started, 1)
         result.update(status=status, exit=code, tests=tests, seconds=seconds)
         self.on_update()
         print(f"{label} {status.upper()} in {seconds}s" + (f" — {tests} passing test(s)" if tests is not None else ""), flush=True)
@@ -585,9 +661,12 @@ class Run:
             tail = output.strip().splitlines()[-25:]
             print("\n".join(f"    {line}" for line in tail), flush=True)
             print(f"    full log: {result['log']}", flush=True)
-        if interrupted:
-            raise KeyboardInterrupt
         return result
+
+    def withdraw(self, launched: "Launched") -> None:
+        """Forget a launch that admitted no work (an opportunistic shard refused a slot); its retry reuses the log."""
+        self.steps.remove(launched.result)
+        self.on_update()
 
     def reused(self, name: str, detail: str, command: list[str]) -> None:
         """A step whose evidence already exists for this commit; it compares equal to running it (exit 0)."""
@@ -597,11 +676,30 @@ class Run:
                            "command": command, "cwd": "."})
         self.on_update()
 
-    def skipped(self, name: str, reason: str) -> None:
-        self.index += 1
-        print(f"[{self.index}/{self.total}] {name} SKIPPED — {reason}", flush=True)
+    def skipped(self, name: str, reason: str, index: int | None = None) -> None:
+        if index is None:
+            self.index += 1
+        print(f"[{index or self.index}/{self.total}] {name} SKIPPED — {reason}", flush=True)
         self.steps.append({"name": name, "status": "skipped", "reason": reason, "tests": None, "seconds": 0})
         self.on_update()
+
+
+def comparable_steps(steps: list[dict]) -> list[dict]:
+    """Step outcomes without timing. The iOS shards count as one step: how methods are packed
+    (from this Mac's timing history) and which lane and slot wait ran each vary between runs."""
+    kept: list[dict] = []
+    shards = [step for step in steps if step["name"] == "tests: ios" or step["name"].startswith("tests: ios ")]
+    for step in steps:
+        if not any(step is shard for shard in shards):
+            kept.append({key: value for key, value in step.items() if key not in ("seconds", "log", "detail")})
+        elif step is shards[0]:
+            statuses = {shard["status"] for shard in shards}
+            kept.append({"name": "tests: ios", "tests": sum(shard.get("tests") or 0 for shard in shards),
+                         "status": next((status for status in ("interrupted", "failed", "deferred", "running", "skipped")
+                                         if status in statuses), "ok"),
+                         "failedTests": sorted(name for shard in shards for name in shard.get("failedTests", [])),
+                         "deferredTests": sorted({name for shard in shards for name in shard.get("deferredTests", [])})})
+    return kept
 
 
 def failure_digest(messages: list[str]) -> str:
@@ -706,8 +804,11 @@ def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[
     return [f"tests: ios {index}/{len(shards)}" for index in range(1, len(shards) + 1)]
 
 
-def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True, gateway_host: str = "local"):
-    """One command definition shared by planning and execution."""
+def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True, gateway_host: str = "local",
+              lane: str | None = None, opportunistic: bool = False):
+    """One command definition shared by planning and execution. An iOS shard runs on `lane` (else
+    the worktree's own lane, or the iPad lane for a `pad` shard); an `opportunistic` one takes a
+    host slot only if one is free at once."""
     node = [str(ROOT / "scripts/tron-node"), "exec"]
     if group in ("gateway", "gateway-nested"):
         report = logs / f"{group}-vitest.json"
@@ -718,8 +819,11 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
                         f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]],
                 ROOT / GATEWAY, vitest_count(report))
     if group == "ios":
-        lane = ["--lane", ios_pad_lane(), "--device-type", IOS_PAD_DEVICE_TYPE] if getattr(selectors, "pad", False) else []
-        return ([str(ROOT / "scripts/tron-ios-test"), "run", *lane, *(["--host-slot-wait-seconds", "30"] if ios_wait else []), *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
+        pad = getattr(selectors, "pad", False)
+        lane = lane or (ios_pad_lane() if pad else None)
+        lanes = [*(["--lane", lane] if lane else []), *(["--device-type", IOS_PAD_DEVICE_TYPE] if pad else [])]
+        wait = ["--host-slot-wait-seconds", "0"] if opportunistic else ["--host-slot-wait-seconds", "30"] if ios_wait else []
+        return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group == "node-gateway":
         return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
     if group == "node":
@@ -727,6 +831,89 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
     if group == "python":
         return (per_file("python3", files), ROOT, python_count)
     return (per_file("bash", files), ROOT, lambda _out: len(files))
+
+
+IOS_POLL_SECONDS = 0.5
+
+
+def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: list[str], ios_wait: bool,
+                   env: dict, phone_lanes: list[str | None]) -> tuple[list[str], bool]:
+    """Run every shard to its outcome, one per lane and at most one per host slot at once, longest
+    estimate first; returns the failures and whether admission was deferred.
+
+    A shard started while none of the run's others is in flight acquires its slot as a serial run
+    would, and its busy exit 73 defers it and every unstarted shard, never passed. A shard started
+    beside one in flight is opportunistic: it takes a slot only if one is free at once. Refused, it
+    admitted no work, so it is requeued, and no further lane starts until a running shard ends.
+    Every admitted shard runs to its outcome, so one red cannot hide another's."""
+    base = run.index
+    run.index += len(shards)
+    queue = sorted(range(len(shards)), key=lambda index: -shards[index].seconds)
+    order = {lane: position for position, lane in enumerate(phone_lanes)}
+    free: dict[bool, list[str | None]] = {False: list(phone_lanes), True: [ios_pad_lane()]}
+    limit = len(phone_lanes)
+    running: dict[int, tuple[Launched, str | None, bool]] = {}
+    failures: list[tuple[int, str]] = []
+    deferred = False
+    try:
+        while queue or running:
+            while not deferred and len(running) < limit:
+                index = next((index for index in queue if free[shards[index].pad]), None)
+                if index is None:
+                    break
+                queue.remove(index)
+                lane = free[shards[index].pad].pop(0)
+                opportunistic = bool(running)
+                command, cwd, _ = test_spec("ios", files, shards[index], run.logs, ios_wait=ios_wait, lane=lane,
+                                            opportunistic=opportunistic)
+                note = (f" on lane {lane}" if lane else " on this worktree's lane") if len(phone_lanes) > 1 or shards[index].pad else ""
+                running[index] = (run.launch(base + index + 1, labels[index], command, cwd, env, note=note), lane, opportunistic)
+            if not running:
+                break
+            finished = [index for index, (launched, _, _) in running.items() if launched.process.poll() is not None]
+            if not finished:
+                time.sleep(IOS_POLL_SECONDS)
+                continue
+            for index in finished:
+                launched, lane, opportunistic = running.pop(index)
+                shard = shards[index]
+                free[shard.pad] = sorted(free[shard.pad] + [lane], key=lambda name: order.get(name, 0))
+                code = launched.process.returncode
+                if code == 73 and opportunistic:
+                    run.withdraw(launched)
+                    print(f"{launched.label}: no host slot free beside this run's other lanes; requeued", flush=True)
+                    queue.insert(0, index)
+                    limit = max(1, len(running))
+                    continue
+                result = run.settle(launched, code, ios_count, (0,))
+                if code == 73:
+                    # Admission refused: this shard and the rest wait for the batch, never pass.
+                    result.update(status="deferred", deferredTests=files)
+                    deferred = True
+                    continue
+                limit = len(phone_lanes)
+                if result["status"] == "failed":
+                    result["failedTests"] = ios_failures(launched.log.read_text(errors="replace"))
+                    print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
+                    failures.append((index, f"{labels[index]} failed"))
+                elif not result.get("tests"):
+                    result["status"] = "failed"
+                    failures.append((index, f"{labels[index]} ran zero passing tests: an empty group is not evidence"))
+                elif all(owner.count("/") == 2 for owner in shard) and result["tests"] != len(shard):
+                    # A method selector that matches nothing passes silently; every named test must run.
+                    result["status"] = "failed"
+                    failures.append((index, f"{labels[index]} passed {result['tests']} of its {len(shard)} named test(s)"))
+    except KeyboardInterrupt:
+        run.stop([launched for launched, _, _ in running.values()])
+        raise
+    for index in sorted(queue):
+        run.skipped(labels[index], "iOS acquisition deferred to batch", index=base + index + 1)
+        run.steps[-1].update(status="deferred", deferredTests=files)
+    # Report the shards in plan order, whichever lane finished first.
+    shard_steps = sorted((step for step in run.steps if step["name"] in labels), key=lambda step: labels.index(step["name"]))
+    run.steps[:] = [step for step in run.steps if step["name"] not in labels] + shard_steps
+    run.on_update()
+    return [message for _, message in sorted(failures)], deferred
 
 
 def main(argv: list[str]) -> int:
@@ -772,7 +959,7 @@ def main(argv: list[str]) -> int:
             groups.setdefault(runner_of(path, nested, mac_terminal), []).append(path)
         # Selectors are needed only by a run that drives the iOS group (#1522).
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
-        shards = ios_shards(selectors)
+        shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
@@ -846,13 +1033,16 @@ def main(argv: list[str]) -> int:
             else:
                 for label, shard in zip(test_step_names(group, shards, False), shards if group == "ios" else [selectors]):
                     command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
-                    commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT))})
+                    commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
+                                     **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
         deferred_commands = []
         if selection["deferredTests"]:
             command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha, gateway_host=gateway_host)
             deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
-                          "deferredCommands": deferred_commands, "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
+                          "deferredCommands": deferred_commands,
+                          "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
+                          "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
 
     # Worktree creation deliberately does not install dependencies. Refuse before
@@ -878,7 +1068,7 @@ def main(argv: list[str]) -> int:
         if verdict == "passed" and any(step["status"] == "deferred" for step in run.steps):
             verdict = "deferred"
             message += "; iOS acquisition deferred to batch, NOT a test pass"
-        comparable = {"commit": sha, "selection": selection, "steps": [{k: v for k, v in step.items() if k not in ("seconds", "log", "detail")} for step in run.steps], "verdict": verdict}
+        comparable = {"commit": sha, "selection": selection, "steps": comparable_steps(run.steps), "verdict": verdict}
         case_steps = [step for step in run.steps if step['name'].startswith('tests:')]
         report = {"schema": "tron.verify.v1", "commit": sha, "verdict": verdict, "message": message,
                   "attemptId": attempt_id, "configDigest": config_digest, "environment": environment, "startedAt": started_at,
@@ -949,31 +1139,15 @@ def main(argv: list[str]) -> int:
                 run.skipped(label, f"{len(files)} file(s) need their own {group} lane(s), which verify does not drive; pass --skip {group.split('-')[0]} to accept")
                 continue
             if group == "ios":
-                failed_shards = []
-                for label, shard in zip(test_step_names("ios", shards, False), shards):
-                    if ios_deferred:
+                labels = test_step_names("ios", shards, False)
+                if ios_deferred:
+                    for label in labels:
                         run.skipped(label, "iOS acquisition deferred to batch")
                         run.steps[-1].update(status="deferred", deferredTests=files)
-                        continue
-                    command, cwd, count = test_spec(group, files, shard, run.logs, ios_wait=name != "all")
-                    env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
-                    result = run.step(label, command, cwd=cwd, count=count, env=env)
-                    if result["exit"] == 73:
-                        # Admission refused: this shard and the rest wait for the batch, never pass.
-                        result.update(status="deferred", deferredTests=files)
-                        ios_deferred = True
-                    elif result["status"] == "failed":
-                        result["failedTests"] = ios_failures((ROOT / result["log"]).read_text(errors="replace"))
-                        print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
-                        failed_shards.append(f"{label} failed")
-                    elif not result.get("tests"):
-                        result["status"] = "failed"
-                        failed_shards.append(f"{label} ran zero passing tests: an empty group is not evidence")
-                    elif all(owner.count("/") == 2 for owner in shard) and result["tests"] != len(shard):
-                        # A method selector that matches nothing passes silently; every named test must run.
-                        result["status"] = "failed"
-                        failed_shards.append(f"{label} passed {result['tests']} of its {len(shard)} named test(s)")
-                # Every shard runs, so one red cannot hide another selected test's outcome.
+                    continue
+                env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
+                failed_shards, ios_deferred = run_ios_shards(run, shards, labels, files, name != "all", env, ios_phone_lanes())
+                # Every admitted shard runs, so one red cannot hide another selected test's outcome.
                 if failed_shards:
                     return finish("failed", "; ".join(failed_shards))
                 continue
