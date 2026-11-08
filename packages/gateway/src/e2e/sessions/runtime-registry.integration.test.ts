@@ -47,7 +47,7 @@ import { invocationReceipts } from "../../kernel/receipts/invocation-receipts.js
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { toolSegmentId } from "../../kernel/projection/projection.js";
 import { AutomationService } from "../../automations/automation-service.js";
-import { pngDimensions } from "../../../test-fixtures/pi-sdk/computer-use-image.js";
+import { imageDimensions } from "../../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticOversizedJpeg, syntheticPng } from "../../../test-fixtures/synthetic-image.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
@@ -4357,10 +4357,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   });
 
   it("never reports a canonical receipt as durable when Pi only staged it in memory", async () => {
-    // Reproduces the pinned SDK ordering: `_appendEntry` inserts the entry into
-    // the live branch and then `_persist` fails, so the receipt exists in memory
-    // while the JSONL lacks it. Gateway must report an unknown outcome for that
-    // exact identity instead of announcing durable success from memory.
+    // The pinned SDK removes an entry from its live branch when `_persist`
+    // fails, so the branch cannot show whether the record reached the JSONL.
+    // Gateway must report an unknown outcome for that exact identity instead of
+    // retrying an append that may already be on disk.
     const fixture = await coldFixture("canonical-receipt-staged-only");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
@@ -4386,7 +4386,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receipt, "staged-only-receipt"))
         .rejects.toMatchObject({ details: { outcomeUnknown: true } });
-      expect(staged()).toBe(true);
+      expect(staged()).toBe(false);
       // The staged entry is not durability evidence: a repeat attempt must not
       // report success from the live branch alone.
       await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receipt, "staged-only-receipt"))
@@ -5999,7 +5999,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       ?.message.content.find((part: any) => part.type === "image") as ImageContent | undefined;
     expect(recorded).toBeDefined();
     expect(recorded!.data).not.toBe(screenshot.data);
-    const dimensions = pngDimensions(recorded!);
+    const dimensions = imageDimensions(recorded!);
     expect(Math.max(dimensions.width, dimensions.height)).toBe(1_000);
   });
 

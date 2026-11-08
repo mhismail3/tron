@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "package": "@earendil-works/pi-coding-agent",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "artifact": {
-    "path": "third_party/pi-coding-agent/pi-coding-agent-1.4.0-tron.3.tgz",
-    "integrity": "sha512-guX5JwS9KWJ86qvWz+JCGbj1pmVgksda+H28SueklD/6tcCJNKmtyZWT/qYyzNftOCoUD9NP7L2twxIk3LODQQ=="
+    "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.0-tron.1.tgz",
+    "integrity": "sha512-F45oL2PB77kzg1zLnAOQJ2sUnT4PQ7w3QwJOGO81nDMcYRTjeGid93pKz+7ncGOKWcwBmV8odTUt0Ze7L09YpA=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "0c04c1d6af3f018181bb3ddcd231103550a7ecec6e42ed25fafb2e796aa1df50"
+    "sha256": "dcb4af24f4e375775755059a31c8d56f34ab86af0ea23a62f128fc3cd69bdccd"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
@@ -16,20 +16,20 @@
   },
   "upstream": {
     "repository": "https://github.com/earendil-works/pi.git",
-    "tag": "v1.4.0",
-    "tagCommit": "4a080252f06caf63a525d7873c5d94d3c23887e0",
-    "registryIntegrity": "sha512-Z41LpZ3yYHSC/UUps6Mr39UMFPwH8elhJBG9DY1P7kuzsE5qSK/6eMj2EHzO5evJRQWLbKSqUMw+4nCNtIyiQg==",
+    "tag": "v1.5.0",
+    "tagCommit": "f9a26365568127461c47a07a37dcb42c140a3ac5",
+    "registryIntegrity": "sha512-xNDZ5kqowO6Z03FS2gwAkPEGk1ssxVcYKQ6qZId84mFEvwACvvyc2l0vAMOS+c5zvxLRMLBE9r4y44IGYkMJaQ==",
     "proposalCommit": "7a795da1c69cbc2df30485c173d14d2266ead2ba",
     "proposalBase": "a447ba11f3e7760fcff91e924bda8c20033953ea"
   },
   "modelData": {
     "package": "@earendil-works/pi-ai",
-    "version": "1.4.0",
-    "integrity": "sha512-hQM/C4+1w8rHYACzDDf+0vQMnEnpzIop1tptIERVgR3ZeT/hHSzBNG8PaWPgxWQjqSeKCyBZSyp8uTT6eKK1pQ=="
+    "version": "1.5.0",
+    "integrity": "sha512-VeWxNqTHSqRCf8AcY/6kvNwh+neRL6MPxZPePVztIQy6qqK9MR/YoCSN/ZgDnIyCD3pqEXgRyQbzk4KV4uvjbg=="
   },
   "toolchain": {
     "node": "22.22.0",
     "npm": "10.9.4"
   },
-  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), dequeues delivered image-only (empty-text) queued messages, normalizes steer and follow-up images as prompts are, keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), depends on undici >= 8.12.2 and minimatch >= 11.0.1 (#2291), and preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), dequeues delivered image-only (empty-text) queued messages, normalizes steer and follow-up images as prompts are, keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), and preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
 }

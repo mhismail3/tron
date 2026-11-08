@@ -337,12 +337,14 @@ export function appendExtensionActivityReceipt(turns: OwnedTurnOwner, activity: 
   const write = turns.operations.runPersistence.trackOwnershipWrite(() => turns.operations.lane.run(() => turns.operations.runPersistence.retryDurableWrite(
     `extension-receipt:${receipt.activityId}`,
     async () => {
+        const manager = turns.operations.runtime.session.sessionManager;
         turns.operations.persistVerifiedCustomEntry({
+          manager,
           describe: "extension activity receipt",
-          existing: () => extensionActivityReceipts(turns.operations.runtime.session.sessionManager.getEntries(), turns.operations.id)
+          existing: () => extensionActivityReceipts(manager.getEntries(), turns.operations.id)
             .some((record) => record.receipt.activityId === receipt.activityId) ? "matching" : "absent",
           append: () => {
-            turns.operations.runtime.session.sessionManager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
+            manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
             turns.operations.revision += 1;
             turns.operations.scheduleSnapshot();
           },

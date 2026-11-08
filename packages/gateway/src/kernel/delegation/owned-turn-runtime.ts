@@ -77,7 +77,7 @@ export interface OwnedTurnRuntime {
   replaceProcessesForToolCall(id: string, processes: readonly SessionProcessActivity[]): void;
   activitySource(): ActivitySource;
   publishProcessesForToolCall(id: string): void;
-  persistVerifiedCustomEntry(options: { describe: string; existing: () => "absent" | "matching" | "contradictory"; append: () => void }): void;
+  persistVerifiedCustomEntry(options: { manager: SessionManager; describe: string; existing: () => "absent" | "matching" | "contradictory"; append: () => void }): void;
   scheduleSnapshot(): void;
   toolLabel(name: string): string | undefined;
   noteDashboardActivity(at?: string): void;

@@ -1,6 +1,6 @@
-pi-coding-agent 1.4.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
+pi-coding-agent 1.5.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
 
-Apply with git apply at tag v1.4.0 (4a080252f06caf63a525d7873c5d94d3c23887e0).
+Apply with git apply at tag v1.5.0 (f9a26365568127461c47a07a37dcb42c140a3ac5).
 
 1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
    A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
@@ -42,113 +42,14 @@ Apply with git apply at tag v1.4.0 (4a080252f06caf63a525d7873c5d94d3c23887e0).
    reads in admission order, so an older detached refresh cannot start store work
    after a newer awaited readiness pass. Independent targeted refreshes are retained.
 
-7. Dependency security pins (Tron #2291). Backports upstream 66c2fa3d7 and the minimatch part
-   of b4c2e92ac (both in v1.5.0): undici 8.12.3 and minimatch 11.0.3, with the root lockfile.
-   The bundled bin and rpc-entry inline them, so the build reinstalls before bundling.
-
-8. Explicit pending loadout names (Tron #2181). Reapplying a saved selection may remove
+7. Explicit pending loadout names (Tron #2181). Reapplying a saved selection may remove
    newly autoactivated direct tools before MCP servers register. When that narrows the
    loadout, preserve pending restored names explicitly requested by the same call, while
    discarding unrequested ones. Addition-only discovery updates still keep pending names.
    Upstream 1.4 auto-activation remains enabled; Tron still reapplies the recorded selection.
 
-diff --git a/package-lock.json b/package-lock.json
-index 898afd386b243ddf9c408abc9fbe05fc412de2c7..710a12f300b7b2d61439b4322610e17c987ed6f1 100644
---- a/package-lock.json
-+++ b/package-lock.json
-@@ -1887,6 +1887,12 @@
- 				"url": "https://opencollective.com/libvips"
- 			}
- 		},
-+		"node_modules/@isaacs/nonrecursive-glob-match": {
-+			"version": "1.1.0",
-+			"resolved": "https://registry.npmjs.org/@isaacs/nonrecursive-glob-match/-/nonrecursive-glob-match-1.1.0.tgz",
-+			"integrity": "sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==",
-+			"license": "BlueOak-1.0.0"
-+		},
- 		"node_modules/@jridgewell/resolve-uri": {
- 			"version": "3.1.2",
- 			"resolved": "https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz",
-@@ -4520,21 +4526,6 @@
- 				"node": ">=20.18.1"
- 			}
- 		},
--		"node_modules/minimatch": {
--			"version": "10.2.6",
--			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.6.tgz",
--			"integrity": "sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==",
--			"license": "BlueOak-1.0.0",
--			"dependencies": {
--				"brace-expansion": "^5.0.8"
--			},
--			"engines": {
--				"node": "18 || 20 || >=22"
--			},
--			"funding": {
--				"url": "https://github.com/sponsors/isaacs"
--			}
--		},
- 		"node_modules/minimist": {
- 			"version": "1.2.8",
- 			"resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz",
-@@ -5634,6 +5625,8 @@
- 			"resolved": "https://registry.npmjs.org/undici/-/undici-8.10.2.tgz",
- 			"integrity": "sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==",
- 			"license": "MIT",
-+			"optional": true,
-+			"peer": true,
- 			"engines": {
- 				"node": ">=22.19.0"
- 			}
-@@ -6245,12 +6238,12 @@
- 				"hosted-git-info": "9.0.3",
- 				"ignore": "7.0.8",
- 				"jiti": "2.7.0",
--				"minimatch": "10.2.6",
-+				"minimatch": "11.0.3",
- 				"proper-lockfile": "4.1.2",
- 				"quickjs-wasi": "3.6.2",
- 				"semver": "7.8.5",
- 				"typebox": "1.3.27",
--				"undici": "8.10.2",
-+				"undici": "8.12.3",
- 				"yaml": "2.9.0"
- 			},
- 			"bin": {
-@@ -6349,6 +6342,31 @@
- 			"extraneous": true,
- 			"license": "MIT"
- 		},
-+		"packages/coding-agent/node_modules/minimatch": {
-+			"version": "11.0.3",
-+			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-11.0.3.tgz",
-+			"integrity": "sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==",
-+			"license": "BlueOak-1.0.0",
-+			"dependencies": {
-+				"@isaacs/nonrecursive-glob-match": "^1.0.3",
-+				"brace-expansion": "^5.0.12"
-+			},
-+			"engines": {
-+				"node": "18 || 20 || >=22"
-+			},
-+			"funding": {
-+				"url": "https://github.com/sponsors/isaacs"
-+			}
-+		},
-+		"packages/coding-agent/node_modules/undici": {
-+			"version": "8.12.3",
-+			"resolved": "https://registry.npmjs.org/undici/-/undici-8.12.3.tgz",
-+			"integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
-+			"license": "MIT",
-+			"engines": {
-+				"node": ">=22.19.0"
-+			}
-+		},
- 		"packages/durable": {
- 			"name": "@earendil-works/pi-durable",
- 			"version": "1.4.0",
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
-index 5d5eb338e22282d409fe9cb659a5eef2a21f0c6e..bb0f55b2ff58168848e944c9d77429225f1874a2 100644
+index 5c6aa7d86d71cd9634fd0efff10f8784de84fb00..c8c33a516183b6c137c8b49273f5d52ac7d72e3b 100644
 --- a/packages/coding-agent/docs/mcp.md
 +++ b/packages/coding-agent/docs/mcp.md
 @@ -59,7 +59,7 @@ The format matches other MCP clients:
@@ -182,25 +83,6 @@ index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa031
  `session.dispose()` aborts active work, invalidates extension contexts, disconnects from the agent, and removes event listeners. Call it when the session is no longer needed.
  
  `AgentSessionRuntime` adds `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. Each operation replaces the active `AgentSession` and recreates services for the target working directory.
-diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index e0955b0e7827d5c119a7dc96bbac70bc8a11e9c5..bf7070baea91f5f57366bde767bdafcdc4fcac48 100644
---- a/packages/coding-agent/package.json
-+++ b/packages/coding-agent/package.json
-@@ -56,12 +56,12 @@
- 		"hosted-git-info": "9.0.3",
- 		"ignore": "7.0.8",
- 		"jiti": "2.7.0",
--		"minimatch": "10.2.6",
-+		"minimatch": "11.0.3",
- 		"proper-lockfile": "4.1.2",
- 		"quickjs-wasi": "3.6.2",
- 		"semver": "7.8.5",
- 		"typebox": "1.3.27",
--		"undici": "8.10.2",
-+		"undici": "8.12.3",
- 		"yaml": "2.9.0"
- 	},
- 	"overrides": {
 diff --git a/packages/coding-agent/src/core/agent-session-services.ts b/packages/coding-agent/src/core/agent-session-services.ts
 index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca085834e102 100644
 --- a/packages/coding-agent/src/core/agent-session-services.ts
@@ -267,10 +149,10 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325840fe65f 100644
+index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c1608c512 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -139,6 +139,7 @@ import {
+@@ -140,6 +140,7 @@ import {
  import type { SlashCommandInfo } from "./slash-commands.ts";
  import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
  import {
@@ -278,7 +160,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  	buildSystemPrompt,
  	buildSystemPromptSections,
  	diffSystemPromptSections,
-@@ -254,6 +255,8 @@ export interface AgentSessionConfig {
+@@ -267,6 +268,8 @@ export interface AgentSessionConfig {
  	sessionManager: SessionManager;
  	settingsManager: SettingsManager;
  	cwd: string;
@@ -287,7 +169,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -437,6 +440,7 @@ export class AgentSession {
+@@ -450,6 +453,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -295,7 +177,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -490,6 +494,7 @@ export class AgentSession {
+@@ -503,6 +507,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -303,7 +185,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1121,20 +1126,22 @@ export class AgentSession {
+@@ -1137,20 +1142,22 @@ export class AgentSession {
  		// This ensures the UI sees the updated queue state
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
@@ -339,7 +221,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  				}
  			}
  		}
-@@ -1485,9 +1492,17 @@ export class AgentSession {
+@@ -1501,9 +1508,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -359,7 +241,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1538,10 +1553,16 @@ export class AgentSession {
+@@ -1554,10 +1569,16 @@ export class AgentSession {
  	setActiveToolsByName(toolNames: string[]): void {
  		const previous = this.getActiveToolNames();
  		this._setActiveTools(toolNames);
@@ -379,7 +261,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  	}
  
  	private _setActiveTools(toolNames: string[]): void {
-@@ -1876,8 +1897,13 @@ export class AgentSession {
+@@ -1897,8 +1918,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
  			messages = await this._prepareRun(trigger);
@@ -393,7 +275,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  			this._flushPendingBashMessages();
  			this._flushPendingCustomMessages();
  			this._resolveIdleWaitIfIdle();
-@@ -1887,7 +1913,6 @@ export class AgentSession {
+@@ -1908,7 +1934,6 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -401,7 +283,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2133,20 +2158,26 @@ export class AgentSession {
+@@ -2154,20 +2179,26 @@ export class AgentSession {
  			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  		}
  
@@ -435,7 +317,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  		}
  
  		// Validate model
-@@ -2255,10 +2286,11 @@ export class AgentSession {
+@@ -2276,10 +2307,11 @@ export class AgentSession {
  		let expandedText = this._expandSkillCommand(processedInput.text);
  		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  
@@ -449,7 +331,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  		}
  		return "queued";
  	}
-@@ -2297,15 +2329,12 @@ export class AgentSession {
+@@ -2318,15 +2350,12 @@ export class AgentSession {
  	}
  
  	/**
@@ -468,7 +350,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  		this.agent.steer({
  			role: "user",
  			content,
-@@ -2314,18 +2343,30 @@ export class AgentSession {
+@@ -2335,18 +2364,30 @@ export class AgentSession {
  	}
  
  	/**
@@ -505,7 +387,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  	/**
  	 * Throw an error if the text is an extension command.
  	 */
-@@ -2488,6 +2529,11 @@ export class AgentSession {
+@@ -2509,6 +2550,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -517,7 +399,7 @@ index 3a9174cf6ea4cdce791c08a84f6ac25b95b6fb01..a9e7ca59c8201c3e2e93ae50ff4ad325
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3700,6 +3746,7 @@ export class AgentSession {
+@@ -3721,6 +3767,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -563,10 +445,10 @@ index 77712e677f91dde65d4d4db906a26b16bbd9de9c..4d4deaf611a8fc124e3a4e13d78d4519
  				runner.assertActive();
  				return runner.sessionManager;
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index 60388c0eb6ddc8c46fd44191b7d872a14a53decd..292f59fdf5398086bb9583e13b0a2ab33277dfd1 100644
+index 098f7fb0d02fd55660c6200c2d503ea75ba30e9e..8c613acf6dcaa159520a4761c50f6412656a3d9b 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
-@@ -331,6 +331,11 @@ export interface ExtensionContext {
+@@ -351,6 +351,11 @@ export interface ExtensionContext {
  	hasUI: boolean;
  	/** Current working directory */
  	cwd: string;
@@ -606,10 +488,10 @@ index 8e03f4d1f4d5166db8a10265f34602f4b542ff4e..b284be2bc1b1e6b53acb1a11064a48ff
  		if (options.providers) {
  			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
 diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
-index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37d49ff7d6 100644
+index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bdde728e95 100644
 --- a/packages/coding-agent/src/core/package-manager.ts
 +++ b/packages/coding-agent/src/core/package-manager.ts
-@@ -136,7 +136,10 @@ export interface PackageManager {
+@@ -149,7 +149,10 @@ export interface PackageManager {
  }
  
  interface PackageManagerOptions {
@@ -620,7 +502,7 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  	agentDir: string;
  	settingsManager: SettingsManager;
  	/** Names of built-in extensions, resolved as `builtin:<name>` extension resources. */
-@@ -817,6 +820,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
+@@ -865,6 +868,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
  
  export class DefaultPackageManager implements PackageManager {
  	private cwd: string;
@@ -628,7 +510,7 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private builtinExtensions: string[];
-@@ -826,6 +830,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -874,6 +878,7 @@ export class DefaultPackageManager implements PackageManager {
  
  	constructor(options: PackageManagerOptions) {
  		this.cwd = resolvePath(options.cwd);
@@ -636,8 +518,8 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  		this.agentDir = resolvePath(options.agentDir);
  		this.settingsManager = options.settingsManager;
  		this.builtinExtensions = options.builtinExtensions ?? [];
-@@ -942,7 +947,7 @@ export class DefaultPackageManager implements PackageManager {
- 		await this.resolvePackageSources(packageSources, accumulator, onMissing);
+@@ -990,7 +995,7 @@ export class DefaultPackageManager implements PackageManager {
+ 		const installFailures = await this.resolvePackageSources(packageSources, accumulator, onMissing);
  
  		const globalBaseDir = this.agentDir;
 -		const projectBaseDir = join(this.cwd, CONFIG_DIR_NAME);
@@ -645,7 +527,7 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  
  		for (const resourceType of RESOURCE_TYPES) {
  			const target = this.getTargetMap(accumulator, resourceType);
-@@ -1553,7 +1558,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -1659,7 +1664,7 @@ export class DefaultPackageManager implements PackageManager {
  		const stdout = await this.runCommandCapture(
  			npmCommand.command,
  			[...npmCommand.args, "view", packageSpec, "version", "--json"],
@@ -654,7 +536,7 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  		);
  		const raw = stdout.trim();
  		if (!raw) throw new Error("Empty response from npm view");
-@@ -2094,7 +2099,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2227,7 +2232,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -663,7 +545,7 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  		}
  		return join(this.agentDir, "npm");
  	}
-@@ -2135,7 +2140,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2268,7 +2273,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -672,7 +554,7 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  		}
  		return join(this.agentDir, "npm", "node_modules", source.name);
  	}
-@@ -2175,7 +2180,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2308,7 +2313,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -681,7 +563,7 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  		}
  		return join(this.agentDir, "git");
  	}
-@@ -2201,7 +2206,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2334,7 +2339,7 @@ export class DefaultPackageManager implements PackageManager {
  	private getBaseDirForScope(scope: SourceScope): string {
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -691,10 +573,10 @@ index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37
  		if (scope === "user") {
  			return this.agentDir;
 diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
-index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe465d4f45f 100644
+index bb0740e49675be6a28a537fc1d8ae92d06fbb924..397c4afa1f82fa3b098c8c74df06714d71aa38ab 100644
 --- a/packages/coding-agent/src/core/resource-loader.ts
 +++ b/packages/coding-agent/src/core/resource-loader.ts
-@@ -274,7 +274,13 @@ export function loadProjectContextFiles(options: {
+@@ -302,7 +302,13 @@ export function loadProjectContextFiles(options: {
  }
  
  export interface DefaultResourceLoaderOptions {
@@ -708,7 +590,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  	agentDir: string;
  	settingsManager?: SettingsManager;
  	eventBus?: EventBus;
-@@ -314,6 +320,7 @@ export interface DefaultResourceLoaderOptions {
+@@ -342,6 +348,7 @@ export interface DefaultResourceLoaderOptions {
  
  export class DefaultResourceLoader implements ResourceLoader {
  	private cwd: string;
@@ -716,7 +598,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private eventBus: EventBus;
-@@ -374,14 +381,16 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -402,14 +409,16 @@ export class DefaultResourceLoader implements ResourceLoader {
  
  	constructor(options: DefaultResourceLoaderOptions) {
  		this.cwd = resolvePath(options.cwd);
@@ -734,7 +616,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  			agentDir: this.agentDir,
  			settingsManager: this.settingsManager,
  			builtinExtensions: [...this.builtinExtensions.keys()],
-@@ -843,7 +852,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -883,7 +892,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  			skillsResult = { skills: [], diagnostics: [] };
  		} else {
  			skillsResult = loadSkills({
@@ -743,7 +625,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  				agentDir: this.agentDir,
  				skillPaths,
  				includeDefaults: false,
-@@ -866,7 +875,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -906,7 +915,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  			promptsResult = { prompts: [], diagnostics: [] };
  		} else {
  			const loaded = loadPromptTemplates({
@@ -752,7 +634,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  				agentDir: this.agentDir,
  				promptPaths,
  				includeDefaults: false,
-@@ -994,10 +1003,10 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1026,10 +1035,10 @@ export class DefaultResourceLoader implements ResourceLoader {
  			join(this.agentDir, "extensions"),
  		];
  		const projectRoots = [
@@ -767,7 +649,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  		];
  
  		for (const root of agentRoots) {
-@@ -1051,7 +1060,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1083,7 +1092,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  		const themes: Theme[] = [];
  		const diagnostics: ResourceDiagnostic[] = [];
  		if (includeDefaults) {
@@ -776,7 +658,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  
  			for (const dir of defaultDirs) {
  				this.loadThemesFromDir(dir, themes, diagnostics, colorMode);
-@@ -1211,7 +1220,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1243,7 +1252,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  	}
  
  	private discoverSystemPromptFile(): string | undefined {
@@ -785,7 +667,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) {
  			return projectPath;
  		}
-@@ -1225,7 +1234,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1257,7 +1266,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  	}
  
  	private discoverAppendSystemPromptFile(): string | undefined {
@@ -795,7 +677,7 @@ index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe4
  			return projectPath;
  		}
 diff --git a/packages/coding-agent/src/core/sdk.ts b/packages/coding-agent/src/core/sdk.ts
-index 0bf874fff7817d1e13e93d6af53285b019ba19c5..9fc1a0b456df3a5611f9f2d819564f75be84904e 100644
+index dbab1d1d99f309ed9b3ebec3f2c3272520ef8d0b..d5b7ea0d5bac0c4efd80add3771ef71a6d8234e7 100644
 --- a/packages/coding-agent/src/core/sdk.ts
 +++ b/packages/coding-agent/src/core/sdk.ts
 @@ -48,6 +48,12 @@ setDefaultStreamFn(streamSimple);
@@ -842,7 +724,7 @@ index 0bf874fff7817d1e13e93d6af53285b019ba19c5..9fc1a0b456df3a5611f9f2d819564f75
  		await resourceLoader.reload();
  		time("resourceLoader.reload");
  	}
-@@ -455,6 +462,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -457,6 +464,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  		sessionManager,
  		settingsManager,
  		cwd,
@@ -851,10 +733,10 @@ index 0bf874fff7817d1e13e93d6af53285b019ba19c5..9fc1a0b456df3a5611f9f2d819564f75
  		resourceLoader,
  		customTools: options.customTools,
 diff --git a/packages/coding-agent/src/core/system-prompt.ts b/packages/coding-agent/src/core/system-prompt.ts
-index 49bcb58ee38c03ba4285ac01d347670dd58b2a36..81779fd1cb77b3423546af1105fb43197039b493 100644
+index e51e14fe4065d73c3a85947000eff04402fa7a52..209394887955eeb080765b7a683809114db259b4 100644
 --- a/packages/coding-agent/src/core/system-prompt.ts
 +++ b/packages/coding-agent/src/core/system-prompt.ts
-@@ -209,6 +209,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
+@@ -208,6 +208,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
  	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
  }
  
@@ -883,10 +765,10 @@ index 49bcb58ee38c03ba4285ac01d347670dd58b2a36..81779fd1cb77b3423546af1105fb4319
   * Diff the sections the model currently has (replayed from the transcript, so never null)
   * against the desired ones. Returns a `SystemMessage.sections` patch, or undefined when
 diff --git a/packages/coding-agent/src/core/trust-manager.ts b/packages/coding-agent/src/core/trust-manager.ts
-index 3396c9a399be0ea4e1a89dddb5a679dd1e2855a4..2faa09e9b38983615e7139e481cfd24f09cf1484 100644
+index f0721efefd954e13c2b502168a2682e544298a2d..572cabf6e5b71b2721129f407d7c67e3a4bdc890 100644
 --- a/packages/coding-agent/src/core/trust-manager.ts
 +++ b/packages/coding-agent/src/core/trust-manager.ts
-@@ -178,17 +178,18 @@ function withTrustFileLock<T>(path: string, fn: () => T): T {
+@@ -185,17 +185,18 @@ function withTrustFileLock<T>(path: string, fn: () => T): T {
  
  /**
   * Returns true when cwd has project-local resources that must be gated by
@@ -963,10 +845,10 @@ index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a
  
  export default createMcpExtension();
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index e24d150be9abfd74dc1fc5c1c74c70d963797b20..c041e8aac08d2266bcd09cd441853a899a4f256d 100644
+index 6c6fbcf370a1795050aa6f363e7b0007c16f399b..28dc1dcbd51d73a1ddc311342bcec29e4dc9c128 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2250,6 +2250,7 @@ export class InteractiveMode {
+@@ -2349,6 +2349,7 @@ export class InteractiveMode {
  			mode: "tui",
  			hasUI: true,
  			cwd: this.sessionManager.getCwd(),
@@ -1035,10 +917,10 @@ index 0000000000000000000000000000000000000000..199f0930c9bd13c8d16bfafc02d97b2e
 +	});
 +});
 diff --git a/packages/coding-agent/test/system-prompt-updates.test.ts b/packages/coding-agent/test/system-prompt-updates.test.ts
-index a55c493d92b5e5aa537b3f260ce4ba46105cea54..92c42e65f9c3b4ba7fe618479bbb182e2ef6724f 100644
+index bbe5fb9f0b12cc1cf38c4f1a3a51fce6aef3b8d5..9ca0dc189ce6478262021fff8b54a9909059b875 100644
 --- a/packages/coding-agent/test/system-prompt-updates.test.ts
 +++ b/packages/coding-agent/test/system-prompt-updates.test.ts
-@@ -167,6 +167,57 @@ describe("system prompt updates", () => {
+@@ -184,6 +184,57 @@ describe("system prompt updates", () => {
  		}
  	});
  
@@ -1109,10 +991,10 @@ index 930769f378e26f1b458ea36ccddbcc685c60f811..3e6cf0ea5e99ccaffa90369c6a17e52d
  		modelRegistry: {} as ExtensionContext["modelRegistry"],
  		model: undefined,
 diff --git a/packages/evals/evals/tui.docs.eval.ts b/packages/evals/evals/tui.docs.eval.ts
-index eddd20a978a4fa8c83a9bddf10caf66591164397..a9f00dedcf32d995f84f411ae860f82b69c94ee5 100644
+index 71988d3a437254aeb4152793bff481f48f7dfc85..732fac5d7343b7abad69d19076fc505bc56d2999 100644
 --- a/packages/evals/evals/tui.docs.eval.ts
 +++ b/packages/evals/evals/tui.docs.eval.ts
-@@ -116,6 +116,7 @@ async function inspectContextFooter(session: AgentSession, agentDir: string): Pr
+@@ -131,6 +131,7 @@ async function inspectContextFooter(session: AgentSession, agentDir: string): Pr
  	const model = { ...activeModel, contextWindow: CONTEXT_WINDOW };
  	const services: AgentSessionServices = {
  		cwd: session.sessionManager.getCwd(),

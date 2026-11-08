@@ -38,7 +38,7 @@ export abstract class RunRuntime<FixedAt> {
   abstract replaceProcessesForToolCall(id: string, processes: readonly SessionProcessActivity[]): void;
   abstract activitySource(): ActivitySource;
   abstract publishProcessesForToolCall(id: string): void;
-  abstract persistVerifiedCustomEntry(options: { describe: string; existing: () => "absent" | "matching" | "contradictory"; append: () => void }): void;
+  abstract persistVerifiedCustomEntry(options: { manager: SessionManager; describe: string; existing: () => "absent" | "matching" | "contradictory"; append: () => void }): void;
   abstract toolLabel(name: string): string | undefined;
   abstract publishSummary(): void;
   abstract readonly cwd: string;

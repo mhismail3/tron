@@ -25,6 +25,7 @@ export const PI_PACKAGES = Object.freeze([
   "@earendil-works/pi-client",
   "@earendil-works/pi-protocol",
   "@earendil-works/pi-telemetry",
+  "@earendil-works/pi-schema",
   "@earendil-works/chord",
 ]);
 export const DIRECT_PI_PACKAGES = Object.freeze([

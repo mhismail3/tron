@@ -1506,7 +1506,8 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
         summaries.push(blob.includes("C10 home input") ? "home" : blob.includes("C10 ordinary input") ? "ordinary" : "unknown");
         return fauxAssistantMessage("Earlier work was summarized.");
       }
-      return blob.length > 40_000 ? fauxAssistantMessage(large) : fauxAssistantMessage("Small response after compaction.");
+      const firstOrdinary = blob.includes("C10 ordinary input") && !blob.includes("C10 ordinary follow-up input") && !blob.includes("Earlier work");
+      return blob.length > 40_000 || firstOrdinary ? fauxAssistantMessage(large) : fauxAssistantMessage("Small response after compaction.");
     }));
     await item.slot.prompt("C10 home input");
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
