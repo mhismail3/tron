@@ -22,7 +22,7 @@ final class AppLocalBehaviorSettings {
     private let defaults: UserDefaults
 
     /// The existing dashboard preference document has one observable owner,
-    /// shared by the dashboard and App Customizations, with no copied selection.
+    /// shared by the dashboard and Appearance, with no copied selection.
     var dashboardFilter: DashboardServerFilterState {
         didSet {
             if dashboardFilter != oldValue { DashboardServerFilterPreferences.save(dashboardFilter, to: defaults) }

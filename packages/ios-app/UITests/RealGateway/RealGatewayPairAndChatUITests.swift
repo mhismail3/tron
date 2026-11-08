@@ -1197,13 +1197,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         // Reach the consolidated device-local destinations through the actual
         // chat gear, then return without losing the Global Settings surface.
-        for (name, marker) in [("Appearance", app.staticTexts["Color Mode"]),
-                               ("App Customizations", app.textFields["Chats per project"]),
+        for (name, marker) in [("Appearance", app.textFields["Chats per project"]),
                                ("Setup", app.switches["Run Swift files"])] {
             let link = app.buttons["settings-link-" + name]
             revealBelowNavigationBar(app, link)
             link.tap()
+            XCTAssertTrue(app.navigationBars.staticTexts[name].waitForExistence(timeout: 30), app.debugDescription)
             XCTAssertTrue(marker.waitForExistence(timeout: 30), app.debugDescription)
+            revealBelowNavigationBar(app, marker)
+            XCTAssertTrue(marker.isHittable, app.debugDescription)
             dismissTopSheet(app)
             XCTAssertTrue(app.buttons["settings-done"].exists)
         }

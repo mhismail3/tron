@@ -28,7 +28,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   secondary read; dashboard rows never become a subscription fallback.
 - **Dashboard.** Rows are profile-qualified and only user sessions (subagent backing sessions
   stay hidden). Active rows first, held by `activeSince`; settled rows by `updatedAt`. Ten per
-  workspace by default (Settings › App Customizations › **Chats per project**, 1–100). Swipes:
+  workspace by default (Settings › Appearance › **Chats per project**, 1–100). Swipes:
   Archive/Unarchive (gray, `session-archive.v1`), Rename (emerald), Mark Read/Unread (gray), Delete
   (red, no destructive role); every one confirms through the shared sheet and nothing is staged
   locally. **Archived (N)** appears after every workspace only for a non-zero count, reads
