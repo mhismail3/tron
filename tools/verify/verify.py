@@ -673,13 +673,15 @@ def test_step_names(group: str, shards: list[list[str]], skipped: bool) -> list[
     return [f"tests: ios {index}/{len(shards)}" for index in range(1, len(shards) + 1)]
 
 
-def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True):
+def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, ios_wait: bool = True, gateway_host: str = "local"):
     """One command definition shared by planning and execution."""
     node = [str(ROOT / "scripts/tron-node"), "exec"]
     if group in ("gateway", "gateway-nested"):
         report = logs / f"{group}-vitest.json"
         config = ["--config", "vitest.nested.config.ts"] if group == "gateway-nested" else []
-        return (["python3", str(ROOT / "tools/verify/gateway.py"), *config, "--reporter=default", "--reporter=json",
+        # mini.py runs this same gateway.py lane on the mini and returns its report and exit code (README).
+        runner = "mini.py" if gateway_host == "mini" else "gateway.py"
+        return (["python3", str(ROOT / "tools/verify" / runner), *config, "--reporter=default", "--reporter=json",
                         f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]],
                 ROOT / GATEWAY, vitest_count(report))
     if group == "ios":
@@ -707,7 +709,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
+    parser.add_argument("--gateway-host", choices=("local", "mini"), default="local",
+                        help="where the Gateway Vitest lanes run: this Mac, or the Mac mini test host (tools/verify/mini.py)")
     args = parser.parse_args(argv)
+    # Recorded goldens must land in this checkout, so recording runs here.
+    gateway_host = "local" if args.update_locks else args.gateway_host
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
@@ -763,6 +769,9 @@ def main(argv: list[str]) -> int:
             print(f"  delta: compatibility wording added in {addition}: no compat code (AGENTS.md); delete it or ask", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
+    if any(group.startswith("gateway") and not skipped_group(group) for group in groups) or selection["deferredTests"]:
+        print(f"  gateway lanes: {'on the Mac mini (--gateway-host mini)' if gateway_host == 'mini' else 'on this Mac'}"
+              + (", because --update-locks records goldens here" if args.update_locks and args.gateway_host == "mini" else ""), flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
@@ -803,11 +812,11 @@ def main(argv: list[str]) -> int:
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
                 for label, shard in zip(test_step_names(group, shards, False), shards if group == "ios" else [selectors]):
-                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all")
+                    command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT))})
         deferred_commands = []
         if selection["deferredTests"]:
-            command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha)
+            command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha, gateway_host=gateway_host)
             deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "deferredCommands": deferred_commands, "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
@@ -826,7 +835,7 @@ def main(argv: list[str]) -> int:
     started_at = datetime.now(timezone.utc).isoformat()
     attempt_id = str(time.time_ns())
     environment = {'platform': sys.platform, 'architecture': os.uname().machine,
-                   'python': list(sys.version_info[:3])}
+                   'python': list(sys.version_info[:3]), 'gatewayHost': gateway_host}
     config_digest = hashlib.sha256(json.dumps({'selection': selection, 'groups': groups, 'skip': sorted(skip),
         'environment': environment, 'updateLocks': args.update_locks,
         'runnerOverrides': {key: value for key, value in os.environ.items() if key.startswith(('TEST_', 'TRON_', 'VITEST_')) or key in ('CI', 'NODE_OPTIONS')}}, sort_keys=True).encode()).hexdigest()
@@ -935,10 +944,10 @@ def main(argv: list[str]) -> int:
                 if failed_shards:
                     return finish("failed", "; ".join(failed_shards))
                 continue
-            command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all")
+            command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            env = update
+            env = {**update, "TRON_VERIFY_COMMIT": sha} if gateway_host == "mini" and group.startswith("gateway") else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
