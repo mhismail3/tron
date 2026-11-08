@@ -27,9 +27,7 @@ export class ExtensionLifecycleCoordinator {
   get pendingUICount(): number {
     return Number(this.activity.hasPendingInteraction)
       + Number(this.activity.hasPendingComponentFactory)
-      + Number(this.activity.hasInputLease)
-      + Number(this.activity.hasScheduledRender)
-      + Number(this.activity.hasBlockingPresentation);
+      + Number(this.activity.hasScheduledRender);
   }
   get hasRetainedPresentation(): boolean { return this.activity.hasRetainedPresentation; }
   get isShutdownRequested(): boolean { return this.shutdownRequested; }
@@ -42,7 +40,7 @@ export class ExtensionLifecycleCoordinator {
    * commands, prompts, or UI interactions owned by this session. */
   get preventsNonRuntimeQuiescence(): boolean {
     return this.pendingCommands > 0 || this.pendingPrompts > 0 || this.hasPendingUI
-      || this.activity.hasInputLease || this.activity.hasScheduledRender || this.activity.hasBlockingPresentation;
+      || this.activity.hasScheduledRender;
   }
   /** Automatic eviction also retains reconnect-visible presentation. */
   get preventsEviction(): boolean {

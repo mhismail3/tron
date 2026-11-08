@@ -484,7 +484,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
     });
     this.ui = this.createSemanticBroker();
-    this.extensionHost = new RemotePiExtensionHost(this.ui, { enableBlockingCustom: false });
+    this.extensionHost = new RemotePiExtensionHost(this.ui);
     this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
     this.unregisterExtensionExpiry = dependencies.extensionActivityRecency.registerExpiryCallback((frame) => onExtensionActivityExpiry(this.ownedTurns, frame));
     this.unregisterProcessExpiry = dependencies.processActivityRecency.registerExpiryCallback((frame) => this.onProcessActivityExpiry(frame));
@@ -1700,10 +1700,10 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   private rotateSemanticHost(reason = "Extension host reloaded or replaced"): void {
-    this.extensionHost.retire(reason);
+    this.extensionHost.retire();
     this.ui.retire(reason);
     this.ui = this.createSemanticBroker();
-    this.extensionHost = new RemotePiExtensionHost(this.ui, { enableBlockingCustom: false });
+    this.extensionHost = new RemotePiExtensionHost(this.ui);
     this.lifecycle.replaceActivity(this.ui.presentation);
     // reload() has already built its new public runner and invokes this hook
     // before session_start. Updating it directly avoids bindExtensions(), which
@@ -4723,7 +4723,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     // nested lane task behind the disposal that produced them.
     await this.flushPendingExtensionCanonicalEffects();
     await this.runPersistence.waitForReceiptWrites();
-    this.extensionHost.retire("Session runtime disposed");
+    this.extensionHost.retire();
     // Waiting prompts are process-local like Pi's own queue.
     this.heldQueue.reset();
     this.runWork.settleAll();
