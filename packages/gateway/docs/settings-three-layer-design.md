@@ -201,9 +201,9 @@ readable in Global Changes; no request, Undo or Apply again writes Project setti
   The Home record model moves into the Profile when none is saved.
 - Preserve saved Global values in their owned stores as Global. Active Home chapter sessions are
   not read or folded; Home's saved choices live in the Profile.
-- Explicit/legacy Session values remain overrides; old inherited `mac`/`builtin` frames are
-  inheritance from Global. Fixed resource settings retain runtime boundary snapshots, not a new
-  user override layer. Unrecognized scope names refuse at read for that session only.
+- Explicit/legacy Session values remain overrides. Fixed resource settings retain runtime boundary
+  snapshots, not a new user override layer. Unrecognized scope names refuse at read for that
+  session only.
 - Migrate audit/approval vocabulary once (including before/after/target references) rather than keep
   dual live schemas. Preserve undo/conflict behavior and pending approvals/expiry; never auto-approve.
   Old titles unavailable in retained metadata show the stable id, not an invented historical title.
