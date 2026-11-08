@@ -120,7 +120,6 @@ Also the rows of `src/` modules that have no README yet: process lifecycle
 | `episodic.store-recovered` | warning | Loading the store discarded a torn trailing record: `counts.bytes` |
 | `episodic.store-refused` | error | The store is unreadable (`reason` `invalid-store`, `unsafe-store`); the memory is refused, never rebuilt |
 | Terminal `[Tron disconnected; reconnecting…] reason=…` and `[Tron resync required: reason=event-gap …]` | terminal stderr | `client/terminal-chat.ts`: one reason per reconnect (`disconnected`, `resync-required`, `event-gap`, `command-recovery`) and an event-gap record (topic, expected and received sequence) before resynchronizing; no tokens, IDs, paths or payloads |
-| `connection.legacy-jev-retired` | info | The first accepted connection write after load removed persisted unsupported `knowledge.jev` instances (`integrations/connection-owner.ts`), once after the retirement persists: sorted `instanceIds` |
 
 ## Verify
 
