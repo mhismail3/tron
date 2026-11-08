@@ -12,7 +12,7 @@
 //   "Ready for cut-over" can only be YES with --recheck.
 //        scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...      -> one batch for human reading
 // Exit 1 if the packet has problems (missing English, unlisted law lemma, missing law kinds).
-import { readFileSync, readdirSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
@@ -108,7 +108,7 @@ function packet(root, block, opts = {}) {
     // (<started-at>_<id>/.../session.jsonl), so committed reviews carry no machine path.
     const named = review.reviewer?.session;
     const found = typeof named === "string" && !named.startsWith("/") && !named.split("/").includes("..") && existsSync(SESSIONS)
-      ? readdirSync(SESSIONS).map((d) => join(SESSIONS, d, named)).filter((f) => existsSync(f)) : [];
+      ? readdirSync(SESSIONS).map((d) => join(SESSIONS, d, named)).filter((f) => existsSync(f) && statSync(f).isFile()) : [];
     const t = found.length === 1 ? found[0] : null;
     if (!named || found.length === 0) reviewProblems.push("reviewer transcript (reviewer.session) missing: identity unverifiable");
     else if (found.length > 1) reviewProblems.push(`reviewer.session matches ${found.length} transcripts in the Pi session store`);
@@ -202,7 +202,7 @@ if (args[0] === "--batch") {
   if (positional.length !== 1) { console.error("usage: scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck] (tools/proof/README.md)"); process.exit(2); }
   const p = packet(root, positional[0], opts);
   const target = join(root, "blocks", positional[0], "LAWS.md");
-  if (args.includes("--write")) { writeFileSync(target, p.md + "\n"); console.log(`wrote ${target} (hash ${p.hash}, ready ${p.ready})`); }
-  else console.log(p.md);
+  if (args.includes("--write")) { writeFileSync(target, `${p.md.trimEnd()}\n`); console.log(`wrote ${target} (hash ${p.hash}, ready ${p.ready})`); }
+  else console.log(p.md.trimEnd());
   if (p.problems.length) { console.error(p.problems.join("\n")); process.exit(1); }
 }

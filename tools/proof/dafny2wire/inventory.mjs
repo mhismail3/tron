@@ -15,7 +15,7 @@
 //   expressible because nothing in types.ts bounds it to integers.
 // Exit 0 with the inventory; 2 on usage or compiler error.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,7 @@ function verifyPrinted(entries) {
 }
 
 function compile(write, read, onDiagnostics) {
+  if (!existsSync(TSC)) throw new Error(`the Gateway's pinned TypeScript is not installed: scripts/tron-node exec npm --prefix packages/gateway ci --include=dev`);
   const dir = mkdtempSync(join(tmpdir(), "tron-wire-inventory-"));
   try {
     // A copy of types.ts in which every declaration is exported (so the emit can name internal ones, which

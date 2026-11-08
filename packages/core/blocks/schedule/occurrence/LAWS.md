@@ -308,4 +308,3 @@ A2: accepted, with one caveat. Its sources (First, Next, Classify), the paused-e
 Mutation: 118 mutants, 113 valid, all killed by laws, 0 unknown. Classify/off-by-one/e->(e - 1)#1 is killed by L6. Shadow 20000/20000 at this hash. Nothing blocking remains.
 
 Residual, not blocking: the oracle covers only multiples of 1000 ms periods and 1970-2100 times. A1 excludes the rest, so the A1 and A2 contract tests are the real evidence for cut-over.
-

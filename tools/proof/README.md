@@ -119,7 +119,8 @@ unaccounted law kind (high-stakes) or a report acceptance not in mutate.json.
 temporary directory and runs `mutate.json` `shadow.cmd` with `{core}` set to the compiled `core.js`; it writes
 `blocks/<block>/SHADOW.json` `{status: match|mismatch|error, compared, mismatches, firstMismatch, source,
 realTraffic, windowDays, inputsHash, coreJsHash, command, date}`, deleting the old file first, so a failed run
-never leaves a stale match. Generated-input comparisons are `realTraffic: false`. The packet re-compiles the
+never leaves a stale match. The command must exit 0 with every request agreeing or 1 with mismatches; a crash,
+a signal, unparsable output, nothing compared, or an exit status that contradicts the counts is `error`. Generated-input comparisons are `realTraffic: false`. The packet re-compiles the
 core to check `coreJsHash`, and `--recheck` re-runs the shadow.
 
 `oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
@@ -198,7 +199,8 @@ proven equivalences; a weakened law FAILS with the survivor it no longer catches
 rejected by its failing proof; a mutant only an unmapped helper catches is `unmapped`, not killed; a law proof
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
-STALE. The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
+STALE; and `proof shadow` records a match or mismatch only from a comparison that ran and agrees with
+its exit status (`tests/fixtures/mutate-variants/shadow-stub.mjs`). The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
 
 `scripts/tron test tooling tools/proof/tests/test-core.py` is the gate test of the real blocks, declared by
 `packages/core/package.module.json`, so any change under `packages/core` runs it: `proof check` passes on a
