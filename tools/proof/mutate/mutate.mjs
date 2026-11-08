@@ -10,24 +10,25 @@
 // (an equivalent mutant, or behaviour outside every law's contract that the block owner accepts).
 // Stillborn mutants (resolution/type errors) are reported and excluded from the score.
 //
-// Block config <block>/mutate.json:
-//   { block, tier: "high-stakes"|"leaf", impl: "Core.dfy", symbols: [compiled functions to mutate],
-//     verify: [law files], laws: { "<law id>": ["<Module.lemma>", ...] }, translate: "Core.dfy",
+// Block config <root>/blocks/<block>/mutate.json, every file path relative to <root> (packages/core):
+//   { block, tier: "high-stakes"|"leaf", impl: "blocks/<block>/Block.dfy", symbols: [compiled functions to mutate],
+//     verify: [files whose verification checks the laws], laws: { "<law id>": ["<Module.lemma>", ...] }, translate: "...",
 //     setup: [[cmd...]], oracles: [{ name, cmd: [...], env?: {}, jsonEq?: [a, b] }],
 //     accepted: { "<mutant id>": { kind: "equivalent"|"out-of-contract", reason, reviewer, hint? } } }
 //   "equivalent" is checked, not trusted: the tool proves <sym> == mutated <sym> in Dafny (hint = proof
 //   body); "out-of-contract" (behaviour no law constrains, by decision) is allowed only for tier "leaf".
-// Placeholders in cmd/env: {dir} = mutant work dir (copy of the block), {lab}, {block}, {work} (shared).
+// Placeholders in cmd/env: {dir} = mutant work root (a copy of <root>), {repo}, {block} (source block dir), {work}.
+// Each mutant runs in its own copy of <root>, so relative includes between laws/ and blocks/ hold.
 //
-// Usage: node tools/mutate/mutate.mjs <block dir> [--laws <file>] [--config <mutate.json>] [--no-oracle] [--jobs N]
-//        [--only <id-substr>] [--list] [--equiv <mutant id>] [--out <report.json>]
+// Usage: scripts/tron proof mutate <block> [--root <dir>] [--laws <file>] [--config <mutate.json>] [--no-oracle]
+//        [--jobs N] [--only <id-substr>] [--list] [--equiv <mutant id>] [--out <report.json>] [--recheck <report.json> [--sample N]]
 //   --equiv <id>   print the generated equivalence-proof file for one mutant (for reviewers) and exit
-//   --laws <file>  verify against this law file instead of config.verify[0] (used to show a weakened law)
+//   --laws <file>  use this file's content as the block's laws (block.json interface[0]; shows a weakened law)
 // Exit 0 iff the full mutant set ran (no --only) with no survivors, law-gaps or unknowns (after "accepted").
 import { execFile } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, mkdtempSync, readdirSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, mkdtempSync, statSync } from "node:fs";
+import { dirname, join, resolve, basename } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { createHash, randomBytes } from "node:crypto";
 import { blockHash, toolHash } from "../packet/hash.mjs";
@@ -36,22 +37,24 @@ const run = promisify(execFile);
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(n);
 const opt = (n, d) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
-const HERE = resolve(new URL(".", import.meta.url).pathname);
-const ROOT = resolve(new URL("../../..", import.meta.url).pathname);
-const blockArg = argv[0] ?? ".";
-const blockDir = resolve(blockArg.startsWith("packages/core/") ? join(ROOT, blockArg) : blockArg);
-const lab = ROOT;
-const DAFNY = join(process.env.XDG_CACHE_HOME || join(process.env.HOME, "Library/Caches"), "tron-proof/bin/dafny");
-const bootstrap = join(HERE, "../bootstrap.sh");
-const pinnedNode = process.execPath;
+const REPO = resolve(new URL("../../..", import.meta.url).pathname);
+if (!argv[0] || argv[0].startsWith("-")) { console.error("usage: scripts/tron proof mutate <block> [options] (tools/proof/README.md)"); process.exit(2); }
+const root = resolve(opt("--root", join(REPO, "packages/core")));
+const blockDir = join(root, "blocks", argv[0]);
 const cfg = JSON.parse(readFileSync(opt("--config") ?? join(blockDir, "mutate.json"), "utf8"));
+if (cfg.block !== argv[0]) { console.error(`mutate.json block "${cfg.block}" is not ${argv[0]}`); process.exit(2); }
 const lawsOverride = opt("--laws");
-const verifyFiles = lawsOverride ? [basename(lawsOverride)] : cfg.verify;
+// --laws replaces the block's laws (its first block.json interface file) in every work copy.
+const lawFiles = JSON.parse(readFileSync(join(blockDir, "block.json"), "utf8")).interface;
+const lawsTarget = lawFiles[0];
+const verifyFiles = cfg.verify;
+// The pinned toolchain only: the doctor must pass, then every Dafny call goes through its wrapper.
+const DAFNY = join(process.env.XDG_CACHE_HOME || join(homedir(), "Library/Caches"), "tron-proof/bin/dafny");
 // Shared Mac: at most MAX_SOLVERS concurrent Z3 processes. Each job runs one dafny command with --cores 1.
 const MAX_SOLVERS = 4;
 const jobs = Number(opt("--jobs", 2));
 if (!(jobs >= 1 && jobs <= MAX_SOLVERS)) { console.error(`--jobs must be 1..${MAX_SOLVERS} (solver cap on the shared Mac)`); process.exit(2); }
-const env = { ...process.env, DAFNY_CORES: "1", PATH: `${dirname(pinnedNode)}:/usr/bin:/bin`, DOTNET_CLI_TELEMETRY_OPTOUT: "1",  };
+const env = { ...process.env, DAFNY_CORES: "1", PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, DOTNET_CLI_TELEMETRY_OPTOUT: "1" };
 
 // ---------------- tokenizer (Dafny subset: enough to find and rewrite expression tokens) ----------
 const OPS = ["<==>", "==>", "<==", "==", "!=", "<=", ">=", "&&", "||", ":=", ":|", "::", "=>", "->", ".."];
@@ -188,6 +191,15 @@ function mutants(src, toks, symbols) {
 // Builds: original impl + the mutated definition renamed <sym>__mutant + a lemma
 //   <sym>__equiv(params) requires <same requires> ensures <sym>(params) == <sym>__mutant(params) { hint }
 // inserted right after the original definition. Verified with the pinned Dafny; no proof, no acceptance.
+// A refining definition inherits its preconditions from the laws (abstract module), so they are read from the
+// laws' signature of <sym> when the impl states none.
+function lawRequires(sym) {
+  for (const f of lawFiles) {
+    const m = new RegExp(`^\\s*(?:ghost\\s+)?(?:function|predicate)\\s+${sym}\\b[\\s\\S]*?(?=\\n\\s*\\n|\\n\\s*(?://|lemma|function|predicate|method|ghost|datatype|\\{|\\}))`, "m").exec(readFileSync(join(root, f), "utf8"));
+    if (m) return m[0];
+  }
+  return "";
+}
 function equivSource(origSrc, mutSrc, sym, hint) {
   const def = (src) => { const t = tokenize(src); const b = bodies(t, [sym])[0]; let k = b.start; while (!["function", "predicate", "method"].includes(t[k].text)) k--; return { t, from: t[k].pos, open: t[b.start - 1].pos, to: t[b.end].pos + 1, k }; };
   const o = def(origSrc), m = def(mutSrc);
@@ -195,7 +207,9 @@ function equivSource(origSrc, mutSrc, sym, hint) {
   const params = header.slice(header.indexOf("(") + 1, header.indexOf(")"));
   const names = params.split(",").map((p) => p.split(":")[0].trim()).filter(Boolean);
   // Every requires clause, including multi-line ones (each runs to the next clause keyword).
-  const requires = (header.match(/requires[\s\S]*?(?=\s(?:requires|ensures|decreases|reads|modifies)\b|$)/g) ?? []).map((r) => r.trim()).join("\n    ");
+  const clauses = (text) => (text.match(/requires[\s\S]*?(?=\s(?:requires|ensures|decreases|reads|modifies)\b|$)/g) ?? []).map((r) => r.trim());
+  const own = clauses(header);
+  const requires = (own.length ? own : clauses(lawRequires(sym))).join("\n    ");
   const rename = (txt) => txt.replace(new RegExp(`\\b${sym}\\b`, "g"), `${sym}__mutant`);
   const mutDef = rename(mutSrc.slice(m.from, m.to));
   const call = (f) => `${f}(${names.join(", ")})`;
@@ -231,7 +245,7 @@ const ROW = /^(.*) \((correctness|well-formedness)\),([A-Za-z]+),/;
 async function verify(dir, baseline = false) {
   const failed = new Set(), unmapped = new Set(), passed = new Set(); let stillborn = false, timeouts = 0, wf = false, error = null;
   for (const f of verifyFiles) {
-    const csv = join(dir, `verify-${f}.csv`);
+    const csv = join(dir, `verify-${basename(f)}.csv`);
     const r = await sh([DAFNY, "verify", "--cores", "1", "--verify-included-files", "--verification-time-limit", "30", ...(cfg.resourceLimit ? ["--resource-limit", String(cfg.resourceLimit)] : []), "--log-format", `csv;LogFileName=${csv}`, f], { cwd: dir, env });
     if (/resolution\/type errors|parse errors/.test(r.out)) { stillborn = true; break; }
     let rows = []; try { rows = readFileSync(csv, "utf8").trim().split("\n").slice(1); } catch {}
@@ -256,27 +270,28 @@ async function verify(dir, baseline = false) {
   return { stillborn, failedLaws: [...failed].sort(), wf, unmapped: [...unmapped].sort(), timeouts, error, passedLaws: [...passed] };
 }
 async function oracles(dir, work) {
-  const vars = { dir, lab, block: blockDir, work };
+  const vars = { dir, repo: REPO, block: blockDir, work };
   const tr = await sh([DAFNY, "translate", "js", "--no-verify", "--include-runtime", cfg.translate, "-o", join(dir, "out/core")], { cwd: dir, env });
   if (tr.code !== 0) return { compiled: false, failed: ["compile"] };
   const failed = [];
   for (const o of cfg.oracles) {
     const e = { ...env }; for (const [k, v] of Object.entries(o.env ?? {})) e[k] = fill(v, vars);
-    const r = await sh(o.cmd.map((c) => fill(c, vars)), { cwd: ROOT, env: e });
+    const r = await sh(o.cmd.map((c) => fill(c, vars)), { cwd: REPO, env: e });
     let ok = r.code === 0;
     if (ok && o.jsonEq) { try { const j = JSON.parse(r.out.slice(r.out.indexOf("{"))); ok = j[o.jsonEq[0]] === j[o.jsonEq[1]]; } catch { ok = false; } }
     if (!ok) failed.push(o.name);
   }
   return { compiled: true, failed };
 }
+// A copy of <root>'s sources (laws/ and blocks/), so every relative include resolves as in the source tree.
 function copyBlock(dst) {
   mkdirSync(dst, { recursive: true });
-  for (const f of readdirSync(blockDir)) if (/\.(dfy|mjs|ts|json)$/.test(f)) cpSync(join(blockDir, f), join(dst, f));
-  if (lawsOverride) cpSync(resolve(lawsOverride), join(dst, basename(lawsOverride)));
+  cpSync(root, dst, { recursive: true, filter: (src) => statSync(src).isDirectory() ? !["out", "dist", "node_modules"].includes(basename(src)) : /\.(dfy|mjs|ts|json)$/.test(src) });
+  if (lawsOverride) cpSync(resolve(lawsOverride), join(dst, lawsTarget));
 }
 
 // ---------------- main ----------------
-const implSrc = readFileSync(join(blockDir, cfg.impl), "utf8");
+const implSrc = readFileSync(join(root, cfg.impl), "utf8");
 const generated = mutants(implSrc, tokenize(implSrc), cfg.symbols);
 let all = generated;
 if (opt("--only")) all = all.filter((m) => m.id.includes(opt("--only")));
@@ -313,13 +328,13 @@ if (recheck) {
 for (const id of Object.keys(cfg.accepted ?? {})) if (!generated.some((m) => m.id === id)) { console.error(`accepted mutant ${id} matches no generated mutant (stale acceptance)`); process.exit(2); }
 if (opt("--equiv")) { const m = all.find((x) => x.id === opt("--equiv")); if (!m) { console.error(`no mutant ${opt("--equiv")} (use --list)`); process.exit(2); } console.log(equivSource(implSrc, m.src, m.sym, cfg.accepted?.[m.id]?.hint)); process.exit(0); }
 if (flag("--list")) { for (const m of all) console.log(`${m.id}  (${m.line}:${m.col})`); console.error(`${all.length} mutants`); process.exit(0); }
-const doctor = await sh(["/bin/bash", bootstrap, "doctor"], { cwd: ROOT, env });
-if (doctor.code !== 0) { console.error(`pinned Dafny doctor failed: ${doctor.out.trim()}`); process.exit(2); }
+const doctor = await sh(["/bin/bash", join(REPO, "tools/proof/bootstrap.sh"), "doctor"], { env });
+if (doctor.code !== 0) { console.error(`pinned toolchain unavailable: ${doctor.out.trim()}`); process.exit(2); }
 const work = mkdtempSync(join(tmpdir(), "mutate-"));
 const t0 = Date.now();
 // Baseline: the unmutated block must pass every law and every oracle, or the run means nothing.
 copyBlock(join(work, "base"));
-for (const s of cfg.setup ?? []) { const r = await sh(s.map((c) => fill(c, { lab, block: blockDir, work, dir: join(work, "base") })), { cwd: ROOT, env }); if (r.code) { console.error(`setup failed: ${s.join(" ")}\n${r.out}`); process.exit(2); } }
+for (const s of cfg.setup ?? []) { const r = await sh(s.map((c) => fill(c, { repo: REPO, block: blockDir, work, dir: join(work, "base") })), { cwd: REPO, env }); if (r.code) { console.error(`setup failed: ${s.join(" ")}\n${r.out}`); process.exit(2); } }
 // Every implementation function the build compiles must be mutated or excluded with a reason.
 {
   const t = tokenize(implSrc); const compiled = [];
@@ -350,8 +365,10 @@ async function worker() {
     let accepted; const acc = cfg.accepted?.[m.id];
     if (acc && (status === "law-gap" || status === "survived")) {
       if (acc.kind === "equivalent") {
-        writeFileSync(join(dir, "Equiv.dfy"), equivSource(implSrc, m.src, m.sym, acc.hint));
-        const r = await sh([DAFNY, "verify", "--verification-time-limit", "30", "Equiv.dfy"], { cwd: dir, env });
+        // Beside the impl, so its relative includes resolve.
+        const equiv = join(dirname(cfg.impl), "Equiv.dfy");
+        writeFileSync(join(dir, equiv), equivSource(implSrc, m.src, m.sym, acc.hint));
+        const r = await sh([DAFNY, "verify", "--verification-time-limit", "30", equiv], { cwd: dir, env });
         const proven = r.code === 0 && status === "survived";
         accepted = proven ? `equivalent (proven): ${acc.reason} [${acc.reviewer}]` : undefined;
         if (!proven) acc.unproven = (acc.unproven ?? []).concat(r.out.split("\n").filter((l) => /Error|finished/.test(l)).slice(0, 3));
@@ -378,7 +395,7 @@ results.sort((a, b) => a.line - b.line || a.col - b.col || a.id.localeCompare(b.
 if (recheck) {
   const want = Object.fromEntries(recheck.results.map((r) => [r.id, `${r.status}|${r.accepted ? "accepted" : ""}`]));
   const bad = results.filter((r) => want[r.id] !== `${r.status}|${r.accepted ? "accepted" : ""}`).map((r) => ({ id: r.id, report: want[r.id], now: `${r.status}|${r.accepted ? "accepted" : ""}` }));
-  const out = { recheck: bad.length ? "mismatch" : "ok", inputsHash: blockHash(blockDir, cfg), reportHash: recheck.summary.inputsHash, sampled: results.map((r) => r.id), mismatches: bad };
+  const out = { recheck: bad.length ? "mismatch" : "ok", inputsHash: blockHash(root, cfg), reportHash: recheck.summary.inputsHash, sampled: results.map((r) => r.id), mismatches: bad };
   console.log(JSON.stringify(out)); process.exit(bad.length || out.inputsHash !== out.reportHash ? 1 : 0);
 }
 
@@ -398,9 +415,9 @@ summary.filter = opt("--only") ?? null; summary.generated = generated.length;
 summary.pass = summary.filter === null && summary.mutants === summary.generated && summary.valid > 0 && summary.stillbornRatio <= 0.4 && summary.lawGap === 0 && summary.survived === 0 && summary.unknown === 0;
 // Binds this report to the exact block inputs (packet.mjs shows it STALE after any edit); a --laws or
 // --config override is recorded and never matches the block's own hash.
-summary.inputsHash = lawsOverride || opt("--config") ? `override:${blockHash(blockDir, cfg)}` : blockHash(blockDir, cfg);
+summary.inputsHash = lawsOverride || opt("--config") ? `override:${blockHash(root, cfg)}` : blockHash(root, cfg);
 const byOp = {}; for (const r of results) { const o = (byOp[r.op] ??= { valid: 0, killed: 0, lawGap: 0, survived: 0, unknown: 0, accepted: 0 }); if (r.status === "stillborn") continue; o.valid++; if (r.accepted) o.accepted++; else if (r.status === "law-gap") o.lawGap++; else if (r.status === "killed" || r.status === "survived") o[r.status]++; else o.unknown++; }
-const md = [`# Mutation report: ${cfg.block} (${cfg.tier})`, "", `laws: \`${summary.laws}\`; oracle tests: ${summary.oracle ? cfg.oracles.map((o) => o.name).join(", ") : "off"}; generated by \`tools/mutate/mutate.mjs\``, "",
+const md = [`# Mutation report: ${cfg.block} (${cfg.tier})`, "", `laws: \`${summary.laws}\`; oracle tests: ${summary.oracle ? cfg.oracles.map((o) => o.name).join(", ") : "off"}; generated by \`scripts/tron proof mutate\``, "",
   `**${summary.pass ? "PASS" : "FAIL"}**: ${summary.mutants} mutants, ${summary.stillborn} stillborn, ${summary.valid} valid: ${summary.killed} killed by laws, ${summary.lawGap} law-gap (oracle only), ${summary.survived} survived, ${summary.unknown} unknown (timeout/unmapped/error), ${summary.accepted} accepted (proven). Score ${summary.score}. ${summary.seconds} s.`, "",
   "| Law | Mutants killed | Killed only by this law |", "|---|---|---|", ...perLaw.map((p) => `| ${p.law} | ${p.killed} | ${p.only} |`), ...other.map((o) => `| ${o} (not a law: impl well-formedness / proof helper) | ${valid.filter((r) => r.killedBy.includes(o)).length} | - |`), "",
   "| Operator | Generated | Stillborn | Valid | Killed | Law-gap | Survived | Unknown | Accepted |", "|---|---|---|---|---|---|---|---|---|", ...Object.entries(byOp).map(([o, c]) => `| ${o} | ${results.filter((r) => r.op === o).length} | ${results.filter((r) => r.op === o && r.status === "stillborn").length} | ${c.valid} | ${c.killed} | ${c.lawGap} | ${c.survived} | ${c.unknown} | ${c.accepted} |`), ""];

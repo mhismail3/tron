@@ -5,32 +5,32 @@
 // the reviewer's verdict and notes, and its mutation kills. Per block: the implementation under test
 // (full definitions of the compiled functions), the definitions the laws use, the world-model assumptions,
 // the law-kind checklist, and five gates: proof, independent review, mutation, shadow, readiness.
-// Every gate result is bound to the block hash (tools/packet/hash.mjs): any edit makes it STALE.
+// Every gate result is bound to the block hash (hash.mjs): any edit makes it STALE.
 //
-// Usage: node tools/packet/packet.mjs <block dir> [--write] [--no-verify] [--recheck]   -> <block>/LAWS.md
-//   --recheck re-runs a seeded sample of mutants and the shadow comparison (gate files are not trusted);
-//   "Ready for cut-over" can only be YES with --recheck.
-//        node tools/packet/packet.mjs --batch <out.md> <block dir>...      -> one batch for human reading
+// Usage: scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]   -> <block dir>/LAWS.md
+//   --recheck re-runs a random sample of mutants (gate files are not trusted); "Ready for cut-over" can only
+//   be YES with --recheck, and also needs a shadow recheck, which the replay runner (#2349) provides.
+//        scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...      -> one batch for human reading
 // Exit 1 if the packet has problems (missing English, unlisted law lemma, missing law kinds).
-import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { blockHash, toolHash } from "./hash.mjs";
+import { blockFiles, blockHash, toolHash } from "./hash.mjs";
 
-const ROOT = resolve(new URL("../../..", import.meta.url).pathname);
-const lab = ROOT;
-const DAFNY = join(process.env.XDG_CACHE_HOME || join(process.env.HOME, "Library/Caches"), "tron-proof/bin/dafny");
+const REPO = resolve(new URL("../../..", import.meta.url).pathname);
+const DAFNY = join(process.env.XDG_CACHE_HOME || join(homedir(), "Library/Caches"), "tron-proof/bin/dafny");
 const readJson = (p) => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null);
 const KINDS = ["safety", "progress", "recovery", "stale-inputs", "exact-results", "uncertain-outcomes"];
 const LAW_ID = /^[A-Z]\d+[a-z]?\b/; // a comment starting with a law id (L7, R6b) marks a law lemma
 const env = { ...process.env, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, DAFNY_CORES: "1" };
-const SESSIONS = join(process.env.HOME, ".tron/agent/sessions");
+// Reviewer transcripts are read (never written) from Pi's session store.
+const SESSIONS = join(homedir(), ".tron/agent/sessions");
 const sh = (cmd, cwd) => { try { return { code: 0, out: execFileSync(cmd[0], cmd.slice(1), { cwd, env, maxBuffer: 1 << 26 }).toString() }; } catch (e) { return { code: e.status ?? 1, out: (e.stdout ?? "").toString() + (e.stderr ?? "").toString() }; } };
 
-function sourcesOf(dir, cfg) {
-  return [...new Set([cfg.impl, ...cfg.verify, ...(cfg.lawContext ?? [])])].map((f) => ({ f, src: readFileSync(join(dir, f), "utf8") }));
+function sourcesOf(root, cfg) {
+  return blockFiles(root, cfg).map((f) => ({ f, src: readFileSync(join(root, f), "utf8") }));
 }
 // All declarations: { kind, name, file, comment, header, body }.
 function decls(sources) {
@@ -42,8 +42,13 @@ function decls(sources) {
       const comment = []; while (lines.length && /^\s*\/\//.test(lines[lines.length - 1])) comment.unshift(lines.pop().replace(/^\s*\/\/\s?/, ""));
       // The body's `{` is the first one not preceded by an operator (`== {s}` is a set literal).
       let i = src.indexOf("{", m.index); while (i > 0 && /[=<>+\-*(,|&:]\s*$/.test(src.slice(m.index, i))) i = src.indexOf("{", i + 1);
-      let d = 0, j = i; for (; j < src.length; j++) { if (src[j] === "{") d++; if (src[j] === "}" && --d === 0) break; }
+      // An abstract (laws) declaration has no body: it ends at the next line that is a comment, a blank line,
+      // another declaration or the module's closing brace.
+      const end = /\n[ \t]*(?:\/\/|\n|(?:ghost\s+)?(?:lemma|predicate|function|method|datatype|type|const|import)\b|\})/.exec(src.slice(m.index + m[0].length));
+      const stop = end ? m.index + m[0].length + end.index : src.length;
       const dedent = (x) => x.replace(new RegExp(`^${m[1]}`, "gm"), "");
+      if (i < 0 || i > stop) { out.push({ kind: m[2], ghost: /ghost/.test(src.slice(m.index, m.index + m[0].length)), name: m[3], file: f, comment: comment.join(" "), header: dedent(src.slice(m.index, stop).trimEnd()), body: "" }); continue; }
+      let d = 0, j = i; for (; j < src.length; j++) { if (src[j] === "{") d++; if (src[j] === "}" && --d === 0) break; }
       out.push({ kind: m[2], ghost: /ghost/.test(src.slice(m.index, m.index + m[0].length)), name: m[3], file: f, comment: comment.join(" "), header: dedent(src.slice(m.index, i).trimEnd()), body: dedent(src.slice(i, j + 1)) });
     }
   }
@@ -51,14 +56,18 @@ function decls(sources) {
 }
 const idsIn = (text) => new Set(text.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? []);
 
-function packet(dirArg, opts = {}) {
-  const dir = resolve(dirArg.startsWith("packages/core/") ? join(ROOT, dirArg) : dirArg); const cfg = readJson(join(dir, "mutate.json"));
-  const sources = sourcesOf(dir, cfg); const all = decls(sources);
-  const hash = blockHash(dir, cfg);
+function packet(root, block, opts = {}) {
+  const dir = join(root, "blocks", block); const cfg = readJson(join(dir, "mutate.json"));
+  if (!cfg) throw new Error(`no mutate.json for block ${block} under ${root}`);
+  const sources = sourcesOf(root, cfg); const all = decls(sources);
+  const hash = blockHash(root, cfg);
   const review = readJson(join(dir, "REVIEW.json")), shadow = readJson(join(dir, "SHADOW.json"));
-  const report = cfg.report ? readJson(join(lab, cfg.report)) : null;
+  const report = cfg.report ? readJson(join(root, cfg.report)) : null;
   const problems = [];
-  const lemma = (sym) => all.find((d) => d.kind === "lemma" && d.name === sym.split(".").pop());
+  // A law's statement and English live in the block's laws (block.json interface); a refining proof repeats only its name.
+  const lawFiles = new Set(JSON.parse(readFileSync(join(dir, "block.json"), "utf8")).interface);
+  const named = (sym) => all.filter((d) => d.kind === "lemma" && d.name === sym.split(".").pop());
+  const lemma = (sym) => named(sym).find((d) => lawFiles.has(d.file)) ?? named(sym)[0];
   const laws = Object.entries(cfg.laws).map(([law, syms]) => ({ law, items: syms.map((s) => lemma(s) ?? (problems.push(`${law}: lemma ${s} not found`), null)).filter(Boolean) }));
   for (const { law, items } of laws) if (items[0] && !items[0].comment) problems.push(`${law}: no plain-English comment above ${items[0].name}`);
   // Coverage: every lemma whose English starts with a law id must be listed as a law.
@@ -84,7 +93,9 @@ function packet(dirArg, opts = {}) {
   let verify = { ok: null, text: "not run (--no-verify)" };
   if (!opts.noVerify) {
     verify = { ok: true, text: "" };
-    for (const f of cfg.verify) { let out; try { out = execFileSync(DAFNY, ["verify", "--verify-included-files", f], { cwd: dir, env }).toString(); } catch (e) { out = (e.stdout ?? "").toString(); verify.ok = false; } verify.text += `${f}: ${(out.match(/Dafny program verifier finished[^\n]*/) ?? ["no verifier summary"])[0]}; `; }
+    const doctor = sh(["/bin/bash", join(REPO, "tools/proof/bootstrap.sh"), "doctor"], REPO);
+    if (doctor.code !== 0) verify = { ok: false, text: `pinned toolchain unavailable: ${doctor.out.trim()}; ` };
+    else for (const f of cfg.verify) { let out; try { out = execFileSync(DAFNY, ["verify", "--verify-included-files", f], { cwd: root, env }).toString(); } catch (e) { out = (e.stdout ?? "").toString(); verify.ok = false; } verify.text += `${f}: ${(out.match(/Dafny program verifier finished[^\n]*/) ?? ["no verifier summary"])[0]}; `; }
   }
   // Gate 2: independent review, bound to the hash, the tier, the reviewer's own transcript and every accepted mutant.
   const reviewProblems = [];
@@ -111,8 +122,8 @@ function packet(dirArg, opts = {}) {
   // --recheck: never trust gate files alone. Re-run a seeded sample of the report's mutants and the
   // whole shadow comparison; READY requires both to reproduce.
   let mutRecheck = null, shadowRecheck = null;
-  if (opts.recheck && ms && mutFresh) { const r = sh(["node", join(lab, "tools/proof/mutate/mutate.mjs"), dir, "--recheck", join(lab, cfg.report), "--sample", "12", "--jobs", "2"], lab); try { mutRecheck = JSON.parse(r.out.trim().split("\n").pop()); } catch { mutRecheck = { recheck: "error", why: r.out.slice(-200) }; } }
-  if (opts.recheck && cfg.shadow) { const tmp = join(tmpdir(), `shadow-recheck-${process.pid}.json`); sh(["node", join(lab, "tools/packet/shadow.mjs"), dir, "--out", tmp], lab); shadowRecheck = readJson(tmp); rmSync(tmp, { force: true }); }
+  if (opts.recheck && ms && mutFresh) { const r = sh([process.execPath, join(REPO, "tools/proof/mutate/mutate.mjs"), block, "--root", root, "--recheck", join(root, cfg.report), "--sample", "12", "--jobs", "2"], REPO); try { mutRecheck = JSON.parse(r.out.trim().split("\n").pop()); } catch { mutRecheck = { recheck: "error", why: r.out.slice(-200) }; } }
+  // No shadow recheck exists before the replay runner (#2349), so with --recheck the shadow gate cannot pass.
   // The report must come from the current checker (a semantics change re-runs every block).
   const toolNow = toolHash();
   const toolFresh = ms?.toolHash === toolNow;
@@ -133,7 +144,7 @@ function packet(dirArg, opts = {}) {
     : "reviewer must be a different agent than the writer; out-of-contract acceptances allowed with a reason; real-traffic shadow 100% over >= 3 days before cut-over";
   const md = [];
   md.push(`# Law review packet: ${cfg.block}`, "", `Tier: **${cfg.tier}** (${tierRules}).`,
-    `Block hash: \`${hash}\` (over ${sources.map((s) => `\`${relative(lab, join(dir, s.f))}\``).join(", ")} and mutate.json's tier/laws/symbols/accepted/kinds). Generated by \`tools/packet/packet.mjs\`; do not edit.`, "",
+    `Block hash: \`${hash}\` (over ${sources.map((s) => `\`${s.f}\``).join(", ")} and the whole mutate.json). Generated by \`scripts/tron proof packet\`; do not edit.`, "",
     "| Gate | Status |", "|---|---|",
     `| Proof (pinned Dafny, --verify-included-files) | ${verify.ok === null ? verify.text : `${verify.ok ? "PASS" : "FAIL"}: ${verify.text}`} |`,
     `| Independent review | ${!review ? "MISSING" : reviewOk ? `ACCEPT by ${review.reviewer.agent} (${review.reviewer.model}, transcript-verified); writer ${review.writer.agent} (${review.writer.model}); ${review.date}` : `NOT ACCEPTED: ${reviewProblems.join("; ")}`} |`,
@@ -148,7 +159,7 @@ function packet(dirArg, opts = {}) {
     md.push(`**Mutation results.** ${p ? `kills ${p.killed} of ${ms.valid} valid mutants; ${p.only} killed by this law alone.${p.killed === 0 ? " Kills nothing here: implied by other laws or by the world model; the reviewer must say which." : ""}` : "no report"}`, "",
       `**Reviewer notes.** ${r ? `${r.verdict}: ${r.notes}` : "(not reviewed)"}`, "");
   }
-  const helperDecls = [...helpers].map((h) => all.find((d) => d.kind === "lemma" && d.name === h)).filter(Boolean);
+  const helperDecls = [...helpers].map((h) => lemma(h)).filter(Boolean);
   if (helperDecls.length) md.push("## Proof helpers (statements only; not laws, but part of what is proven)", "", ...helperDecls.flatMap((h) => [`- ${h.comment || h.name}`, "", "```dafny", h.header, "```", ""]));
   md.push("## Law kinds", "", "| Kind | Laws |", "|---|---|", ...KINDS.map((k) => `| ${k} | ${Array.isArray(kinds[k]) ? kinds[k].join(", ") : kinds[k] ?? "(not stated)"} |`), "");
   if (assumptions.length) md.push("## World-model assumptions (requirements on the shell and stores; not proven here)", "", ...assumptions.map(([a, t]) => `- **${a}** ${t}`), "");
@@ -164,15 +175,20 @@ function packet(dirArg, opts = {}) {
 
 const args = process.argv.slice(2);
 const opts = { noVerify: args.includes("--no-verify"), recheck: args.includes("--recheck") };
+const rootAt = args.indexOf("--root");
+const root = resolve(rootAt >= 0 ? args[rootAt + 1] : join(REPO, "packages/core"));
+const positional = args.filter((a, i) => !a.startsWith("--") && !(rootAt >= 0 && i === rootAt + 1));
 if (args[0] === "--batch") {
-  const out = args[1]; const blocks = args.slice(2).filter((a) => !a.startsWith("--")); const parts = blocks.map((b) => packet(b, opts));
+  const out = positional[0]; const blocks = positional.slice(1); const parts = blocks.map((b) => packet(root, b, opts));
   writeFileSync(out, [`# Law review batch (${parts.length} blocks)`, "", "Read the English first; the Dafny is the exact statement that is proven.", "",
     "| Block | Hash | Ready |", "|---|---|---|", ...parts.map((p, i) => `| ${blocks[i]} | ${p.hash} | ${p.ready ? "YES" : "no"} |`), "", ...parts.map((p) => p.md)].join("\n\n---\n\n"));
   console.log(`wrote ${out}`);
   const bad = parts.filter((p) => p.problems.length); if (bad.length) { for (const p of bad) console.error(p.problems.join("\n")); process.exit(1); }
 } else {
-  const p = packet(args[0], opts);
-  if (args.includes("--write")) { writeFileSync(join(resolve(args[0]), "LAWS.md"), p.md + "\n"); console.log(`wrote ${join(args[0], "LAWS.md")} (hash ${p.hash}, ready ${p.ready})`); }
+  if (positional.length !== 1) { console.error("usage: scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck] (tools/proof/README.md)"); process.exit(2); }
+  const p = packet(root, positional[0], opts);
+  const target = join(root, "blocks", positional[0], "LAWS.md");
+  if (args.includes("--write")) { writeFileSync(target, p.md + "\n"); console.log(`wrote ${target} (hash ${p.hash}, ready ${p.ready})`); }
   else console.log(p.md);
   if (p.problems.length) { console.error(p.problems.join("\n")); process.exit(1); }
 }

@@ -96,8 +96,9 @@ Commands:
                                     proof toolchain in the per-user cache (tools/proof)
   proof check [<block>...] [--json] Check proof blocks (packages/core/blocks) and the blocks
                                     below them with the pinned toolchain; cached per worktree
-  proof mutate <block> [options]    Mutate a core block (pinned Dafny; max 4 solver jobs)
-  proof packet <block> [options]    Render a core block's hash-bound law packet
+  proof mutate <block> [options]    Mutation gate: every change to a block's compiled functions
+                                    must be killed by a law (tools/proof/README.md)
+  proof packet <block> [options]    Render a block's hash-bound law review packet (LAWS.md)
   health [<rev>] [--baseline <rev>] [--github] [--evidence] [--deploy-log <jsonl>]
          [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
                                     Read-only outcome and diagnostic health signals diffed

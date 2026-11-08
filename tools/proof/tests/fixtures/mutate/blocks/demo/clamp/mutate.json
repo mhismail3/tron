@@ -1,0 +1,77 @@
+{
+  "block": "demo/clamp",
+  "tier": "high-stakes",
+  "impl": "blocks/demo/clamp/Block.dfy",
+  "symbols": [
+    "Clamp"
+  ],
+  "verify": [
+    "blocks/demo/clamp/Block.dfy"
+  ],
+  "laws": {
+    "L1 in-range": [
+      "Clamp.L1InRange"
+    ],
+    "L2 inside": [
+      "Clamp.L2Inside"
+    ],
+    "L3 below": [
+      "Clamp.L3Below"
+    ],
+    "L4 above": [
+      "Clamp.L4Above"
+    ]
+  },
+  "helpers": [
+    "AtLow"
+  ],
+  "translate": "blocks/demo/clamp/Block.dfy",
+  "oracles": [],
+  "report": "blocks/demo/clamp/mutation-report.json",
+  "accepted": {
+    "Clamp/off-by-one/x->(x - 1)#1": {
+      "kind": "equivalent",
+      "reason": "differs only at a boundary where both branches return the same value",
+      "reviewer": "fixture author"
+    },
+    "Clamp/boundary/<-><=#1": {
+      "kind": "equivalent",
+      "reason": "differs only at a boundary where both branches return the same value",
+      "reviewer": "fixture author"
+    },
+    "Clamp/off-by-one/lo->(lo + 1)#1": {
+      "kind": "equivalent",
+      "reason": "differs only at a boundary where both branches return the same value",
+      "reviewer": "fixture author"
+    },
+    "Clamp/off-by-one/hi->(hi - 1)#1": {
+      "kind": "equivalent",
+      "reason": "differs only at a boundary where both branches return the same value",
+      "reviewer": "fixture author"
+    },
+    "Clamp/boundary/<-><=#2": {
+      "kind": "equivalent",
+      "reason": "differs only at a boundary where both branches return the same value",
+      "reviewer": "fixture author"
+    },
+    "Clamp/off-by-one/x->(x + 1)#2": {
+      "kind": "equivalent",
+      "reason": "differs only at a boundary where both branches return the same value",
+      "reviewer": "fixture author"
+    }
+  },
+  "kinds": {
+    "safety": [
+      "L1 in-range"
+    ],
+    "progress": "n/a: pure function",
+    "recovery": "n/a: pure function",
+    "stale-inputs": "n/a: pure function",
+    "exact-results": [
+      "L2 inside",
+      "L3 below",
+      "L4 above"
+    ],
+    "uncertain-outcomes": "n/a: pure function"
+  }
+}
