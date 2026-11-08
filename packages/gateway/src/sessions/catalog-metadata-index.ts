@@ -155,7 +155,7 @@ type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcileProgress)
  * diagnoses a bound. */
 export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append" | "line-limit";
 export interface CatalogMetadataIndexFailureDetail {
-  reason: "entries" | "shard-bytes" | "write" | "readback";
+  reason: "entries" | "shard-bytes" | "write";
   shard?: string;
   rows?: number;
   bytes?: number;
@@ -196,9 +196,6 @@ interface CatalogMetadataManifest {
   refused: string[];
 }
 
-/** What the store holds for one root. `complete` rows are one save's whole cut;
- * otherwise `rows` are every row a readable shard still holds, which are reuse
- * candidates only (each is re-verified against its file before reuse). */
 interface ShardFileIdentity {
   digest: string;
   ino: number;
@@ -213,6 +210,9 @@ interface BoundedFile {
   mtimeMs: number;
 }
 
+/** What the store holds for one root. `complete` rows are one save's whole cut;
+ * otherwise `rows` are every row a readable shard still holds, which are reuse
+ * candidates only (each is re-verified against its file before reuse). */
 interface CatalogMetadataStoreRead {
   complete: boolean;
   rows: CatalogMetadataIndexRow[];

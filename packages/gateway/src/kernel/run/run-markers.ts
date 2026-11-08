@@ -19,8 +19,6 @@ interface RunMarkerDocument {
   operations: RunMarkerEvidence[];
 }
 
-type StoredRunMarker = RunMarkerDocument;
-
 interface Lane {
   mutex: AsyncMutex;
   users: number;
@@ -199,7 +197,7 @@ export class RunMarkerStore {
 }
 
 async function readOperations(path: string, sessionId: string): Promise<RunMarkerEvidence[]> {
-  const stored = await readJson<StoredRunMarker | undefined>(path, undefined, MAXIMUM_RUN_MARKER_BYTES);
+  const stored = await readJson<RunMarkerDocument | undefined>(path, undefined, MAXIMUM_RUN_MARKER_BYTES);
   if (!admitsMarkerDocument(stored, sessionId)) return [];
   return stored.operations.map((operation) => ({ ...operation }));
 }
@@ -243,7 +241,7 @@ function admitsOperation(operation: unknown): operation is RunMarkerEvidence {
       && boundedString(candidate.assistantCompletedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)));
 }
 
-function admitsMarkerDocument(marker: StoredRunMarker | undefined, sessionId: string): marker is RunMarkerDocument {
+function admitsMarkerDocument(marker: RunMarkerDocument | undefined, sessionId: string): marker is RunMarkerDocument {
   if (marker?.version !== 2 || marker.sessionId !== sessionId || !Array.isArray(marker.operations)
     || marker.operations.length === 0 || marker.operations.length > MAXIMUM_RUN_MARKER_OPERATIONS
     || !marker.operations.every(admitsOperation)) return false;
