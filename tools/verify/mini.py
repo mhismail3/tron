@@ -76,7 +76,8 @@ def outputs(args: list[str]) -> tuple[list[str], list[str]]:
         else:
             pending = word == OUTPUT_OPTION or (word.startswith(OUTPUT_OPTION + '.') and '=' not in word)
             mapped.append(word)
-    return mapped, [str(Path(os.getcwd(), path)) for path in paths]
+    # Vitest resolves a relative output path against its root, the Gateway package.
+    return mapped, [str(ROOT / 'packages/gateway' / path) for path in paths]
 
 
 def local_main(args: list[str]) -> int:
@@ -92,6 +93,11 @@ def local_main(args: list[str]) -> int:
         print(error, file=sys.stderr)
         return EXIT_INFRA
     sha, destination = git('rev-parse', 'HEAD'), ssh[-1]
+    # verify names the commit its report records; a HEAD that moved since then is not that commit.
+    expected = os.environ.get('TRON_VERIFY_COMMIT')
+    if expected and expected != sha:
+        print(f'mini: HEAD is {sha[:12]}, not the commit under verification {expected[:12]}; no result', file=sys.stderr)
+        return EXIT_INFRA
     mapped, paths = outputs(args)
     started = time.time()
     print(f'mini: Gateway lane for {sha[:12]} on {destination}; pushing the commit', flush=True)
@@ -108,10 +114,11 @@ def local_main(args: list[str]) -> int:
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
-    marker, code, received = frame(nonce), None, set()
+    marker, code, received, stopped = frame(nonce), None, set(), []
     with subprocess.Popen([*ssh, remote], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as child:
         # Closing stdin ends the mini's job: it sends its lane SIGTERM and returns what it has.
-        def stop(_signum, _frame):
+        def stop(signum, _frame):
+            stopped.append(signum)
             if child.stdin and not child.stdin.closed:
                 child.stdin.close()
         previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)}
@@ -136,6 +143,9 @@ def local_main(args: list[str]) -> int:
         finally:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
+    if stopped:
+        print(f'mini: stopped; the mini job was ended (lane exit {code}); not a test result', file=sys.stderr)
+        return 128 + stopped[0]
     if code is None:
         print(f'mini: the session with {destination} ended (ssh exit {child.returncode}) without a result; not a test result',
               file=sys.stderr)
@@ -156,7 +166,7 @@ def remote_main(job: dict) -> int:
     say = lambda text: print(f'mini: {text}', flush=True)  # noqa: E731
     out = sys.stdout.buffer
     cancelled = threading.Event()
-    lane: list[subprocess.Popen] = []
+    running: list[subprocess.Popen] = []  # the job's current long child (npm ci or the lane), signalled on cancel
 
     def watch() -> None:
         # The local side never writes; end of input means it stopped or the connection dropped.
@@ -164,8 +174,9 @@ def remote_main(job: dict) -> int:
         while os.read(sys.stdin.fileno(), 4096):
             pass
         cancelled.set()
-        if lane and lane[0].poll() is None:
-            lane[0].send_signal(signal.SIGTERM)
+        for child in running:
+            if child.poll() is None:
+                child.send_signal(signal.SIGTERM)
     threading.Thread(target=watch, daemon=True).start()
 
     def finish(code: int) -> int:
@@ -180,9 +191,18 @@ def remote_main(job: dict) -> int:
     clean = {'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin', 'PYTHONDONTWRITEBYTECODE': '1',
              'LANG': os.environ.get('LANG', 'en_US.UTF-8'), **{key: os.environ[key] for key in ('USER', 'LOGNAME', 'SHELL') if key in os.environ}}
 
-    def run(*command: str, cwd: Path | None = None, stream: bool = False) -> subprocess.CompletedProcess:
-        return subprocess.run(command, cwd=cwd, env=clean, stdin=subprocess.DEVNULL, text=True,
-                              **({} if stream else {'capture_output': True}))
+    def run(*command: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(command, cwd=cwd, env=clean, stdin=subprocess.DEVNULL, text=True, capture_output=True)
+
+    def stream(*command: str, cwd: Path) -> int:
+        """Run a long child with its output streamed, stopped by a cancel; a signal exit is 128+n."""
+        with subprocess.Popen(command, cwd=cwd, env=clean, stdin=subprocess.DEVNULL) as child:
+            running.append(child)
+            if cancelled.is_set():
+                child.send_signal(signal.SIGTERM)
+            code = child.wait()
+            running.remove(child)
+        return 128 - code if code < 0 else code
 
     if not (repository / 'HEAD').is_file():
         return refuse(f'{repository} is not a bare repository; set it up with `git init --bare {repository}`')
@@ -255,10 +275,10 @@ def remote_main(job: dict) -> int:
             stamp = checkout / 'packages/gateway/node_modules/.tron-mini-install'
             if not stamp.is_file() or stamp.read_text() != install:
                 say('Gateway dependencies changed; npm ci')
-                installed = run(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--prefix', 'packages/gateway', 'ci', '--include=dev',
-                                cwd=checkout, stream=True)
-                if installed.returncode:
-                    return refuse(f'npm ci failed (exit {installed.returncode})')
+                installed = stream(str(checkout / 'scripts/tron-node'), 'exec', 'npm', '--prefix', 'packages/gateway', 'ci', '--include=dev',
+                                   cwd=checkout)
+                if installed:
+                    return refuse(f'npm ci failed (exit {installed})')
                 stamp.parent.mkdir(exist_ok=True)  # npm creates no node_modules for a manifest without dependencies
                 stamp.write_text(install)
             say(f'prepared in {time.time() - prepared:.1f}s; running the lane, load {os.getloadavg()[0]:.1f}')
@@ -273,13 +293,7 @@ def remote_main(job: dict) -> int:
                     for index, path in enumerate(files):
                         word = word.replace(f'@output:{index}', str(path))
                     args.append(word.replace(job['localRoot'], str(checkout)))
-                with subprocess.Popen(['/usr/bin/python3', str(checkout / 'tools/verify/gateway.py'), *args], cwd=checkout / 'packages/gateway',
-                                      env=clean, stdin=subprocess.DEVNULL) as child:
-                    lane.append(child)
-                    if cancelled.is_set():
-                        child.send_signal(signal.SIGTERM)
-                    code = child.wait()
-                    code = 128 - code if code < 0 else code  # killed by a signal: the shell's convention
+                code = stream('/usr/bin/python3', str(checkout / 'tools/verify/gateway.py'), *args, cwd=checkout / 'packages/gateway')
                 for index, path in enumerate(files):
                     if path.is_file():
                         content = path.read_text(errors='replace').replace(str(checkout), job['localRoot'])

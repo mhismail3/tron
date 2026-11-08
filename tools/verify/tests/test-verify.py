@@ -374,6 +374,20 @@ class GatewayFailureTests(VerifyCase):
                     self.assertTrue((r.path / "packages/gateway/test-results/executed").exists())
 
 
+    def test_an_unreachable_mini_fails_the_gateway_lane_without_running_it_here(self):
+        r = self.repo
+        self.fixture()
+        r.git("config", "tron.verify.mini", "nobody@mini.invalid")
+        result = r.verify("--module", "gateway/sample")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("gateway lanes: on the Mac mini", result.stdout)
+        report = r.report()
+        step = next(step for step in report["steps"] if step["name"] == "tests: gateway")
+        self.assertEqual((report["verdict"], step["status"], step["exit"]), ("failed", "failed", 2))
+        self.assertIn("could not push", (r.path / step["log"]).read_text())
+        self.assertFalse((r.path / "packages/gateway/test-results/executed").exists(), "the local lane never ran")
+
+
 class GatewayDependenciesTests(VerifyCase):
     def test_gateway_requires_local_pinned_compiler_before_running_checks(self) -> None:
         r = self.repo

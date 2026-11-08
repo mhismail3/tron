@@ -7,8 +7,8 @@ Node (linked where nvm keeps it). An `ssh` first on PATH drops its options and r
 command in that home, the way sshd would run it in the mini user's home: git's own push and
 mini.py's session both go through it. The cases check that a lane runs at the exact commit and its
 report and exit code come back with the mini checkout path rewritten; that a dirty tree, an
-unreachable host and an off-pin toolchain fail with exit 2 and no result; and that stopping the
-local runner stops the mini lane and releases the mini job lock.
+unreachable host, an off-pin toolchain and a HEAD other than verify's commit fail with exit 2 and no
+result; and that stopping the local runner stops the mini lane and releases the mini job lock.
 """
 from __future__ import annotations
 
@@ -133,13 +133,22 @@ class MiniGatewayLane(unittest.TestCase):
         self.write('README', 'next commit\n')
         self.commit('next')
         report.unlink()
-        failed = self.lane(*args, 'fail')
+        # From the repository root: a relative output path is still the Gateway package's, as Vitest resolves it.
+        failed = subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), '--reporter=json',
+                                 '--outputFile.json=../../test-results/lane.json', 'src/a.test.ts', 'fail'],
+                                cwd=self.local, env=self.env, text=True, capture_output=True, timeout=300)
         self.assertEqual(failed.returncode, 3, failed.stdout + failed.stderr)
         self.assertTrue(report.is_file(), 'a red lane still returns its report')
         self.assertNotIn('npm ci', failed.stdout, 'unchanged Gateway dependency inputs are not reinstalled')
 
-        self.write('README', 'uncommitted\n')
         report.unlink()
+        moved = subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), *args], cwd=self.local, text=True,
+                               capture_output=True, timeout=300, env={**self.env, 'TRON_VERIFY_COMMIT': sha})
+        self.assertEqual(moved.returncode, 2, moved.stdout + moved.stderr)
+        self.assertIn('not the commit under verification', moved.stderr)
+        self.assertFalse(report.exists(), 'a HEAD that moved since verify named its commit gets no result')
+
+        self.write('README', 'uncommitted\n')
         dirty = self.lane(*args)
         self.assertEqual(dirty.returncode, 2, dirty.stdout + dirty.stderr)
         self.assertIn('uncommitted', dirty.stderr)

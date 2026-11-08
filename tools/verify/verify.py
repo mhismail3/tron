@@ -950,7 +950,7 @@ def main(argv: list[str]) -> int:
             command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            env = update
+            env = {**update, "TRON_VERIFY_COMMIT": sha} if gateway_host == "mini" and group.startswith("gateway") else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
