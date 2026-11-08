@@ -12,6 +12,7 @@
     "gateway/delegation",
     "gateway/notifications",
     "gateway/resources",
-    "gateway/run"
+    "gateway/run",
+    "gateway/proof"
   ]
 }

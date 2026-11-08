@@ -23,8 +23,9 @@ usage() {
 Usage: scripts/tron <command> [options]
 
 Commands:
-  dev [start|restart|status|preflight|stop|handoff]
-                                    Own the immutable Debug Gateway on port 9848
+  dev [start|restart|status|preflight|stop|handoff] [--proof-traffic]
+                                    Own the immutable Debug Gateway on port 9848;
+                                    --proof-traffic records proof seams (tools/proof)
                                     status/preflight are read-only; users initiate
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
