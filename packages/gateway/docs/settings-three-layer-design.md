@@ -193,17 +193,17 @@ readable in Global Changes; no request, Undo or Apply again writes Project setti
   stage replacements; an automatic backup precedes publication; crash recovery completes the same
   transaction; rerun is a no-op. It never fails startup: a refusal changes nothing, logs
   `settings.migration-failed` and retries next start (#1649).
-- Startup never rewrites session JSONL. `RETIRED_SCOPES` (`kernel/settings/tool-contract.ts`) maps
-  `mac`/`builtin` → Global and `chat`/`profile` → Session for the Session reader until the one-shot,
-  backed-up `scripts/tron migrate retired-formats` (#2329), run by the maintainer with the Gateway
-  listening and Home idle, rewrites retained entries. It never rewrites a sealed Home chapter: Home
-  memory pins its exact bytes, so those chapters keep the retired names and `RETIRED_SCOPES` still reads them.
+- Startup never rewrites session JSONL. Session snapshot provenance names only current layers
+  (`global`, `project`, `session`, `delegate`); any other name refuses at read for that session.
+  Entries that still name a scope #1634 retired are rewritten once by the maintainer-run,
+  backed-up `scripts/tron migrate retired-formats` (#2329), which re-seals a sealed Home chapter
+  (`episodic/README.md`).
   The Home record model moves into the Profile when none is saved.
 - Preserve saved Global values in their owned stores as Global. Active Home chapter sessions are
   not read or folded; Home's saved choices live in the Profile.
-- Explicit/legacy Session values remain overrides; old inherited `mac`/`builtin` frames are
-  inheritance from Global. Fixed resource settings retain runtime boundary snapshots, not a new
-  user override layer. Unrecognized scope names refuse at read for that session only.
+- Explicit/legacy Session values remain overrides. Fixed resource settings retain runtime boundary
+  snapshots, not a new user override layer. Unrecognized scope names refuse at read for that
+  session only.
 - Migrate audit/approval vocabulary once (including before/after/target references) rather than keep
   dual live schemas. Preserve undo/conflict behavior and pending approvals/expiry; never auto-approve.
   Old titles unavailable in retained metadata show the stable id, not an invented historical title.

@@ -4,20 +4,6 @@ import type { SubjectAuditReference, SubjectContext, SubjectWrite } from "../../
 import { assertProfileCapacity, profilePath, type ProfileMetadata } from "./profile-placement.js";
 import { assertProfileNoteId, validateProfileNoteRecord, type ProfileNoteRecord, type NoteContent } from "./profile-note-contract.js";
 
-export type ProfileFile = "core" | "home" | `scopes/${string}`;
-const PROFILE_FILE_TAG = "home-file-";
-const PROFILE_FILE_PATTERN = "^(core|home|scopes/[a-z][a-z0-9-]{0,46})$";
-const FILE_NAME = new RegExp(PROFILE_FILE_PATTERN);
-function validProfileFile(file: string): file is ProfileFile { return FILE_NAME.test(file); }
-export function profileFile(tags: readonly string[] = []): ProfileFile | null | undefined {
-  const labels = tags.filter(tag => tag.startsWith(PROFILE_FILE_TAG));
-  if (!labels.length) return undefined;
-  const file = labels[0]!.slice(PROFILE_FILE_TAG.length).replace(/^scopes-/, "scopes/");
-  return labels.length !== 1 || !validProfileFile(file) ? null : file;
-}
-function profileFileTags(tags: readonly string[], file?: ProfileFile): string[] {
-  return [...tags.filter(tag => !tag.startsWith(PROFILE_FILE_TAG)), ...(file ? [PROFILE_FILE_TAG + file.replace("/", "-")] : [])];
-}
 export function carryNoteMarks(current: ProfileNoteRecord, content: NoteContent): NoteContent {
   const tags = content.tags ?? current.content.tags, retired = content.retired ?? current.content.retired, profile = content.profile ?? current.content.profile;
   const { retired: _named, ...rest } = content;
@@ -27,11 +13,10 @@ export function storedNoteContent(content: NoteContent): NoteContent {
   if (content.retired !== false) return content;
   const { retired: _cleared, ...rest } = content; return rest;
 }
-export interface ProfileLabel { index: number; tag: string }
-export const profileLabels = (tags: readonly string[] = []): ProfileLabel[] => tags.flatMap((tag, index) => tag.startsWith(PROFILE_FILE_TAG) ? [{ index, tag }] : []);
-export interface ProfileAssignment { id: string; expectedRevision: string; path?: string; profile?: ProfileMetadata; file?: ProfileFile; labels?: ProfileLabel[] }
+/** One placement: a v2 `path`, exact `profile` metadata, or (Changes Undo only) `prior`. */
+export interface ProfileAssignment { id: string; expectedRevision: string; path?: string; profile?: ProfileMetadata; prior?: true }
 export interface ProfilePartitionRequest { commandId: string; mode: "reorganize"; assignments: ProfileAssignment[] }
-export interface ProfilePartitionResult { audit?: SubjectAuditReference; changes: Array<{ id: string; beforeRevision: string; revisionId: string; beforeFile?: ProfileFile; file?: ProfileFile }> }
+export interface ProfilePartitionResult { audit?: SubjectAuditReference; changes: Array<{ id: string; beforeRevision: string; revisionId: string }> }
 export interface ProfilePartitionEnvelope { version: 1; context: SubjectContext; replayAt: string; writes: SubjectWrite[] }
 export interface ProfilePartitionAudit {
   restoring?: boolean;
@@ -42,14 +27,8 @@ export interface ProfilePartitionAudit {
 const refuse = (message: string): never => { throw new GatewayError("conflict", message); };
 function assignmentContent(note: ProfileNoteRecord, assignment: ProfileAssignment): NoteContent {
   const { profile: _placement, ...content } = note.content;
-  if (assignment.path !== undefined || assignment.profile !== undefined) return { ...content, tags: profileFileTags(content.tags ?? []), profile: assignment.path !== undefined ? profilePath(assignment.path) : assignment.profile! };
-  let tags = [...(content.tags ?? [])];
-  if (assignment.labels === undefined) { if (profileFile(tags) !== assignment.file) tags = profileFileTags(tags, assignment.file); }
-  else {
-    tags = tags.filter(tag => !tag.startsWith(PROFILE_FILE_TAG));
-    for (const label of assignment.labels) { if (label.index > tags.length) refuse("Invalid profile label position"); tags.splice(label.index, 0, label.tag); }
-  }
-  return { ...content, tags };
+  if (assignment.prior) return content;
+  return { ...content, profile: assignment.path !== undefined ? profilePath(assignment.path) : assignment.profile! };
 }
 /** Prepares only current placement data. No history, backup directory or archive
  * is an input to an admitted transition. The file owner publishes the whole plan. */
@@ -62,9 +41,8 @@ export function prepareProfilePartition(request: ProfilePartitionRequest, notes:
   const originals: ProfileNoteRecord[] = [], prepared: ProfileNoteRecord[] = [];
   for (const item of assignments) {
     assertProfileNoteId(item.id, "profile note"); assertProfileNoteId(item.expectedRevision, "profile revision");
-    if (item.file !== undefined && !validProfileFile(item.file)) refuse("Invalid explicit profile partition");
-    if (item.labels !== undefined && (item.file !== undefined || !Array.isArray(item.labels) || item.labels.some((label, index) => typeof label.tag !== "string" || !label.tag.startsWith(PROFILE_FILE_TAG) || !Number.isInteger(label.index) || label.index < 0 || (index > 0 && label.index <= item.labels![index - 1]!.index)))) refuse("Invalid profile label restoration");
-    if ([item.path !== undefined, item.profile !== undefined, item.file !== undefined, item.labels !== undefined].filter(Boolean).length !== 1) refuse("Exactly one profile placement is required");
+    if (item.prior !== undefined && item.prior !== true) refuse("Invalid profile Prior restoration");
+    if ([item.path !== undefined, item.profile !== undefined, item.prior !== undefined].filter(Boolean).length !== 1) refuse("Exactly one profile placement is required");
     if (!restoring && item.path === undefined) refuse("New profile organization requires a v2 path; Prior is read-only except exact Changes Undo");
     const original = current.get(item.id);
     if (!original || original.revisionId !== item.expectedRevision) refuse("Profile assignment revision is stale or unavailable");
@@ -79,8 +57,7 @@ export function prepareProfilePartition(request: ProfilePartitionRequest, notes:
   const changes = prepared.flatMap((next, index) => {
     const before = originals[index]!;
     if (next.revisionId === before.revisionId) return [];
-    const oldFile = profileFile(before.content.tags), file = profileFile(next.content.tags);
-    return [{ id: next.id, beforeRevision: before.revisionId, revisionId: next.revisionId, ...(oldFile ? { beforeFile: oldFile } : {}), ...(file ? { file } : {}) }];
+    return [{ id: next.id, beforeRevision: before.revisionId, revisionId: next.revisionId }];
   });
   return { originals, prepared, result: { changes } };
 }

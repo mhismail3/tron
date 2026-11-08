@@ -47,7 +47,6 @@ it("retains Prior placement, Unsorted, Not now, retirement and full provenance w
   const f = await fixture();
   const prior = note("Prior organization retained");
   delete prior.content.profile;
-  prior.content.tags!.push("home-file-core");
   const inferred = note("Unconfirmed proposal");
   inferred.content.confirmed = false;
   inferred.content.profile = { version: 2, path: ["inferred", "review"] };

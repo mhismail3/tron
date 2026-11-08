@@ -43,7 +43,11 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   The same file appends from the cursor, verifying only an 8 KiB window (a
   same-length rewrite outside it can go unseen); a new identity extends only after
   its whole prefix is re-proven. Any other change re-reads an active chapter and
-  refuses a sealed one; navigation and context edits re-read the chapter. A parse failure on a changing file
+  refuses a sealed one, except a re-seal: a sealed chapter the retired-format
+  migration rewrote is admitted only when its record in `gateway/home/chapter-reseals.jsonl`
+  re-derives, from the current bytes, the exact admitted size, prefix digest and leaf (changed
+  lines are non-projected settings entries, so no summary changes); the cursor then pins the
+  new bytes (`episodic.chapter-resealed`). Navigation and context edits re-read the chapter. A parse failure on a changing file
   leaves the cursor for retry; a stable malformed file blocks `source-unavailable`.
   Partial lines wait for their newline. The Home cursor is strict version 2.
 - **Reads.** `whenReady(cut)` resolves when every view part before `cut` is built

@@ -14,7 +14,7 @@ import type { SettingsChangePath } from "../../../kernel/settings/settings-chang
 
 let knowledge: ProfileStore | undefined;
 afterEach(async () => { vi.restoreAllMocks(); knowledge = undefined; await disposeFixtures(); });
-async function setup(mode: "v2" | "migration" = "v2") {
+async function setup(mode: "v2" | "prior" = "v2") {
   const f = await fixture(false, false, undefined, false, undefined, { knowledge: () => knowledge });
   let resource = f.registry.moduleHost.contract(workspaceModule);
   knowledge = new ProfileStore(resource);
@@ -23,9 +23,9 @@ async function setup(mode: "v2" | "migration" = "v2") {
     const record: Parameters<ProfileStore["createNote"]>[0]["record"] = { kind: "note", scope: "personal", provenance: { actor: "user", source: "fixture", evidence: [], reason: `Original provenance ${i}` },
       relations: mode === "v2" && i === 2 ? [{ type: "supersedes", recordId: originals[0]!.id, revisionId: originals[0]!.revisionId }] : [],
       content: { title: `Original confirmed standing instruction ${i}`, body: `Original private body ${i}`, role: "decision", confirmed: true,
-        ...(mode === "v2" && i === 1 ? { retired: true } : {}), tags: ["home-profile", "kind-standing-decision", "fixture-label", ...(mode === "migration" ? [i === 1 ? "home-file-home" : "home-file-core"] : [])],
+        ...(mode === "v2" && i === 1 ? { retired: true } : {}), tags: ["home-profile", "kind-standing-decision", "fixture-label"],
         ...(mode === "v2" ? { profile: { version: 2, path: ["engineering", "originals"] } } : {}) } };
-    originals.push(mode === "migration" ? await legacyProfileFixture(resource, `create-original-${i}`, record) : (await knowledge.createNote({ commandId: `create-original-${i}`, record })).record);
+    originals.push(mode === "prior" ? await legacyProfileFixture(resource, `create-original-${i}`, record) : (await knowledge.createNote({ commandId: `create-original-${i}`, record })).record);
   }
   const context = { commandId: "original-partition-command", actor: { kind: "ui" as const, id: "home-fixture", sessionId: "home-fixture", toolCallId: "original-tool-call" }, reason: "Original private audit reason" };
   const request = { commandId: context.commandId, mode: "reorganize" as const,
@@ -105,7 +105,7 @@ it("keeps original context and repairs only shared facts after preparation failu
 });
 
 it.each(["before-intent", "after-intent", "after-prepare", "before-domain", "staged-domain", "after-domain", "before-publication", "after-publication", "after-ack"])("retains the original intent, cold audit and exact Changes Undo after process death at %s", async cut => {
-  const { f, profile, originals, request, context, cold } = await setup("migration");
+  const { f, profile, originals, request, context, cold } = await setup("prior");
   await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
   await crashProfilePartition(f.root, f.tronHome, request.assignments, cut, { context });
   const changes = await cold();
@@ -121,7 +121,7 @@ it.each(["before-intent", "after-intent", "after-prepare", "before-domain", "sta
   if (committed) expect(heads).toEqual(beforeRetry);
   for (const [index, original] of originals.entries()) {
     const current = heads[index]!;
-    expect({ ...current, revisionId: original.revisionId }).toEqual({ ...original, content: { ...original.content, tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: request.assignments[index]!.path.split("/") } } });
+    expect({ ...current, revisionId: original.revisionId }).toEqual({ ...original, content: { ...original.content, profile: { version: 2, path: request.assignments[index]!.path.split("/") } } });
     await expect(knowledge!.read(original.id, original.revisionId)).rejects.toMatchObject({ details: { kind: "profile_revision_unavailable" } });
   }
   const entries = await applied(changes);
@@ -135,7 +135,7 @@ it.each(["before-intent", "after-intent", "after-prepare", "before-domain", "sta
 });
 
 it("keeps separate original commands separate and never adopts another intent's prepared identities", async () => {
-  const { f, profile, originals, request, context, cold } = await setup("migration");
+  const { f, profile, originals, request, context, cold } = await setup("prior");
   await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
   await crashProfilePartition(f.root, f.tronHome, request.assignments, "after-prepare", { context });
   const changes = await cold(), first = await knowledge!.profilePartitionRecovery(context.commandId);
@@ -152,7 +152,7 @@ it("keeps separate original commands separate and never adopts another intent's 
 });
 
 it("invalidates the complete proof when Forget races cold publication after shared preparation was read", async () => {
-  const { f, currentResource, profile, originals, request, context, cold } = await setup("migration");
+  const { f, currentResource, profile, originals, request, context, cold } = await setup("prior");
   await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
   await crashProfilePartition(f.root, f.tronHome, request.assignments, "after-domain", { context });
   const changes = await cold(), current = (await knowledge!.read(originals[0]!.id))!;

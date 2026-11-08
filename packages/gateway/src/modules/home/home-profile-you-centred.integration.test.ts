@@ -7,28 +7,29 @@ import type { ProfileNoteRecord } from "./profile-note-contract.js";
 
 profileReportFile("test-results/home-profile/you-centred.json");
 
-it("organizes exact legacy placement through a real Home activation and Changes Undo restores its exact tags and prior organization", async () => {
+it("organizes an exact Prior note through a real Home activation and Changes Undo restores its exact tags and Prior organization", async () => {
   const f = await fixture("you-centred-migrate");
   const original = await legacyProfileFixture(f.workspace, command("legacy-seed"), {
     kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [], reason: "Original inferred capture" }, relations: [],
     content: { title: "Prefers concise questions.", body: "Keep this exact body.", role: "fact", confirmed: false,
-      tags: ["fixture-first", "home-file-home", "home-profile", "kind-fact", "fixture-last"] },
+      tags: ["fixture-first", "home-profile", "kind-fact", "fixture-last"] },
   });
-  const retired = await legacyProfileFixture(f.workspace, command("legacy-retired"), { kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [] }, relations: [], content: { title: "An inactive original stays byte-for-byte unchanged.", role: "fact", confirmed: false, retired: true, tags: ["home-profile", "kind-fact", "home-file-home"] } });
+  const retired = await legacyProfileFixture(f.workspace, command("legacy-retired"), { kind: "note", scope: "personal", provenance: { actor: "agent", source: "home", evidence: [] }, relations: [], content: { title: "An inactive original stays byte-for-byte unchanged.", role: "fact", confirmed: false, retired: true, tags: ["home-profile", "kind-fact"] } });
   const turn = homeActivation(f, "Sort this inferred nonbinding note without changing its content.", [
     profileCall({ action: "reorganize", assignments: [{ id: original.id, expectedRevision: original.revisionId, path: "communication/questions" }], reason: "File the original inferred capture" }, "you-centred-migrate"), say("sorted"),
   ]);
   const result = (await turn).last.messages.find(message => message.role === "toolResult" && message.toolCallId === "you-centred-migrate")?.details as { status: string };
   expect(result.status).toBe("organized");
   const migrated = await f.store.read(original.id) as typeof original;
-  expect(migrated.content).toEqual({ ...original.content, tags: original.content.tags!.filter(tag => !tag.startsWith("home-file-")), profile: { version: 2, path: ["communication", "questions"] } });
+  expect(migrated.content).toEqual({ ...original.content, profile: { version: 2, path: ["communication", "questions"] } });
   expect({ ...migrated, revisionId: original.revisionId, content: original.content }).toEqual(original);
   await expect(f.store.read(original.id, original.revisionId)).rejects.toMatchObject({ details: { kind: "profile_revision_unavailable" } });
   const completeHistory = await history(f);
   expect(completeHistory).toHaveLength(2);
   const audit = completeHistory.filter(entry => entry.status === "applied");
   expect(audit).toHaveLength(1);
-  expect(audit[0]).toMatchObject({ before: { fileLabels: [{ index: 1, tag: "home-file-home" }] }, after: { profile: { version: 2, path: ["communication", "questions"] } } });
+  expect(audit[0]).toMatchObject({ after: { profile: { version: 2, path: ["communication", "questions"] } } });
+  expect(audit[0]!.before).not.toHaveProperty("profile");
   await undo(f, audit[0]!.changeId, "you-centred-undo");
   const restored = await f.store.read(original.id) as typeof original;
   expect({ ...restored, revisionId: original.revisionId }).toEqual(original);

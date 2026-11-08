@@ -20,8 +20,8 @@ link. Retired Corrections retain their links. Forget removes even linked claim
 bodies and leaves an unavailable-claim privacy tombstone.
 
 `home-profile` marks membership; one `kind-*` label retains preference, standing
-decision, delegation default, fact or correction. Prior organization preserves
-old `home-file-*` labels or unlabelled members without guessing destinations.
+decision, delegation default, fact or correction. Prior organization holds
+unplaced members without guessing destinations.
 Ordinary Home content edits refuse until an exact placement is reviewed. Only
 shared Changes Undo may restore Prior placement; new curation writes v2 paths.
 
@@ -110,7 +110,7 @@ original state; subsequent writes cannot grow an exceeded dimension.
 
 `reorganize` names selected notes. Explicit destinations,
 visibility, expected revisions and bounds are checked without dropping members.
-Only placement and old `home-file-*` labels change; other labels retain order.
+Only placement changes; labels retain order.
 
 Before effects, the file records a body-free intent with original context/time,
 request, prepared revision identities and Undo links. Shared Changes prepares the
@@ -127,7 +127,7 @@ reuses the prepared identities and context. Postcommit retry checks the committe
 proof against the prepared shared group and repairs only those original facts.
 Later edits are neither replayed nor overwritten. The result is `retry_required`
 with the original command ID until publication is acknowledged. Shared Changes
-Undo fences the whole current group and restores exact placement/label positions
+Undo fences the whole current group and restores exact placement
 in one publication; only the maintainer resumes an uncommitted Undo.
 
 Command fences retain their operation/request-digest identity, not old bodies.

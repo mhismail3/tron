@@ -226,7 +226,13 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const task = await homeOwnerOf(f.registry).taskStatus("explicit-clamp");
     expect(task.intent.text).toContain("Worker choice: model");
     expect(task.intent.text).toContain("high clamped to off");
-    expect(readSessionFixedSettings(await f.registry.readTaskEvidence(task.sessionId!))["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
+    const evidence = await f.registry.readTaskEvidence(task.sessionId!);
+    expect(readSessionFixedSettings(evidence)["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
+    // A scope name that is not a current layer is refused; the session does not reinterpret it.
+    const settings = evidence.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY)!;
+    const retired = structuredClone(settings) as typeof settings & { data: { fixed: Record<string, { from: string }> } };
+    retired.data.fixed["model.thinking[role=chat]"]!.from = "mac";
+    expect(() => readSessionFixedSettings([...evidence, retired])).toThrow("Canonical Chat provenance is invalid");
   });
 
   it("skips an unregistered model and a provider at 95% usage in the worker queue, and tells Home and the worker why", async () => {

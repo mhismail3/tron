@@ -15,15 +15,6 @@ export function splitModelRef(value: string): { provider: string; id: string } |
   return separator > 0 && separator < value.length - 1 ? { provider: value.slice(0, separator), id: value.slice(separator + 1) } : undefined;
 }
 
-/** Scope names #1634 retired, as old session entries recorded them. Session
- * readers map them to current names. The maintainer-run, backed-up
- * `scripts/tron migrate retired-formats` (#2329) rewrites retained entries
- * except sealed Home chapters, whose bytes Home memory pins; those still hold
- * these names, so this map stays until their reading is decided in #2329. */
-export const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
-  mac: "global", builtin: "global", chat: "session", profile: "session",
-});
-
 export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction", "server", "note", "device"] as const;
 
 export type QualifierName = typeof QUALIFIER_NAMES[number];

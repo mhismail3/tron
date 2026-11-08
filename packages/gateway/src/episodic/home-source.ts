@@ -1,14 +1,22 @@
 import type { HomeMemoryEvidence } from "../protocol/types.js";
 import { constants, type Stats } from "node:fs";
+import { createHash } from "node:crypto";
 import { lstat, open } from "node:fs/promises";
 import { abortableRead } from "../util/abortable-read.js";
 import { EpisodicMemoryError } from "../errors.js";
 import { HOME_MAX_CHAPTERS, type EpisodicChapterSourceCursor, type EpisodicLimits, type EpisodicSourceCursor } from "./episodic-contract.js";
 import { COMPLETE_PREFIX_SEED, EpisodicSourceChangedError, episodicDigest, extendPrefixDigest, parseEntry, prefixLineDigest, sameSnapshot, type EpisodicCanonicalEntry } from "../kernel/session/canonical-reader.js";
 import { projectBranch, type EpisodicProjectedMessage, type EpisodicSourceDelta } from "./episodic-projection.js";
+import { admittedSettingsLine, readChapterReseals, type ChapterReseal } from "../sessions/retired-format-migration.js";
 
 export interface HomeSourceChapter { sessionId: string; path: string; sealed: boolean }
-export interface HomeSourceSnapshot { homeId: string; ledgerRevision: number; chapters: readonly HomeSourceChapter[] }
+export interface HomeSourceSnapshot {
+  homeId: string;
+  ledgerRevision: number;
+  chapters: readonly HomeSourceChapter[];
+  /** The retired-format migration's re-seal ledger (`RESEAL_LEDGER`), when it can apply. */
+  resealLedger?: string;
+}
 interface CompactEntry {
   id: string;
   parentId: string | null;
@@ -201,7 +209,72 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
   } finally { await handle.close(); }
 }
 
-async function validateSnapshot(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null) {
+/**
+ * The cursor of a sealed chapter the retired-format migration rewrote, or
+ * undefined. Admitted only when one re-seal record re-derives, from the chapter's
+ * current bytes, exactly the bytes this cursor admitted: every recorded line
+ * reverts to its admitted form (`admittedSettingsLine`), every other line is
+ * unchanged, and the result has the cursor's size, prefix digest and leaf and
+ * the record's original digest. Changed lines must project to nothing, so every
+ * catalog message, summary and node stays valid; the new cursor pins the current
+ * bytes. Any other change finds no record and is refused as before.
+ */
+async function resealedCursor(chapter: HomeSourceChapter, cursor: EpisodicChapterSourceCursor, ledger: string, limits: EpisodicLimits): Promise<{ cursor: EpisodicChapterSourceCursor; record: ChapterReseal } | undefined> {
+  if (cursor.completeBytes !== cursor.size) return undefined;
+  let records: ChapterReseal[];
+  try { records = (await readChapterReseals(ledger)).records; } catch { return undefined; }
+  const candidates = records.filter(record => record.sessionId === chapter.sessionId && record.before.size === cursor.size);
+  if (!candidates.length) return undefined;
+  const handle = await open(chapter.path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => fail("Home canonical source cannot be opened"));
+  try {
+    const start = await handle.stat();
+    if (!start.isFile()) fail("Home canonical source is not a regular file");
+    for (const record of candidates) {
+      if (record.after.size !== start.size) continue;
+      const proven = await proveReseal(handle, chapter, cursor, record, start.size, limits);
+      const end = await handle.stat();
+      if (!sameSnapshot(start, end)) throw new EpisodicSourceChangedError();
+      if (proven) return { record, cursor: { ...proven, sessionId: chapter.sessionId, sealed: chapter.sealed, dev: end.dev, ino: end.ino, size: end.size, mtimeMs: end.mtimeMs, ctimeMs: end.ctimeMs } };
+    }
+    return undefined;
+  } finally { await handle.close(); }
+}
+
+async function proveReseal(handle: Awaited<ReturnType<typeof open>>, chapter: HomeSourceChapter, cursor: EpisodicChapterSourceCursor,
+  record: ChapterReseal, size: number, limits: EpisodicLimits): Promise<Pick<EpisodicChapterSourceCursor, "completeBytes" | "completePrefixDigest" | "leafEntryId" | "leafLineDigest"> | undefined> {
+  const recorded = new Map<number, ChapterReseal["values"]>();
+  for (const value of record.values) recorded.set(value.line, [...recorded.get(value.line) ?? [], value]);
+  const current = createHash("sha256"), admitted = createHash("sha256");
+  let prefix = COMPLETE_PREFIX_SEED, admittedPrefix = COMPLETE_PREFIX_SEED;
+  let bytesRead = 0, admittedBytes = 0, index = 0, leaf: string | null = null, leafDigest: string | null = null;
+  try {
+    for await (const bytes of lines(handle, 0, size, limits.maxSourceLineBytes)) {
+      const line = bytes.toString("utf8");
+      let original = bytes;
+      const values = recorded.get(index);
+      if (values) {
+        const restored = admittedSettingsLine(line, values);
+        if (restored === undefined || singleProjection(parseEntry(line), limits, chapter.sessionId)
+          || singleProjection(parseEntry(restored), limits, chapter.sessionId)) return undefined;
+        original = Buffer.from(restored, "utf8");
+        recorded.delete(index);
+      }
+      current.update(bytes).update("\n"); admitted.update(original).update("\n");
+      prefix = extendPrefixDigest(prefix, bytes); admittedPrefix = extendPrefixDigest(admittedPrefix, original);
+      bytesRead += bytes.length + 1; admittedBytes += original.length + 1;
+      if (index > 0 && line.trim()) { leaf = parseEntry(line).id; leafDigest = episodicDigest(line); }
+      index += 1;
+    }
+  } catch (error) {
+    if (error instanceof EpisodicMemoryError && error.kind === "source") return undefined;
+    throw error;
+  }
+  if (recorded.size || bytesRead !== size || current.digest("hex") !== record.after.sha256 || admitted.digest("hex") !== record.before.sha256
+    || admittedBytes !== cursor.completeBytes || admittedPrefix !== cursor.completePrefixDigest || leaf !== cursor.leafEntryId) return undefined;
+  return { completeBytes: bytesRead, completePrefixDigest: prefix, leafEntryId: leaf, leafLineDigest: leafDigest };
+}
+
+async function validateSnapshot(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null, resealing = false) {
   if (!snapshot.chapters.length || snapshot.chapters.length > HOME_MAX_CHAPTERS
     || !Number.isSafeInteger(snapshot.ledgerRevision) || snapshot.ledgerRevision < 1) fail("Home source has no admitted ledger");
   const ids = new Set<string>();
@@ -215,7 +288,8 @@ async function validateSnapshot(snapshot: HomeSourceSnapshot, cursor: EpisodicSo
     const info = await lstat(chapter.path).catch(() => fail("Home canonical source is unavailable"));
     if (!info.isFile()) fail("Home canonical source is not a regular file");
     // A sealed chapter never grows or shrinks; its bytes are proven where they are read.
-    if (prior[index]?.sealed && (!chapter.sealed || info.size !== prior[index]!.size)) fail("Sealed Home source changed since ingestion");
+    // Ingestion settles a recorded re-seal of a resized sealed chapter itself.
+    if (prior[index]?.sealed && (!chapter.sealed || (info.size !== prior[index]!.size && !(resealing && snapshot.resealLedger)))) fail("Sealed Home source changed since ingestion");
     stats.push(info);
   }
   return stats;
@@ -232,8 +306,9 @@ function aggregate(snapshot: HomeSourceSnapshot, chapters: EpisodicChapterSource
 
 /** Consume/commit one chapter before reading the next. Only capped projections
  * cross the await into EpisodicMemory; old sealed JSONL is never reopened. */
-export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<EpisodicSourceDelta> {
-  const stats = await validateSnapshot(snapshot, cursor);
+export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null, limits: EpisodicLimits,
+  resealed?: (record: ChapterReseal) => void): AsyncIterable<EpisodicSourceDelta> {
+  const stats = await validateSnapshot(snapshot, cursor, true);
   const chapters = [...(cursor?.home.chapters ?? [])];
   let acknowledged = cursor;
   for (const [index, chapter] of snapshot.chapters.entries()) {
@@ -245,6 +320,12 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
     const rekeyed = previous && stats[index]!.size === previous.size && await rekeyedCursor(chapter, previous, limits);
     if (rekeyed) {
       chapters[index] = rekeyed;
+      continue;
+    }
+    const reseal = previous && chapter.sealed && snapshot.resealLedger ? await resealedCursor(chapter, previous, snapshot.resealLedger, limits) : undefined;
+    if (reseal) {
+      chapters[index] = reseal.cursor;
+      resealed?.(reseal.record);
       continue;
     }
     if (previous?.sealed) fail("Sealed Home source changed since ingestion");

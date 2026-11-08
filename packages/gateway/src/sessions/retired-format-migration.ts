@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { copyFile, link, lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
-import { RETIRED_SCOPES } from "../kernel/settings/tool-contract.js";
 import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
 
 /**
@@ -13,7 +12,7 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  * form (#2329), run by the maintainer while the Gateway is listening and never
  * during startup (#1649):
  * - `tron.settings.v1` session entries whose `fixed`/`requestPins` provenance
- *   still names a scope #1634 retired (`RETIRED_SCOPES`);
+ *   still names a scope #1634 retired (`RETIRED_SCOPES` below);
  * - Profile note tags carrying the retired `home-file-*` placement labels, and
  *   the `beforeFile`/`file` label fields of committed partition receipts.
  *
@@ -21,30 +20,58 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  * its original into the backup directory with a manifest of both digests, then
  * publishes atomically only if the file is unchanged since it was read (see
  * `publishSession` and `publishProfile` for a Gateway write racing publication). Session files written within
- * `--settle-seconds` are deferred to a later run; run it while Home is idle. A
- * chapter the Home ledger records as sealed is never rewritten: Home memory pins
- * its exact bytes and blocks on any change (`episodic/home-source.ts`). It
- * refuses a configured `sessionDir`, an unsupported Home ledger and an
- * uncommitted Profile organization. The shared Changes record is append-only
- * history and is not rewritten. This module goes with the retired readers once
- * #2329 decides how sealed Home chapters that keep retired names are read.
+ * `--settle-seconds` are deferred to a later run; run it while Home is idle.
+ *
+ * A chapter the Home ledger records as sealed is re-sealed, never silently
+ * rewritten: Home memory pins its exact bytes (`episodic/home-source.ts`). Before
+ * its replacement is renamed into place (staged and fsynced first), one
+ * `ChapterReseal` record naming both digests and every changed value is appended
+ * to the re-seal ledger and fsynced. Home memory accepts the rewritten chapter
+ * only by re-deriving, from its current bytes and that record, the exact bytes it
+ * admitted. So an interrupted run leaves either the original chapter or a
+ * re-sealable one, and a rerun completes it; `--restore` appends the reverse
+ * record the same way. It refuses a configured `sessionDir`, an unsupported Home
+ * ledger and an uncommitted Profile organization. The shared Changes record is
+ * append-only history and is not rewritten. This module and the re-seal check in
+ * Home memory are deleted together once the live run is verified.
  */
+
+/** The scope names #1634 retired, as old session entries recorded them, and the
+ * current layer each became. The migration's own map: no reader accepts them. */
+const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
+  mac: "global", builtin: "global", chat: "session", profile: "session",
+});
 
 const PROFILE_FILE = "workspace/files/Profile.json";
 const HOME_LEDGER = "gateway/home/home.json";
+/** Append-only: one JSON `ChapterReseal` per line, written only by this tool. */
+export const RESEAL_LEDGER = "gateway/home/chapter-reseals.jsonl";
 const RETIRED_LABEL = "home-file-";
 const SETTINGS_MARK = `"customType":"${SESSION_SETTINGS_ENTRY}"`;
 
 interface Identity { dev: number; ino: number; size: number; mtimeMs: number }
-interface PlannedFile { kind: "session" | "profile"; path: string; identity: Identity; before: Buffer; after: Buffer; changes: number }
+/** One rewritten provenance value: `line` is the 0-based line index; the
+ * re-sealed chapter holds `to` where Home memory admitted `from`. */
+export interface ResealValue { line: number; field: "fixed" | "requestPins"; key: string; from: string; to: string }
+export interface ChapterReseal {
+  version: 1;
+  sessionId: string;
+  /** The chapter file, relative to the Tron home. */
+  path: string;
+  at: string;
+  before: { sha256: string; size: number };
+  after: { sha256: string; size: number };
+  values: ResealValue[];
+}
+interface PlannedFile { kind: "session" | "profile"; path: string; identity: Identity; before: Buffer; after: Buffer; changes: number; reseal?: { sessionId: string; values: ResealValue[] } }
 export interface MigrationPlan {
   sessions: { scanned: number; files: number; entries: number; values: number; deferred: string[] };
   profile: { notes: number; labels: number; receipts: number };
-  /** Sealed Home chapters that hold a retired form and are kept as they are. */
+  /** Sealed Home chapters among `files`: each is re-sealed. */
   sealedHome: string[];
   files: PlannedFile[];
 }
-interface ManifestFile { path: string; kind: PlannedFile["kind"]; before: string; after: string; changes: number }
+interface ManifestFile { path: string; kind: PlannedFile["kind"]; before: string; after: string; changes: number; reseal?: PlannedFile["reseal"] }
 interface Manifest { version: 1; tronHome: string; createdAt: string; files: ManifestFile[] }
 
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -59,21 +86,104 @@ async function* sessionFiles(directory: string): AsyncGenerator<string> {
   }
 }
 
+type SettingsEntry = { type?: unknown; customType?: unknown; data?: Record<string, unknown> | null };
+const snapshotFields = ["fixed", "requestPins"] as const;
+/** The rewrite pairs, in either direction (a restore runs it backwards). */
+const retiredPair = (from: string, to: string) => (Object.hasOwn(RETIRED_SCOPES, from) && RETIRED_SCOPES[from] === to)
+  || (Object.hasOwn(RETIRED_SCOPES, to) && RETIRED_SCOPES[to] === from);
+
 /** Current names for one settings entry's snapshot provenance; undefined when already current. */
-function currentSettingsLine(line: string): { line: string; values: number } | undefined {
+function currentSettingsLine(line: string, index: number): { line: string; values: ResealValue[] } | undefined {
   if (!line.includes(SETTINGS_MARK)) return undefined;
-  const entry = JSON.parse(line) as { type?: unknown; customType?: unknown; data?: Record<string, unknown> | null };
+  const entry = JSON.parse(line) as SettingsEntry;
   if (entry.type !== "custom" || entry.customType !== SESSION_SETTINGS_ENTRY) return undefined;
   if (JSON.stringify(entry) !== line) throw new Error("A settings entry does not re-serialize byte-for-byte; refusing to rewrite its file");
-  let values = 0;
-  for (const field of ["fixed", "requestPins"] as const) {
+  const values: ResealValue[] = [];
+  for (const field of snapshotFields) {
     const snapshots = entry.data?.[field];
     if (!snapshots || typeof snapshots !== "object" || Array.isArray(snapshots)) continue;
-    for (const value of Object.values(snapshots as Record<string, { from?: unknown }>)) {
-      if (value && typeof value.from === "string" && Object.hasOwn(RETIRED_SCOPES, value.from)) { value.from = RETIRED_SCOPES[value.from]; values += 1; }
+    for (const [key, value] of Object.entries(snapshots as Record<string, { from?: unknown }>)) {
+      if (value && typeof value.from === "string" && Object.hasOwn(RETIRED_SCOPES, value.from)) {
+        values.push({ line: index, field, key, from: value.from, to: RETIRED_SCOPES[value.from]! });
+        value.from = RETIRED_SCOPES[value.from];
+      }
     }
   }
-  return values ? { line: JSON.stringify(entry), values } : undefined;
+  return values.length ? { line: JSON.stringify(entry), values } : undefined;
+}
+
+/**
+ * The line Home memory admitted, re-derived from a re-sealed chapter's current
+ * line and that line's recorded values; undefined unless the current line is a
+ * settings entry that re-serializes byte-for-byte and holds exactly `to` at each
+ * recorded value, every pair a retired-name rewrite. Each value changes only its
+ * own JSON string, so any other byte that differs from the admitted line fails
+ * the caller's digest comparison.
+ */
+export function admittedSettingsLine(line: string, values: readonly ResealValue[]): string | undefined {
+  let entry: SettingsEntry;
+  try { entry = JSON.parse(line) as SettingsEntry; } catch { return undefined; }
+  if (!entry || entry.type !== "custom" || entry.customType !== SESSION_SETTINGS_ENTRY || JSON.stringify(entry) !== line) return undefined;
+  const seen = new Set<string>();
+  for (const value of values) {
+    const snapshots = entry.data && Object.hasOwn(entry.data, value.field) ? entry.data[value.field] as Record<string, { from?: unknown }> | null : undefined;
+    const snapshot = snapshots && typeof snapshots === "object" && Object.hasOwn(snapshots, value.key) ? snapshots[value.key] : undefined;
+    const name = `${value.field}\0${value.key}`;
+    if (!snapshot || typeof snapshot !== "object" || snapshot.from !== value.to || !retiredPair(value.from, value.to) || seen.has(name)) return undefined;
+    seen.add(name);
+    snapshot.from = value.from;
+  }
+  return JSON.stringify(entry);
+}
+
+const digestPattern = /^[a-f0-9]{64}$/u;
+function admitReseal(value: unknown): ChapterReseal | undefined {
+  const record = value as Partial<ChapterReseal> | null;
+  const side = (part: unknown) => { const v = part as { sha256?: unknown; size?: unknown } | null;
+    return Boolean(v) && typeof v!.sha256 === "string" && digestPattern.test(v!.sha256) && Number.isSafeInteger(v!.size) && (v!.size as number) > 0 && Object.keys(v!).length === 2; };
+  if (!record || typeof record !== "object" || record.version !== 1 || typeof record.sessionId !== "string" || !record.sessionId
+    || typeof record.path !== "string" || typeof record.at !== "string" || !side(record.before) || !side(record.after)
+    || !Array.isArray(record.values) || record.values.length === 0 || Object.keys(record).length !== 7) return undefined;
+  for (const item of record.values) {
+    if (!item || typeof item !== "object" || !Number.isSafeInteger(item.line) || item.line < 1 || !snapshotFields.includes(item.field)
+      || typeof item.key !== "string" || typeof item.from !== "string" || typeof item.to !== "string" || !retiredPair(item.from, item.to)
+      || Object.keys(item).length !== 5) return undefined;
+  }
+  return record as ChapterReseal;
+}
+
+/** The re-seal ledger's complete records. A torn trailing line (an interrupted
+ * append) is not a record; any malformed complete line refuses the whole ledger. */
+export async function readChapterReseals(path: string): Promise<{ records: ChapterReseal[]; completeBytes: number }> {
+  const bytes = await readFile(path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return Buffer.alloc(0); throw error; });
+  const completeBytes = bytes.lastIndexOf(0x0a) + 1;
+  const records: ChapterReseal[] = [];
+  for (const line of bytes.subarray(0, completeBytes).toString("utf8").split("\n")) {
+    if (!line) continue;
+    let value: unknown;
+    try { value = JSON.parse(line); } catch { throw new Error("The chapter re-seal ledger holds a malformed record"); }
+    const record = admitReseal(value);
+    if (!record) throw new Error("The chapter re-seal ledger holds a malformed record");
+    records.push(record);
+  }
+  return { records, completeBytes };
+}
+
+/** Appends one durable record unless an identical transition is already recorded
+ * (a rerun after an interruption). A torn tail from an interrupted append is cut
+ * first: its rename never happened, because every rename follows its record. */
+async function appendReseal(tronHome: string, record: ChapterReseal): Promise<void> {
+  const path = tronHomePath(tronHome, RESEAL_LEDGER);
+  const { records, completeBytes } = await readChapterReseals(path);
+  if (records.some(existing => existing.sessionId === record.sessionId && existing.before.sha256 === record.before.sha256 && existing.after.sha256 === record.after.sha256)) return;
+  const created = !await present(path);
+  const handle = await open(path, constants.O_WRONLY | constants.O_CREAT, 0o600);
+  try {
+    await handle.truncate(completeBytes);
+    await handle.write(`${JSON.stringify(record)}\n`, completeBytes);
+    await syncDurably(handle);
+  } finally { await handle.close(); }
+  if (created) await syncDirectory(path);
 }
 
 /** Session IDs of the chapters the Home ledger has sealed. */
@@ -96,18 +206,26 @@ async function planSession(path: string, settleBefore: number, sealedHome: Reado
   const before = await readFile(path);
   if (!before.includes(SETTINGS_MARK)) return;
   const lines = before.toString("utf8").split("\n");
-  let entries = 0, values = 0;
+  let entries = 0;
+  const values: ResealValue[] = [];
   for (const [index, line] of lines.entries()) {
     let current: ReturnType<typeof currentSettingsLine>;
-    try { current = currentSettingsLine(line); } catch (error) { throw new Error(`${path}:${index + 1}: ${(error as Error).message}`); }
+    try { current = currentSettingsLine(line, index); } catch (error) { throw new Error(`${path}:${index + 1}: ${(error as Error).message}`); }
     if (!current) continue;
-    lines[index] = current.line; entries += 1; values += current.values;
+    lines[index] = current.line; entries += 1; values.push(...current.values);
   }
   if (!entries) return;
-  if (sealedHome.has((JSON.parse(lines[0]!) as { id?: unknown }).id as string)) { plan.sealedHome.push(path); return; }
-  if (info.mtimeMs > settleBefore) { plan.sessions.deferred.push(path); return; }
-  plan.sessions.files += 1; plan.sessions.entries += entries; plan.sessions.values += values;
-  plan.files.push({ kind: "session", path, identity: identity(info), before, after: Buffer.from(lines.join("\n"), "utf8"), changes: entries });
+  // A chapter is named by its session header on line 0, so every recorded value
+  // of a re-seal sits on a later line. A sealed chapter is never written by the
+  // Gateway, so it is not deferred.
+  const header = JSON.parse(lines[0]!) as { type?: unknown; id?: unknown };
+  const sessionId = header.type === "session" ? header.id : undefined;
+  const sealed = typeof sessionId === "string" && sealedHome.has(sessionId);
+  if (!sealed && info.mtimeMs > settleBefore) { plan.sessions.deferred.push(path); return; }
+  plan.sessions.files += 1; plan.sessions.entries += entries; plan.sessions.values += values.length;
+  if (sealed) plan.sealedHome.push(path);
+  plan.files.push({ kind: "session", path, identity: identity(info), before, after: Buffer.from(lines.join("\n"), "utf8"), changes: entries,
+    ...(sealed ? { reseal: { sessionId: sessionId as string, values } } : {}) });
 }
 
 /** Strips retired labels wherever a Profile note body lives: section heads and claim anchors. */
@@ -159,7 +277,16 @@ export async function planRetiredFormatMigration(tronHome: string, settleSeconds
   return plan;
 }
 
+/** Removes the staged replacements an interrupted run left beside `path`. */
+async function removeStaleTemporaries(path: string): Promise<void> {
+  const name = basename(path);
+  for (const entry of await readdir(dirname(path))) {
+    if (entry.startsWith(`${name}.`) && /^\.(?:migration|restore)-\d+\.tmp$/u.test(entry.slice(name.length))) await rm(join(dirname(path), entry), { force: true });
+  }
+}
+
 async function stage(path: string, bytes: Buffer, mode: number): Promise<string> {
+  await removeStaleTemporaries(path);
   const temporary = `${path}.migration-${process.pid}.tmp`;
   const handle = await open(temporary, "wx", mode);
   try { await handle.writeFile(bytes); await syncDurably(handle); } catch (error) { await handle.close(); await rm(temporary, { force: true }); throw error; }
@@ -174,15 +301,17 @@ const unchanged = "changed since it was read; rerun to include it";
  * rename: an append that reached it after the last check is detected, and if the
  * migrated file is still exactly as published the complete original is put back
  * un-migrated for a later run; otherwise its final bytes are kept for a manual
- * merge. Appends after the rename land in the migrated file and are kept.
+ * merge. Appends after the rename land in the migrated file and are kept. A
+ * sealed Home chapter's re-seal record is durable before its rename.
  */
-async function publishSession(file: PlannedFile, raced: string): Promise<void> {
+async function publishSession(file: PlannedFile, raced: string, tronHome: string): Promise<void> {
   const original = await open(file.path, "r");
   try {
     const info = await original.stat();
     if (!same(identity(info), file.identity)) throw new Error(unchanged);
     const temporary = await stage(file.path, file.after, info.mode & 0o777);
     try {
+      if (file.reseal) await appendReseal(tronHome, resealRecord(tronHome, file.path, file.before, file.after, file.reseal));
       if (!same(identity(await lstat(file.path)), file.identity)) throw new Error(unchanged);
       await rename(temporary, file.path);
     } catch (error) { await rm(temporary, { force: true }); throw error; }
@@ -240,6 +369,11 @@ async function syncDirectory(path: string): Promise<void> {
   try { await syncDurably(directory); } finally { await directory.close(); }
 }
 
+function resealRecord(tronHome: string, path: string, before: Buffer, after: Buffer, reseal: NonNullable<PlannedFile["reseal"]>): ChapterReseal {
+  return { version: 1, sessionId: reseal.sessionId, path: relative(tronHome, path), at: new Date().toISOString(),
+    before: { sha256: digest(before), size: before.length }, after: { sha256: digest(after), size: after.length }, values: reseal.values };
+}
+
 /** Clones every original and writes the manifest before the first replacement. */
 async function backUp(tronHome: string, backup: string, files: readonly PlannedFile[]): Promise<Manifest> {
   await mkdir(backup, { recursive: true, mode: 0o700 });
@@ -250,7 +384,7 @@ async function backUp(tronHome: string, backup: string, files: readonly PlannedF
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     await copyFile(file.path, target, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
     if (digest(await readFile(target)) !== digest(file.before)) throw new Error(`${file.path} changed while it was backed up; rerun`);
-    manifest.files.push({ path, kind: file.kind, before: digest(file.before), after: digest(file.after), changes: file.changes });
+    manifest.files.push({ path, kind: file.kind, before: digest(file.before), after: digest(file.after), changes: file.changes, ...(file.reseal ? { reseal: file.reseal } : {}) });
   }
   await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   return manifest;
@@ -261,13 +395,18 @@ export async function applyRetiredFormatMigration(tronHome: string, backup: stri
   await backUp(tronHome, backup, plan.files);
   let published = 0; const failed: string[] = [];
   for (const [index, file] of plan.files.entries()) {
-    try { await (file.kind === "profile" ? publishProfile : publishSession)(file, join(backup, `raced-${index}`)); published += 1; }
+    try {
+      if (file.kind === "profile") await publishProfile(file, join(backup, `raced-${index}`));
+      else await publishSession(file, join(backup, `raced-${index}`), tronHome);
+      published += 1;
+    }
     catch (error) { failed.push(`${relative(tronHome, file.path)}: ${(error as Error).message}`); }
   }
   return { published, failed };
 }
 
-/** Rollback: restores each original whose current bytes are still exactly what this run published. */
+/** Rollback: restores each original whose current bytes are still exactly what this
+ * run published. A re-sealed chapter's reverse record is durable before its rename. */
 export async function restoreRetiredFormatMigration(tronHome: string, backup: string): Promise<{ restored: number; skipped: string[] }> {
   const manifest = JSON.parse(await readFile(join(backup, "manifest.json"), "utf8")) as Manifest;
   if (manifest.tronHome !== tronHome) throw new Error(`Backup ${backup} belongs to ${manifest.tronHome}, not ${tronHome}`);
@@ -277,11 +416,20 @@ export async function restoreRetiredFormatMigration(tronHome: string, backup: st
     const current = digest(await readFile(live));
     if (current === file.before) continue;
     if (current !== file.after) { skipped.push(`${file.path}: changed after the migration; restore it by hand from ${original}`); continue; }
-    if (digest(await readFile(original)) !== file.before) throw new Error(`Backup of ${file.path} does not match its manifest`);
+    const bytes = await readFile(original);
+    if (digest(bytes) !== file.before) throw new Error(`Backup of ${file.path} does not match its manifest`);
+    await removeStaleTemporaries(live);
     const temporary = `${live}.restore-${process.pid}.tmp`;
-    await copyFile(original, temporary, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
+    const handle = await open(temporary, "wx", (await lstat(live)).mode & 0o777);
+    try { await handle.writeFile(bytes); await syncDurably(handle); } finally { await handle.close(); }
+    if (file.reseal) {
+      const migrated = await readFile(live);
+      const reverse = { sessionId: file.reseal.sessionId, values: file.reseal.values.map(value => ({ ...value, from: value.to, to: value.from })) };
+      await appendReseal(manifest.tronHome, resealRecord(manifest.tronHome, live, migrated, bytes, reverse));
+    }
     if (digest(await readFile(live)) !== file.after) { await rm(temporary); skipped.push(`${file.path}: changed during the restore; restore it by hand from ${original}`); continue; }
     await rename(temporary, live);
+    await syncDirectory(live);
     restored += 1;
   }
   return { restored, skipped };
@@ -312,7 +460,6 @@ async function main(argv: readonly string[]): Promise<number> {
   const plan = await planRetiredFormatMigration(resolve(tronHome), settle);
   process.stdout.write(`plan ${summary(plan)}\n`);
   for (const path of plan.sessions.deferred) process.stdout.write(`deferred (written within ${settle}s) ${path}\n`);
-  for (const path of plan.sealedHome) process.stdout.write(`kept (sealed Home chapter) ${path}\n`);
   if (!flags.has("--apply")) return 0;
   const result = await applyRetiredFormatMigration(resolve(tronHome), resolve(options.get("--backup")!), plan);
   process.stdout.write(`applied ${JSON.stringify(result)}\n`);

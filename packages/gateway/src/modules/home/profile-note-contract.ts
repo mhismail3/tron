@@ -230,7 +230,7 @@ function validateNoteContent(value: unknown): void {
     if (content.profile !== undefined) {
       validateProfileMetadata(content.profile);
       if ((content.tags as string[] | undefined)?.includes("kind-correction") && content.profile.path[0] !== "corrections") throw new Error("Corrections stay in the Corrections area");
-      if (!(content.tags as string[] | undefined)?.includes("home-profile") || (content.tags as string[]).some(tag => tag.startsWith("home-file-"))) throw new Error("Profile placement must have membership and no legacy file labels");
+      if (!(content.tags as string[] | undefined)?.includes("home-profile")) throw new Error("Profile placement must have membership");
     }
     if (content.retired !== undefined && typeof content.retired !== "boolean") throw new Error("Invalid note retirement");
     if (content.privacyScope !== undefined && !["private", "shared"].includes(content.privacyScope as string)) throw new Error("Invalid note privacy scope");
