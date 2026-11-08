@@ -4,7 +4,7 @@
   "tier": "high-stakes",
   "laws": "blocks/schedule/occurrence/Block.dfy",
   "oracle": true,
-  "toolHash": "3bf34288c20e1b8a",
+  "toolHash": "a36fd30c10c2fc06",
   "mutants": 118,
   "stillborn": 5,
   "valid": 113,
@@ -12,7 +12,7 @@
   "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 300,
+  "seconds": 307,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.042,
@@ -49,7 +49,7 @@
   },
   {
    "law": "L6 classify-due",
-   "killed": 82,
+   "killed": 83,
    "only": 57
   },
   {
@@ -589,10 +589,11 @@
    "killedBy": [
     "L1 next-sound",
     "L2 next-minimal",
+    "L6 classify-due",
     "L8 first-after-occurrence"
    ],
    "unmapped": [],
-   "timeouts": 1,
+   "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
