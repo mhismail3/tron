@@ -38,12 +38,13 @@ IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppU
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
 NOT_DRIVEN = ("ios-lanes", "mac", "relay")
-# Estimated test seconds per iOS runner process: half the runner's unchanged 1200 s focused
-# deadline, so a shard keeps it even when every method takes twice its longest recorded time.
-# A method's estimate is the longest this Mac's retained runner logs record for it; a method
-# with none counts a third of the budget, three to a process (six 150-450 s HomeSheets journeys
-# overran one deadline).
-IOS_SHARD_SECONDS = 600.0
+# Estimated test seconds per iOS runner process. A shard keeps the runner's unchanged 1200 s
+# focused deadline even when every method takes twice its longest recorded time and the process
+# spends IOS_LAUNCH_SECONDS launching. A method with no record counts a third of the budget, so
+# unmeasured methods run three to a process.
+IOS_DEADLINE_SECONDS = 1200
+IOS_LAUNCH_SECONDS = 60
+IOS_SHARD_SECONDS = (IOS_DEADLINE_SECONDS - IOS_LAUNCH_SECONDS) / 2
 IOS_UNMEASURED_SECONDS = IOS_SHARD_SECONDS / 3
 # Runner logs scripts/tron-ios-test keeps for every worktree and lane (its RESULTS_ROOT), and the
 # line XCTest prints for each finished case.
@@ -598,6 +599,7 @@ class Launched:
 class Run:
     def __init__(self, sha: str, total: int):
         self.sha, self.total, self.index, self.steps = sha, total, 0, []
+        self.live: list[Launched] = []  # launched step processes not yet settled
         self.logs = ROOT / "test-results" / "verify" / sha
         self.logs.mkdir(parents=True, exist_ok=True)
         self.on_update = lambda: None
@@ -609,7 +611,7 @@ class Run:
         try:
             code = launched.process.wait()
         except KeyboardInterrupt:
-            self.stop([launched])
+            self.stop(list(self.live))
             raise
         return self.settle(launched, code, count, accept)
 
@@ -623,10 +625,20 @@ class Run:
                   "tests": None, "seconds": 0, "log": str(log.relative_to(ROOT))}
         self.steps.append(result)
         self.on_update()
-        with log.open("w") as stream:
-            process = subprocess.Popen(command, cwd=cwd, shell=isinstance(command, str), stdout=stream,
-                                       stderr=subprocess.STDOUT, env={**os.environ, **(env or {})}, start_new_session=True)
-        return Launched(label, result, process, log, time.time())
+        # Signals wait until the process is recorded as live, so an interrupt always finds it to
+        # stop; the child starts with them unblocked, so it can be stopped.
+        stopping = {signal.SIGINT, signal.SIGTERM}
+        blocked = signal.pthread_sigmask(signal.SIG_BLOCK, stopping)
+        try:
+            with log.open("w") as stream:
+                process = subprocess.Popen(command, cwd=cwd, shell=isinstance(command, str), stdout=stream,
+                                           stderr=subprocess.STDOUT, env={**os.environ, **(env or {})}, start_new_session=True,
+                                           preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, stopping))
+            launched = Launched(label, result, process, log, time.time())
+            self.live.append(launched)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+        return launched
 
     def stop(self, launched: list["Launched"]) -> None:
         """Stop and join the owned process groups (SIGTERM, then SIGKILL after 30 s); each is interrupted."""
@@ -649,6 +661,8 @@ class Run:
 
     def settle(self, launched: "Launched", code: int, count, accept, interrupted: bool = False) -> dict:
         result, label = launched.result, launched.label
+        if launched in self.live:
+            self.live.remove(launched)
         output = launched.log.read_text(errors="replace")
         ok = code in accept and not interrupted
         tests = count(output) if count and ok else None
@@ -665,6 +679,7 @@ class Run:
 
     def withdraw(self, launched: "Launched") -> None:
         """Forget a launch that admitted no work (an opportunistic shard refused a slot); its retry reuses the log."""
+        self.live.remove(launched)
         self.steps.remove(launched.result)
         self.on_update()
 
@@ -880,6 +895,9 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
                 free[shard.pad] = sorted(free[shard.pad] + [lane], key=lambda name: order.get(name, 0))
                 code = launched.process.returncode
                 if code == 73 and opportunistic:
+                    # The refused lane goes last, so the retry tries another lane first.
+                    free[shard.pad].remove(lane)
+                    free[shard.pad].append(lane)
                     run.withdraw(launched)
                     print(f"{launched.label}: no host slot free beside this run's other lanes; requeued", flush=True)
                     queue.insert(0, index)
@@ -904,7 +922,7 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
                     result["status"] = "failed"
                     failures.append((index, f"{labels[index]} passed {result['tests']} of its {len(shard)} named test(s)"))
     except KeyboardInterrupt:
-        run.stop([launched for launched, _, _ in running.values()])
+        run.stop(list(run.live))
         raise
     for index in sorted(queue):
         run.skipped(labels[index], "iOS acquisition deferred to batch", index=base + index + 1)
@@ -1041,6 +1059,8 @@ def main(argv: list[str]) -> int:
             deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "deferredCommands": deferred_commands,
+                          # Planned iOS commands are each shard's form when it runs alone; beside others in
+                          # flight a shard runs on another of these lanes with --host-slot-wait-seconds 0.
                           "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
                           "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0

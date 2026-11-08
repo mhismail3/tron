@@ -640,6 +640,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 echo "$*" >>"$FIXTURE_IOS_CALLS"
 if [[ "${FIXTURE_IOS_BUSY:-}" == "$1" && "$*" == *"${FIXTURE_IOS_BUSY_IN:-}"* ]]; then echo 'host slot wait expired; deferred'; exit 73; fi
 # A run's wall-clock span, for proving that shards on different lanes overlap.
+if [[ "$1" == run && -n "${FIXTURE_IOS_PIDS:-}" ]]; then echo "$$" >>"$FIXTURE_IOS_PIDS"; fi
 if [[ "$1" == run && -n "${FIXTURE_IOS_SECONDS:-}" ]]; then
   begun="$(python3 -c 'import time; print(time.time())')"; sleep "$FIXTURE_IOS_SECONDS"
   echo "$begun $(python3 -c 'import time; print(time.time())') $*" >>"$FIXTURE_IOS_SPANS"
@@ -672,7 +673,10 @@ class IosLaneTests(VerifyCase):
         r = self.repo
         products = Path(self.temp.name) / "products"
         calls = Path(self.temp.name) / "ios-calls.txt"
-        r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls))
+        # No runner logs: packing never reads this host's real test history.
+        (Path(self.temp.name) / "ios-runs").mkdir()
+        r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls),
+                     TRON_IOS_TEST_RESULTS_DIR=str(Path(self.temp.name) / "ios-runs"))
         tooling = json.loads((r.path / "tooling.module.json").read_text())
         # verify reads the host-wide slot count, one lane per slot, from the slot owner: the shipped count.
         tooling["owns"] += ["scripts/tron-ios-test", "scripts/ios-test-lock.py"]
@@ -840,8 +844,8 @@ class IosLaneTests(VerifyCase):
         """#2173: a selected class runs as method shards, each its own runner process under the
         unchanged deadline, packed by the longest time this Mac's runner logs record for each method
         (unmeasured methods three to a process), on one lane per host slot at once. A red shard does
-        not stop the rest; a lane refused a slot beside the run's others requeues its shard, and only
-        a refusal with nothing else in flight defers it and the rest."""
+        not stop the rest; a lane refused a slot beside the run's others requeues its shard, only a
+        refusal with nothing else in flight defers it and the rest, and SIGTERM stops every lane."""
         r = self.repo
         calls = self.ios_fixture()
         ios = "packages/ios-app/UITests"
@@ -924,12 +928,11 @@ class IosLaneTests(VerifyCase):
         # budget, and one estimated above it runs alone.
         results = Path(self.temp.name) / "ios-runs"
         case = lambda name, outcome, seconds: f"Test Case '-[TronMobileUITests.FixtureJourneyUITests {name}]' {outcome} ({seconds} seconds).\n"  # noqa: E731
-        (results / "a-run.1").mkdir(parents=True)
+        (results / "a-run.1").mkdir()
         (results / "a-run.1/test.log").write_text(case(ordered[0], "passed", "0.5") + case(ordered[1], "passed", "0.5")
                                                  + case(ordered[2], "passed", shipped.IOS_SHARD_SECONDS + 100))
         (results / "b-run.2").mkdir()
         (results / "b-run.2/test.log").write_text(case(ordered[1], "failed", shipped.IOS_SHARD_SECONDS) + case(ordered[3], "passed", "0.5"))
-        r.env.update(TRON_IOS_TEST_RESULTS_DIR=str(results))
         self.assertEqual(planned_shards(), [f"--host-slot-wait-seconds 30 {selectors(ordered[:1])}",
                                             f"--host-slot-wait-seconds 30 {selectors(ordered[1:2])}",
                                             f"--host-slot-wait-seconds 30 {selectors(ordered[2:3])}",
@@ -943,8 +946,39 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(r.report()["verdict"], "deferred", refused.stdout)
         self.assertEqual({step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")}, {"deferred"})
         self.assertEqual(len([step for step in r.report()["steps"] if step["name"].startswith("tests: ios")]), 5)
-        r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN"); r.env.pop("TRON_IOS_TEST_RESULTS_DIR")
-        r.env.pop("FIXTURE_IOS_SECONDS")
+        r.env.pop("FIXTURE_IOS_BUSY"); r.env.pop("FIXTURE_IOS_BUSY_IN")
+        for item in results.iterdir():
+            shutil.rmtree(item)
+
+        # SIGTERM stops and joins every lane's shard: none outlives verify, none starts after it,
+        # and the run is interrupted, never a pass.
+        pids = Path(self.temp.name) / "pids.txt"
+        calls.write_text("")
+        r.env.update(FIXTURE_IOS_SECONDS="120", FIXTURE_IOS_PIDS=str(pids))
+        process = subprocess.Popen([str(r.path / "scripts/tron"), "verify", "--base", "base", "--module", "ios-app/ui-tests",
+                                    "--skip", "mac"], cwd=r.path, env=r.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        try:
+            deadline = time.monotonic() + 60
+            while (not pids.exists() or len(pids.read_text().split()) < 3) and time.monotonic() < deadline:
+                time.sleep(.05)
+            started = [int(pid) for pid in pids.read_text().split()]
+            self.assertEqual(len(started), 3, "every lane's shard must start before the signal")
+            process.send_signal(signal.SIGTERM)
+            # Within the 30 s SIGKILL grace: each runner stops on SIGTERM itself.
+            output, _ = process.communicate(timeout=20)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        self.assertEqual(process.returncode, 130, output)
+        self.assertEqual(r.report()["verdict"], "interrupted", output)
+        self.assertEqual(sorted(step["status"] for step in r.report()["steps"] if step["name"].startswith("tests: ios")),
+                         ["interrupted"] * 3, output)
+        for pid in started:
+            with self.assertRaises(ProcessLookupError, msg=f"shard runner {pid} outlived verify"):
+                os.kill(pid, 0)
+        self.assertEqual(len([line for line in calls.read_text().splitlines() if line.startswith("run ")]), 3)
+        r.env.pop("FIXTURE_IOS_SECONDS"); r.env.pop("FIXTURE_IOS_PIDS")
 
         # A shard whose runner passes fewer tests than it names fails: a selector matched nothing.
         r.env.update(FIXTURE_IOS_PASSED="2")
