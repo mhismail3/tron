@@ -16,9 +16,10 @@ export function splitModelRef(value: string): { provider: string; id: string } |
 }
 
 /** Scope names #1634 retired, as old session entries recorded them. Session
- * readers map them to current names. Exit: the maintainer-run, backed-up
- * `scripts/tron migrate retired-formats` (#2329) rewrites retained entries;
- * this map and that migration are then deleted together. */
+ * readers map them to current names. The maintainer-run, backed-up
+ * `scripts/tron migrate retired-formats` (#2329) rewrites retained entries
+ * except sealed Home chapters, whose bytes Home memory pins; those still hold
+ * these names, so this map stays until their reading is decided in #2329. */
 export const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
   mac: "global", builtin: "global", chat: "session", profile: "session",
 });

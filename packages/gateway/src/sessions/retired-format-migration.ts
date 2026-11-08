@@ -21,13 +21,17 @@ import { SESSION_SETTINGS_ENTRY } from "./session-settings.js";
  * its original into the backup directory with a manifest of both digests, then
  * publishes atomically only if the file is unchanged since it was read (see
  * `publishSession` and `publishProfile` for a Gateway write racing publication). Session files written within
- * `--settle-seconds` are deferred to a later run; run it while Home is idle. It
- * refuses a configured `sessionDir` and an uncommitted Profile organization. The
- * shared Changes record is append-only history and is not rewritten. Delete this
- * module with the retired readers once the live run is verified.
+ * `--settle-seconds` are deferred to a later run; run it while Home is idle. A
+ * chapter the Home ledger records as sealed is never rewritten: Home memory pins
+ * its exact bytes and blocks on any change (`episodic/home-source.ts`). It
+ * refuses a configured `sessionDir`, an unsupported Home ledger and an
+ * uncommitted Profile organization. The shared Changes record is append-only
+ * history and is not rewritten. This module goes with the retired readers once
+ * #2329 decides how sealed Home chapters that keep retired names are read.
  */
 
 const PROFILE_FILE = "workspace/files/Profile.json";
+const HOME_LEDGER = "gateway/home/home.json";
 const RETIRED_LABEL = "home-file-";
 const SETTINGS_MARK = `"customType":"${SESSION_SETTINGS_ENTRY}"`;
 
@@ -36,6 +40,8 @@ interface PlannedFile { kind: "session" | "profile"; path: string; identity: Ide
 export interface MigrationPlan {
   sessions: { scanned: number; files: number; entries: number; values: number; deferred: string[] };
   profile: { notes: number; labels: number; receipts: number };
+  /** Sealed Home chapters that hold a retired form and are kept as they are. */
+  sealedHome: string[];
   files: PlannedFile[];
 }
 interface ManifestFile { path: string; kind: PlannedFile["kind"]; before: string; after: string; changes: number }
@@ -70,7 +76,21 @@ function currentSettingsLine(line: string): { line: string; values: number } | u
   return values ? { line: JSON.stringify(entry), values } : undefined;
 }
 
-async function planSession(path: string, settleBefore: number, plan: MigrationPlan): Promise<void> {
+/** Session IDs of the chapters the Home ledger has sealed. */
+async function sealedHomeChapters(tronHome: string): Promise<ReadonlySet<string>> {
+  const text = await readFile(tronHomePath(tronHome, HOME_LEDGER), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+  if (text === undefined) return new Set();
+  const ledger = JSON.parse(text) as { version?: unknown; chapters?: unknown };
+  if (ledger.version !== 2 || !Array.isArray(ledger.chapters)) throw new Error("Unsupported Home ledger format");
+  const sealed = new Set<string>();
+  for (const chapter of ledger.chapters as Array<{ sessionId?: unknown; state?: unknown }>) {
+    if (typeof chapter?.sessionId !== "string" || typeof chapter.state !== "string") throw new Error("Unsupported Home ledger format");
+    if (chapter.state === "sealed") sealed.add(chapter.sessionId);
+  }
+  return sealed;
+}
+
+async function planSession(path: string, settleBefore: number, sealedHome: ReadonlySet<string>, plan: MigrationPlan): Promise<void> {
   plan.sessions.scanned += 1;
   const info = await lstat(path);
   const before = await readFile(path);
@@ -84,6 +104,7 @@ async function planSession(path: string, settleBefore: number, plan: MigrationPl
     lines[index] = current.line; entries += 1; values += current.values;
   }
   if (!entries) return;
+  if (sealedHome.has((JSON.parse(lines[0]!) as { id?: unknown }).id as string)) { plan.sealedHome.push(path); return; }
   if (info.mtimeMs > settleBefore) { plan.sessions.deferred.push(path); return; }
   plan.sessions.files += 1; plan.sessions.entries += entries; plan.sessions.values += values;
   plan.files.push({ kind: "session", path, identity: identity(info), before, after: Buffer.from(lines.join("\n"), "utf8"), changes: entries });
@@ -131,8 +152,9 @@ async function planProfile(path: string, plan: MigrationPlan): Promise<void> {
 export async function planRetiredFormatMigration(tronHome: string, settleSeconds: number, now = Date.now()): Promise<MigrationPlan> {
   const settings = await readFile(tronHomePath(tronHome, "agent/settings.json"), "utf8").then(text => JSON.parse(text) as { sessionDir?: unknown }, (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return {} as { sessionDir?: unknown }; throw error; });
   if (settings.sessionDir !== undefined) throw new Error("agent/settings.json sets sessionDir; this migration covers only agent/sessions");
-  const plan: MigrationPlan = { sessions: { scanned: 0, files: 0, entries: 0, values: 0, deferred: [] }, profile: { notes: 0, labels: 0, receipts: 0 }, files: [] };
-  for await (const path of sessionFiles(tronHomePath(tronHome, "agent/sessions"))) await planSession(path, now - settleSeconds * 1_000, plan);
+  const sealedHome = await sealedHomeChapters(tronHome);
+  const plan: MigrationPlan = { sessions: { scanned: 0, files: 0, entries: 0, values: 0, deferred: [] }, profile: { notes: 0, labels: 0, receipts: 0 }, sealedHome: [], files: [] };
+  for await (const path of sessionFiles(tronHomePath(tronHome, "agent/sessions"))) await planSession(path, now - settleSeconds * 1_000, sealedHome, plan);
   await planProfile(tronHomePath(tronHome, PROFILE_FILE), plan);
   return plan;
 }
@@ -266,7 +288,7 @@ export async function restoreRetiredFormatMigration(tronHome: string, backup: st
 }
 
 function summary(plan: MigrationPlan): string {
-  return JSON.stringify({ sessions: { ...plan.sessions, deferred: plan.sessions.deferred.length }, profile: plan.profile, files: plan.files.length });
+  return JSON.stringify({ sessions: { ...plan.sessions, deferred: plan.sessions.deferred.length }, profile: plan.profile, sealedHome: plan.sealedHome.length, files: plan.files.length });
 }
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -290,6 +312,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const plan = await planRetiredFormatMigration(resolve(tronHome), settle);
   process.stdout.write(`plan ${summary(plan)}\n`);
   for (const path of plan.sessions.deferred) process.stdout.write(`deferred (written within ${settle}s) ${path}\n`);
+  for (const path of plan.sealedHome) process.stdout.write(`kept (sealed Home chapter) ${path}\n`);
   if (!flags.has("--apply")) return 0;
   const result = await applyRetiredFormatMigration(resolve(tronHome), resolve(options.get("--backup")!), plan);
   process.stdout.write(`applied ${JSON.stringify(result)}\n`);
