@@ -142,12 +142,12 @@ function settingsQualifiers(raw: unknown, label: string): Qualifiers {
 function profileChangeOp(raw: unknown, label: string): HomeProfileRequest {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new GatewayError("invalid_request", `${label} must be an object`);
   const value = raw as Record<string, unknown>;
-  const action = oneOf(value.action, `${label}.action`, [...HOME_PROFILE_MAINTAINER_ACTIONS, "migrate", "reorganize", "retry"] as const);
+  const action = oneOf(value.action, `${label}.action`, [...HOME_PROFILE_MAINTAINER_ACTIONS, "reorganize", "retry"] as const);
   if (action === "retry") {
     rejectUnknownFields(value, ["action", "commandId"], label);
     return { action, commandId: string(value.commandId, `${label}.commandId`, { min: 8, max: 200 }) };
   }
-  if (action === "migrate" || action === "reorganize") {
+  if (action === "reorganize") {
     rejectUnknownFields(value, ["action", "assignments"], label);
     if (!Array.isArray(value.assignments) || value.assignments.length < 1 || value.assignments.length > 500) throw new GatewayError("invalid_request", "assignments holds 1 to 500 exact profile destinations");
     return { action, assignments: value.assignments.map((raw, index) => {

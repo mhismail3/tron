@@ -27,14 +27,10 @@ export function storedNoteContent(content: NoteContent): NoteContent {
   if (content.retired !== false) return content;
   const { retired: _cleared, ...rest } = content; return rest;
 }
-function profileMigrationMembers(notes: readonly ProfileNoteRecord[]): ProfileNoteRecord[] {
-  const superseded = new Set(notes.flatMap(note => note.relations.filter(relation => relation.type === "supersedes").map(relation => relation.recordId)));
-  return notes.filter(note => { const file = profileFile(note.content.tags); return !note.content.profile && !note.content.retired && !superseded.has(note.id) && (file === undefined || file === "core" || file === "home"); });
-}
 export interface ProfileLabel { index: number; tag: string }
 export const profileLabels = (tags: readonly string[] = []): ProfileLabel[] => tags.flatMap((tag, index) => tag.startsWith(PROFILE_FILE_TAG) ? [{ index, tag }] : []);
 export interface ProfileAssignment { id: string; expectedRevision: string; path?: string; profile?: ProfileMetadata; file?: ProfileFile; labels?: ProfileLabel[] }
-export interface ProfilePartitionRequest { commandId: string; mode: "migrate" | "reorganize"; assignments: ProfileAssignment[] }
+export interface ProfilePartitionRequest { commandId: string; mode: "reorganize"; assignments: ProfileAssignment[] }
 export interface ProfilePartitionResult { audit?: SubjectAuditReference; changes: Array<{ id: string; beforeRevision: string; revisionId: string; beforeFile?: ProfileFile; file?: ProfileFile }> }
 export interface ProfilePartitionEnvelope { version: 1; context: SubjectContext; replayAt: string; writes: SubjectWrite[] }
 export interface ProfilePartitionAudit {
@@ -59,16 +55,15 @@ function assignmentContent(note: ProfileNoteRecord, assignment: ProfileAssignmen
  * is an input to an admitted transition. The file owner publishes the whole plan. */
 export function prepareProfilePartition(request: ProfilePartitionRequest, notes: ProfileNoteRecord[], excluded: (note: ProfileNoteRecord) => boolean,
   restoring = false, revisions: Readonly<Record<string, string>> = {}): { originals: ProfileNoteRecord[]; prepared: ProfileNoteRecord[]; result: ProfilePartitionResult } {
-  if (!["migrate", "reorganize"].includes(request.mode) || request.assignments.length < 1 || request.assignments.length > 500) refuse("Partition requires 1 to 500 explicit assignments");
+  if (request.mode !== "reorganize" || request.assignments.length < 1 || request.assignments.length > 500) refuse("Partition requires 1 to 500 explicit assignments");
   const assignments = [...request.assignments].sort((a, b) => a.id.localeCompare(b.id));
   if (new Set(assignments.map(item => item.id)).size !== assignments.length) refuse("Duplicate profile assignment");
   const current = new Map(notes.map(note => [note.id, note]));
-  const members = profileMigrationMembers(notes);
   const originals: ProfileNoteRecord[] = [], prepared: ProfileNoteRecord[] = [];
   for (const item of assignments) {
     assertProfileNoteId(item.id, "profile note"); assertProfileNoteId(item.expectedRevision, "profile revision");
     if (item.file !== undefined && !validProfileFile(item.file)) refuse("Invalid explicit profile partition");
-    if (item.labels !== undefined && (item.file !== undefined || request.mode !== "reorganize" || !Array.isArray(item.labels) || item.labels.some((label, index) => typeof label.tag !== "string" || !label.tag.startsWith(PROFILE_FILE_TAG) || !Number.isInteger(label.index) || label.index < 0 || (index > 0 && label.index <= item.labels![index - 1]!.index)))) refuse("Invalid profile label restoration");
+    if (item.labels !== undefined && (item.file !== undefined || !Array.isArray(item.labels) || item.labels.some((label, index) => typeof label.tag !== "string" || !label.tag.startsWith(PROFILE_FILE_TAG) || !Number.isInteger(label.index) || label.index < 0 || (index > 0 && label.index <= item.labels![index - 1]!.index)))) refuse("Invalid profile label restoration");
     if ([item.path !== undefined, item.profile !== undefined, item.file !== undefined, item.labels !== undefined].filter(Boolean).length !== 1) refuse("Exactly one profile placement is required");
     if (!restoring && item.path === undefined) refuse("New profile organization requires a v2 path; Prior is read-only except exact Changes Undo");
     const original = current.get(item.id);
@@ -80,7 +75,6 @@ export function prepareProfilePartition(request: ProfilePartitionRequest, notes:
     if (Buffer.byteLength(JSON.stringify(next)) > 2 * 1_048_576) refuse("Partitioned note exceeds its record byte bound");
     originals.push(original!); prepared.push(next);
   }
-  if (request.mode === "migrate" && (members.length !== assignments.length || members.some(note => !assignments.some(item => item.id === note.id)))) refuse("Migration must assign exactly the active legacy Core/Home notes; inactive and scoped originals stay unchanged");
   if (!restoring) { const replacements = new Map(prepared.map(note => [note.id, note])); assertProfileCapacity(notes, notes.map(note => replacements.get(note.id) ?? note)); }
   const changes = prepared.flatMap((next, index) => {
     const before = originals[index]!;

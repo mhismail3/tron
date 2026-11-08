@@ -2276,7 +2276,7 @@
       },
       {
         "name": "profile",
-        "schema": "sha256:7c4018de5cf487ab1901eaaa535635bf1f987db88f41ff7c21f09916932dae01"
+        "schema": "sha256:221aa850ccb82ba0712d1ab23f3f2c9d2d2ceb21ef2f17739978176df917f7cc"
       },
       {
         "name": "obligation",
@@ -3522,7 +3522,7 @@
               }
             },
             {
-              "description": "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
+              "description": "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit reorganize assigns only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
               "name": "profile",
               "parameters": {
                 "additionalProperties": false,
@@ -3550,10 +3550,6 @@
                         "type": "string"
                       },
                       {
-                        "const": "migrate",
-                        "type": "string"
-                      },
-                      {
                         "const": "reorganize",
                         "type": "string"
                       },
@@ -3569,7 +3565,7 @@
                     "description": "read an explicit file or the metadata index; learn, refine, supersede or retire an item."
                   },
                   "assignments": {
-                    "description": "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and correction claims stay unchanged.",
+                    "description": "Explicit exact-revision destinations. reorganize names only the selected notes. Placement only: text, authority and correction claims stay unchanged.",
                     "items": {
                       "additionalProperties": false,
                       "properties": {
