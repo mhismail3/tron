@@ -6,9 +6,10 @@ what enforces it; a rule with no enforcement is cut. Safety boundaries live in
 
 ## P1 A module owns its code and its tests
 
-**Rule.** Code, tests and fixtures sit in the module that owns them (its `*.module.json`). Tests
-reach other modules only through their public interfaces. A commit is gated by the local tests of
-the modules it touches, plus the E2E journeys that prove any behaviour it deletes.
+**Rule.** The repository is a monorepo: code, tests and fixtures sit in the module that owns them
+(its `*.module.json`). Tests reach other modules only through their public interfaces. A commit is
+gated by the local tests of the modules it touches, plus the E2E journeys that prove any behaviour
+it deletes.
 **Evidence.** At def6e931c, 209 of 240 JS/TS test files imported another module (counting
 `test-support`); 150 of 228 Gateway test files imported another module's internals; and 92 test
 files (55,866 lines) booted the whole Gateway registry (#2316 baseline). Under that coupling the full
@@ -40,7 +41,11 @@ implementation snapshots) are retired. Loosening an assertion that guards real b
 allowed. Other additions are a fix, a consolidation that removes more than it adds, or a type
 change that deletes the runtime checks it replaces. No backward-compatibility code: no shims,
 aliases, old-format or fallback readers, flags or "just in case" wrappers; live old data moves once
-through a backed-up migration.
+through a backed-up migration. Simplify by reusing and hardening existing primitives (approval
+requests with log/Undo, the one generalized app UI, Home memory, inline display/artifacts), not
+per-feature machinery. A deletion removes the machinery but keeps its process value: each kept
+behaviour is listed and E2E-proven before the deletion lands. Never cut lines by dropping a whole
+capability; each capability's module stays clean, proven and self-contained.
 **Evidence.** The #2297 structure program added custom governance tooling and ended at net +227
 lines. Governance tooling alone was about 14,000 lines (#2316 §0). Tests reached about 127,000 lines:
 fail-before/pass-after named no owner for the proof and only deleting a test needed evidence, so each
