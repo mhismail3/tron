@@ -723,6 +723,37 @@ class IosLaneTests(VerifyCase):
         skipped = r.verify("--module", "ios-app/ui-tests", "--skip", "ios", "--plan")
         self.assertEqual(skipped.returncode, 0, skipped.stderr)
 
+    def test_ipad_only_methods_run_in_their_own_shards_on_the_worktrees_ipad_lane(self) -> None:
+        """#2331: a test that skips unless on an iPad (in itself, its class's setUp or a helper it
+        calls) runs on this worktree's iPad lane, never alone on the iPhone lane where its shard
+        passes nothing; iPhone methods stay on the default lane."""
+        r = self.repo
+        calls = self.ios_fixture()
+        ios = "packages/ios-app/UITests"
+        gate = "try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, \"iPad\")"
+        r.write(f"{ios}/FixtureJourneyUITests.swift", "final class FixtureJourneyUITests: XCTestCase {\n"
+                f"    @MainActor func testPadReturn() throws {{\n        {gate}\n    }}\n"
+                "    @MainActor func testPhoneReturn() throws {\n        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, \"iPhone\")\n    }\n"
+                "    func testWindowed() throws {\n        try windowed()\n    }\n"
+                f"    private func windowed() throws {{\n        {gate}\n    }}\n}}\n")
+        r.write(f"{ios}/FixturePadUITests.swift", "final class FixturePadUITests: XCTestCase {\n"
+                f"    override func setUpWithError() throws {{\n        {gate}\n    }}\n"
+                "    func testColumn() {}\n}\n")
+        r.commit("ipad-only journeys")
+        planned = r.verify("--module", "ios-app/ui-tests", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        commands = {c["name"]: " ".join(c["command"][1:]) for c in plan["commands"] if c["name"].startswith("tests: ios") and "command" in c}
+        journey, pad = "TronMobileUITests/FixtureJourneyUITests", "TronMobileUITests/FixturePadUITests"
+        lane = "--lane verify-ipad-" + hashlib.sha256(str(r.path.resolve()).encode()).hexdigest()[:12] + " --device-type iPad Pro 13-inch (M5)"
+        iphone = [command for command in commands.values() if f"{journey}/testPhoneReturn" in command]
+        self.assertEqual(len(iphone), 1, commands)
+        self.assertNotIn("--lane", iphone[0])
+        for method in (f"{journey}/testPadReturn", f"{journey}/testWindowed", f"{pad}/testColumn"):
+            owning = [command for command in commands.values() if method in command]
+            self.assertEqual(len(owning), 1, commands)
+            self.assertIn(lane, owning[0], f"{method} must run on the iPad lane: {owning[0]}")
+            self.assertNotIn(f"{journey}/testPhoneReturn", owning[0])
+
     def test_a_class_larger_than_one_shard_runs_every_method_in_bounded_processes(self) -> None:
         """#2173: a selected class runs as method shards of at most IOS_SHARD_TESTS, each its own
         runner process under the unchanged deadline, and a red shard does not stop the rest."""
