@@ -42,14 +42,11 @@ export interface GatewayConfig {
 
 const GATEWAY_CONFIG_MAX_BYTES = 16 * 1_024;
 const MACHINE_GROUP_MAX_BYTES = 256;
-const LEGACY_MACHINE_GROUP_FILE = ".tron-machine-group-id";
 
 interface StoredGatewayConfig {
   version: 1;
   machineId: string;
   machineName: string;
-  /** Accepted only to normalize the retired pre-workspace configuration. */
-  defaultWorkspace?: string;
 }
 
 function valueAfter(args: string[], name: string): string | undefined {
@@ -232,20 +229,14 @@ export function resolveLanAddresses(interfaces = networkInterfaces()): LanAddres
 function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Record<string, unknown>;
-  const hasRetiredWorkspace = Object.prototype.hasOwnProperty.call(document, "defaultWorkspace");
-  const expectedKeys = hasRetiredWorkspace
-    ? ["version", "machineId", "machineName", "defaultWorkspace"]
-    : ["version", "machineId", "machineName"];
+  const expectedKeys = ["version", "machineId", "machineName"];
   const keys = Object.keys(document);
   return keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key))
     && document.version === 1
     && typeof document.machineId === "string" && Buffer.byteLength(document.machineId) > 0
     && Buffer.byteLength(document.machineId) <= 256 && !/[\u0000-\u001f\u007f]/.test(document.machineId)
     && typeof document.machineName === "string" && Buffer.byteLength(document.machineName) > 0
-    && Buffer.byteLength(document.machineName) <= 1_024 && !/[\u0000-\u001f\u007f]/.test(document.machineName)
-    && (!hasRetiredWorkspace
-      || (typeof document.defaultWorkspace === "string" && Buffer.byteLength(document.defaultWorkspace) > 0
-        && Buffer.byteLength(document.defaultWorkspace) <= 8_192 && !/[\u0000-\u001f\u007f]/.test(document.defaultWorkspace)));
+    && Buffer.byteLength(document.machineName) <= 1_024 && !/[\u0000-\u001f\u007f]/.test(document.machineName);
 }
 
 async function storedGatewayConfig(path: string): Promise<StoredGatewayConfig | null> {
@@ -296,21 +287,7 @@ async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGate
   try {
     if (!created) {
       const stored = await storedGatewayConfig(path);
-      if (stored) {
-        // The former defaultWorkspace field was never an authoritative
-        // workspace setting. Normalize it while holding the existing config
-        // lock so concurrent Gateway starts cannot publish mixed shapes.
-        if (Object.prototype.hasOwnProperty.call(stored, "defaultWorkspace")) {
-          const normalized: StoredGatewayConfig = {
-            version: stored.version,
-            machineId: stored.machineId,
-            machineName: stored.machineName,
-          };
-          await durableAtomicWriteJson(path, normalized);
-          return normalized;
-        }
-        return stored;
-      }
+      if (stored) return stored;
       throw new GatewayError("conflict", "Gateway identity configuration is empty");
     }
     const next: StoredGatewayConfig = {
@@ -325,26 +302,15 @@ async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGate
   }
 }
 
-function machineGroupIdentityPaths(
+function machineGroupIdentityPath(
   environment: NodeJS.ProcessEnv = process.env,
   userHome = homedir(),
-): { readonly canonical: string; readonly legacy: string } {
+): string {
   const override = environment.TRON_MACHINE_GROUP_PATH?.trim();
   if (override && !isAbsolute(override)) {
     throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_PATH must be absolute");
   }
-  const canonical = override ?? tronHomePath(join(userHome, ".tron"), "internal/machine-group-id");
-  return { canonical, legacy: join(userHome, LEGACY_MACHINE_GROUP_FILE) };
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
+  return override ?? tronHomePath(join(userHome, ".tron"), "internal/machine-group-id");
 }
 
 async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<string> {
@@ -355,23 +321,7 @@ async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<strin
     }
     return injected;
   }
-  const paths = machineGroupIdentityPaths(environment);
-  // The old file is intentionally not read as a startup fallback. A missing
-  // canonical file with a legacy source requires the explicit operator
-  // migration, otherwise startup would silently create a second identity.
-  if (!environment.TRON_MACHINE_GROUP_PATH?.trim()) {
-    const canonicalPresent = await pathExists(paths.canonical);
-    const legacyPresent = await pathExists(paths.legacy);
-    if (legacyPresent) {
-      throw new GatewayError(
-        "conflict",
-        canonicalPresent
-          ? "Machine group identity migration required: retire ~/.tron-machine-group-id before starting Tron"
-          : "Machine group identity migration required: stage ~/.tron-machine-group-id at ~/.tron/internal/machine-group-id",
-      );
-    }
-  }
-  const path = paths.canonical;
+  const path = machineGroupIdentityPath(environment);
   try {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const value = await updateJsonLocked<unknown>(
@@ -424,9 +374,6 @@ export async function loadConfig(
   const pushServiceOrigin = await loadProductPushOrigin();
 
   const explicitAgentDir = environment.PI_CODING_AGENT_DIR;
-  if (environment.TRON_AGENT_DIR_NAME?.trim()) {
-    throw new GatewayError("invalid_request", "TRON_AGENT_DIR_NAME is retired; use an absolute PI_CODING_AGENT_DIR override or the profile default");
-  }
   if (explicitAgentDir && !isAbsolute(explicitAgentDir)) {
     throw new GatewayError("invalid_request", "PI_CODING_AGENT_DIR must be absolute");
   }

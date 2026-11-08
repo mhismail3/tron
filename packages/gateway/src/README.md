@@ -24,23 +24,19 @@ modules stay separate, so read-only consumers do not gain a lockfile dependency.
 
 - **Agent home** (Pi's canonical home) is `<tronHome>/agent`: `~/.tron/agent` for
   Stable, `~/.tron-dev/agent` for the isolated Debug supervisor. An absolute
-  `PI_CODING_AGENT_DIR` is the only override (the Debug supervisor strips it); the
-  retired `TRON_AGENT_DIR_NAME` is rejected. Canonical JSONL, settings, credentials,
+  `PI_CODING_AGENT_DIR` is the only override (the Debug supervisor strips it). Canonical JSONL, settings, credentials,
   packages, resources, retries and compaction stay there. The retired `~/.pi/agent`
   is never read, migrated or deleted. Stable and Debug never share these stores.
 - **Gateway state** is `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`.
   `gateway.json` is an exact-shape document (16 KiB max, 256-byte machine ID, 1 KiB
-  name); unsafe, malformed or oversized files fail startup without rekeying. The old
-  version-1 shape with a valid `defaultWorkspace` is normalized under the config lock
-  by removing only that field; unknown shapes are never rewritten.
+  name); unsafe, malformed, oversized or unknown-shape files fail startup without rekeying.
 - Owner-only regular non-symlink files: `local-auth.json` (local wrapper credential,
   0600), `devices.json` (hashed mobile devices), `enrollment.json` (current
   invitation: ten minutes, one use), `notifications.json`
   ([notifications](notifications/README.md)). Malformed credentials fail closed.
 - The physical-machine group ID lives at the one shared path
   `~/.tron/internal/machine-group-id` for both Stable and Debug, used only for
-  connection grouping; while the retired `~/.tron-machine-group-id` exists, startup
-  refuses rather than mint a second identity.
+  connection grouping.
 - The internal workspace is the sibling `<tronHome>/workspace`
   ([workspace](workspace/README.md)). Delegated provider artifacts live under
   `<tronHome>/internal/subagents/` ([internal-workspace.md](../docs/internal-workspace.md#delegated-provider-root)).

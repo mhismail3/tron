@@ -19,9 +19,7 @@ inferred from pairing identity, browser preferences, or the current project.
   Installed Swift apps are owned by `SwiftAppStore` under `state/apps/`
   ([swift-apps.md](swift-apps.md)); agents use the `swift_app` tool.
 - `internal/machine-group-id`: one shared Stable/Debug physical-machine
-  identity. The retired `~/.tron-machine-group-id` is never read on startup and
-  is never a fallback: while it exists, startup refuses and asks the operator to
-  retire it. The value is opaque identity bytes, not a credential.
+  identity. The value is opaque identity bytes, not a credential.
 - `internal/subagents/`: the installed delegated provider's existing
   `PI_SUBAGENTS_TEMP_ROOT` root; its `async-subagent-runs/` child is the only
   lifecycle subtree admitted by Gateway. Provider project/session artifacts,
