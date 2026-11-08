@@ -370,8 +370,8 @@ def delta(base: str) -> dict:
 
 def golden_readers(goldens: list[str], tests: list[str]) -> set[str]:
     """The locks a golden change reruns. A Gateway E2E golden `<dir>/locks/<name>.golden.json` is read
-    only by the lock in `<dir>` naming it through `lockPaths(import.meta.url, "<name>")` (directly or
-    through a string constant); any other golden reruns every lock its module owns."""
+    only by the lock in `<dir>` naming it through `lockPaths(import.meta.url, "<name>")`, or through a
+    computed argument when the lock spells `"<name>"`; any other golden reruns every lock its module owns."""
     locks = [path for path in tests if is_lock(path)]
     readers: set[str] = set()
     for golden in goldens:
@@ -383,10 +383,13 @@ def golden_readers(goldens: list[str], tests: list[str]) -> set[str]:
         found = set()
         for lock in (path for path in locks if str(Path(path).parent) == directory):
             source = (ROOT / lock).read_text(errors="replace")
-            arguments = re.findall(r"lockPaths\(import\.meta\.url,\s*(\w+|\"[^\"]+\"|'[^']+')\s*\)", source)
+            arguments = re.findall(r"lockPaths\(import\.meta\.url,\s*([\w.$]+|\"[^\"]+\"|'[^']+')\s*\)", source)
             names = {argument[1:-1] for argument in arguments if argument[0] in "\"'"}
-            for constant in (argument for argument in arguments if argument[0] not in "\"'"):
-                names.update(re.findall(rf"\b(?:const|let)\s+{re.escape(constant)}\s*=\s*['\"]([^'\"]+)['\"]", source))
+            computed = [argument for argument in arguments if argument[0] not in "\"'"]
+            # A computed name (a constant or a trace field) reads this golden when the
+            # lock spells the name as a string anywhere in its source.
+            if computed and re.search(rf"['\"]{re.escape(name)}['\"]", source):
+                names.add(name)
             if name in names:
                 found.add(lock)
         if not found:

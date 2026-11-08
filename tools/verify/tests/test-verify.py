@@ -549,7 +549,7 @@ class FastPathTests(VerifyCase):
         r.write(f"{base}/one/locks/state.golden.json", "{}\n")
         r.write(f"{base}/one/one.lock.integration.test.ts", 'import { lockPaths } from "../../test-support/scenario-lock.js";\nlockPaths(import.meta.url, "state");\n')
         r.write(f"{base}/two/locks/other.golden.json", "{}\n")
-        r.write(f"{base}/two/two.lock.integration.test.ts", 'import { lockPaths } from "../../test-support/scenario-lock.js";\nlockPaths(import.meta.url, "other");\n')
+        r.write(f"{base}/two/two.lock.integration.test.ts", 'import { lockPaths } from "../../test-support/scenario-lock.js";\nconst trace = { lock: "other" };\nlockPaths(import.meta.url, trace.lock);\n')
         r.commit("gateway locks")
         r.git("branch", "-f", "base")
         r.write(f"{base}/one/locks/state.golden.json", '{"changed":true}\n')
@@ -558,6 +558,13 @@ class FastPathTests(VerifyCase):
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         selection = json.loads(planned.stdout[planned.stdout.index("{\n"):])["selection"]
         self.assertEqual(selection["tests"], [f"{base}/one/one.lock.integration.test.ts"], planned.stdout)
+        r.git("branch", "-f", "base")
+        r.write(f"{base}/two/locks/other.golden.json", '{"changed":true}\n')
+        r.commit("computed-name golden")
+        computed = r.verify("--changed", "--plan")
+        self.assertEqual(computed.returncode, 0, computed.stdout + computed.stderr)
+        self.assertEqual(json.loads(computed.stdout[computed.stdout.index("{\n"):])["selection"]["tests"],
+                         [f"{base}/two/two.lock.integration.test.ts"], computed.stdout)
         r.write(f"{base}/two/locks/unread.golden.json", "{}\n")
         r.commit("unread golden")
         refused = r.verify("--changed", "--plan")

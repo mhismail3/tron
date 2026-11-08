@@ -144,7 +144,7 @@ batch. The one consumer added is a module whose `dynamicEdges` name a selected
 module (today only the iOS UI tests' spawn edges to the hosted app): its locks are
 that module's rendered tests. A module with no test declares its proving tests (`verify`, below), usually its
 `gateway/e2e` journeys; directory modules may also declare `verify`. A Gateway E2E golden
-selects only the lock in its directory whose `lockPaths(import.meta.url, name)` names it.
+selects only the lock in its directory whose `lockPaths(import.meta.url, …)` names it (a computed argument counts when the lock spells the name as a string); a golden no lock reads refuses.
 `--module` does not widen to unrelated kernel locks; `--update-locks` stays with its owner.
 
 Small changes run only what can catch a regression in them:
