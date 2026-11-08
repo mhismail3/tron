@@ -72,8 +72,9 @@ user's settings or profile. Test input and output must not depend on live stores
 
 ## Gateway lanes on the Mac mini
 
-Verify runs its Gateway Vitest lanes (`tests: gateway`, `tests: gateway-nested`) on the Mac mini test host
-through `mini.py`; `--gateway-host local` runs them here, and `--update-locks` always records here.
+Once `git config tron.verify.mini` names the Mac mini test host, verify runs its Gateway Vitest lanes
+(`tests: gateway`, `tests: gateway-nested`) there through `mini.py`, and prints where they run. `--gateway-host
+local|mini` overrides that either way; `--update-locks` always records here.
 `scripts/tron test gateway --mini [vitest args]` is the direct form. `mini.py` refuses a dirty tree and pushes
 HEAD to the mini's `~/tron-ci/tron.git`. It then runs one job at a time under `~/tron-ci/jobs/gateway.lock`. The
 job checks out exactly that commit in `~/tron-ci/jobs/gateway` and cleans it, keeping only the Gateway
@@ -84,9 +85,10 @@ with the mini checkout path rewritten to this one, and the lane's exit code is t
 unreachable mini, an off-pin toolchain, or a session that ends without a result exits 2 and never falls back to
 this Mac. Stopping verify ends the session, and the mini lane gets SIGTERM.
 
-Setup: `git config tron.verify.mini <user@host>` and `git config tron.verify.miniIdentity <key file>`. On the
-mini: a bare `~/tron-ci/tron.git`, then `scripts/tron-node install` in the job checkout, whose missing-Node
-refusal prints that command. `verify --batch` and `mutate` still run their Gateway lanes on this Mac.
+Setup: `git config tron.verify.mini <user@host>` and `git config tron.verify.miniIdentity <key file>`, shared by
+every worktree of the clone. On the mini: a bare `~/tron-ci/tron.git`, then `scripts/tron-node install` in the
+job checkout; the missing-Node refusal prints that command. `verify --batch` and `mutate` still run their Gateway
+lanes on this Mac.
 
 ## Run output
 

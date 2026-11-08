@@ -709,11 +709,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
-    parser.add_argument("--gateway-host", choices=("mini", "local"), default="local",
-                        help="where the Gateway Vitest lanes run: the Mac mini test host (tools/verify/mini.py) or this Mac")
+    parser.add_argument("--gateway-host", choices=("mini", "local"),
+                        help="where the Gateway Vitest lanes run: the Mac mini test host (tools/verify/mini.py; the default "
+                             "once `git config tron.verify.mini` names it) or this Mac")
     args = parser.parse_args(argv)
+    configured = subprocess.run(["git", "-C", str(ROOT), "config", "--get", "tron.verify.mini"], capture_output=True, text=True).stdout.strip()
     # Recorded goldens must land in this checkout, so recording runs here.
-    gateway_host = "local" if args.update_locks else args.gateway_host
+    gateway_host = "local" if args.update_locks else args.gateway_host or ("mini" if configured else "local")
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
@@ -770,8 +772,9 @@ def main(argv: list[str]) -> int:
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     if any(group.startswith("gateway") and not skipped_group(group) for group in groups) or selection["deferredTests"]:
-        print(f"  gateway lanes: {'on the Mac mini (tools/verify/mini.py)' if gateway_host == 'mini' else 'on this Mac'}"
-              + (" because --update-locks records goldens here" if args.update_locks and args.gateway_host == "mini" else ""), flush=True)
+        why = ("--update-locks records goldens here" if args.update_locks else f"--gateway-host {args.gateway_host}" if args.gateway_host
+               else f"tron.verify.mini is {configured}; --gateway-host local runs them here" if configured else "no tron.verify.mini is configured")
+        print(f"  gateway lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({why})", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
