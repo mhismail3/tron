@@ -132,14 +132,19 @@ through the block's generated façade. The compiled core's runtime dependency `b
 
 ## Façade
 
-`dafny2wire/facade.mjs` (`proof facade`) writes `packages/core/dist/<block>/core.js`, the block's `translate` file
-compiled by the pinned Dafny (unedited, with a generated header), and `facade.ts`, a typed TypeScript wrapper
-generated from the datatypes and compiled signatures of the block's laws: `load(corePath)` binds it to any
-compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the bound
-checked-in one. Types: `int`/`nat` -> `number` (a safe integer, checked both ways), `bool` -> `boolean`, a
-datatype of nullary constructors -> a string union of their names, a one-constructor datatype named like its
-type -> a plain object, any other datatype -> an object tagged by `$`; other Dafny types are refused until a
-block needs them. `--check` regenerates into a temporary directory and exits 1 if the checked-in files differ.
+`dafny2wire/facade.mjs` (`proof facade <block> [--check] [--root <dir>]`) writes `packages/core/dist/<block>/core.js`,
+the block's `translate` file compiled by the pinned Dafny (unedited, with a generated header), and `facade.ts`, a
+typed TypeScript wrapper generated from the datatypes and compiled signatures of the block's laws: `load(corePath)`
+binds it to any compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the
+bound checked-in one. It exposes every compiled function and predicate of the laws (ghost and commented-out
+declarations are not compiled, so not exposed) and checks each stated precondition before calling, because
+compiled code does not check `requires`. Types: `int` -> `number` and `nat` -> `number >= 0` (safe integers, checked
+both ways), `bool` -> `boolean`, a datatype of nullary constructors -> a string union of their names, a
+one-constructor datatype named like its type -> a plain object, any other datatype -> an object tagged by `$`; an
+unknown constructor is a `TypeError` in either direction. Refused before anything compiles: Dafny 3 `function method`
+syntax, preconditions other than a call of a compiled predicate on parameters, generic functions, and any other
+Dafny type (an unused generic datatype is ignored). `--check` regenerates into a temporary directory and exits 1 if
+the checked-in files differ.
 
 ## Wire
 
@@ -217,3 +222,9 @@ H5 kill criterion), every form they need is exercised by the codec fixture, and 
 keys and strings, TypeScript and Swift (`swiftc -O`) produce identical bytes and identical normalisations of
 non-canonical inputs (and a Swift-built map encodes in JavaScript order), and both reject 16 malformed inputs
 at the same path.
+
+`scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block
+`demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
+full, an opaque function; no ghost or commented-out one), round trips values, refuses unknown constructors,
+non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
+either file; and `function method`, an uncheckable precondition and an unsupported type are refused.

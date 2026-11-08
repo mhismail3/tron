@@ -1,0 +1,1 @@
+{"interface": ["laws/demo/Counter.dfy"], "impl": ["blocks/demo/counter/Block.dfy"], "deps": []}

@@ -6,7 +6,8 @@ clean environment (env -i, PATH=/usr/bin:/bin, so no other dafny, z3 or dotnet i
 
 1. doctor on the clean cache fails: "pinned Dafny missing".
 2. bootstrap installs the pinned archive and passes; doctor then reports the pinned Dafny and Z3 versions.
-3. The pinned wrapper verifies a true fixture (also on the alternate bundled Z3) and rejects a false law.
+3. The pinned wrapper verifies a true fixture (also on the alternate bundled Z3), translates it with the
+   one-core cap, and rejects a false law.
 4. A one-byte tamper of the installed tree is rejected by doctor and by bootstrap.
 
 The release archive is copied from the user's cache when present (bootstrap re-checks its digest);
@@ -75,6 +76,10 @@ class ProofToolchainTest(unittest.TestCase):
         alternate = self.cache / f"tron-proof/dafny-{PIN['DAFNY_VERSION']}/z3/bin/z3-{PIN['Z3_ALT_VERSION']}"
         portable = self.dafny("verify", "--solver-path", str(alternate), str(FIXTURES / "holds.dfy"))
         self.assertEqual(portable.returncode, 0, portable.stdout + portable.stderr)
+        # Every solver-running command gets the one-core cap, translate included (its language comes first).
+        translated = self.dafny("translate", "js", str(FIXTURES / "holds.dfy"), "-o", str(self.base / "holds"))
+        self.assertEqual(translated.returncode, 0, translated.stdout + translated.stderr)
+        self.assertNotIn("was not matched", translated.stdout + translated.stderr)
         false_law = self.dafny("verify", str(FIXTURES / "false-law.dfy"))
         self.assertNotEqual(false_law.returncode, 0, false_law.stdout)
         self.assertIn("0 verified, 1 error", false_law.stdout)
