@@ -2073,6 +2073,17 @@
       "options": {
         "cacheRetention": "long",
         "headers": {},
+        "identity": {
+          "attribution": {
+            "categories": [
+              "cli-agent"
+            ],
+            "name": "pi",
+            "url": "https://pi.dev"
+          },
+          "userAgent": "detailed",
+          "version": "1.4.0"
+        },
         "maxRetryDelayMs": 60000,
         "model": {
           "api": "<api>",
@@ -2105,6 +2116,17 @@
       "options": {
         "cacheRetention": "long",
         "headers": {},
+        "identity": {
+          "attribution": {
+            "categories": [
+              "cli-agent"
+            ],
+            "name": "pi",
+            "url": "https://pi.dev"
+          },
+          "userAgent": "detailed",
+          "version": "1.4.0"
+        },
         "maxRetryDelayMs": 60000,
         "model": {
           "api": "<api>",
@@ -2137,6 +2159,17 @@
       "options": {
         "cacheRetention": "long",
         "headers": {},
+        "identity": {
+          "attribution": {
+            "categories": [
+              "cli-agent"
+            ],
+            "name": "pi",
+            "url": "https://pi.dev"
+          },
+          "userAgent": "detailed",
+          "version": "1.4.0"
+        },
         "maxRetryDelayMs": 60000,
         "model": {
           "api": "<api>",
@@ -2168,6 +2201,17 @@
       "caller": "worker",
       "options": {
         "headers": {},
+        "identity": {
+          "attribution": {
+            "categories": [
+              "cli-agent"
+            ],
+            "name": "pi",
+            "url": "https://pi.dev"
+          },
+          "userAgent": "detailed",
+          "version": "1.4.0"
+        },
         "maxRetryDelayMs": 60000,
         "model": {
           "api": "<api>",
