@@ -15,10 +15,10 @@ export function splitModelRef(value: string): { provider: string; id: string } |
   return separator > 0 && separator < value.length - 1 ? { provider: value.slice(0, separator), id: value.slice(separator + 1) } : undefined;
 }
 
-/** Scope names #1634 retired, as old session entries recorded them. Session JSONL
- * is never rewritten (#1649), so session readers map them to current names;
- * the next settings write persists the current name. Exit condition: delete it
- * once no retained session predates #1634 (none carries one of these names). */
+/** Scope names #1634 retired, as old session entries recorded them. Session
+ * readers map them to current names. Exit: the maintainer-run, backed-up
+ * `scripts/tron migrate retired-formats` (#2329) rewrites retained entries;
+ * this map and that migration are then deleted together. */
 export const RETIRED_SCOPES: Readonly<Record<string, "global" | "session">> = Object.freeze({
   mac: "global", builtin: "global", chat: "session", profile: "session",
 });

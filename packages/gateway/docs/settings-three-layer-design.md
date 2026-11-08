@@ -193,10 +193,10 @@ readable in Global Changes; no request, Undo or Apply again writes Project setti
   stage replacements; an automatic backup precedes publication; crash recovery completes the same
   transaction; rerun is a no-op. It never fails startup: a refusal changes nothing, logs
   `settings.migration-failed` and retries next start (#1649).
-- Session JSONL is never rewritten. `RETIRED_SCOPES` (`kernel/settings/tool-contract.ts`), shared
-  by the Session reader and shared-store migration, maps `mac`/`builtin` → Global and
-  `chat`/`profile` → Session; the next settings write persists current names. Remove it once no retained
-  session predates #1634. The Home record model moves into the Profile when none is saved.
+- Startup never rewrites session JSONL. `RETIRED_SCOPES` (`kernel/settings/tool-contract.ts`) maps
+  `mac`/`builtin` → Global and `chat`/`profile` → Session for the Session reader until the one-shot,
+  backed-up `scripts/tron migrate retired-formats` (#2329), run by the maintainer with the Gateway
+  listening and Home idle, rewrites retained entries; both are then deleted. The Home record model moves into the Profile when none is saved.
 - Preserve saved Global values in their owned stores as Global. Active Home chapter sessions are
   not read or folded; Home's saved choices live in the Profile.
 - Explicit/legacy Session values remain overrides; old inherited `mac`/`builtin` frames are

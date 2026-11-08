@@ -52,7 +52,7 @@ it("repairs a v2-to-historical Undo audit after a real postcommit process death 
   const { f, profile } = await setup();
   const originals = [await seed(0), await seed(1)];
   const context = { actor: { kind: "ui" as const, id: "fixture" }, commandId: "v2-before-undo-crash", reason: "Exact fixture migration" };
-  const migrated = await profile.partition(f.settings.settingsChanges, { commandId: context.commandId, mode: "migrate", assignments: originals.map(note => ({ id: note.id, expectedRevision: note.revisionId, path: "engineering/undo" })) }, context);
+  const migrated = await profile.partition(f.settings.settingsChanges, { commandId: context.commandId, mode: "reorganize", assignments: originals.map(note => ({ id: note.id, expectedRevision: note.revisionId, path: "engineering/undo" })) }, context);
   const undoContext = { actor: context.actor, commandId: "v2-undo-postcommit-crash", reason: "Restore exact historical placement" };
    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
   await crashProfilePartition(f.root, f.tronHome, [], "after-domain", { context: undoContext, undoChangeId: migrated.changes[0]!.changeId });

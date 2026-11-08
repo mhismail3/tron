@@ -12,7 +12,7 @@ const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 // ---- the profile tool -----------------------------------------------------------
 
 const PROFILE_PARAMETERS = Type.Object({
-  action: Type.Union([...HOME_PROFILE_ACTIONS, "read" as const, "migrate" as const, "reorganize" as const, "retry" as const, "defer" as const].map((action) => Type.Literal(action)), { description: "read an explicit file or the metadata index; learn, refine, supersede or retire an item." }),
+  action: Type.Union([...HOME_PROFILE_ACTIONS, "read" as const, "reorganize" as const, "retry" as const, "defer" as const].map((action) => Type.Literal(action)), { description: "read an explicit file or the metadata index; learn, refine, supersede or retire an item." }),
   path: Type.Optional(Type.String({ minLength: 1, maxLength: 131, description: "Explicit personal path or inferred holding bucket; read prior for historical organization. No path reads the metadata index. New notes default to inferred/review." })),
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10_000, description: "Metadata-index offset; record pages use cursor." })),
   includeInactive: Type.Optional(Type.Boolean({ description: "Explicitly include retired and superseded content; omitted reads active notes only." })),
@@ -25,7 +25,7 @@ const PROFILE_PARAMETERS = Type.Object({
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Exact Profile note ID; read requires its revisionId. Also used by refine, supersede and retire." })),
   revisionId: Type.Optional(Type.String({ minLength: 16, maxLength: 80, description: "read: the current head revision or an exact wrong-claim revision linked by a current Correction. Other historical revisions are unavailable." })),
   contentOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: 2_097_152, description: "read with id/revisionId: UTF-16 character offset into canonical record JSON, continued only with nextOffset." })),
-  assignments: Type.Optional(Type.Array(Type.Object({ id: Type.String({ minLength: 1, maxLength: 200 }), expectedRevision: Type.String({ minLength: 16, maxLength: 80 }), path: Type.String({ minLength: 1, maxLength: 131 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 500, description: "Explicit exact-revision destinations. migrate must include exactly the active legacy Core/Home notes, leaving inactive/scoped originals untouched; reorganize names only the selected notes. Placement only: text, authority and correction claims stay unchanged." })),
+  assignments: Type.Optional(Type.Array(Type.Object({ id: Type.String({ minLength: 1, maxLength: 200 }), expectedRevision: Type.String({ minLength: 16, maxLength: 80 }), path: Type.String({ minLength: 1, maxLength: 131 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 500, description: "Explicit exact-revision destinations. reorganize names only the selected notes. Placement only: text, authority and correction claims stay unchanged." })),
   commandId: Type.Optional(Type.String({ minLength: 1, maxLength: 160, description: "retry: the ORIGINAL operation command returned with retry_required; never a new operation identity." })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: PROFILE_REASON_MAX, description: "Why the change is made. Required for retire; recorded in the ledger." })),
 }, { additionalProperties: false });
@@ -38,11 +38,11 @@ type HomeProfileToolDetails =
   | { status: "refused"; action: ProfileToolAction; reason: string }
   | { status: "declined"; action: ProfileToolAction }
   | { status: "unavailable"; action: ProfileToolAction }
-  | { status: "organized"; action: "migrate" | "reorganize" | "retry"; commandId: string; changeIds: string[] }
+  | { status: "organized"; action: "reorganize" | "retry"; commandId: string; changeIds: string[] }
   | { status: "retry_required"; action: ProfileToolAction; commandId: string; reason: string }
   | { status: "read"; path?: string; items: unknown[]; unclassified: number; nextCursor?: string; index?: string; sorting?: { version: string; deferred: boolean } };
 
-type ProfileToolAction = HomeProfileAction | "read" | "migrate" | "reorganize" | "retry" | "defer";
+type ProfileToolAction = HomeProfileAction | "read" | "reorganize" | "retry" | "defer";
 type ProfileRequest = {
   action: ProfileToolAction;
   version?: string;
@@ -66,7 +66,6 @@ type ProfileRequest = {
 const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRequest>; allowed: Array<keyof ProfileRequest> }> = {
   read: { required: [], allowed: ["path", "offset", "cursor", "includeInactive", "id", "revisionId", "contentOffset"] },
   defer: { required: ["version"], allowed: ["version"] },
-  migrate: { required: ["assignments", "reason"], allowed: ["assignments", "reason"] },
   reorganize: { required: ["assignments", "reason"], allowed: ["assignments", "reason"] },
   retry: { required: ["commandId"], allowed: ["commandId"] },
   learn: { required: ["kind", "text"], allowed: ["kind", "text", "path", "corrects", "sensitive"] },
@@ -86,7 +85,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
     // docs/settings-model.md 5.4: declares it reads no open-world content.
     annotations: { openWorldHint: false },
     label: "Profile",
-    description: "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit migrate/reorganize assign only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
+    description: "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit reorganize assigns only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
     parameters: PROFILE_PARAMETERS,
     executionMode: "sequential",
     execute: async (toolCallId, parameters, signal, _update, context) => {
@@ -156,7 +155,7 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
         }
       }
       if (request.action === "learn" && request.sensitive && !triggeringStatement(context, citation.entryId).includes(request.text!.trim())) return refused("learn", "Never infer sensitive information: capture only its verbatim statement in this maintainer message, unsorted for review");
-      if (request.action === "migrate" || request.action === "reorganize" || request.action === "retry") {
+      if (request.action === "reorganize" || request.action === "retry") {
         const original = request.action === "retry" ? request.commandId! : commandId(citation.sessionId, toolCallId);
         const op: HomeProfileRequest = request.action === "retry" ? { action: "retry", commandId: original } : { action: request.action, assignments: request.assignments! };
         try {
