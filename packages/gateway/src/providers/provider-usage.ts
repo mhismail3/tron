@@ -130,10 +130,11 @@ const adapters: Record<string, Adapter> = {
   "opencode-go": {
     // Go models resolve across several wire APIs under two base URLs; the plan's
     // account usage is the one endpoint both the console and the CLI report.
-    // The bundled catalog serves the `/zen/go` paths, while the remote pi.dev
-    // catalog that replaces it on refresh serves the same service under
-    // `/inference/go` and adds a Gemini-API model (#1072). One key and one usage
-    // endpoint serve both path families.
+    // Catalogs have served the same service under `/zen/go`, `/inference/go` and,
+    // from Pi 1.5, one protocol-specific path per API under `/inference/go`
+    // (`/anthropic`, `/openai/v1`, `/google/v1beta`); a refresh can replace the
+    // bundled catalog with another family (#1072). One key and one usage endpoint
+    // serve every path family.
     id: "opencode-go", shapes: [
       { api: "anthropic-messages", baseUrl: "https://opencode.ai/zen/go" },
       { api: "openai-completions", baseUrl: "https://opencode.ai/zen/go/v1" },
@@ -142,6 +143,10 @@ const adapters: Record<string, Adapter> = {
       { api: "openai-completions", baseUrl: "https://opencode.ai/inference/go/v1" },
       { api: "openai-responses", baseUrl: "https://opencode.ai/inference/go/v1" },
       { api: "google-generative-ai", baseUrl: "https://opencode.ai/inference/go/v1" },
+      { api: "anthropic-messages", baseUrl: "https://opencode.ai/inference/go/anthropic" },
+      { api: "openai-completions", baseUrl: "https://opencode.ai/inference/go/openai/v1" },
+      { api: "openai-responses", baseUrl: "https://opencode.ai/inference/go/openai/v1" },
+      { api: "google-generative-ai", baseUrl: "https://opencode.ai/inference/go/google/v1beta" },
     ],
     endpoint: "https://opencode.ai/zen/go/v1/usage", source: "opencode-go.usage", scope: "account",
     headers: bearerHeaders, parse: parseOpenCodeGo,
