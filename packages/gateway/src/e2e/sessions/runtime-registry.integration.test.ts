@@ -6334,6 +6334,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         ctx.ui.setWidget("factory", () => ({
           render: () => ["must mount"], invalidate: () => {}
         }));
+        ctx.ui.setWidget("custom:broken", () => { throw new Error("factory failed"); });
         try {
           await ctx.ui.custom(() => {
             invoked = true;
@@ -6359,9 +6360,13 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       "context-has-ui": "true", "context-mode": "rpc", "custom-deferred": "not-invoked",
     });
     expect(snapshot.extensionPresentation.semanticState.widgets).toEqual([]);
-    expect(snapshot.extensionPresentation.surfaces).toEqual([
+    // A widget key is opaque: one that looks like a reserved prefix still gets its own fallback frame.
+    expect(snapshot.extensionPresentation.surfaces).toHaveLength(2);
+    expect(snapshot.extensionPresentation.surfaces).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "widget:ZmFjdG9yeQ", kind: "widget", placement: "aboveEditor", lifecycle: "retained", focused: false, inputMode: "none" }),
-    ]);
+      expect.objectContaining({ id: "widget:Y3VzdG9tOmJyb2tlbg", kind: "widget", lifecycle: "retained", focused: false, inputMode: "none",
+        frame: expect.objectContaining({ plainText: "[Extension component unavailable: factory failed]" }) }),
+    ]));
     expect(snapshot.extensionPresentation.diagnostics).toContainEqual({ code: "component.render-invalid", message: "Blocking component UI is deferred in RPC mode" });
   });
 
