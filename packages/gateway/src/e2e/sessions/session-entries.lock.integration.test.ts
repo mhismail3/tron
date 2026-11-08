@@ -1,11 +1,11 @@
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import {
   automationOwnedRunScenario, compactionScenario, drainBlockersScenario, DETACHED_RUN, EXTENSION_UI_OPTIONS, extensionUiScenario,
   openLockSession, projectRootTrustScenario, promptStreamScenario, queueControlScenario, WAITING_COMMAND,
-} from "../../test-support/lock-scenarios.js";
-import { compareWithGolden, lockUpdateRequested, type TraceValue } from "../../test-support/scenario-lock.js";
+} from "../../../test-support/lock-scenarios.js";
+import { compareWithGolden, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
 
 /**
  * Tron's persisted session entries (#2279): every distinct Tron custom entry
@@ -75,10 +75,10 @@ describe("gateway/pi-sdk session entries", () => {
 
     const sorted = [...entries].sort().map((entry) => JSON.parse(entry) as TraceValue);
     await compareWithGolden({
-      module: "gateway/pi-sdk", goldenPath: GOLDEN,
+      module: "gateway/e2e", goldenPath: GOLDEN,
       actualPath: resolve(process.cwd(), "test-results", "session-entries.actual.json"),
       diffPath: resolve(process.cwd(), "test-results", "session-entries.diff"),
-      trace: { lock: "session-entries", entries: sorted }, update: lockUpdateRequested("gateway/pi-sdk"),
+      trace: { lock: "session-entries", entries: sorted }, update: lockUpdateRequested("gateway/e2e"),
       validate: () => {
         const types = new Set(sorted.map((entry) => (entry as { customType: string }).customType));
         expect([...types].sort()).toEqual(["tron.chat-invocation.v1", "tron.context-window.v1", "tron.extension-activity.v1", "tron.settings.v1"]);

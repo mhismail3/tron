@@ -77,7 +77,7 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(gateway, {m for m in expected if m.startswith("gateway/")})
 
     def test_rpc_list_holds_every_method_a_real_gateway_answered(self) -> None:
-        lock = json.loads((ROOT / "packages/gateway/src/protocol/locks/protocol-wire.golden.json").read_text())
+        lock = json.loads((ROOT / "packages/gateway/src/e2e/protocol/locks/protocol-wire.golden.json").read_text())
         answered = {call["method"] for call in lock["methods"] if call["ok"]}
         output = self.generate("rpc")
         rows = [line.split(" | ")[1] for line in output.splitlines() if line.startswith("| `")]

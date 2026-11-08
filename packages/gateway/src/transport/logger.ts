@@ -43,8 +43,6 @@ export interface LogRecord {
   /** The protocol version a refused hello asked for (`http.upgrade`,
    * `reason=protocol_mismatch`): names the stale side of a version mismatch. */
   peerProtocolVersion?: number;
-  /** Retired legacy connection instance IDs. */
-  instanceIds?: readonly string[];
   commandId?: string;
   /** Process identity for lifecycle records observed across supervisor boundaries. */
   pid?: number;
@@ -128,7 +126,6 @@ interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "bounda
   peerAttemptId?: string;
   peerEpoch?: string;
   peerProtocolVersion?: number;
-  instanceIds?: readonly string[];
   commandId?: string;
   step?: string;
   requestID?: string;
@@ -364,7 +361,6 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.peerAttemptId === "string" ? { peerAttemptId: boundedDiagnosticID(value.peerAttemptId) } : {}),
     ...(typeof value.peerEpoch === "string" ? { peerEpoch: boundedDiagnosticID(value.peerEpoch) } : {}),
     ...(Number.isSafeInteger(value.peerProtocolVersion) ? { peerProtocolVersion: value.peerProtocolVersion } : {}),
-    ...(Array.isArray(value.instanceIds) ? { instanceIds: value.instanceIds.filter((id): id is string => typeof id === "string").slice(0, 64).map(id => boundedDiagnosticID(id)) } : {}),
     ...(typeof value.commandId === "string" ? { commandId: boundedDiagnosticID(value.commandId) } : {}),
     ...(typeof value.step === "string" ? { step: boundedDiagnosticID(value.step).slice(0, 64) } : {}),
     ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),

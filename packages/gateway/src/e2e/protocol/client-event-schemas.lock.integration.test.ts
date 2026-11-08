@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import {
   automationOwnedRunScenario, compactionScenario, notificationsPushScenario, openLockSession, projectRootTrustScenario,
   promptStreamScenario, queueControlScenario,
-} from "../../test-support/lock-scenarios.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../test-support/scenario-lock.js";
-import { sessionSettingChange } from "../../test-support/session-settings-change.js";
+} from "../../../test-support/lock-scenarios.js";
+import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
+import { sessionSettingChange } from "../../../test-support/session-settings-change.js";
 
 /**
  * Client event schemas (#2279): every client event topic the phone decodes, with
@@ -24,7 +24,7 @@ import { sessionSettingChange } from "../../test-support/session-settings-change
  * scenarios reach that topic deterministically.
  */
 
-const MODULE = "gateway/protocol";
+const MODULE = "gateway/e2e";
 /** Every release in creation order; each Gateway restores the agent-dir environment it found, so they run newest first. */
 const owned: Array<() => Promise<void>> = [];
 const own = (gateway: LockGateway) => { owned.push(() => gateway.dispose()); };

@@ -3,13 +3,13 @@ import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { HomeTaskReportOwner } from "../kernel/delegation/task-report.js";
-import { NotificationGrantStore } from "../notifications/grant-store.js";
-import { NotificationService } from "../notifications/notification-service.js";
-import { PushRelayClient } from "../notifications/relay-client.js";
-import { startLockGateway, type LockClient, type LockGateway, type LockGatewayOptions, type ProviderRequestRecord } from "../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockUpdateRequested, type TraceValue } from "../../test-support/scenario-lock.js";
-import { awaitsWithin } from "../../test-support/wait-for.js";
+import { HomeTaskReportOwner } from "../../kernel/delegation/task-report.js";
+import { NotificationGrantStore } from "../../notifications/grant-store.js";
+import { NotificationService } from "../../notifications/notification-service.js";
+import { PushRelayClient } from "../../notifications/relay-client.js";
+import { startLockGateway, type LockClient, type LockGateway, type LockGatewayOptions, type ProviderRequestRecord } from "../../../test-support/gateway-lock-harness.js";
+import { compareWithGolden, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
+import { awaitsWithin } from "../../../test-support/wait-for.js";
 
 /**
  * Model-visible session shapes (#2279): what the model receives for each kind of
@@ -32,7 +32,7 @@ import { awaitsWithin } from "../../test-support/wait-for.js";
  * `home-activation-wake`.
  *
  * It is the `gateway/pi-sdk` module's scenario lock beside the SDK behavior trace:
- * intended prompt or tool changes update it with `TRON_UPDATE_LOCKS=gateway/pi-sdk`.
+ * intended prompt or tool changes update it with `TRON_UPDATE_LOCKS=gateway/e2e`.
  */
 
 const GOLDEN = resolve(process.cwd(), "test-fixtures", "pi-sdk", "session-shapes.golden.json");
@@ -245,10 +245,10 @@ export default function (pi) {
     }
 
     await compareWithGolden({
-      module: "gateway/pi-sdk", goldenPath: GOLDEN,
+      module: "gateway/e2e", goldenPath: GOLDEN,
       actualPath: resolve(process.cwd(), "test-results", "session-shapes.actual.json"),
       diffPath: resolve(process.cwd(), "test-results", "session-shapes.diff"),
-      trace: { lock: "session-shapes", shapes }, update: lockUpdateRequested("gateway/pi-sdk"),
+      trace: { lock: "session-shapes", shapes }, update: lockUpdateRequested("gateway/e2e"),
       validate: () => { expect(Object.keys(shapes)).toHaveLength(13); },
     });
   }, 120_000);

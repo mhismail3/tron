@@ -1,14 +1,14 @@
+import { createHash } from "node:crypto";
 import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
-import { CatalogMetadataIndex, catalogActivityTimestamp, type CatalogMetadataIndexRow, type CatalogMetadataIndexSummary } from "./catalog-metadata-index.js";
+import { CatalogMetadataIndex, catalogActivityTimestamp, catalogMetadataShard, type CatalogMetadataIndexRow, type CatalogMetadataIndexSummary } from "./catalog-metadata-index.js";
 
 /**
- * `gateway/session-catalog` cold-catalog metadata index `gateway/catalog-metadata-v3/`
- * and the superseded `gateway/catalog-metadata-v2.json` it migrates: rows stamped from a
- * summary, sharded saves and their bounds, appends, reconcile with its stop and
- * unproven candidates, legacy document and row admission, and disposal. File times are
+ * `gateway/session-catalog` cold-catalog metadata index `gateway/catalog-metadata-v3/`:
+ * rows stamped from a summary, sharded saves and their bounds, appends, reconcile with its
+ * stop and unproven candidates, shard document and row admission, and disposal. File times are
  * set explicitly, so sizes, times and tail hashes are the index's own arithmetic over
  * real files. Each persisted manifest and shard is asserted as the exact document, except
  * shard digests: those hash bytes that carry the temporary root, so they are checked by
@@ -45,7 +45,7 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     return { id, path, cwd: "/work", firstMessage: "hello", createdAt: time, updatedAt: time, messageCount: 1,
       fileIdentity: `${info.dev}:${info.ino}`, size: info.size, mtimeMs: info.mtimeMs, eofOffset: info.size, ...rest };
   };
-  /** Every file the index owns under `gateway/`, parsed: the manifest, each shard and the legacy document. */
+  /** Every file the index owns under `gateway/`, parsed: the manifest and each shard. */
   const persisted = async (): Promise<Record<string, unknown>> => {
     const files: Record<string, unknown> = {};
     for (const name of (await readdir(gateway).catch(() => [])).sort()) {
@@ -271,29 +271,33 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
 
   // The index binds a document to the catalog root's canonical path.
   const canonical = await realpath(root);
-  const document = (rows: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ version: 3, root: canonical, rows, ...extra });
-  // A hand-written legacy document is the migration input. Its store is removed again
-  // after its load, so each check pins the verdict: an admitted document is migrated
-  // and removed; an ignored one stays.
+  const valid = { ...row };
+  const shard = catalogMetadataShard(canonical, valid.path);
+  const shardPath = join(index.directory, `shard-${shard}.json`);
+  const document = (rows: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ version: 3, root: canonical, shard, rows, ...extra });
+  // A hand-written shard under a manifest that lists its exact bytes: the load is
+  // complete only when the shard document and every row in it are admitted.
   const loadWritten = async (content: string) => {
     await rm(index.directory, { recursive: true, force: true });
-    await writeFile(index.legacyPath, content);
+    await mkdir(index.directory, { recursive: true });
+    await writeFile(shardPath, content);
+    const digest = createHash("sha256").update(content).digest("base64url");
+    await writeFile(join(index.directory, "manifest.json"), JSON.stringify({ version: 3, root: canonical, shards: [{ shard, digest }], refused: [] }));
     try {
       const rows = await index.load(root);
-      return { loaded: rows === undefined ? "ignored" : rows.length, legacyKept: await lstat(index.legacyPath).then(() => true, () => false) };
+      return rows === undefined ? "ignored" : rows.length;
     } finally {
-      await rm(index.legacyPath, { force: true });
       await rm(index.directory, { recursive: true, force: true });
     }
   };
-  const admitted = { loaded: 1, legacyKept: false };
-  const ignored = { loaded: "ignored", legacyKept: true };
-  const valid = { ...row };
+  const admitted = 1;
+  const ignored = "ignored";
   const automation = { kind: "automation", automationId: "01234567-89ab-4def-8123-456789abcdef" };
   for (const [label, content, verdict] of [
     ["a hand-written document", document([valid]), admitted],
     ["a document of another version", document([valid], { version: 2 }), ignored],
     ["a document for another root", document([valid], { root: "/elsewhere" }), ignored],
+    ["a document for another shard", document([valid], { shard: shard === "00" ? "01" : "00" }), ignored],
     ["a document with an overlong root", document([valid], { root: "r".repeat(4_097) }), ignored],
     ["a document whose rows are not a list", document([], { rows: { length: 0 } }), ignored],
     ["a document that is a list", "[]", ignored],
@@ -336,9 +340,10 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   ] as const) expect(await loadWritten(document([bad])), `ignore ${label}`).toEqual(ignored);
   expect(await persisted(), "every admission check leaves no store behind").toEqual({});
   await writeFile(join(home, "linked.json"), document([valid]));
-  await symlink(join(home, "linked.json"), index.legacyPath);
-  try { expect(await index.load(root), "ignore a document that is a symbolic link").toBeUndefined(); }
-  finally { await rm(index.legacyPath); }
+  await mkdir(index.directory, { recursive: true });
+  await symlink(join(home, "linked.json"), shardPath);
+  try { expect(await index.load(root), "ignore a shard that is a symbolic link").toBeUndefined(); }
+  finally { await rm(index.directory, { recursive: true, force: true }); }
 
   await expect(index.dispose(), "dispose").resolves.toBeUndefined();
   expect(await index.save(root, [row]), "a disposed index writes nothing").toBe(false);

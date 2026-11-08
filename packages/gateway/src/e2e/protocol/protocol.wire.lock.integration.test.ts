@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import WebSocket from "ws";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } from "../../test-support/scenario-lock.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
+import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } from "../../../test-support/scenario-lock.js";
+import { waitFor } from "../../../test-support/wait-for.js";
 
 /**
  * Wire contract lock (packages/gateway/docs/scenario-locks.md#wire-contract-v7) for the `gateway/protocol` module:
@@ -22,8 +22,8 @@ import { waitFor } from "../../test-support/wait-for.js";
  * A wire change updates both ends in a lockstep slice (AGENTS.md "Architecture invariants").
  */
 
-const MODULE = "gateway/protocol";
-const REPOSITORY = resolve(import.meta.dirname, "..", "..", "..", "..");
+const MODULE = "gateway/e2e";
+const REPOSITORY = resolve(import.meta.dirname, "..", "..", "..", "..", "..");
 const gateways: LockGateway[] = [];
 afterEach(async () => {
   try { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); }
