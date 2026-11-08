@@ -43,6 +43,10 @@ NOT_DRIVEN = ("ios-lanes", "mac", "relay")
 # Six HomeSheets methods overran the 1200 s deadline on a quiet host: journeys there take ~150-290 s
 # and the tool-detail journey 250-450 s. Three methods fit two such journeys plus ~35 s of launch.
 IOS_SHARD_TESTS = 3
+# An iPad-only UI test skips on the iPhone lane (`XCTSkipUnless(... == .pad ...)`), so
+# its shard runs on this worktree's iPad lane with this device type instead.
+IOS_PAD_GATE = re.compile(r"XCTSkipUnless\(\s*UIDevice\.current\.userInterfaceIdiom\s*==\s*\.pad\b")
+IOS_PAD_DEVICE_TYPE = "iPad Pro 13-inch (M5)"
 
 
 class VerifyError(Exception):
@@ -148,9 +152,10 @@ def ios_selectors(paths: list[str]) -> list[str]:
     return owners
 
 
-def ios_test_methods(owner: str) -> list[str]:
+def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
     """`Target/Class/testMethod` owners XCTest runs for `Target/Class`: the no-argument, non-private
-    `test` methods declared in the class or its top-level extensions in that target's sources.
+    `test` methods declared in the class or its top-level extensions in that target's sources, and
+    the subset that is iPad-only (the method, or the class's setUp, skips unless on an iPad).
     Fails closed: a test-shaped method whose enclosing top-level type cannot be read makes the
     class run whole (an empty result) rather than silently dropping a test."""
     target, name = owner.split("/")
@@ -160,37 +165,74 @@ def ios_test_methods(owner: str) -> list[str]:
     method = re.compile(r"^\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:override\s+)?func\s+(test\w*)\(\)")
     shaped = re.compile(r"\bfunc\s+(test\w*)\s*\(\s*\)")
     hidden = re.compile(r"\b(?:private|fileprivate|static|class)\s+func\b")
+    member_line = re.compile(r"^\s+(?:(?:@\w+(?:\([^)]*\))?|override|private|fileprivate|public|open|internal|static|class|nonisolated)\s+)*func\s+(\w+)")
     found: list[str] = []
+    pad: set[str] = set()
+    bodies: dict[str, str] = {}
+    class_pad = False
     unplaced = False
     for source in sorted((ROOT / IOS / folder).rglob("*.swift")):
         text = source.read_text(errors="replace")
         if not re.search(rf"\b(?:class|extension)\s+{re.escape(name)}\b", text):
             continue
         scope: str | None = None
+        member: str | None = None
         for line in text.splitlines():
+            if scope == name and (declared_member := member_line.match(line)):
+                member = declared_member.group(1)
+            if scope == name and member:
+                bodies[member] = bodies.get(member, "") + line + "\n"
+            if scope == name and member and IOS_PAD_GATE.search(line):
+                class_pad = class_pad or member in ("setUp", "setUpWithError")
+                pad.add(member)
             # A top-level line opens a type's scope, or an unknown one; a bare attribute line does not.
             if line[:1] not in ("", " ", "\t", "}", "/", "#") and (
                     line[:1] != "@" or re.search(r"\b(?:class|struct|enum|actor|extension|protocol|func|var|let)\b", line)):
                 declared = top_level.match(line)
                 scope = declared.group(1) if declared else None
+                member = None
             elif scope == name and (match := method.match(line)):
                 found += [] if match.group(1) in found else [match.group(1)]
             elif scope == name and shaped.search(line) and not hidden.search(line):
                 unplaced = True  # a test spelled in a way the reader does not select
             elif scope is None and shaped.search(line) and not hidden.search(line):
                 unplaced = True
-    return [] if unplaced else [f"{owner}/{test}" for test in found]
+    if unplaced:
+        return [], set()
+    # A test that calls a gated helper of its class is iPad-only too (one call level).
+    helpers = [helper for helper in pad if helper not in found]
+    gated = {test for test in found if class_pad or test in pad
+             or any(re.search(rf"\b{re.escape(helper)}\(", bodies.get(test, "")) for helper in helpers)}
+    return [f"{owner}/{test}" for test in found], {f"{owner}/{test}" for test in gated}
 
 
-def ios_shards(selectors: list[str]) -> list[list[str]]:
-    """The selected classes' test methods in runs of at most IOS_SHARD_TESTS; classes whose methods
-    cannot be read run whole, together, in one final shard."""
-    methods, whole = [], []
+class IosShard(list):
+    """Selectors one runner process executes; `pad` shards run on the iPad lane."""
+    pad = False
+
+
+def ios_shards(selectors: list[str]) -> list[IosShard]:
+    """The selected classes' test methods in runs of at most IOS_SHARD_TESTS, iPhone methods first,
+    then iPad-only methods in their own shards; classes whose methods cannot be read run whole,
+    together, in one final shard."""
+    methods, pad_methods, whole = [], [], []
     for owner in selectors:
-        found = ios_test_methods(owner)
-        methods += found
+        found, pad = ios_test_methods(owner)
+        methods += [method for method in found if method not in pad]
+        pad_methods += [method for method in found if method in pad]
         whole += [] if found else [owner]
-    return [methods[index:index + IOS_SHARD_TESTS] for index in range(0, len(methods), IOS_SHARD_TESTS)] + ([whole] if whole else [])
+    shards = []
+    for group, is_pad in ((methods, False), (pad_methods, True)):
+        for index in range(0, len(group), IOS_SHARD_TESTS):
+            shard = IosShard(group[index:index + IOS_SHARD_TESTS])
+            shard.pad = is_pad
+            shards.append(shard)
+    return shards + ([IosShard(whole)] if whole else [])
+
+
+def ios_pad_lane() -> str:
+    """This worktree's own iPad lane, so concurrent worktrees never share one lease."""
+    return "verify-ipad-" + hashlib.sha256(str(ROOT).encode()).hexdigest()[:12]
 
 
 def ios_index_stale() -> str | None:
@@ -641,7 +683,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
                         f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]],
                 ROOT / GATEWAY, vitest_count(report))
     if group == "ios":
-        return ([str(ROOT / "scripts/tron-ios-test"), "run", *(["--host-slot-wait-seconds", "30"] if ios_wait else []), *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
+        lane = ["--lane", ios_pad_lane(), "--device-type", IOS_PAD_DEVICE_TYPE] if getattr(selectors, "pad", False) else []
+        return ([str(ROOT / "scripts/tron-ios-test"), "run", *lane, *(["--host-slot-wait-seconds", "30"] if ios_wait else []), *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group == "node-gateway":
         return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
     if group == "node":
