@@ -131,11 +131,16 @@ extension View {
 /// carrying its navigation chrome with it. Reduce Motion crossfades instead.
 struct TronSideColumnPanel: ViewModifier {
     let isOpen: Bool
+    /// Only a scene that can reflow beside a side column (an iPad scene root in
+    /// side-column mode) is that panel; iPhone scenes and sheets carry no marker.
+    let isPanel: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
-            .background { Color.clear.accessibilityElement().accessibilityIdentifier("tron-scene-panel").allowsHitTesting(false) }
+            .background {
+                if isPanel { Color.clear.accessibilityElement().accessibilityIdentifier("tron-scene-panel").allowsHitTesting(false) }
+            }
             // A mask, not a clip: a clip cuts at the layout frame, which excludes the
             // safe areas, so the scene's background stopped at the status bar and
             // home indicator and the window behind showed as black bars. The mask
