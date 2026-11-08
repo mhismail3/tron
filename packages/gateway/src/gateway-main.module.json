@@ -7,6 +7,9 @@
     "main/modules.ts",
     "main/settings-schema.ts"
   ],
+  "verify": [
+    "scripts/tron test gateway src/e2e/sessions/tron-modules.integration.test.ts"
+  ],
   "dependsOn": [
     "gateway/apps",
     "gateway/display",

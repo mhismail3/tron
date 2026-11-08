@@ -19,7 +19,7 @@
   ],
   "directories": {
     "docs": {"name": "docs", "layer": "L5"},
-    "src/lifecycle": {"name": "lifecycle", "layer": "L0"},
+    "src/lifecycle": {"name": "lifecycle", "layer": "L0", "verify": ["scripts/tron test gateway src/lifecycle/exit-after-shutdown.e2e.test.ts"]},
     "src/security": {"name": "security", "layer": "L3"},
     "src/util": {"name": "util", "layer": "L0"}
   }
