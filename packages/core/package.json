@@ -1,0 +1,8 @@
+{
+  "name": "@tron/core",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "bignumber.js": "11.1.5"
+  }
+}

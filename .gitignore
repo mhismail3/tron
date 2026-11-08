@@ -1,6 +1,8 @@
 # TypeScript build outputs
 *.tsbuildinfo
 **/dist/
+# Generated proof-block cores and façades are checked in (scripts/tron proof facade --check keeps them fresh).
+!packages/core/dist/
 
 # IDE
 .idea/
@@ -44,6 +46,7 @@ node_modules/
 package-lock.json
 !packages/gateway/package-lock.json
 !packages/push-relay/package-lock.json
+!packages/core/package-lock.json
 
 # Python (utility scripts)
 __pycache__/

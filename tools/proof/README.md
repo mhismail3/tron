@@ -11,6 +11,8 @@ scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--no-oracle] [--
                           [--config <mutate.json>] [--only <id>] [--list] [--equiv <id>] [--recheck <report.json> [--sample N]]
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
+scripts/tron proof shadow <block> [--root <dir>] [--out <file>]
+scripts/tron proof facade <block> [--check]
 scripts/tron proof wire --inventory [--json] [--numbers float64|integer]
 scripts/tron proof wire --generate <in.dfy> <out-dir>
 ```
@@ -97,13 +99,15 @@ law-kind table and five gates, each bound to the block hash:
 
 - **Proof:** `doctor`, then `dafny verify --verify-included-files` on each `verify` file.
 - **Independent review:** `REVIEW.json` at the current hash and tier, every law ACCEPT, every accepted mutant
-  AGREE, reviewer agent and model different from the writer's, and the reviewer's Pi transcript (read from
-  `~/.tron/agent/sessions`) naming the hash and exactly that model.
+  AGREE, reviewer agent and model different from the writer's, and the reviewer's Pi transcript naming the
+  hash and exactly that model. `reviewer.session` is the transcript's path below its project directory of
+  `~/.tron/agent/sessions` (read, never written), so a committed review holds no machine path; it must match
+  exactly one transcript.
 - **Mutation:** the `report` for the current hash and checker, PASS (with `--recheck`, re-run with 12 samples).
 - **Shadow:** `SHADOW.json` match at the current hash and compiled core; cut-over needs real traffic over 7
   (high-stakes) or 3 (leaf) days.
-- **Ready for cut-over:** only with `--recheck`, which also needs a shadow recheck; until the replay runner
-  (#2349) exists it is never YES.
+- **Ready for cut-over:** only with `--recheck`, which re-runs the shadow too, and only with a real-traffic
+  shadow over the tier's window.
 
 A gate for another hash shows STALE. Exit 1 lists packet problems: a missing English comment, a law lemma not
 found, a lemma neither a law nor a declared helper, a law-marked lemma not listed, an escape hatch, an
@@ -133,6 +137,39 @@ calls are not seams.
   the Mac and is never committed.
 - **Determinism:** time enters as a value, the recorder feeds nothing back, and every record carries the
   TypeScript output, so a replay is offline and exact.
+
+## Shadow and oracles
+
+`shadow/shadow.mjs` (`proof shadow`) compiles the block's `translate` file with the pinned toolchain into a
+temporary directory and runs `mutate.json` `shadow.cmd` with `{core}` set to the compiled `core.js`; it writes
+`blocks/<block>/SHADOW.json` `{status: match|mismatch|error, compared, mismatches, firstMismatch, source,
+realTraffic, windowDays, inputsHash, coreJsHash, command, date}`, deleting the old file first, so a failed run
+never leaves a stale match. The command must exit 0 with every request agreeing or 1 with mismatches; a crash,
+a signal, unparsable output, nothing compared, or an exit status that contradicts the counts is `error`. Generated-input comparisons are `realTraffic: false`. The packet re-compiles the
+core to check `coreJsHash`, and `--recheck` re-runs the shadow.
+
+`oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
+inputs and print `{requests, agree, diffs}` (exit 0 iff all agree); a block's `mutate.json` uses its oracle
+both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
+imports `packages/gateway/src/automations/schedule.ts` directly (Node strips its types) and calls the core
+through the block's generated façade. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
+(`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
+
+## Façade
+
+`dafny2wire/facade.mjs` (`proof facade <block> [--check] [--root <dir>]`) writes `packages/core/dist/<block>/core.js`,
+the block's `translate` file compiled by the pinned Dafny (unedited, with a generated header), and `facade.ts`, a
+typed TypeScript wrapper generated from the datatypes and compiled signatures of the block's laws: `load(corePath)`
+binds it to any compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the
+bound checked-in one. It exposes every compiled function and predicate of the laws (ghost and commented-out
+declarations are not compiled, so not exposed) and checks each stated precondition before calling, because
+compiled code does not check `requires`. Types: `int` -> `number` and `nat` -> `number >= 0` (safe integers, checked
+both ways), `bool` -> `boolean`, a datatype of nullary constructors -> a string union of their names, a
+one-constructor datatype named like its type -> a plain object, any other datatype -> an object tagged by `$`; an
+unknown constructor is a `TypeError` in either direction. Refused before anything compiles: Dafny 3 `function method`
+syntax, preconditions other than a call of a compiled predicate on parameters, generic functions, and any other
+Dafny type (an unused generic datatype is ignored). `--check` regenerates into a temporary directory and exits 1 if
+the checked-in files differ.
 
 ## Wire
 
@@ -192,7 +229,15 @@ proven equivalences; a weakened law FAILS with the survivor it no longer catches
 rejected by its failing proof; a mutant only an unmapped helper catches is `unmapped`, not killed; a law proof
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
-STALE. The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
+STALE; and `proof shadow` records a match or mismatch only from a comparison that ran and agrees with
+its exit status (`tests/fixtures/mutate-variants/shadow-stub.mjs`). The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
+
+`scripts/tron test tooling tools/proof/tests/test-core.py` is the gate test of the real blocks, declared by
+`packages/core/package.module.json`, so any change under `packages/core` runs it: `proof check` passes on a
+fresh cache, and for each block with a `mutate.json` the regenerated packet equals the committed `LAWS.md`
+and shows proof PASS, a current mutation PASS, a current shadow match, and a `REVIEW.json` for the current
+block hash with every law ACCEPT, and `proof facade --check` finds `dist/` fresh. An edit that skips any gate
+fails it.
 
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: the inventory covers
 every export, every expansion is compiler-confirmed, at least 95% of the protocol types are expressible (the
@@ -208,3 +253,9 @@ outside an opted-in Debug Gateway (Stable channel, no channel, other values, the
 seeded schedule journey through the real seams writes one record per call (none for calendar triggers or
 nested calls) that replays through the same TypeScript to the recorded outputs, and that the daily cap and
 retention hold.
+
+`scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block
+`demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
+full, an opaque function; no ghost or commented-out one), round trips values, refuses unknown constructors,
+non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
+either file; and `function method`, an uncheckable precondition and an unsupported type are refused.

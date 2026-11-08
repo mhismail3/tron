@@ -1,0 +1,2187 @@
+{
+ "summary": {
+  "block": "schedule/occurrence",
+  "tier": "high-stakes",
+  "laws": "blocks/schedule/occurrence/Block.dfy",
+  "oracle": true,
+  "toolHash": "3bf34288c20e1b8a",
+  "mutants": 118,
+  "stillborn": 5,
+  "valid": 113,
+  "killed": 113,
+  "lawGap": 0,
+  "survived": 0,
+  "accepted": 0,
+  "seconds": 286,
+  "score": 1,
+  "unknown": 0,
+  "stillbornRatio": 0.042,
+  "filter": null,
+  "generated": 118,
+  "pass": true,
+  "inputsHash": "88ecabd339a63d34"
+ },
+ "perLaw": [
+  {
+   "law": "L1 next-sound",
+   "killed": 32,
+   "only": 3
+  },
+  {
+   "law": "L2 next-minimal",
+   "killed": 19,
+   "only": 0
+  },
+  {
+   "law": "L3 next-none",
+   "killed": 11,
+   "only": 0
+  },
+  {
+   "law": "L4 first-interval",
+   "killed": 6,
+   "only": 0
+  },
+  {
+   "law": "L5 classify-not-due",
+   "killed": 7,
+   "only": 6
+  },
+  {
+   "law": "L6 classify-due",
+   "killed": 82,
+   "only": 57
+  },
+  {
+   "law": "L7 first-once",
+   "killed": 1,
+   "only": 1
+  },
+  {
+   "law": "L8 first-after-occurrence",
+   "killed": 33,
+   "only": 2
+  }
+ ],
+ "results": [
+  {
+   "id": "Next/branch/at > after->false#1",
+   "sym": "Next",
+   "op": "branch",
+   "line": 58,
+   "col": 25,
+   "from": "at > after",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/branch/at > after->true#1",
+   "sym": "Next",
+   "op": "branch",
+   "line": 58,
+   "col": 25,
+   "from": "at > after",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/at->(at - 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 58,
+   "col": 25,
+   "from": "at",
+   "to": "(at - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/at->(at + 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 58,
+   "col": 25,
+   "from": "at",
+   "to": "(at + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/boundary/>->>=#1",
+   "sym": "Next",
+   "op": "boundary",
+   "line": 58,
+   "col": 28,
+   "from": ">",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/relational/>-><=#1",
+   "sym": "Next",
+   "op": "relational",
+   "line": 58,
+   "col": 28,
+   "from": ">",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/after->(after - 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 58,
+   "col": 30,
+   "from": "after",
+   "to": "(after - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/after->(after + 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 58,
+   "col": 30,
+   "from": "after",
+   "to": "(after + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/constructor/Some(at)->None#1",
+   "sym": "Next",
+   "op": "constructor",
+   "line": 58,
+   "col": 41,
+   "from": "Some(at)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/branch/after < a->false#1",
+   "sym": "Next",
+   "op": "branch",
+   "line": 60,
+   "col": 10,
+   "from": "after < a",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/branch/after < a->true#1",
+   "sym": "Next",
+   "op": "branch",
+   "line": 60,
+   "col": 10,
+   "from": "after < a",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/after->(after - 1)#2",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 10,
+   "from": "after",
+   "to": "(after - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/after->(after + 1)#2",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 10,
+   "from": "after",
+   "to": "(after + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/boundary/<-><=#1",
+   "sym": "Next",
+   "op": "boundary",
+   "line": 60,
+   "col": 16,
+   "from": "<",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/relational/<->>=#1",
+   "sym": "Next",
+   "op": "relational",
+   "line": 60,
+   "col": 16,
+   "from": "<",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/a->(a - 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 18,
+   "from": "a",
+   "to": "(a - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/a->(a + 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 18,
+   "from": "a",
+   "to": "(a + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/constructor/Some(a)->None#1",
+   "sym": "Next",
+   "op": "constructor",
+   "line": 60,
+   "col": 25,
+   "from": "Some(a)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none",
+    "L4 first-interval"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/constructor/Some(a + ((after - a) / e + 1) * e)->None#1",
+   "sym": "Next",
+   "op": "constructor",
+   "line": 60,
+   "col": 38,
+   "from": "Some(a + ((after - a) / e + 1) * e)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L3 next-none",
+    "L4 first-interval",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/a->(a - 1)#2",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 43,
+   "from": "a",
+   "to": "(a - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/a->(a + 1)#2",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 43,
+   "from": "a",
+   "to": "(a + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/arith/+->-#1",
+   "sym": "Next",
+   "op": "arith",
+   "line": 60,
+   "col": 45,
+   "from": "+",
+   "to": "-",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/drop-operand/+ ((after - a) / e + 1) * e->#1",
+   "sym": "Next",
+   "op": "drop-operand",
+   "line": 60,
+   "col": 45,
+   "from": "+ ((after - a) / e + 1) * e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/after->(after - 1)#3",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 49,
+   "from": "after",
+   "to": "(after - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/after->(after + 1)#3",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 49,
+   "from": "after",
+   "to": "(after + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/arith/-->+#1",
+   "sym": "Next",
+   "op": "arith",
+   "line": 60,
+   "col": 55,
+   "from": "-",
+   "to": "+",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/drop-operand/- a->#1",
+   "sym": "Next",
+   "op": "drop-operand",
+   "line": 60,
+   "col": 55,
+   "from": "- a",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/a->(a - 1)#3",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 57,
+   "from": "a",
+   "to": "(a - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/a->(a + 1)#3",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 57,
+   "from": "a",
+   "to": "(a + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/arith//->*#1",
+   "sym": "Next",
+   "op": "arith",
+   "line": 60,
+   "col": 60,
+   "from": "/",
+   "to": "*",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/drop-operand// e->#1",
+   "sym": "Next",
+   "op": "drop-operand",
+   "line": 60,
+   "col": 60,
+   "from": "/ e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/e->(e - 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 62,
+   "from": "e",
+   "to": "(e - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L8 first-after-occurrence",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/e->(e + 1)#1",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 62,
+   "from": "e",
+   "to": "(e + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/arith/+->-#2",
+   "sym": "Next",
+   "op": "arith",
+   "line": 60,
+   "col": 64,
+   "from": "+",
+   "to": "-",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/drop-operand/+ 1->#1",
+   "sym": "Next",
+   "op": "drop-operand",
+   "line": 60,
+   "col": 64,
+   "from": "+ 1",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/constant/1->0#1",
+   "sym": "Next",
+   "op": "constant",
+   "line": 60,
+   "col": 66,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/constant/1->2#1",
+   "sym": "Next",
+   "op": "constant",
+   "line": 60,
+   "col": 66,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "L2 next-minimal",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/arith/*->+#1",
+   "sym": "Next",
+   "op": "arith",
+   "line": 60,
+   "col": 69,
+   "from": "*",
+   "to": "+",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/drop-operand/* e->#1",
+   "sym": "Next",
+   "op": "drop-operand",
+   "line": 60,
+   "col": 69,
+   "from": "* e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/e->(e - 1)#2",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 71,
+   "from": "e",
+   "to": "(e - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Next/off-by-one/e->(e + 1)#2",
+   "sym": "Next",
+   "op": "off-by-one",
+   "line": 60,
+   "col": 71,
+   "from": "e",
+   "to": "(e + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L1 next-sound",
+    "L2 next-minimal",
+    "L6 classify-due",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/constructor/Some(at)->None#1",
+   "sym": "First",
+   "op": "constructor",
+   "line": 66,
+   "col": 22,
+   "from": "Some(at)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L7 first-once"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/swap-args/t, now - 1->now - 1, t#1",
+   "sym": "First",
+   "op": "swap-args",
+   "line": 69,
+   "col": 33,
+   "from": "t, now - 1",
+   "to": "now - 1, t",
+   "note": "Next args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/off-by-one/now->(now - 1)#1",
+   "sym": "First",
+   "op": "off-by-one",
+   "line": 69,
+   "col": 36,
+   "from": "now",
+   "to": "(now - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/off-by-one/now->(now + 1)#1",
+   "sym": "First",
+   "op": "off-by-one",
+   "line": 69,
+   "col": 36,
+   "from": "now",
+   "to": "(now + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L4 first-interval",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/arith/-->+#1",
+   "sym": "First",
+   "op": "arith",
+   "line": 69,
+   "col": 40,
+   "from": "-",
+   "to": "+",
+   "status": "killed",
+   "killedBy": [
+    "L4 first-interval",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/drop-operand/- 1->#1",
+   "sym": "First",
+   "op": "drop-operand",
+   "line": 69,
+   "col": 40,
+   "from": "- 1",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L4 first-interval",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/constant/1->0#1",
+   "sym": "First",
+   "op": "constant",
+   "line": 69,
+   "col": 42,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "L4 first-interval",
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "First/constant/1->2#1",
+   "sym": "First",
+   "op": "constant",
+   "line": 69,
+   "col": 42,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "L8 first-after-occurrence"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/branch/nxt > now->false#1",
+   "sym": "Classify",
+   "op": "branch",
+   "line": 74,
+   "col": 8,
+   "from": "nxt > now",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/branch/nxt > now->true#1",
+   "sym": "Classify",
+   "op": "branch",
+   "line": 74,
+   "col": 8,
+   "from": "nxt > now",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt - 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 74,
+   "col": 8,
+   "from": "nxt",
+   "to": "(nxt - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt + 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 74,
+   "col": 8,
+   "from": "nxt",
+   "to": "(nxt + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/boundary/>->>=#1",
+   "sym": "Classify",
+   "op": "boundary",
+   "line": 74,
+   "col": 12,
+   "from": ">",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/relational/>-><=#1",
+   "sym": "Classify",
+   "op": "relational",
+   "line": 74,
+   "col": 12,
+   "from": ">",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due",
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/now->(now - 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 74,
+   "col": 14,
+   "from": "now",
+   "to": "(now - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/now->(now + 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 74,
+   "col": 14,
+   "from": "now",
+   "to": "(now + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/None, Some(nxt)->Some(nxt), None#1",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 74,
+   "col": 30,
+   "from": "None, Some(nxt)",
+   "to": "Some(nxt), None",
+   "note": "Result args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(nxt)->None#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 74,
+   "col": 36,
+   "from": "Some(nxt)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/Some(nxt), None->None, Some(nxt)#1",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 74,
+   "col": 36,
+   "from": "Some(nxt), None",
+   "to": "None, Some(nxt)",
+   "note": "Result args 2<->3",
+   "status": "killed",
+   "killedBy": [
+    "L5 classify-not-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/branch/p == Latest->false#1",
+   "sym": "Classify",
+   "op": "branch",
+   "line": 77,
+   "col": 10,
+   "from": "p == Latest",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/branch/p == Latest->true#1",
+   "sym": "Classify",
+   "op": "branch",
+   "line": 77,
+   "col": 10,
+   "from": "p == Latest",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/p->(p - 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 77,
+   "col": 10,
+   "from": "p",
+   "to": "(p - 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/p->(p + 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 77,
+   "col": 10,
+   "from": "p",
+   "to": "(p + 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/relational/==->!=#1",
+   "sym": "Classify",
+   "op": "relational",
+   "line": 77,
+   "col": 12,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Latest->Skip#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 77,
+   "col": 15,
+   "from": "Latest",
+   "to": "Skip",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(nxt)->None#2",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 77,
+   "col": 34,
+   "from": "Some(nxt)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/Some(nxt), None->None, Some(nxt)#2",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 77,
+   "col": 34,
+   "from": "Some(nxt), None",
+   "to": "None, Some(nxt)",
+   "note": "Result args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/None, Some(nxt)->Some(nxt), None#2",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 77,
+   "col": 75,
+   "from": "None, Some(nxt)",
+   "to": "Some(nxt), None",
+   "note": "Result args 2<->3",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(nxt)->None#3",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 77,
+   "col": 81,
+   "from": "Some(nxt)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/now->(now - 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 79,
+   "col": 17,
+   "from": "now",
+   "to": "(now - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/now->(now + 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 79,
+   "col": 17,
+   "from": "now",
+   "to": "(now + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/arith/-->+#1",
+   "sym": "Classify",
+   "op": "arith",
+   "line": 79,
+   "col": 21,
+   "from": "-",
+   "to": "+",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/drop-operand/- nxt->#1",
+   "sym": "Classify",
+   "op": "drop-operand",
+   "line": 79,
+   "col": 21,
+   "from": "- nxt",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt - 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 79,
+   "col": 23,
+   "from": "nxt",
+   "to": "(nxt - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt + 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 79,
+   "col": 23,
+   "from": "nxt",
+   "to": "(nxt + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/arith//->*#1",
+   "sym": "Classify",
+   "op": "arith",
+   "line": 79,
+   "col": 28,
+   "from": "/",
+   "to": "*",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/drop-operand// e->#1",
+   "sym": "Classify",
+   "op": "drop-operand",
+   "line": 79,
+   "col": 28,
+   "from": "/ e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/e->(e - 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 79,
+   "col": 30,
+   "from": "e",
+   "to": "(e - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/e->(e + 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 79,
+   "col": 30,
+   "from": "e",
+   "to": "(e + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt - 1)#3",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 80,
+   "col": 21,
+   "from": "nxt",
+   "to": "(nxt - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt + 1)#3",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 80,
+   "col": 21,
+   "from": "nxt",
+   "to": "(nxt + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/arith/+->-#1",
+   "sym": "Classify",
+   "op": "arith",
+   "line": 80,
+   "col": 25,
+   "from": "+",
+   "to": "-",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/drop-operand/+ q * e->#1",
+   "sym": "Classify",
+   "op": "drop-operand",
+   "line": 80,
+   "col": 25,
+   "from": "+ q * e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/q->(q - 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 80,
+   "col": 27,
+   "from": "q",
+   "to": "(q - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/q->(q + 1)#1",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 80,
+   "col": 27,
+   "from": "q",
+   "to": "(q + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/arith/*->+#1",
+   "sym": "Classify",
+   "op": "arith",
+   "line": 80,
+   "col": 29,
+   "from": "*",
+   "to": "+",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/drop-operand/* e->#1",
+   "sym": "Classify",
+   "op": "drop-operand",
+   "line": 80,
+   "col": 29,
+   "from": "* e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/e->(e - 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 80,
+   "col": 31,
+   "from": "e",
+   "to": "(e - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/e->(e + 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 80,
+   "col": 31,
+   "from": "e",
+   "to": "(e + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt - 1)#4",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 81,
+   "col": 17,
+   "from": "nxt",
+   "to": "(nxt - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/nxt->(nxt + 1)#4",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 81,
+   "col": 17,
+   "from": "nxt",
+   "to": "(nxt + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/arith/+->-#2",
+   "sym": "Classify",
+   "op": "arith",
+   "line": 81,
+   "col": 21,
+   "from": "+",
+   "to": "-",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/drop-operand/+ (q + 1) * e->#1",
+   "sym": "Classify",
+   "op": "drop-operand",
+   "line": 81,
+   "col": 21,
+   "from": "+ (q + 1) * e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/q->(q - 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 81,
+   "col": 24,
+   "from": "q",
+   "to": "(q - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/q->(q + 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 81,
+   "col": 24,
+   "from": "q",
+   "to": "(q + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/arith/+->-#3",
+   "sym": "Classify",
+   "op": "arith",
+   "line": 81,
+   "col": 26,
+   "from": "+",
+   "to": "-",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/drop-operand/+ 1->#1",
+   "sym": "Classify",
+   "op": "drop-operand",
+   "line": 81,
+   "col": 26,
+   "from": "+ 1",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constant/1->0#1",
+   "sym": "Classify",
+   "op": "constant",
+   "line": 81,
+   "col": 28,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constant/1->2#1",
+   "sym": "Classify",
+   "op": "constant",
+   "line": 81,
+   "col": 28,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/arith/*->+#2",
+   "sym": "Classify",
+   "op": "arith",
+   "line": 81,
+   "col": 31,
+   "from": "*",
+   "to": "+",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/drop-operand/* e->#2",
+   "sym": "Classify",
+   "op": "drop-operand",
+   "line": 81,
+   "col": 31,
+   "from": "* e",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/e->(e - 1)#3",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 81,
+   "col": 33,
+   "from": "e",
+   "to": "(e - 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/e->(e + 1)#3",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 81,
+   "col": 33,
+   "from": "e",
+   "to": "(e + 1)",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/branch/p == Skip->false#1",
+   "sym": "Classify",
+   "op": "branch",
+   "line": 82,
+   "col": 10,
+   "from": "p == Skip",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/branch/p == Skip->true#1",
+   "sym": "Classify",
+   "op": "branch",
+   "line": 82,
+   "col": 10,
+   "from": "p == Skip",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/p->(p - 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 82,
+   "col": 10,
+   "from": "p",
+   "to": "(p - 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/off-by-one/p->(p + 1)#2",
+   "sym": "Classify",
+   "op": "off-by-one",
+   "line": 82,
+   "col": 10,
+   "from": "p",
+   "to": "(p + 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/relational/==->!=#2",
+   "sym": "Classify",
+   "op": "relational",
+   "line": 82,
+   "col": 12,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Skip->Latest#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 82,
+   "col": 15,
+   "from": "Skip",
+   "to": "Latest",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/None, Some(n2)->Some(n2), None#1",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 82,
+   "col": 32,
+   "from": "None, Some(n2)",
+   "to": "Some(n2), None",
+   "note": "Result args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(n2)->None#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 82,
+   "col": 38,
+   "from": "Some(n2)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/Some(n2), Some(latest)->Some(latest), Some(n2)#1",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 82,
+   "col": 38,
+   "from": "Some(n2), Some(latest)",
+   "to": "Some(latest), Some(n2)",
+   "note": "Result args 2<->3",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(latest)->None#1",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 82,
+   "col": 48,
+   "from": "Some(latest)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(latest)->None#2",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 83,
+   "col": 19,
+   "from": "Some(latest)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/Some(latest), Some(n2)->Some(n2), Some(latest)#1",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 83,
+   "col": 19,
+   "from": "Some(latest), Some(n2)",
+   "to": "Some(n2), Some(latest)",
+   "note": "Result args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/constructor/Some(n2)->None#2",
+   "sym": "Classify",
+   "op": "constructor",
+   "line": 83,
+   "col": 33,
+   "from": "Some(n2)",
+   "to": "None",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Classify/swap-args/Some(n2), None->None, Some(n2)#1",
+   "sym": "Classify",
+   "op": "swap-args",
+   "line": 83,
+   "col": 33,
+   "from": "Some(n2), None",
+   "to": "None, Some(n2)",
+   "note": "Result args 2<->3",
+   "status": "killed",
+   "killedBy": [
+    "L6 classify-due"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  }
+ ]
+}

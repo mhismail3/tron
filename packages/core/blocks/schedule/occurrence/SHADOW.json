@@ -1,0 +1,14 @@
+{
+ "status": "match",
+ "compared": 20000,
+ "unit": "inputs",
+ "mismatches": 0,
+ "firstMismatch": null,
+ "source": "compiled core vs packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic)",
+ "realTraffic": false,
+ "windowDays": 0,
+ "inputsHash": "88ecabd339a63d34",
+ "coreJsHash": "96104b810abdd724",
+ "command": "node tools/proof/oracles/schedule-occurrence.mjs {core} 20000",
+ "date": "2026-11-08"
+}
