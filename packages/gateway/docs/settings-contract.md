@@ -25,7 +25,7 @@ consume it. Edge cases follow from a [foundation](#foundations), never a new rul
 
 | Scope | Store | Owner |
 |---|---|---|
-| Project | Admitted `.pi/settings.json` and `.pi/mcp.json` fields at the worktree root | Repository-owned, read-only; verified historical Undo alone retains its applier |
+| Project | Admitted `.pi/settings.json` and `.pi/mcp.json` fields at the worktree root | Repository-owned, read-only; Tron never writes it, and Undo of a historical Project entry refuses |
 | Session/Home override | Session JSONL for ordinary chats and workers; `<tronHome>/gateway/home/profile.json` for Home's bounded durable recipe | Settings change path; the runtime lane owns SDK effects |
 | Global | Agent and Gateway defaults, trust, notifications and SDK/schema defaults | Gateway and the underlying SDK stores; hand edits are outside writers |
 
@@ -207,13 +207,11 @@ entry (with `HEAD` and branch for repository files; redacted keys by digest); MC
 custom providers report only added/changed/removed, then `mcp.changed` or
 `models.customChanged`. Tron's own writes are bracketed (`begin`/`end`, `adopt`).
 
-## Project writes
+## Project git state
 
-Tron edits `.pi/` under the project's store lock, keeps other keys and layout, and stages with
-`git add`; it never commits, pushes or opens a pull request. If git cannot stage the write
-stands and the entry says why. Badges: matches `HEAD` → Project; else **Staged** or
-**Uncommitted**; **Local only** outside a repository or when ignored. A commit holding Tron's
-blob appends `committed`.
+Tron never writes `.pi/`. Badges: matches `HEAD` → Project; else **Staged** or
+**Uncommitted**; **Local only** outside a repository or when ignored. A commit holding a
+historical Tron-staged blob appends `committed`.
 
 ## Home profile
 

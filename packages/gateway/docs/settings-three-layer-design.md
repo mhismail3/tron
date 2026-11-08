@@ -180,10 +180,8 @@ session identity), key, group, actor (maintainer/Home/worker task with task/sess
 status. Each entry snapshots scope title/group/key at write so renames/deletion do not orphan filters;
 show redacted old→new and Undo or its precise refusal. Preserve pending approvals and receipt fencing.
 Project repo edits do not create new Tron settings entries; diagnostics/trust state have their own
-owners. Non-repo outside edits to Global remain observed changes. Existing repo history is a real
-persisted consumer: recommend retaining historical Project entries and their fenced Undo only in
-Global Changes, with a Legacy Project filter. No new Project writes via settings.change; any retained
-legacy undo applier may retire only when no retained undoable entry references it (approval below).
+owners. Non-repo outside edits to Global remain observed changes. Historical Project entries stay
+readable in Global Changes; no request, Undo or Apply again writes Project settings.
 
 ## One migration, backup and verification
 

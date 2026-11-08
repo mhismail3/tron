@@ -14,7 +14,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | Settings declarations and binding admission | [kernel schema](../kernel/settings/settings-schema.ts) (`createSettingsSchema`, `KEYS`, `RECORD_SUBJECTS`), [kernel scope resolution](../kernel/settings/scope-resolution.ts) (binding admission from `sessionOverridable`/`projectSettable`); value validation, formatting and vocabulary: [kernel settings](../kernel/settings/README.md) |
 | SDK scope admission and operational model selection | [kernel SDK storage admission](../kernel/settings/settings-sdk-manager.ts), [kernel operational admission](../kernel/settings/settings-admission.ts) |
 | Store/options adapter and presentation | `settings-model.ts` (`SettingsStoreAdapter`), `settings-presentation.ts`; [kernel resolver and diagnostics](../kernel/settings/README.md) |
-| Appliers and outside writers | `project-settings-writer.ts`, [kernel trust owner](../kernel/resources/trust-service.ts), `settings-outside.ts` (`OutsideChanges`) |
+| Project reader, appliers and outside writers | `project-settings-writer.ts` (read-only Project layer and git state), [kernel trust owner](../kernel/resources/trust-service.ts), `settings-outside.ts` (`OutsideChanges`) |
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
 | Packages, extensions, hooks, tools | `package-service.ts`, `package-provides.ts`, `session-free-extensions.ts`, `hook-resources.ts`, `tool-catalog.ts` |
@@ -111,7 +111,7 @@ are installed; schema access never evaluates their late-bound service getter.
   native filenames may omit the changed settings file. Unchanged digests skip their
   canonical readers and emit no audit or push; accepted scans and observers are
   joined by `dispose`.
-- Tron stages Project writes and never commits, pushes or opens a pull request.
+- Tron never writes Project settings; the repository owns them.
 - Changing a model or thinking never persists a default. A masked Chat write
   refuses without replacing the stored choice. Operational Project selections
   preserve that inactive choice through cold resume and Project removal.

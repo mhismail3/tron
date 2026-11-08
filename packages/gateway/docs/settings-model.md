@@ -115,8 +115,8 @@ Dropped (design rationale); see #758.
 ### 5.6a Implemented: outside changes
 → [Outside changes](settings-contract.md#outside-changes)
 
-### 5.7 Project writes
-→ [Project writes](settings-contract.md#project-writes)
+### 5.7 Project git state
+→ [Project git state](settings-contract.md#project-git-state)
 
 ## 6. The Home Home recipe
 → [Home profile](settings-contract.md#home-profile)
@@ -175,7 +175,7 @@ F1–F4 → [Foundations](settings-contract.md#foundations);
 Native consent and 24-hour unanswered-card expiry → [Native review](settings-contract.md#native-review);
 12 → [Change path](settings-contract.md#change-path) (record kept forever);
 13, Q25 → [Outside changes](settings-contract.md#outside-changes);
-14, Q24–Q27, 29 → [Project writes](settings-contract.md#project-writes);
+14, Q24–Q27, 29 → [Project git state](settings-contract.md#project-git-state);
 15 → [Timing](settings-contract.md#timing); 34 → [Keys](settings-contract.md#keys) (`writers`).
 
 ### 8.2 Open questions
