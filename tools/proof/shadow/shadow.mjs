@@ -31,14 +31,16 @@ const outPath = resolve(opt("--out") ?? join(dir, "SHADOW.json"));
 rmSync(outPath, { force: true });
 const env = { ...process.env, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, DAFNY_CORES: "1" };
 const date = new Date().toISOString().slice(0, 10);
+let work;
 const fail = (why) => {
+  if (work) rmSync(work, { recursive: true, force: true });
   writeFileSync(outPath, `${JSON.stringify({ status: "error", error: why, inputsHash: blockHash(root, full), realTraffic: false, compared: 0, mismatches: null, date }, null, 1)}\n`);
   console.error(`shadow: FAIL: ${why}`);
   process.exit(1);
 };
 const doctor = spawnSync("/bin/bash", [join(REPO, "tools/proof/bootstrap.sh"), "doctor"], { encoding: "utf8" });
 if (doctor.status !== 0) { console.error(`shadow: pinned toolchain unavailable: ${doctor.stderr.trim()}`); process.exit(2); }
-const work = mkdtempSync(join(tmpdir(), "tron-proof-shadow-"));
+work = mkdtempSync(join(tmpdir(), "tron-proof-shadow-"));
 try {
   const core = join(work, "core.js");
   execFileSync(DAFNY, ["translate", "js", "--no-verify", "--include-runtime", full.translate, "-o", join(work, "core")], { cwd: root, env, stdio: "ignore" });

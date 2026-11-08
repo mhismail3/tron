@@ -119,4 +119,9 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   assert.deepEqual(shadow("match"), [0, "match"]);
   assert.deepEqual(shadow("mismatch"), [1, "mismatch"]);
   for (const mode of ["crash", "garbage", "none", "lie"]) assert.deepEqual(shadow(mode), [1, "error"], mode);
+  // A failed run replaces the previous match with its error record, never leaving the old result.
+  assert.deepEqual(shadow("match"), [0, "match"]);
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), shadow: { cmd: ["/nonexistent/comparison"], source: "fixture" } }));
+  assert.equal(cli("shadow", "demo/clamp").status, 1);
+  assert.match(JSON.parse(readFileSync(shadowFile, "utf8")).error, /did not run/);
 });
