@@ -191,11 +191,13 @@ function mutants(src, toks, symbols) {
 // Builds: original impl + the mutated definition renamed <sym>__mutant + a lemma
 //   <sym>__equiv(params) requires <same requires> ensures <sym>(params) == <sym>__mutant(params) { hint }
 // inserted right after the original definition. Verified with the pinned Dafny; no proof, no acceptance.
-// A refining definition inherits its preconditions from the laws (abstract module), so they are read from the
-// laws' signature of <sym> when the impl states none.
+// A refining definition inherits its preconditions from the laws (abstract module) and Dafny enforces them at
+// every call, so they are read from the laws' signature of <sym> when the impl states none: equivalence is
+// proven over the function's whole domain, exactly as for a definition that states its own requires.
 function lawRequires(sym) {
   for (const f of lawFiles) {
-    const m = new RegExp(`^\\s*(?:ghost\\s+)?(?:function|predicate)\\s+${sym}\\b[\\s\\S]*?(?=\\n\\s*\\n|\\n\\s*(?://|lemma|function|predicate|method|ghost|datatype|\\{|\\}))`, "m").exec(readFileSync(join(root, f), "utf8"));
+    const text = readFileSync(lawsOverride && f === lawsTarget ? resolve(lawsOverride) : join(root, f), "utf8");
+    const m = new RegExp(`^\\s*(?:ghost\\s+)?(?:function|predicate)\\s+${sym}\\b[\\s\\S]*?(?=\\n\\s*\\n|\\n\\s*(?://|lemma|function|predicate|method|ghost|datatype|\\{|\\}))`, "m").exec(text);
     if (m) return m[0];
   }
   return "";

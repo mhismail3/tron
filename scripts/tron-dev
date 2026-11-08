@@ -161,12 +161,29 @@ supervise() {
       exit 1
     fi
     "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" starting childPid= childStartIdentity=
-    env -u TRON_DATA_DIR -u PI_CODING_AGENT_DIR -u TRON_AGENT_DIR_NAME \
-      TRON_HOME_NAME=.tron-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 \
-      "$LAUNCHER" --host "$HOST" --port 9848 &
+    # The child waits at a gate until its pid and start identity are recorded, so
+    # stop and termination never meet a running launcher they cannot attribute.
+    # Only this supervisor holds the gate's write end (fd 7): if it dies first,
+    # the child reads EOF and exits without starting. exec keeps the pid and its
+    # start identity.
+    gate="$STATE_DIR/child-start.gate"
+    rm -f "$gate"
+    mkfifo -m 600 "$gate"
+    exec 7<>"$gate" 8<"$gate"
+    rm -f "$gate"
+    (
+      exec 7>&-
+      IFS= read -r -u 8 go && [[ "$go" == start ]] || exit 0
+      exec 8<&- env -u TRON_DATA_DIR -u PI_CODING_AGENT_DIR -u TRON_AGENT_DIR_NAME \
+        TRON_HOME_NAME=.tron-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 \
+        "$LAUNCHER" --host "$HOST" --port 9848
+    ) &
     child=$!
+    exec 8<&-
     child_identity="$("$NODE_BIN" "$STATE_HELPER" pid-start "$child")"
     "$NODE_BIN" "$STATE_HELPER" write "$STATE_FILE" childPid="$child" childStartIdentity="$child_identity"
+    printf 'start\n' >&7
+    exec 7>&-
     ready=0
     for _ in $(seq 1 80); do
       health="$("$NODE_BIN" "$STATE_HELPER" health "$HOST" 9848)"

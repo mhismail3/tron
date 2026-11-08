@@ -67,8 +67,8 @@ of the core root (so relative includes hold) with the pinned wrapper after `doct
    oracle caught it), `survived`. `stillborn` (resolution/type error) is excluded from the score.
 4. **Gate.** PASS only for a full run (no `--only`) with valid > 0, stillborn ≤ 40% and zero law-gap, survived and
    unknown. An `accepted` entry exempts a mutant only if it holds: `equivalent` makes the tool prove
-   `F == F_mutant` for all inputs (preconditions from the impl, else from the laws' signature; optional `hint`
-   proof body); `out-of-contract` only for `tier: "leaf"`. A stale accepted id exits 2, and every compiled
+   `F == F_mutant` on F's whole domain (its preconditions: the impl's, else those it inherits from the laws'
+   signature, which Dafny enforces at every call; optional `hint` proof body); `out-of-contract` only for `tier: "leaf"`. A stale accepted id exits 2, and every compiled
    function must be in `symbols` or `excludeSymbols` with a reason.
 5. **Binding.** The report's `inputsHash` is the block hash (`packet/hash.mjs`: the whole mutate.json plus the
    block's laws, impl, verify and `lawContext` files); `--laws` (replaces the block's first laws file in the
@@ -83,7 +83,7 @@ Exit 0: PASS; 1: FAIL; 2: config, baseline or toolchain error. Limits: mutants a
 covers the Dafny subset blocks use (no attributes inside bodies, no nested comments in mutated bodies); Dafny
 reports a solver "unknown" on a goal as an ordinary failure, so such a failure of a mapped law counts as a kill;
 a forged `killed` label in a report is caught only if sampled. Oracles run with the repository as working
-directory; no oracle has a runtime dependency yet.
+directory.
 
 ## Packet
 
@@ -122,8 +122,10 @@ block above does not run with the verifier's postcondition error, and an include
 implementation is refused, also behind a comment and from a laws file.
 
 `scripts/tron-node exec node --test tools/proof/tests/gates.test.mjs` runs `proof mutate` and `proof packet` on a
-copy of the fixture block `demo/clamp` (`tests/fixtures/mutate`, with law variants in `tests/fixtures/mutate-variants`;
-test input, not a core block), about 90 s: the real laws PASS with six proven equivalences; a weakened law FAILS
-with the survivor it no longer catches; a false equivalence claim is rejected by its failing proof; a mutant only
-an unmapped helper catches is `unmapped`, not killed; and after an edit the packet shows the review and the
-mutation report STALE.
+copy of the fixture blocks `demo/clamp` and `demo/timeout` (`tests/fixtures/mutate`, with law variants in
+`tests/fixtures/mutate-variants`; test input, not core blocks), about 2 minutes: the real laws PASS with six
+proven equivalences; a weakened law FAILS with the survivor it no longer catches; a false equivalence claim is
+rejected by its failing proof; a mutant only an unmapped helper catches is `unmapped`, not killed; a law proof
+that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
+English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
+STALE. The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.

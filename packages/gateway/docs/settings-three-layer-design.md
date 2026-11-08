@@ -195,9 +195,6 @@ readable in Global Changes; no request, Undo or Apply again writes Project setti
   `settings.migration-failed` and retries next start (#1649).
 - Startup never rewrites session JSONL. Session snapshot provenance names only current layers
   (`global`, `project`, `session`, `delegate`); any other name refuses at read for that session.
-  Entries that still name a scope #1634 retired are rewritten once by the maintainer-run,
-  backed-up `scripts/tron migrate retired-formats` (#2329), which re-seals a sealed Home chapter
-  (`episodic/README.md`).
   The Home record model moves into the Profile when none is saved.
 - Preserve saved Global values in their owned stores as Global. Active Home chapter sessions are
   not read or folded; Home's saved choices live in the Profile.
