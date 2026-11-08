@@ -14,6 +14,7 @@ import { importGatewaySource } from "./gateway-source.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const oracle = await importGatewaySource("automations/schedule.ts");
+const { isGatewayTimestamp } = await importGatewaySource("util/timestamp.ts");
 const [corePath, countArg, seedArg, ...replayFiles] = process.argv.slice(2);
 if (!corePath) { console.error("usage: schedule-occurrence.mjs <compiled core.js> [count] [seed] | --replay <corpus.jsonl>..."); process.exit(2); }
 const replay = countArg === "--replay";
@@ -39,13 +40,16 @@ if (replay) {
   const files = [seedArg, ...replayFiles].filter(Boolean);
   const requests = [];
   // Exactly the records the recorder writes; anything else is refused (exit 2), never compared.
+  // Fields the recorder writes itself (at, outputs) are canonical ISO; inputs come from stored records, so they
+  // follow the Gateway's own timestamp rule (offsets, 1-9 fraction digits).
   const iso = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)) && new Date(Date.parse(v)).toISOString() === v;
+  const stamp = (v) => typeof v === "string" && isGatewayTimestamp(v) && Number.isFinite(Date.parse(v));
   const integer = (v) => Number.isSafeInteger(v);
-  const okTrigger = (t) => t && ((t.kind === "once" && iso(t.at) && Object.keys(t).length === 2)
-    || (t.kind === "interval" && iso(t.anchorAt) && integer(t.everySeconds) && t.everySeconds > 0 && Object.keys(t).length === 3));
+  const okTrigger = (t) => t && ((t.kind === "once" && stamp(t.at) && Object.keys(t).length === 2)
+    || (t.kind === "interval" && stamp(t.anchorAt) && integer(t.everySeconds) && t.everySeconds > 0 && Object.keys(t).length === 3));
   const okInput = (seam, i) => i && okTrigger(i.trigger) && (seam === "next" ? integer(i.afterMs) && Object.keys(i).length === 2
     : seam === "first" ? integer(i.nowMs) && Object.keys(i).length === 2
-    : iso(i.nextOccurrenceAt) && integer(i.nowMs) && ["latest", "skip"].includes(i.policy) && Object.keys(i).length === 4);
+    : stamp(i.nextOccurrenceAt) && integer(i.nowMs) && ["latest", "skip"].includes(i.policy) && Object.keys(i).length === 4);
   const okOutput = (seam, o) => (seam === "classify"
     ? o && typeof o === "object" && Array.isArray(o.skipped) && o.skipped.length <= 1 && o.skipped.every(iso)
       && (o.dispatchAt === undefined || iso(o.dispatchAt)) && (o.nextOccurrenceAt === undefined || iso(o.nextOccurrenceAt))

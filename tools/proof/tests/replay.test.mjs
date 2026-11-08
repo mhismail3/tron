@@ -25,8 +25,11 @@ test("replayed Debug traffic is a real-traffic shadow that catches a corrupted r
     const lines = [];
     for (let i = 0; i < 300; i++) {
       const anchor = start + Math.floor(rnd() * 2e9);
-      const trigger = rnd() < 0.3 ? { kind: "once", at: new Date(anchor).toISOString() }
-        : { kind: "interval", anchorAt: new Date(anchor).toISOString(), everySeconds: [60, 900, 3600, 86400][Math.floor(rnd() * 4)] };
+      // Stored triggers may use any timestamp form the Gateway admits (offsets, other fraction lengths).
+      const stamp = (ms) => [new Date(ms).toISOString(), new Date(ms).toISOString().replace(".000Z", "Z"),
+        new Date(ms + 3_600_000).toISOString().replace(/\.(\d{3})Z$/, ".$1000+01:00")][Math.floor(i / 3) % 3];
+      const trigger = rnd() < 0.3 ? { kind: "once", at: stamp(anchor) }
+        : { kind: "interval", anchorAt: stamp(anchor), everySeconds: [60, 900, 3600, 86400][Math.floor(rnd() * 4)] };
       const now = anchor + Math.floor((rnd() - 0.2) * 1e8);
       const seam = ["next", "first", "classify"][i % 3];
       const input = seam === "next" ? { trigger, afterMs: now } : seam === "first" ? { trigger, nowMs: now }
