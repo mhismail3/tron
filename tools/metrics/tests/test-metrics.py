@@ -17,12 +17,15 @@ fixture files with fixed dates, and runs the command as a worker would:
    follows files over 500 lines through renames; its rows sum to the total.
 5. An unknown revision fails loudly and writes nothing.
 6. Structure counts modules, root entries and files directly in `scripts/`.
+7. `scripts/tron health` ranks a large, co-changed, often-fixed file below a quiet one, counts a
+   merge that re-resolves a conflict, writes only its `--csv` directory, and exits 2 on bad input.
 
 The last comparison is kept in `test-results/metrics-cli/` for review.
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
@@ -354,6 +357,58 @@ class CompareTests(RepoCase):
         self.assertNotIn("entered: packages/gateway/src/core/big.ts", out)
         self.assertIn("Metrics Δ: LOC prod/test/tool/docs -299/0/+30/+5; files>500 -1; "
                       "hotspot 100.0%→100.0%.", out)
+
+
+class HealthTests(RepoCase):
+    """`scripts/tron health` (docs/HEALTH.md): scores and collisions from Git history; read-only; exit 2 on bad input."""
+
+    def health(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([str(self.repo.path / "scripts/tron"), "health", "--baseline", "HEAD", *args],
+                              cwd=self.repo.path, env=self.repo.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, check=False)
+
+    def setUp(self) -> None:
+        super().setUp()
+        r = self.repo
+        r.write("tools/metrics/health.py", (ROOT / "tools/metrics/health.py").read_text())
+        r.write("root.module.json", json.dumps({"layer": "L5", "owns": ["root.module.json", "scripts/**", "tools/**"],
+                                                "layout": {"root": [], "scriptsTop": [], "frozen": []}}))
+        for name in ("a", "b"):
+            r.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write("mods/b/quiet.ts", lines(20))
+        r.commit("start", T0)
+        for day in range(1, 7):  # the hub is large and co-changes with module b, mostly in fixes
+            r.write("mods/a/hub.ts", lines(3000, f"v{day}"))
+            r.write("mods/b/edge.ts", f"edge {day}\n")
+            r.commit("fix: hub and edge" if day % 2 else "feat: hub and edge", T0 + day * DAY)
+        r.git("checkout", "-q", "-b", "side")
+        r.write("mods/b/edge.ts", "side\n")
+        r.commit("side edit", T0 + 7 * DAY)
+        r.git("checkout", "-q", "main")
+        r.write("mods/b/edge.ts", "main\n")
+        r.commit("main edit", T0 + 7 * DAY + 60)
+        r.git("merge", "-q", "--no-ff", "-X", "ours", "-m", "merge side", "side", date=T0 + 8 * DAY)
+
+    def test_scores_rank_the_coupled_hub_and_count_the_conflicted_merge(self) -> None:
+        csv_dir = Path(self.temp.name) / "csv"
+        result = self.health("--csv", str(csv_dir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("| D2 rework: fix share of commits | 0.333 |", result.stdout)
+        self.assertIn("| D4 collisions: merges that re-resolve a conflict | 1.0 |", result.stdout)
+        self.assertIn("re-resolved in conflicted merges): mods/b/edge.ts (1)", result.stdout)
+        with (csv_dir / "files.csv").open() as handle:
+            scores = {row["path"]: float(row["score"]) for row in csv.DictReader(handle)}
+        self.assertLess(scores["mods/a/hub.ts"], 4.0)
+        self.assertGreaterEqual(scores["mods/b/quiet.ts"], 9.0)
+        self.assertEqual(sorted(p.name for p in csv_dir.iterdir()), ["files.csv", "folders.csv", "modules.csv"])
+        self.assertFalse((self.repo.path / "test-results").exists())
+        self.assertEqual(self.repo.git("status", "--porcelain"), "")
+
+    def test_unreadable_input_exits_2_without_a_traceback(self) -> None:
+        result = self.health("--deploy-log", str(Path(self.temp.name) / "missing.jsonl"))
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(result.stderr.startswith("health: "), result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 class FailureTests(RepoCase):
