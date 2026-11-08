@@ -565,6 +565,7 @@
         "transcript[].usage.cost.input:number",
         "transcript[].usage.cost.output:number",
         "transcript[].usage.cost.total:number",
+        "transcript[].usage.cost.totalFromProvider:boolean",
         "transcript[].usage.cost:object",
         "transcript[].usage.input:number",
         "transcript[].usage.output:number",
