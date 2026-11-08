@@ -435,6 +435,8 @@ export interface GoldenComparison<Trace = BehaviorTrace> {
   /** Where the full unified diff is retained for review. */
   readonly diffPath: string;
   readonly trace: Trace;
+  /** An additional trace kept beside a narrowed projection in the golden, compared after the same shared-tool-schema projection. */
+  readonly inlineTrace?: TraceValue;
   /**
    * Rewrite the golden from this trace. Only one case per golden passes `true`
    * (and only under {@link LOCK_UPDATE_ENV}), so every other case still has to
@@ -460,7 +462,10 @@ export interface GoldenComparison<Trace = BehaviorTrace> {
  */
 export async function compareWithGolden<Trace>(comparison: GoldenComparison<Trace>): Promise<{ updated: boolean; hunks: number }> {
   const lock = lockName(comparison.goldenPath);
-  const rendered = renderTrace(lock === "home-activation-wake" ? comparison.trace : withoutSharedToolSchemas(comparison.trace));
+  const goldenTrace = comparison.inlineTrace === undefined
+    ? comparison.trace
+    : { ...(comparison.trace as Record<string, unknown>), inlineTrace: comparison.inlineTrace };
+  const rendered = renderTrace(lock === "home-activation-wake" ? goldenTrace : withoutSharedToolSchemas(goldenTrace));
   await mkdir(dirname(comparison.actualPath), { recursive: true });
   await writeFile(comparison.actualPath, rendered);
   const golden = await readFile(comparison.goldenPath, "utf8").catch(() => undefined);
