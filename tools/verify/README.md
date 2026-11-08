@@ -18,7 +18,7 @@ scripts/tron verify --batch [--repeat] [--plan] # next pinned batch, or rerun ev
 scripts/tron verify --batch --review <culprit> --decision ACCEPT|BLOCK --reviewer <id> --binding <digest>
 scripts/tron verify --update-locks <id>         # rewrite <id>'s goldens (lock or approved migration slices)
 scripts/tron verify ... --skip ios,mac,relay    # accept, explicitly, selections this run will not run
-scripts/tron verify ... --gateway-host local    # run the Gateway Vitest lanes on this Mac, not the Mac mini
+scripts/tron verify ... --gateway-host mini     # run the Gateway Vitest lanes on the Mac mini, not this Mac
 ```
 
 ## Worktree dependencies
@@ -72,10 +72,10 @@ user's settings or profile. Test input and output must not depend on live stores
 
 ## Gateway lanes on the Mac mini
 
-Once `git config tron.verify.mini` names the Mac mini test host, verify runs its Gateway Vitest lanes
-(`tests: gateway`, `tests: gateway-nested`) there through `mini.py` and prints where they run. `--gateway-host
-local|mini` overrides that either way; `--update-locks` always records here. `scripts/tron test gateway --mini
-[vitest args]` is the direct form.
+`--gateway-host mini` runs verify's Gateway Vitest lanes (`tests: gateway`, `tests: gateway-nested`) on the Mac
+mini test host through `mini.py`; the default, and `--update-locks` always, runs them here. `scripts/tron test
+gateway --mini [vitest args]` is the direct form. Routing is opt-in; making the mini the default waits on an exact
+pass/fail match with this Mac at one commit (#2334).
 
 `mini.py` refuses a dirty tree, or a HEAD other than the commit verify records, and pushes HEAD to the mini's
 `~/tron-ci/tron.git`. The mini runs one job at a time under `~/tron-ci/jobs/gateway.lock`. A job checks out

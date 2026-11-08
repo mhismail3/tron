@@ -236,16 +236,13 @@ class ExternalVerificationTests(VerifyCase):
         groups = json.loads(planned.stdout[planned.stdout.index("{"):])["groups"]
         for group, path in zip(("gateway", "gateway-nested", "mac", "node-gateway"), files):
             self.assertEqual(groups[group], [f"packages/gateway/{path}"])
-        # The lanes' runner: the same gateway.py here, or mini.py running it on the mini, which a configured
-        # tron.verify.mini makes the default and --gateway-host overrides either way.
-        for configured, options, runner in ((False, [], "gateway.py"), (False, ["--gateway-host", "mini"], "mini.py"),
-                                            (True, [], "mini.py"), (True, ["--gateway-host", "local"], "gateway.py")):
-            if configured:
-                r.git("config", "tron.verify.mini", "mini.invalid")
+        # The lanes' runner: gateway.py here by default (a configured mini host changes nothing), mini.py on request.
+        r.git("config", "tron.verify.mini", "mini.invalid")
+        for options, runner in (([], "gateway.py"), (["--gateway-host", "mini"], "mini.py"), (["--gateway-host", "local"], "gateway.py")):
             planned = r.verify("--module", "repo/alpha", "--plan", *options)
             commands = json.loads(planned.stdout[planned.stdout.index("{"):])["commands"]
             self.assertEqual({c["name"]: Path(c["command"][1]).name for c in commands if c["name"].startswith("tests: gateway")},
-                             {"tests: gateway": runner, "tests: gateway-nested": runner}, (configured, options))
+                             {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
         r.git("config", "--unset", "tron.verify.mini")
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")
@@ -378,7 +375,7 @@ class GatewayFailureTests(VerifyCase):
         r = self.repo
         self.fixture()
         r.git("config", "tron.verify.mini", "nobody@mini.invalid")
-        result = r.verify("--module", "gateway/sample")
+        result = r.verify("--module", "gateway/sample", "--gateway-host", "mini")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("gateway lanes: on the Mac mini", result.stdout)
         report = r.report()
