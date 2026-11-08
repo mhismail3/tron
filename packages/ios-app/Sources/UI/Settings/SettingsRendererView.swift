@@ -235,15 +235,15 @@ struct SettingsRendererView: View {
         let sections = Self.sections(resolution)
         let groups = Dictionary(grouping: instances) { governed($0)?.group ?? "" }
         TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
-            if let help = instances.first?.presentation?.help { TronSettingsCaption(help).containerValue(\.tronSettingsSection, false) }
+            if let help = instances.first?.presentation.help { TronSettingsCaption(help).containerValue(\.tronSettingsSection, false) }
             ForEach(sections.map(\.id).filter { groups[$0] != nil } + (groups[""] == nil ? [] : [""]), id: \.self) { group in
-                TronSettingsGroup(sections.first { $0.id == group }?.title ?? (instances.first?.presentation?.label ?? key)) {
+                TronSettingsGroup(sections.first { $0.id == group }?.title ?? (instances.first?.presentation.label ?? key)) {
                     VStack(spacing: 0) {
                         let members = (groups[group] ?? []).sorted { (RowTitle.instance($0), $0.id) < (RowTitle.instance($1), $1.id) }
                         ForEach(Array(members.enumerated()), id: \.element.id) { index, instance in
                             if index > 0 { TronSettingsDivider() }
                             row(instance, resolution: resolution, options: options, detailed: true, instanced: true,
-                                instanceHelp: governed(instance)?.presentation?.help)
+                                instanceHelp: governed(instance)?.presentation.help)
                         }
                     }
                 }
@@ -254,14 +254,14 @@ struct SettingsRendererView: View {
     }
 
     private func instancesLink(_ setting: ResolvedSetting, count: Int) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: setting.presentation?.label ?? setting.key,
+        TronProgressiveSheetLink(accessibilityLabel: setting.presentation.label,
                                  identity: "settings.instances.\(setting.key)") {
             SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers, projectCWD: projectCWD,
                                  presentation: .instances(key: setting.key), selection: selection)
-                .tronNavigationTitle(setting.presentation?.label ?? setting.key)
+                .tronNavigationTitle(setting.presentation.label)
         } label: {
-            TronSettingsRow(icon: SettingsRendererRow.semanticIcon(for: setting.key) ?? "list.bullet.indent", title: setting.presentation?.label ?? setting.key,
-                            subtitle: setting.presentation?.help, subtitleColor: .tronTextSecondary)
+            TronSettingsRow(icon: SettingsRendererRow.semanticIcon(for: setting.key) ?? "list.bullet.indent", title: setting.presentation.label,
+                            subtitle: setting.presentation.help, subtitleColor: .tronTextSecondary)
         }
         .accessibilityIdentifier("settings-instances-\(setting.key)-open")
     }
@@ -346,7 +346,7 @@ struct SettingsRendererView: View {
         // Repository configuration is inspectable, never editable through app navigation.
         guard target.objectValue?["kind"]?.stringValue != "project", setting.projectSetting == nil else { return nil }
         let candidates = ownedLayers.isEmpty ? [writeLayer].compactMap { $0 } : ownedLayers
-        return setting.presentation?.editable == true ? candidates.first : nil
+        return setting.presentation.editable ? candidates.first : nil
     }
 
     /// A dry run first: the Gateway validates (no client copy of a key's rules),

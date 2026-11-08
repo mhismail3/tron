@@ -315,7 +315,7 @@ struct SettingsSectionLinks: View {
         let sections = members(id)
         guard let first = sections.first, first.id == id else { return nil }
         let values = model.settingsSnapshot(for: target)?.resolution.keys
-            .filter { $0.group == id && selection.includes($0) && $0.presentation?.importance == "essential" && $0.value != nil }
+            .filter { $0.group == id && selection.includes($0) && $0.presentation.importance == "essential" && $0.value != nil }
             .map(\.display).filter { !$0.isEmpty } ?? []
         guard !values.isEmpty else { return nil }
         return (values + sections.dropFirst().map(\.title)).joined(separator: " · ")
@@ -457,7 +457,7 @@ struct SettingsProjectNotices: View {
             TronSettingsGroup("Ignored settings", detail: resolution.diagnostics.first?.file) {
                 ForEach(Array(resolution.diagnostics.enumerated()), id: \.offset) { index, diagnostic in
                     if index > 0 { TronSettingsDivider() }
-                    let label = resolution.keys.first { $0.key == diagnostic.key }?.presentation?.label
+                    let label = resolution.keys.first { $0.key == diagnostic.key }?.presentation.label
                     TronSettingsRow(icon: "info.circle", title: label ?? diagnostic.path,
                                     subtitle: diagnostic.reason == "project-forbidden"
                                         ? "Project settings can't change this. Ignored: \(diagnostic.path)"

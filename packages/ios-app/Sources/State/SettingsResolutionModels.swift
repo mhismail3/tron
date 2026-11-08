@@ -42,8 +42,7 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     let layers: [Layer]
     var overridden: Bool? = nil
     var projectSetting: SettingsProjectSource? = nil
-    /// Absent from a Gateway that predates the renderer contract: the row is then read-only.
-    let presentation: SettingsKeyPresentation?
+    let presentation: SettingsKeyPresentation
 
     var id: String { settingIdentity(key: key, qualifiers: qualifiers) }
 

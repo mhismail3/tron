@@ -257,8 +257,8 @@ final class SettingsTrustCoordinator {
     /// source that cannot answer leaves its row read-only; other rows are unaffected.
     private func options(for resolution: SettingsResolution, target: JSONValue) async -> [String: SettingsOptionsResponse] {
         let sourced = resolution.keys.filter { setting in
-            setting.presentation?.optionsSource != nil
-                && [.choice, .checklist].contains(SettingsRowControl(negotiated: setting.presentation?.control))
+            setting.presentation.optionsSource != nil
+                && [.choice, .checklist].contains(SettingsRowControl(negotiated: setting.presentation.control))
         }
         let client = client
         return await withTaskGroup(of: (String, SettingsOptionsResponse?).self) { group in

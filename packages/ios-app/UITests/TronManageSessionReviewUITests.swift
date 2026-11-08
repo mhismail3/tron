@@ -2,16 +2,8 @@ import XCTest
 
 /// Manage Session, its folded Project section and the Resources sheet (#1655),
 /// through the hosted Manage Session fixture with reported usage, a Git
-/// workspace and resources of every kind and source. The Capture journeys keep
-/// the light/dark review images; the Behavior tests are the regression oracle.
+/// workspace and resources of every kind and source.
 final class TronManageSessionReviewUITests: XCTestCase {
-    @MainActor func testCaptureManageSessionLight() { captureManageSession(dark: false) }
-    @MainActor func testCaptureManageSessionDark() { captureManageSession(dark: true) }
-    @MainActor func testCaptureResourcesLight() { captureResources(dark: false) }
-    @MainActor func testCaptureResourcesDark() { captureResources(dark: true) }
-
-    // MARK: Behavior
-
     /// Manage Session: the usage line sits under the headline with Compact Now
     /// trailing and centered on both; no separate Compact row; the renamed rows;
     /// no Project Settings row.
@@ -113,75 +105,6 @@ final class TronManageSessionReviewUITests: XCTestCase {
         return app
     }
 
-    @MainActor private func captureManageSession(dark: Bool) {
-        let app = launch(dark: dark); defer { app.terminate() }
-        let mode = dark ? "dark" : "light"
-        shot("manage-session-top-\(mode)")
-        for _ in 0..<3 { app.swipeUp() }
-        Thread.sleep(forTimeInterval: 0.6)
-        shot("manage-session-bottom-\(mode)")
-        // The Models step is Manage Session's Switch Model on the model card. Back to
-        // the top: a row under the top bar still reads as hittable, and a pull past
-        // the top would collapse the sheet.
-        let switchModel = app.buttons["manage-model-switch"]
-        for _ in 0..<6 where !(switchModel.exists && switchModel.frame.minY > 140) { app.swipeDown() }
-        Thread.sleep(forTimeInterval: 0.6)
-        switchModel.tap()
-        expandSheet(app, title: "Models")
-        shot("session-models-\(mode)")
-        app.navigationBars.containing(.staticText, identifier: "Models").buttons["Done"].firstMatch.tap()
-        _ = waitFor(switchModel, "hittable == true", timeout: 5)
-        let link = app.buttons["chat-settings-link"]
-        for _ in 0..<12 where !link.isHittable { app.swipeDown() }
-        link.tap()
-        expandSheet(app, title: "Session Settings")
-        shot("session-settings-top-\(mode)")
-        for _ in 0..<3 { app.swipeUp() }
-        Thread.sleep(forTimeInterval: 0.6)
-        shot("session-settings-bottom-\(mode)")
-        app.navigationBars.containing(.staticText, identifier: "Session Settings").buttons["Done"].firstMatch.tap()
-        // The base build's separate Project Settings sheet, when it still exists.
-        let project = app.buttons["project-settings-link"]
-        if project.waitForExistence(timeout: 3) {
-            _ = waitFor(project, "hittable == true", timeout: 5)
-            project.tap()
-            expandSheet(app, title: "Project Settings")
-            _ = app.staticTexts["No repository overrides"].waitForExistence(timeout: 8)
-            shot("project-settings-\(mode)")
-        }
-    }
-
-    @MainActor private func captureResources(dark: Bool) {
-        let mode = dark ? "dark" : "light"
-        for (kind, name) in [("commands", "command"), ("subagents", "subagent")] {
-            let app = launch(dark: dark)
-            openResources(app)
-            if kind == "commands" {
-                shot("resources-top-\(mode)")
-                app.swipeUp()
-                Thread.sleep(forTimeInterval: 0.6)
-                shot("resources-bottom-\(mode)")
-            }
-            let row = app.buttons["project-resource-\(kind)-0"]
-            for _ in 0..<8 where !row.isHittable { app.swipeUp() }
-            row.tap()
-            expandSheet(app, title: kind == "commands" ? "Review" : "Scout")
-            Thread.sleep(forTimeInterval: 1.0)
-            shot("\(name)-detail-\(mode)")
-            let viewAll = app.buttons["project-resource-view-all"]
-            if viewAll.waitForExistence(timeout: 3) {
-                for _ in 0..<4 where !viewAll.isHittable { app.swipeUp() }
-                viewAll.tap()
-                Thread.sleep(forTimeInterval: 1.5)
-                shot("\(name)-reader-\(mode)")
-                for _ in 0..<6 { app.swipeUp() }
-                Thread.sleep(forTimeInterval: 0.6)
-                shot("\(name)-reader-end-\(mode)")
-            }
-            app.terminate()
-        }
-    }
-
     @MainActor private func openResources(_ app: XCUIApplication) {
         let row = app.buttons.matching(NSPredicate(format: "label IN {'Resources', 'Project Resources'}")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
@@ -228,14 +151,4 @@ final class TronManageSessionReviewUITests: XCTestCase {
         app.descendants(matching: .any)[id].firstMatch
     }
 
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
-    }
-
-    @MainActor private func shot(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
 }

@@ -18,7 +18,6 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
 
     struct Presentation: Decodable, Equatable, Sendable {
         let label: String
-        let section: String?
         let actor: String
         let layer: String
         let display: Display
@@ -57,10 +56,10 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
     /// A later fact's subject: for an outside change, the Tron change whose value it replaced.
     let refersTo: String?
     let applyAgainOf: String?
-    let presentation: Presentation?
+    let presentation: Presentation
 
     var id: String { changeId }
-    var title: String { presentation?.label ?? key }
+    var title: String { presentation.label }
     /// Parsed with value-type format styles: a feed renders many rows, and
     /// allocating formatters per read made every list refresh expensive.
     var date: Date? {

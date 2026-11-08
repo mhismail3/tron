@@ -4,15 +4,6 @@ import UIKit
 /// Gateway transcript DTOs pass through the real mounted ChatView/projector and
 /// native chip. Color is observed from rendered title ink, not a policy probe.
 @MainActor final class TronToolSummaryTintUITests: XCTestCase {
-    func testCaptureForVisualApproval() {
-        for mode in ["light", "dark"] {
-            for scenario in ["recovered", "latest-failed"] {
-                let (app, _) = launch(scenario, mode: mode)
-                capture(app, "\(scenario)-\(mode)")
-                app.terminate()
-            }
-        }
-    }
 
     func testRestingTintFollowsCanonicalLatestInvocation() {
         continueAfterFailure = false
@@ -60,11 +51,6 @@ import UIKit
         let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '3 tools,'")).firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
         return (app, chip)
-    }
-
-    private func capture(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 
     private func verifyInk(_ app: XCUIApplication, chip: XCUIElement, expected: Ink, name: String) {

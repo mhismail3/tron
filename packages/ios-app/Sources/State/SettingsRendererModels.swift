@@ -9,8 +9,8 @@ enum SettingsRendererContract {
     static let controls = ["toggle", "choice", "text", "secret", "list", "checklist", "catalog", "readOnly"]
 }
 
-/// The control one row renders with. A control this app does not implement, or
-/// a missing presentation, is read-only: the row still shows its `display`.
+/// The control one row renders with. A control this app does not implement is
+/// read-only: the row still shows its `display`.
 enum SettingsRowControl: String, Equatable, Sendable {
     case toggle, choice, text, secret, list, checklist, catalog, readOnly
 
@@ -37,18 +37,14 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     let valueKind: String?
     /// Static choices, or field names/labels for a `numberMap` list.
     let options: [SettingsChoice]?
-    let range: SettingsRange?
     let optionsSource: SettingsOptionsSource?
     let confirm: String?
     let redacted: Bool?
     /// What to type into the key's text field or a list's new value (#939).
     let entry: SettingsEntryGuidance?
-    /// UI-editable scopes, timing and effect are declared by the Gateway, not iOS.
+    /// UI-editable scopes are declared by the Gateway, not iOS.
     let sessionOverridable: Bool
-    let projectSettable: Bool
     let editable: Bool
-    let timing: JSONValue?
-    let effect: String?
 }
 
 /// A view of canonical resolution, not a second store or a list of key definitions.
@@ -70,9 +66,9 @@ enum SettingsKeySelection: Equatable {
         case .all: return true
         case .allExcept(let excluded): return !excluded.contains(setting.key)
         case .editable(let excluded):
-            return !excluded.contains(setting.key) && setting.presentation?.editable == true
+            return !excluded.contains(setting.key) && setting.presentation.editable
         case .sessionOverrides:
-            return setting.presentation?.sessionOverridable == true && setting.presentation?.editable == true
+            return setting.presentation.sessionOverridable && setting.presentation.editable
         case .sessionOverridesExcept(let excluded):
             return Self.sessionOverrides.includes(setting) && !excluded.contains(setting.key)
         case .projectValues: return setting.projectSetting != nil
@@ -94,16 +90,8 @@ struct SettingsChoice: Decodable, Equatable, Sendable {
     let detail: String?
 }
 
-struct SettingsRange: Decodable, Equatable, Sendable {
-    let min: Double
-    let max: Double
-    let step: Double?
-    let unit: String?
-}
-
 struct SettingsOptionsSource: Decodable, Equatable, Sendable {
     let name: String
-    let dependsOn: [String]
 }
 
 /// One choice `settings.options` serves for a key (gateway docs/settings-model.md 7.5).
@@ -119,8 +107,6 @@ struct SettingsOption: Decodable, Equatable, Sendable, Identifiable {
 
 struct SettingsOptionsResponse: Decodable, Equatable, Sendable {
     let key: String
-    let source: String
-    let dependsOn: [String]
     let options: [SettingsOption]
     let nextCursor: String?
 }
