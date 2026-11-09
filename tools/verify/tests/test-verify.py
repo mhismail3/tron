@@ -441,6 +441,41 @@ class GatewayDependenciesTests(VerifyCase):
         planned = r.verify("--module", "gateway/compiler", "--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
 
+    def test_any_test_step_refuses_before_step_one_while_the_gateway_install_differs_from_its_lockfile(self) -> None:
+        # Tests well outside the Gateway import its installed packages (scripts/, tools/docs, tools/layers,
+        # tools/proof, tools/verify), so a checkout with a Gateway lockfile prepares it before any test step.
+        r = self.repo
+        lock = {"lockfileVersion": 3, "packages": {"": {"name": "gateway"},
+                "node_modules/ws": {"version": "8.18.0", "integrity": "sha512-ws"},
+                "node_modules/@oxlint/binding-win32-x64-msvc": {"version": "1.0.0", "optional": True}}}
+        r.write("packages/gateway/package-lock.json", json.dumps(lock))
+        r.write("packages/gateway/lock.module.json", json.dumps({"layer": "L3", "owns": ["package-lock.json", "lock.module.json"]}))
+        r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\n")
+        r.commit("Gateway lockfile")
+        r.git("branch", "-f", "base")
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
+        r.commit("python-only change")
+        hint = "scripts/tron-node exec npm --prefix packages/gateway ci --include=dev"
+        installed = r.path / "packages/gateway/node_modules/.package-lock.json"
+        for case, packages, named in (("missing", None, "not installed"),
+                                      ("stale", {"node_modules/ws": {"version": "8.17.0", "integrity": "sha512-old"}}, "node_modules/ws"),
+                                      ("extraneous", {"node_modules/ws": lock["packages"]["node_modules/ws"],
+                                                      "node_modules/left-over": {"version": "1.0.0"}}, "node_modules/left-over")):
+            with self.subTest(case=case):
+                if packages is not None:
+                    installed.parent.mkdir(parents=True, exist_ok=True)
+                    installed.write_text(json.dumps({"lockfileVersion": 3, "packages": packages}))
+                refused = r.verify("--changed")
+                self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+                self.assertIn(hint, refused.stderr)
+                self.assertIn(named, refused.stderr)
+                self.assertNotIn("[1/", refused.stdout, "a step ran before the refusal")
+                self.assertFalse((r.path / "test-results/verify").exists(), "a refused run wrote a report")
+        # npm's own record of the install matching the lockfile (a platform-optional package absent) passes.
+        installed.write_text(json.dumps({"lockfileVersion": 3, "packages": {"node_modules/ws": lock["packages"]["node_modules/ws"]}}))
+        passed = r.verify("--changed")
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+
 
 class SelectionTests(VerifyCase):
     def test_one_module_change_runs_only_its_tests_and_a_failure_fails_loudly(self) -> None:
