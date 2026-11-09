@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[2] if '__file__' in globals() else None
 BASE = 'tron-ci'  # under the mini user's home: tron.git, jobs/, results/
 EXIT_INFRA = 2
 OUTPUT_OPTION = '--outputFile'
+INCOMING = 'refs/tron-jobs/incoming'  # carries a pushed commit to its job; the job checks it out by object id
 
 
 def frame(nonce: str) -> bytes:
@@ -101,8 +102,9 @@ def local_main(args: list[str]) -> int:
     mapped, paths = outputs(args)
     started = time.time()
     print(f'mini: Gateway lane for {sha[:12]} on {destination}; pushing the commit', flush=True)
+    # One shared incoming ref, overwritten by every push: a push whose job never starts leaves nothing that grows.
     push = subprocess.run(['git', '-C', str(ROOT), 'push', '--no-verify', '--quiet', f'{destination}:{BASE}/tron.git',
-                           f'{sha}:refs/tron-jobs/run-{sha}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
+                           f'+{sha}:{INCOMING}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if push.returncode:
         print(f'mini: could not push {sha[:12]} to {destination}:{BASE}/tron.git; the mini is unreachable or not set up, '
@@ -302,8 +304,9 @@ def remote_main(job: dict) -> int:
             finally:
                 shutil.rmtree(results, ignore_errors=True)
     finally:
-        # The pushed ref only carried the commit here; a checkout or the gateway ref keeps what is needed.
-        run('git', '-C', str(repository), 'update-ref', '-d', f'refs/tron-jobs/run-{sha}')
+        # Only while it still names this commit: a later push owns it otherwise. A commit whose ref moved on stays
+        # readable, unreferenced, until gc's prune expiry (two weeks), far beyond any job lock wait.
+        run('git', '-C', str(repository), 'update-ref', '-d', INCOMING, sha)
 
 
 if __name__ == '__main__':
