@@ -250,7 +250,7 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
             // The band keeps the tap clear of the navigation bar and bottom edge. A
             // sheet's last row cannot scroll into it: once a drag no longer moves a
             // fully visible, hittable row, it is as far in as the sheet allows.
-            let settled = frame.map { $0 == previous && window.contains($0) } ?? false
+            let settled = frame.map { $0 == previous && window.contains($0) && $0.minY > 140 } ?? false
             if let frame, button.isHittable,
                settled || (frame.minY > 140 && frame.maxY < window.height - 70) {
                 button.tap(); return
