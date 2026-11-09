@@ -1,5 +1,6 @@
 {
   "layer": "L5",
+  "verify": ["scripts/tron test mac"],
   "owns": [
     "App/**",
     "Assets.xcassets/**",

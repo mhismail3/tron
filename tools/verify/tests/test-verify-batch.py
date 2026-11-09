@@ -104,7 +104,7 @@ class BatchTests(unittest.TestCase):
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.git('init', '-q', '-b', 'main')
-        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py'):
+        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py', 'mac.py', 'mini.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.
@@ -585,9 +585,11 @@ else: sys.exit('unexpected xcrun '+' '.join(args))
 
     def test_mac_xctest_case_filter_proves_landing_without_suite_probe(self):
         binary = Path(self.temporary.name) / 'bin/xcodebuild'
-        binary.write_text('''#!/usr/bin/env python3
+        calls = Path(self.temporary.name) / 'xcodebuild-calls'
+        binary.write_text(f'''#!/usr/bin/env python3
 import sys
 from pathlib import Path
+with open({str(calls)!r}, 'a') as f: f.write(' '.join(sys.argv[1:]) + '\\n')
 if Path('mac-bad').exists():
     selected=[arg for arg in sys.argv if arg.startswith('-only-testing:')]
     if selected and selected != ['-only-testing:TronMacIntegrationTests/SampleTests/testExample']:
@@ -602,7 +604,10 @@ print('Executed 2 tests, with 0 failures')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         proof = self.reports()[-1]['failures'][0]['attribution']
         self.assertEqual((proof['status'], proof['commit']), ('proven', culprit))
-        self.assertTrue(all('-only-testing:TronMacIntegrationTests/SampleTests/testExample' in p['command'] for p in proof['probes']))
+        self.assertTrue(all(p['command'][-1] == 'SampleTests/testExample' for p in proof['probes']))
+        # Each probe reached xcodebuild with exactly that case's filter: never a whole-suite run.
+        filtered = [line for line in calls.read_text().splitlines() if '-only-testing:TronMacIntegrationTests/SampleTests/testExample' in line]
+        self.assertEqual(len(filtered), len(proof['probes']))
 
     def test_ios_smoke_case_selector_proves_landing_with_own_build(self):
         owner = (self.root / 'scripts/tron-ios-test').read_text()
@@ -1407,6 +1412,68 @@ class AppleLaneTests(unittest.TestCase):
         self.assertNotIn(theirs['TRON_IOS_TEST_LANE'], names)
         self.assertEqual(theirs['TRON_IOS_TEST_LANE_REPOSITORY'], os.path.realpath(other / '.git'))
 
+
+class ChainInterruptTests(unittest.TestCase):
+    def test_an_interrupt_while_a_stopped_lane_awaits_reaping_stays_an_interrupt(self):
+        """#2389: macOS answers killpg on a group whose members all exited but are not yet reaped
+        with EPERM. An interrupt landing in that window must still end the chains as an interrupt
+        and clear the cancellation, never surface as an infrastructure error that keeps it set."""
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        import threading
+        from unittest import mock
+        signalled, killpg = threading.Event(), os.killpg
+
+        def observed_killpg(group, signum):
+            # The real call; the spy only tells the lane its group was signalled.
+            try:
+                return killpg(group, signum)
+            finally:
+                signalled.set()
+
+        def lane(_index, _lane):
+            # A started lane, as `execute` registers it, that exits before its thread reaps it.
+            process = subprocess.Popen(['true'], start_new_session=True)
+            with batch.RUNNING_LOCK:
+                batch.RUNNING.add(process.pid)
+            try:
+                wait_until(lambda: subprocess.run(['ps', '-o', 'stat=', '-p', str(process.pid)], capture_output=True,
+                                                  text=True).stdout.startswith('Z'), 'the lane never exited')
+                os.kill(os.getpid(), signal.SIGINT)
+                wait_until(signalled.is_set, 'the interrupt never signalled the running lane')
+            finally:
+                process.wait()
+                with batch.RUNNING_LOCK:
+                    batch.RUNNING.discard(process.pid)
+
+        with mock.patch('os.killpg', observed_killpg), self.assertRaises(KeyboardInterrupt):
+            batch.run_chains([[(0, {})]], lane)
+        self.assertFalse(batch.CANCELLED.is_set())
+
+
+    def test_an_issue_write_the_stopped_batch_never_dispatched_leaves_no_uncertain_journal(self):
+        """#2389: a stopped batch never starts its issue write; that is no dispatch, so the filing
+        neither crashes nor leaves an `attempting` journal that a rerun would retain instead of filing."""
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        completed = {'status': 'completed', 'exit': 0, 'number': 7}
+        for previous in (None, completed):
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory(prefix='tron-batch-issue-') as temporary:
+                state = Path(temporary) / 'state'
+                journal = state / 'issue-writes/key.json'
+                if previous:
+                    journal.parent.mkdir(parents=True)
+                    journal.write_text(json.dumps(previous))
+                batch.CANCELLED.set()
+                try:
+                    outcome = batch.issue_write('key', 'title', 'body', Path(temporary) / 'failure', state)
+                finally:
+                    batch.CANCELLED.clear()
+                self.assertIsNone(outcome['exit'], outcome)
+                # A filed issue keeps its number, so the next red comments on it instead of filing again.
+                self.assertEqual(json.loads(journal.read_text()) if journal.exists() else None, previous)
 
 class ShardedIosProbeTests(unittest.TestCase):
     """#2173: verify names a sharded iOS step `tests: ios k/N`; its bisect probe is still the iOS

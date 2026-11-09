@@ -1,0 +1,58 @@
+{
+  "packetHash": "567b18e428635b86",
+  "tier": "high-stakes",
+  "date": "2026-11-09",
+  "writer": {
+    "agent": "parent",
+    "model": "anthropic/claude-opus-5-5"
+  },
+  "reviewer": {
+    "agent": "law-reviewer (run 53291cd2, rounds c16cf20d, 7341fead)",
+    "model": "openai/gpt-6-luna",
+    "session": "2026-11-09T09-25-13-804Z_01a1bfa0-43cb-7473-beb1-ed93d992bcce/1cbe4be4-6532-42f8-b664-351f96a8c5f2/run-0/session.jsonl"
+  },
+  "laws": {
+    "L1 legal-moves": {
+      "verdict": "ACCEPT",
+      "notes": "English matches the equation: NoLife and terminal sources are illegal; terminals may move any unsettled source to a terminal target and ordinary moves use exactly Allowed. Staged\u2192Accepted with settle=false witnesses it; the disjunction implementation preserves the transition table."
+    },
+    "H1 history": {
+      "verdict": "ACCEPT",
+      "notes": "This is the exact iterative fold equivalence, preserving first refusal and its position; an empty sequence satisfies it. ProjectFast's by-method remains proven equal to RunAt, including the fallback path."
+    },
+    "S1 start": {
+      "verdict": "ACCEPT",
+      "notes": "The equation matches start behavior, including Accepted default, copied identity/name/origin/sequence/time, and empty entry/flag/unsettled fields; empty state plus a Staged start witnesses it. FindIndexAppend supports the optimized first-index invariant for appends."
+    },
+    "S2 checks": {
+      "verdict": "ACCEPT",
+      "notes": "A matching first projection and binding with empty bound sets and matching ownership satisfies the premise; Check failures refuse in order and passing bindings proceed. The method preserves ownership, entry-bound, invocation-bound, name, origin, terminal, then transition check precedence."
+    },
+    "S3 no-start": {
+      "verdict": "ACCEPT",
+      "notes": "An empty state and any non-start receipt satisfy the premise and yield NoStart. The fast fold preserves this refusal before subsequent checks."
+    },
+    "S4 settle": {
+      "verdict": "ACCEPT",
+      "notes": "A started Staged invocation with a legal Completed terminal witnesses settlement; same-lifecycle terminal duplicates pass and contradictory ones refuse, while transitions require legal moves. The fast fold preserves check order and permits bindings after settlement."
+    },
+    "S5 update": {
+      "verdict": "ACCEPT",
+      "notes": "A started invocation followed by a successful binding witnesses the update rule: only its projection changes, updated time advances, optional entry/flag update, and lifecycle is retained after settlement. FindIndexUpdate is correctly grouped here because it proves in-place update indexing."
+    },
+    "P1 progress": {
+      "verdict": "ACCEPT",
+      "notes": "The fixed start/accept/running/completed/binding trace witnesses the law and yields the specified completed, settled, bound projection. Method/function equivalence carries the result to the optimized implementation."
+    },
+    "I1 settled-stays-settled": {
+      "verdict": "ACCEPT",
+      "notes": "A Staged start followed by a Completed terminal satisfies the premise and conclusion; duplicate terminals and post-settlement bindings retain lifecycle and settlement. The implementation equivalence supports the unchanged history invariant."
+    },
+    "I2 one-binding": {
+      "verdict": "ACCEPT",
+      "notes": "Two distinct started invocations bound to distinct entries give a concrete projected history; repeated entry or invocation bindings are refused. The fast path's bound arrays implement the same constraints as StepOf."
+    }
+  },
+  "acceptedMutants": {},
+  "general": "High-stakes remains correct for task/run lifecycle facts. ProjectFast's by-method uses bounded i53 indices and dense token-indexed arrays, with fallback to RunAt for histories at/above 2^20 or invocation/entry tokens outside the array range; the proof obligation establishes equality with its functional fold. The code comment now states the dense-token precondition for O(1), and the oracle exercises sparse tokens and fallback beyond the array limit. The mutation tool does not mutate the by-method body, which is a residual mutation-coverage risk; the body is held by the Dafny proof obligation and 18/18 hand mutants fail verification, useful supplemental evidence but not a substitute for automated mutation coverage. FindIndexUpdate is correctly assigned to S5 as an in-place update lemma; FindIndexAppend remains with S1. Legal's disjunction rewrite preserves the table while avoiding per-call set construction. The final mutation run reports PASS: 267 total, 225 valid, all 225 killed by laws, 0 accepted and 0 survived; shadow matched 5,000/5,000 generated histories, not real traffic. Semantics remain aligned with the TS: ordered checks, duplicate versus contradictory terminals, lifecycle/updatedAt/retryable handling, permitted binding after settlement, and the unreachable ChangedAfterTerminal branch. A1 token/receipt shape and A2 shell result ordering remain boundary contracts; A2 sorting is intentionally outside the core. All six law kinds are accounted for; no unresolved subjective product decision identified. Real-traffic shadow window remains necessary before cut-over."
+}

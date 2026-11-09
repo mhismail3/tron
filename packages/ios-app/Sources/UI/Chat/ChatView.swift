@@ -23,7 +23,13 @@ struct ChatView: View {
     let hostedProbe: ChatHostedProbe?
     #endif
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool {
+        #if HOSTED_TEST
+        if hostedProbe?.reducesMotion == true { return true }
+        #endif
+        return systemReduceMotion
+    }
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -214,6 +220,19 @@ struct ChatView: View {
         .environment(\.chatAnnotationPresenter, annotationPresenter)
         .onChange(of: composerScope, initial: true) { _, scope in
             annotationPresenter.bind(drafts: model.composerDrafts, scope: scope)
+        }
+        .onChange(of: annotationPresenter.revealScroll) { _, scroll in
+            guard let scroll else { return }
+            let issued = switch scroll.target {
+            case .row(let itemID):
+                scrollCoordinator.requestAnnotationReveal(row: itemID, reduceMotion: reduceMotion)
+            case .visualOffset(let offset):
+                scrollCoordinator.requestAnnotationReveal(visualOffset: offset, reduceMotion: reduceMotion)
+            }
+            if !issued { annotationPresenter.endReveal() }
+        }
+        .onChange(of: reduceMotion, initial: true) { _, reduce in
+            annotationPresenter.reduceMotion = reduce
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -1275,6 +1294,7 @@ struct ChatView: View {
             responseState: responseState,
             mutatingQueuedMessageIDs: sessionPresentation.mutatingQueuedMessageIDs,
             orientation: transcriptOrientation,
+            revealSheetTop: annotationPresenter.revealSheetTop,
             scrollPosition: $transcriptScrollPosition,
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
             openingSurface: {
@@ -2586,7 +2606,7 @@ struct ChatView: View {
             switch command.destination {
             case .row(let renderedID):
                 var target = ScrollPosition(idType: String.self)
-                target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
+                target.scrollTo(id: renderedID, anchor: .center)
                 transcriptScrollPosition = target
             case .oldestHistory:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
@@ -2607,19 +2627,33 @@ struct ChatView: View {
                 ))
             }
         }
+        // An annotation reveal measures its source once the scroll has landed:
+        // after its animation completes (or the jump), when the source's frame
+        // holds still between display frames; lazy rows can keep settling for
+        // a few frames. A reader who took the transcript in between ends it.
+        let landed: () -> Void = command.origin == .annotationReveal
+            ? { [annotationPresenter, scrollCoordinator, displayFrameScheduler] in
+                Task { @MainActor in
+                    var previous: CGRect?
+                    for _ in 0..<ChatAnnotationPresenter.maximumSettleFrames {
+                        do { try await displayFrameScheduler.nextFrame() } catch { return }
+                        let frame = annotationPresenter.revealSourceFrame
+                        if frame == previous { break }
+                        previous = frame
+                    }
+                    if scrollCoordinator.isUserInteracting { annotationPresenter.endReveal() }
+                    else { annotationPresenter.revealScrollLanded() }
+                }
+            }
+            : {}
         switch command.animation {
-        case .disabled:
+        case .smooth(let duration) where !reduceMotion:
+            withAnimation(ChatMotion.smooth(duration: duration), completionCriteria: .logicallyComplete, update, completion: landed)
+        case .disabled, .smooth:
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction, update)
-        case .smooth(let duration):
-            if reduceMotion {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction, update)
-            } else {
-                withAnimation(ChatMotion.smooth(duration: duration), update)
-            }
+            landed()
         }
         // The coordinator keeps this exact token installed through its native
         // opening/catch-up/semantic settlement, then publishes a leased release.
@@ -2784,6 +2818,10 @@ struct ChatView: View {
             onComposerHeight: composerHeightChanged,
             onComposerHeightSettled: composerHeightSettled
         )
+        // The transcript's visible bottom, above the composer and its staged chips.
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
+            annotationPresenter.revealBottom = $0
+        }
         .environment(\.chatOwnsStatusBar, true)
     }
 

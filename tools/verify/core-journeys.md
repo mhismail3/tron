@@ -10,7 +10,7 @@ Run results belong in `test-results/` and reports, not in this map. Gap fixes be
 
 | Label | What runs | Controlled |
 |---|---|---|
-| **Process** | Built Gateway `dist/index.js` as its own process, started by `scripts/ios-gateway-e2e-test` with a fault proxy (`scripts/ios-gateway-fault-proxy.mjs`); Pi in that process; real socket from the simulator. `restart-gateway` restarts the process on the same data; `respawn-exited-gateway` starts it again after a supervised Gateway exits on its own. | `tron-e2e/e2e-model` scripted provider extension written by `scripts/ios-gateway-e2e-fixture.sh`; proxy link faults. |
+| **Process** | Built Gateway `dist/index.js` as its own process, started by `scripts/ios-gateway-e2e-test` with a fault proxy (`scripts/fault-proxy/ios-gateway-fault-proxy.mjs`); Pi in that process; real socket from the simulator. `restart-gateway` restarts the process on the same data; `respawn-exited-gateway` starts it again after a supervised Gateway exits on its own. | `tron-e2e/e2e-model` scripted provider extension written by `scripts/ios-gateway-e2e-fixture.sh`; proxy link faults. |
 | **Native** | Process boundary driven by the production app UI (`HOSTED_TEST` build, `TronMobileUITests`) after real pairing. | Same as Process. |
 | **Lock socket** | `startLockGateway` (`packages/gateway/test-support/gateway-lock-harness.ts`): in-process `GatewayServer`, loopback `ws` client, real `RuntimeRegistry`/Pi SDK, temp disk. | Faux provider. Restart = dispose and start on the same root in the same Node process. |
 | **Registry** | Real `RuntimeRegistry`/owners and Pi SDK in the Vitest process; RPCs via `GatewayService.invoke`, no socket. | Faux provider; `f.restart()` recreates the registry in-process. |

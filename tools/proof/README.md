@@ -13,8 +13,8 @@ scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--rech
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
 scripts/tron proof shadow <block> [--root <dir>] [--out <file>] [--days N [--corpus <dir>]]
 scripts/tron proof facade <block> [--check]
-scripts/tron proof wire --inventory [--json] [--numbers float64|integer]
 scripts/tron proof wire --generate <in.dfy> <out-dir>
+scripts/tron proof wire --protocol [--check]
 ```
 
 `bootstrap`/`doctor`: exit 0 when the install matches `dafny.pin`; 1 when missing or mismatched, with the
@@ -117,10 +117,16 @@ unaccounted law kind (high-stakes) or a report acceptance not in mutate.json.
 
 Shadows need real inputs. `packages/gateway/src/proof/traffic-recorder.ts` records, at each seam where a
 block will replace TypeScript logic, the exact typed inputs and the output the TypeScript returned:
-`recordSeam(block, seam, input, output)`, a no-op unless enabled. The first seams are
-`nextAutomationOccurrence`, `firstAutomationOccurrence` and `classifyDueOccurrence` in
-`packages/gateway/src/automations/schedule.ts`, for once and interval triggers (the block's domain); nested
-calls are not seams.
+`recordSeam(block, seam, input, output)`, a no-op unless enabled; a seam whose record costs work checks
+`seamsRecorded()` first, and none records an identity or text: values enter as per-call tokens (equal values share
+one). Seams (shell files under `packages/gateway/src/`), with the oracle each block's shadow runs (below):
+
+| Block | Seam | Recorded | Oracle's generated inputs |
+|---|---|---|---|
+| `schedule/occurrence`, `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | once and interval triggers under the first, calendar triggers under the second; nested calls are not seams | calendar: core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
+| `settings/precedence` | `resolveInstance` (`kernel/settings/settings-resolver.ts`) | `precedenceFacts` (per layer: in target, bound, per-model and plain value, applied; default token 0) and the fold before clamping; a composing value as null | real `resolveSettings`/`composedBelow` over a synthetic schema; compose builds a term, so its order is exact |
+| `settings/tool-selection` | `toolSelectionType().compose/encode` (`kernel/settings/settings-types.ts`) | `toolSelectionFacts` (empty name 0); a non-list below/current is none; a list holding a non-string is not recorded | plain names, modifiers, repeats and the empty name over every kind of selection below |
+| `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds (mulberry32); 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
   `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
@@ -163,7 +169,8 @@ print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a 
 both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
 imports `packages/gateway/src/automations/schedule.ts` through `oracles/gateway-source.mjs` (module hooks
 that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript transform) and calls the core
-through the block's generated façade. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
+through the block's generated façade; the other oracles do the same for their blocks (table above). Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
+the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
 ## Façade
@@ -175,7 +182,7 @@ binds it to any compiled core (the checked-in one, or a mutant or fresh translat
 bound checked-in one. It exposes every compiled function and predicate of the laws (ghost and commented-out
 declarations are not compiled, so not exposed) and checks each stated precondition before calling, because
 compiled code does not check `requires`. Types: `int` -> `number` and `nat` -> `number >= 0` (safe integers, checked
-both ways), `bool` -> `boolean`, a datatype of nullary constructors -> a string union of their names, a
+both ways), `bool` -> `boolean`, `seq<T>` -> a readonly array of `T` (also nested and as a field), a datatype of nullary constructors -> a string union of their names, a
 one-constructor datatype named like its type -> a plain object, any other datatype -> an object tagged by `$`; an
 unknown constructor is a `TypeError` in either direction. Refused before anything compiles: Dafny 3 `function method`
 syntax, preconditions other than a call of a compiled predicate on parameters, generic functions, and any other
@@ -184,40 +191,37 @@ the checked-in files differ.
 
 ## Wire
 
-`dafny2wire/inventory.mjs` (`proof wire --inventory`) classifies every export of
-`packages/gateway/src/protocol/types.ts` (or `--types <file>`) as expressible by the generated wire format or
-not, with a reason. Resolution is the pinned Gateway `tsc`'s: each type is probed as `x<T>()` (a one-level
-mapped expansion) in a temporary copy of the types file in which every declaration is exported, and the
-declaration emit prints its structure with intersections, `extends`, utility types, indexed access and
-`typeof` constants applied; field expressions the emit leaves are probed again until only scalars, literals,
-arrays, object literals and named references remain (a union-of-scalars alias, which the emit keeps by
-name, is probed member by member). The parser's reading of every expansion is printed back and must be
-equal to the original under the same compiler (`Eq<N<printed>, N<original>>`), else the type is not
-expressible. A type is expressible when every part is a form the generator emits: string, boolean, number,
-a literal (one-constructor enum), a union of literals (enum), array, string-keyed map, object with optional
-or absent (`?: never`) fields, or a union a decoder can split: members of distinct JSON kinds (`bykind`), or
-objects by a required field with pairwise disjoint literal values (`tag=`). Refused: `unknown`, `any`,
-`object`, functions, fields mixed with an index signature, untagged object unions, several array kinds.
-The JSON `summary.features` lists the forms the expressible types use. `--numbers float64` (default) reads
-`number` as today's JSON float64; `--numbers integer` treats it as unbounded and so not expressible. The five
-`export const` capability strings are values, not wire types, and are counted apart.
+The Gateway protocol's value types have one source, `packages/core/wire/Protocol.dfy`: `proof wire --protocol`
+writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and
+`--check` exits 1 when that file is not what the source generates. The Gateway still writes frames with
+`JSON.stringify` of the values it builds, so the generated encoders serve the codec tests only and the
+decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
+is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
+Swift codec is generated and proven against the TypeScript one in the test below; the iOS app still decodes
+with its own models.
 
 `dafny2wire/dafny2wire.mjs` (`proof wire --generate`) turns `// @wire` Dafny datatypes into `wire.ts` and
 `Wire.swift` codecs: records; `// @wire enum` (a JSON literal per constructor: `{:wire "x"}`, `{:wire 1}`,
-`{:wire true}`, else the constructor name); `// @wire tag=<field>` tagged unions; `// @wire bykind` unions
+`{:wire true}`, else the constructor name); `// @wire tag=<field>` tagged unions (a tag value may be a string,
+number or boolean); `// @wire bykind` unions
 split by JSON kind (a nullary constructor is `null`; this is how open JSON values are written). Field types:
-`string`, `bool`, `int`/`nat` (safe-range JSON integers), `real` (float64), `seq<T>`, `map<string, T>`,
+`string`, `bool`, `int`/`nat` (safe-range JSON integers), `real` (float64), `seq<T>`, `map<string, T>` (or
+`map<E, T>` with E a string enum: only E's values are keys),
 `Option<T>` (absent key), `Nullable<T>` (JSON null) and `Absent` (the key never appears); a trailing `_`
 escapes a Dafny keyword or a shared destructor name. Canonical JSON: keys in declaration order with the tag
 first, no whitespace, JSON.stringify string escaping, ECMAScript Number::toString (`-0` as `0`; non-finite
 numbers refused by both encoders). Maps keep JavaScript's property order (array-index keys ascending, then
 insertion order; a duplicate key keeps its first position and last value), also when built in Swift, so the
 Swift codec parses JSON itself rather than through Foundation; an overflowing number literal (`1e400`)
-parses as infinity and is rejected at its path by both decoders. Decoders reject unknown and absent-only
-fields, wrong kinds, out-of-range integers and unknown constructors at a named JSON path. Limits: Swift refuses
-a lone UTF-16 surrogate, which JavaScript strings can hold; the protocol's goldens lock frame shapes (sorted
-key paths), not bytes, so byte-identity with today's frames, which JSON.stringify writes in construction
-order, needs a recorded frame corpus.
+parses as infinity and is rejected at its path by both decoders. The TypeScript decoders are strict: they
+reject unknown and absent-only fields, missing fields, wrong kinds, out-of-range integers and unknown
+constructors at a named JSON path. The Swift decoders are tolerant, the iOS decoding policy: unknown fields are
+ignored; an absent field, or a null one whose type cannot hold null (not `Nullable<T>`, not a union with a null
+constructor), takes its type's default (`""`, `0`, `false`, empty, `null`, the `unknown` value of an enum that
+has one, an enum's only value, a record of defaults); an unknown value of an enum with an `unknown` value is
+`unknown`. A field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
+unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
+Limits: Swift refuses a lone UTF-16 surrogate, which JavaScript strings can hold.
 
 ## Verify
 
@@ -250,25 +254,32 @@ and shows proof PASS, a current mutation PASS, a current shadow match, and a `RE
 block hash with every law ACCEPT, and `proof facade --check` finds `dist/` fresh. An edit that skips any gate
 fails it.
 
-`scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: the inventory covers
-every export, every expansion is compiler-confirmed, at least 95% of the protocol types are expressible (the
-H5 kill criterion), every form they need is exercised by the codec fixture, and the shapes in
-`tests/fixtures/wire/not-expressible.ts` are refused with their reasons; and the codecs generated from
+`scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: `--protocol --check`
+passes; the protocol's codecs, on 12 seeded values of each of its datatypes, encode exactly what
+`JSON.stringify` writes for the value built in declaration order, round trip, and agree byte for byte between
+TypeScript and Swift; of eight malformed protocol values TypeScript refuses each at its path and Swift
+refuses the wrong boolean tag, the unknown enum map key and the overflowing number but reads the unknown field,
+the missing and the null field and the unknown `ChatSemanticKind` tolerantly; and the codecs generated from
 `tests/fixtures/wire/Wire.dfy` (one datatype per form) round trip 2,000 seeded random frames plus edge doubles,
 keys and strings, TypeScript and Swift (`swiftc -O`) produce identical bytes and identical normalisations of
-non-canonical inputs (and a Swift-built map encodes in JavaScript order), and both reject 16 malformed inputs
-at the same path.
+non-canonical inputs (and a Swift-built map encodes in JavaScript order), and of 16 malformed inputs
+TypeScript rejects each at its path and Swift rejects or reads each as stated.
 
 `scripts/tron test gateway src/proof/traffic-recorder.integration.test.ts` proves the recorder is refused
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
-seeded schedule journey through the real seams writes one record per call (none for calendar triggers or
-nested calls) that replays through the same TypeScript to the recorded outputs, and that the daily cap and
-retention hold.
+seeded schedule journey through the real seams writes one record per call (none for nested calls), each under
+its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs,
+that resolving the real settings schema records every key instance's fold (layer and not-applied layer as
+resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, that
+tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
+and nothing for a value outside the block's domain, that invocation receipt folds record tokens and refusal
+reasons, once per history and not above the receipt bound, and
+that the daily cap and retention hold.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block
 `demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
-full, an opaque function; no ghost or commented-out one), round trips values, refuses unknown constructors,
-non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
+full, an opaque function; no ghost or commented-out one), round trips values (sequences, nested and as fields),
+refuses unknown constructors, a non-array sequence, non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
 either file; and `function method`, an uncheckable precondition and an unsupported type are refused.
 
 `scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format

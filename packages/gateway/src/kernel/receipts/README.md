@@ -9,7 +9,10 @@ codecs. Producers construct facts here; only the live Run authority persists the
 
 Strict receipt grammar, encoded bounds, duplicate/contradiction refusal, canonical
 entry bindings, legal lifecycle folding, captured owner classification and bounded
-history read projection. Persisted tags/versions and JSONL stay unchanged.
+history read projection. Persisted tags/versions and JSONL stay unchanged. The
+invocation lifecycle fold (`invocationProjection`) is shadowed by proof block
+`receipts/invocation-lifecycle` (packages/core) through a Debug-only seam
+(`invocationLifecycleFacts`); the TypeScript stays authoritative until its cut-over.
 
 ## Not here
 

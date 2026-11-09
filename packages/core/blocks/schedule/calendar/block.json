@@ -1,0 +1,1 @@
+{"interface": ["laws/schedule/Calendar.dfy"], "impl": ["blocks/schedule/calendar/Block.dfy"], "deps": []}

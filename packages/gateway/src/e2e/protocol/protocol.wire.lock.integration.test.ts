@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } from "../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../test-support/wait-for.js";
+import * as Protocol from "../../protocol/types.js";
+import { protocolTs } from "../../../../../tools/proof/dafny2wire/dafny2wire.mjs";
 
 /**
  * Wire contract lock (packages/gateway/docs/scenario-locks.md#wire-contract-v7) for the `gateway/protocol` module:
@@ -45,6 +47,11 @@ async function handshake(gateway: LockGateway, protocolVersion: number): Promise
 }
 
 describe("gateway/protocol wire contract locks", () => {
+  it("types.ts is exactly what packages/core/wire/Protocol.dfy generates (never edited by hand)", async () => {
+    expect(await readFile(resolve(REPOSITORY, "packages/gateway/src/protocol/types.ts"), "utf8"),
+      "run scripts/tron proof wire --protocol").toBe(protocolTs());
+  });
+
   it("preserves supervised provenance in raw hello and system.info without changing the base wire", async () => {
     const identity = { sourceRevision: "fixture-source", buildFingerprint: "fixture-build", runtimeEpoch: "fixture-epoch" };
     vi.stubEnv("TRON_GATEWAY_SOURCE_REVISION", identity.sourceRevision);
@@ -113,6 +120,25 @@ describe("gateway/protocol wire contract locks", () => {
     await call("session.archive.set", { commandId: gateway.commandId(), sessionId, archived: true });
     await call("session.prompt", { commandId: gateway.commandId(), sessionId: "missing-session", text: "refused" });
     await call("no.such.method", {});
+
+    // The generated decoders (packages/core/wire/Protocol.dfy) are the protocol's validators: every typed
+    // value the Gateway sent in this scenario is accepted strictly (no unknown, missing or mistyped field)
+    // and decodes to itself.
+    const result = (method: string) => calls.find((entry) => entry.method === method)!.response.result as Record<string, unknown>;
+    const snapshots = client.events.filter((event) => event.topic === "session.snapshot").map((event) => event.payload);
+    const typed: Array<[string, (value: unknown) => unknown, unknown[]]> = [
+      ["session.open session", Protocol.decodeSessionSnapshot, [result("session.open").session]],
+      ["session.snapshot", Protocol.decodeSessionSnapshot, snapshots],
+      ["session.transcript items", Protocol.decodeTranscriptItem, result("session.transcript").items as unknown[]],
+      ["session.list sessions", Protocol.decodeSessionSummary, result("session.list").sessions as unknown[]],
+      ["session.commands commands", Protocol.decodeCommandInfo, result("session.commands").commands as unknown[]],
+      ["session.tree", Protocol.decodeSessionTreeNode, calls.find((entry) => entry.method === "session.tree")!.response.result as unknown[]],
+      ["session.history.list nodes", Protocol.decodeSessionTreeNode, result("session.history.list").nodes as unknown[]],
+    ];
+    for (const [where, decode, values] of typed) {
+      expect(values.length, `${where} carries values`).toBeGreaterThan(0);
+      for (const value of values) expect(decode(value), where).toEqual(value);
+    }
 
     const trace = {
       lock: "protocol-wire",

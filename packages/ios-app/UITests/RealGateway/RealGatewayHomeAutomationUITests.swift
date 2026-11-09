@@ -29,7 +29,7 @@ extension RealGatewayPairAndChatUITests {
         // The fixture prepares a real Home chapter through Gateway RPC. This
         // journey owns the new editor/fire/chip boundary, not Home onboarding.
         XCTAssertTrue(waitForEnabled(ring, timeout: 60), app.debugDescription)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Home automation fixture ready.'")).firstMatch.waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(assistantReply(app, containing: "Home automation fixture ready.").waitForExistence(timeout: 60), app.debugDescription)
         app.buttons["Back"].tap()
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(waitForHittable(menu, timeout: 30), app.debugDescription)

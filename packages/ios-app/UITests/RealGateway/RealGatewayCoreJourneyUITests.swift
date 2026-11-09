@@ -22,10 +22,11 @@ extension RealGatewayPairAndChatUITests {
         sendJourneyPrompt(app, prompt)
         // The fixture's first ordinary reply streams; its last words mark completion.
         let completion = "Detached response complete"
-        // Each assistant message renders one selectable text view (its identifier);
-        // the prompt is counted outside the navigation title the chat derives from it.
+        // Each assistant message renders one selectable text view (its identifier)
+        // whose paragraph carries the text; the prompt is counted outside the
+        // navigation title the chat derives from it.
         let reply = app.textViews.matching(identifier: "chat.assistant.selectable-text")
-            .matching(NSPredicate(format: "label CONTAINS %@", completion))
+            .descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", completion))
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 180), app.debugDescription)
         let sentPredicate = NSPredicate(format: "label == %@", prompt)
         func sentCount() -> Int { app.staticTexts.matching(sentPredicate).count - app.navigationBars.staticTexts.matching(sentPredicate).count }
@@ -67,7 +68,7 @@ extension RealGatewayPairAndChatUITests {
         createSession(app, inWorkspace: fixture.workspace)
         func served(_ model: String) -> XCUIElementQuery {
             app.textViews.matching(identifier: "chat.assistant.selectable-text")
-                .matching(NSPredicate(format: "label CONTAINS %@", "Model probe answered by \(model)."))
+                .descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Model probe answered by \(model)."))
         }
         func probe(_ label: String, expecting model: String, count: Int) {
             sendJourneyPrompt(app, "MODEL-PROBE-JOURNEY \(label)")

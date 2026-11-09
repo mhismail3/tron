@@ -74,8 +74,7 @@ def lanes(root: Path, base: str) -> list[dict]:
         result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/gateway.py', *config],
                        'vitest': True, 'gatewayLock': True, 'requires': 'packages/gateway/package-lock.json'})
     result.extend([
-        {'name': 'Mac integration', 'chain': 'node', 'command': 'scripts/tron mac generate && scripts/tron-xcodebuild build-for-testing -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData -showBuildTimingSummary && xcodebuild test-without-building -project packages/mac-app/TronMac.xcodeproj -scheme TronMac -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath packages/mac-app/build/DerivedData',
-         'requires': 'packages/mac-app/project.yml'},
+        {'name': 'Mac integration', 'chain': 'node', 'command': ['python3', 'tools/verify/mac.py'], 'requires': 'packages/mac-app/project.yml'},
         {'name': 'relay', 'chain': 'node', 'command': ['scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/push-relay', 'test', '--'],
          'vitest': True, 'testRoot': 'packages/push-relay', 'requires': 'packages/push-relay/package-lock.json'},
         {'name': 'shipping iOS compile', 'chain': 'apple', 'command': ['scripts/tron-ios-device', 'compile'],
@@ -161,10 +160,7 @@ def stop_running(grace: float = 30) -> None:
     with RUNNING_LOCK:
         groups = list(RUNNING)
     for group in groups:
-        try:
-            os.killpg(group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        verify.signal_group(group, signal.SIGTERM)
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
         with RUNNING_LOCK:
@@ -174,10 +170,7 @@ def stop_running(grace: float = 30) -> None:
     with RUNNING_LOCK:
         groups = list(RUNNING & set(groups))
     for group in groups:
-        try:
-            os.killpg(group, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        verify.signal_group(group, signal.SIGKILL)
 
 
 def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
@@ -243,11 +236,6 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     deferred_ios = lane['name'] == 'full verify' and host_slots_busy(root) is True
     if deferred_ios:
         command = [*command, '--skip', 'ios']
-    if lane['name'] == 'Mac integration':
-        home, scratch = directory / 'home', directory / 'tmp'
-        home.mkdir(exist_ok=True, mode=0o700)
-        scratch.mkdir(exist_ok=True, mode=0o700)
-        command = command.replace('&& xcodebuild ', f'&& env HOME={shlex.quote(str(home))} TMPDIR={shlex.quote(str(scratch))} xcodebuild ')
     if lane['name'] == 'shipping iOS compile':
         # This compile owner has a device lease, not a simulator slot; compose the
         # common host-slot owner rather than reserving capacity for the whole batch.
@@ -294,11 +282,11 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             try:
                 code = process.wait()
             except BaseException:
-                os.killpg(process.pid, signal.SIGTERM)
+                verify.signal_group(process.pid, signal.SIGTERM)
                 try:
                     process.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    verify.signal_group(process.pid, signal.SIGKILL)
                     process.wait()
                 raise
             finally:
@@ -392,9 +380,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         result['signature'] = signature(f"{lane['name']} failed", failures, output, root)
     output = log.read_text(errors='replace')
     if lane['name'] == 'Mac integration':
-        counts = re.findall(r'Executed (\d+) tests?|Test run with (\d+) tests?', output)
-        counts = [int(xctest or swift_testing) for xctest, swift_testing in counts]
-        if code == 0 and (not counts or counts[-1] == 0 or re.search(r'\d+ tests? skipped', output)):
+        if code == 0 and verify.mac_count(output) == 0:
             result.update(status='uncovered', reason='missing, empty or skipped XCTest evidence')
         failures = re.findall(r"Test Case '-\[([^ .]+)\.([^ ]+) ([^]]+)\]' failed", output)
         if failures:
@@ -782,6 +768,10 @@ def issue_write(key: str, title: str, body: str, directory: Path, state: Path, t
                ['scripts/tron', 'work', 'issue', 'create', '--title', title, '--body-file', str(directory / 'issue.md'),
                 '--kind', 'kind:bug', '--area', 'area:tooling'])
     outcome = execute(ROOT, {'name': 'issue write', 'command': command}, directory / 'issue')
+    if 'log' not in outcome:
+        # The batch stopped before dispatch: nothing reached GitHub, so the journal goes back to what it was.
+        save(journal, previous) if previous else journal.unlink()
+        return {**outcome, 'number': number}
     match = re.search(r'(?:/issues/|created issue #)(\d+)', Path(outcome['log']).read_text(errors='replace'))
     outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved', 'number': int(match[1]) if match else number}
     save(journal, outcome)
@@ -841,7 +831,7 @@ def failure_cases(outcome: dict) -> list[dict]:
         for case in outcome['xctestCases']:
             # Build remains at each revision; execution selects one class/method.
             cases.append({**outcome, 'signature': {**outcome['signature'], 'failedTests': [case]},
-                          'probe': {'name': outcome['name'], 'command': outcome['command'] + ' -only-testing:' + case}})
+                          'probe': {'name': outcome['name'], 'command': [*outcome['command'], case.split('/', 1)[1]]}})
     elif outcome.get('probe') and '--only-testing' in outcome['probe'].get('command', []):
         cases.append(outcome)
     return cases

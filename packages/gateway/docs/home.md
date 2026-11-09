@@ -147,7 +147,7 @@ See [Home tasks: Task wake inbox and terminal push](../src/modules/home/tasks.md
 
 ### `home.status`
 
-`HomeStatus` (shape in `src/protocol/types.ts`). See [Home README: RPCs and clients](../src/modules/home/README.md#rpcs-and-clients).
+`HomeStatus` (shape in `packages/core/wire/Protocol.dfy`, generated into `src/protocol/types.ts`). See [Home README: RPCs and clients](../src/modules/home/README.md#rpcs-and-clients).
 
 ### Typed memory browser
 

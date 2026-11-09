@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 import { importGatewaySource } from "./gateway-source.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// The schedule seams record on an opted-in Debug Gateway; an oracle run must never add its own calls to that corpus.
+delete process.env.TRON_PROOF_TRAFFIC;
 const oracle = await importGatewaySource("automations/schedule.ts");
 const { isGatewayTimestamp } = await importGatewaySource("util/timestamp.ts");
 const [corePath, countArg, seedArg, ...replayFiles] = process.argv.slice(2);
@@ -57,7 +59,9 @@ if (replay) {
     : o === null || iso(o));
   for (const file of files) {
     const day = /(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(file)?.[1];
-    readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+    let text;
+    try { text = readFileSync(file, "utf8"); } catch (error) { console.error(`${file}: ${error.message}`); process.exit(2); }
+    text.split("\n").forEach((line, i) => {
       if (!line) return;
       const refuse = (why) => { console.error(`${file}:${i + 1}: ${why}`); process.exit(2); };
       let r; try { r = JSON.parse(line); } catch { refuse("not JSON"); }

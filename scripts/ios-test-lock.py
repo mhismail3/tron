@@ -456,7 +456,9 @@ def main() -> int:
                     # dies at once on a signal, and the process owner below it is
                     # what stops the xcodebuild it runs in its own session.
                     os.killpg(process.pid, signum)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
+                    # The command exited after the poll: macOS answers EPERM while its
+                    # leader awaits reaping (ESRCH once reaped); it is ours, so no other cause.
                     pass
 
         # The handlers cover taking the lease and starting the command too: a

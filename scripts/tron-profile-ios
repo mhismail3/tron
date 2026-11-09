@@ -502,7 +502,8 @@ class TraceRecorder:
         """Kill xctrace with the helpers it spawned (its own session)."""
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
+            # Already exited: macOS answers EPERM while it awaits reaping (ESRCH once reaped).
             pass
         process.wait()
 

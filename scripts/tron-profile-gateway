@@ -773,7 +773,7 @@ def run_driver(fixture: FixtureGateway, scenario: Scenario, output: Path, warmup
             raise ProfileFailure(f"scenario driver exceeded its {overall:.0f} s deadline", EXIT_TIMEOUT, driver_log) from error
         finally:
             if driver.poll() is None:
-                with contextlib.suppress(ProcessLookupError):
+                with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(driver.pid, signal.SIGKILL)
                 driver.wait(timeout=10)
     if status != 0:
@@ -1150,7 +1150,7 @@ def run_multi_driver(fixture: FixtureGateway, run_dir: Path, phase: str, label: 
             raise ProfileFailure(f"{label}: driver exceeded its {deadline} s deadline", EXIT_TIMEOUT, driver_log) from error
         finally:
             if driver.poll() is None:
-                with contextlib.suppress(ProcessLookupError):
+                with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(driver.pid, signal.SIGKILL)
                 driver.wait(timeout=10)
     if status != 0:

@@ -290,10 +290,10 @@ final class TronHomeDashboardUITests: XCTestCase {
 
         let card = element(app, "home-usage-card")
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(waitFor(card, "label CONTAINS 'Anthropic (CortexKit), 48% used (Weekly)'"), card.label)
+        XCTAssertTrue(waitFor(card, "label CONTAINS 'Cloudflare AI Gateway, 48% used (Weekly)'"), card.label)
         XCTAssertTrue(card.label.hasPrefix("Anthropic, 42% used (5h) · 18% used (Weekly)"), card.label)
         let probe = app.staticTexts["fixture.home-usage-layout"]
-        XCTAssertTrue(waitFor(probe, "label CONTAINS 'cortexkit.column0.bar='"), probe.label)
+        XCTAssertTrue(waitFor(probe, "label CONTAINS 'cloudflare-ai-gateway.column0.bar='"), probe.label)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         var frames: [String: CGRect] = [:]
         for entry in probe.label.split(separator: ";") {
@@ -302,7 +302,7 @@ final class TronHomeDashboardUITests: XCTestCase {
             frames[String(pair[0])] = CGRect(x: v[0], y: v[1], width: v[2], height: v[3])
         }
         let cardFrame = try! XCTUnwrap(frames["card"])
-        for (provider, columns) in [("anthropic", 2), ("openai-codex", 2), ("cortexkit", 1)] {
+        for (provider, columns) in [("anthropic", 2), ("openai-codex", 2), ("cloudflare-ai-gateway", 1)] {
             let name = try! XCTUnwrap(frames["\(provider).name"], probe.label)
             XCTAssertNil(frames["\(provider).column\(columns)"], "\(provider) has \(columns) column(s)")
             var previous: CGRect?
@@ -420,12 +420,12 @@ final class TronHomeDashboardUITests: XCTestCase {
         let card = element(app, "home-usage-card")
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(waitFor(card, "label CONTAINS 'Opencode Go, 0% used (5h) · 72% used (Weekly) · 100% used (Monthly)'"), card.label)
-        XCTAssertTrue(card.label.contains("Anthropic (CortexKit), 48% used (Weekly); "), card.label)
+        XCTAssertTrue(card.label.contains("Cloudflare AI Gateway, 48% used (Weekly); "), card.label)
         XCTAssertFalse(card.label.contains("61% used"), "the repeated weekly cadence stays off the card: \(card.label)")
         let probe = app.staticTexts["fixture.home-usage-layout"]
         XCTAssertTrue(waitFor(probe, "label CONTAINS 'opencode-go.column2.bar='"), probe.label)
-        XCTAssertTrue(probe.label.contains("cortexkit.column0="), probe.label)
-        XCTAssertFalse(probe.label.contains("cortexkit.column1"), "one Weekly column: \(probe.label)")
+        XCTAssertTrue(probe.label.contains("cloudflare-ai-gateway.column0="), probe.label)
+        XCTAssertFalse(probe.label.contains("cloudflare-ai-gateway.column1"), "one Weekly column: \(probe.label)")
         keep("15-usage-card-one-column-per-cadence")
 
         app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
@@ -437,7 +437,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Account usage: 48% used (Weekly)")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         app.navigationBars.staticTexts["Providers"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        app.buttons["Details for Anthropic (CortexKit)"].tap()
+        app.buttons["Details for Cloudflare AI Gateway"].tap()
         XCTAssertTrue(app.staticTexts["Opus only"].waitForExistence(timeout: 10), "the detail sheet keeps the scoped limit: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["61% used"].exists, app.debugDescription)
         keep("16-provider-detail-scoped-weekly")

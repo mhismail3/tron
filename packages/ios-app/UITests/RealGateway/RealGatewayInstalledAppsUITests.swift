@@ -179,7 +179,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
         try sendPrompt(app, "INSTALLED-SWIFT-APP-PERSISTENCE")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Persistence proof app ready for review")).firstMatch
+        XCTAssertTrue(assistantReply(app, containing: "Persistence proof app ready for review")
             .waitForExistence(timeout: 90), "the agent's swift_app offer never completed: \(app.debugDescription)")
         // The agent offers the app; only the phone's explicit review in Apps installs it.
         app.buttons["Back"].tap()

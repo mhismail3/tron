@@ -72,11 +72,38 @@ exit "${BUILD_STATUS:-0}"
                 assert (user / "dirty").read_text() == "keep caller draft"
                 registrations = git(repo, "worktree", "list", "--porcelain")
                 assert len(registrations.split("worktree ")) == 2, registrations
+        # #2401: macOS answers killpg on a group whose members all exited but whose leader is not
+        # yet reaped with EPERM. A signal in that window still ends the run with the build's own
+        # status and removes the checkout; the spy only holds the window open, then calls the real wait.
+        driver = (
+            "import importlib.util, os, signal, subprocess, sys, time\n"
+            "spec = importlib.util.spec_from_file_location('source', sys.argv[1])\n"
+            "source = importlib.util.module_from_spec(spec); spec.loader.exec_module(source)\n"
+            "real_wait = subprocess.Popen.wait\n"
+            "def wait(self, timeout=None):\n"
+            "    if 'tron-ios-device' in str(self.args):\n"
+            "        deadline = time.monotonic() + 60\n"
+            "        while not subprocess.run(['ps', '-o', 'stat=', '-p', str(self.pid)], capture_output=True,"
+            " text=True).stdout.startswith('Z'):\n"
+            "            assert time.monotonic() < deadline, 'the build never exited'\n"
+            "            time.sleep(0.02)\n"
+            "        os.kill(os.getpid(), signal.SIGTERM)\n"
+            "    return real_wait(self, timeout)\n"
+            "subprocess.Popen.wait = wait\n"
+            "sys.argv = sys.argv[1:]\n"
+            "raise SystemExit(source.main())\n"
+        )
+        result = subprocess.run([sys.executable, "-c", driver, ROOT / "scripts/run-main-source.py", "--root", repo,
+                                 "--", "scripts/tron-ios-device", "install", "--fast-debug"],
+                                env={**env, "BUILD_STATUS": "7"}, text=True, capture_output=True, timeout=60)
+        assert result.returncode == 7 and "Traceback" not in result.stderr, (result.returncode, result.stderr)
+        registrations = git(repo, "worktree", "list", "--porcelain")
+        assert len(registrations.split("worktree ")) == 2, registrations
         resolved = subprocess.check_output([sys.executable, ROOT / "scripts/run-main-source.py", "--root", repo], env=env, text=True).strip()
         assert resolved == main_sha
         artifact = ROOT / "test-results/main-source.json"
         artifact.parent.mkdir(exist_ok=True)
-        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution"]}, indent=2) + "\n")
+        artifact.write_text(json.dumps({"revision": main_sha, "cases": ["real install/share entry points", "success/failure nested-clone cleanup", "dirty caller and unpublished nested work preserved", "no receipts", "read-only source resolution", "signal while the build awaits reaping"]}, indent=2) + "\n")
         print(f"Passed fetched-main source journey; evidence: {artifact}")
 
 

@@ -41,7 +41,7 @@ at the loader cut. The module also owns whether the interaction capability is re
 semantic interactions and the versioned form capability; a generic form never authorizes
 an effect. A select option is one line on the wire: the broker joins a multi-line option's
 lines with ` · ` (de-duplicating collisions) and returns the extension's own option by
-position, so menus such as CortexKit's `/claude` work from the app. `native-change.ts` owns the internal module-only port for the dedicated
+position, so an extension menu whose options span several lines works from the app. `native-change.ts` owns the internal module-only port for the dedicated
 `change` interaction, whose exact review only a paired native device answers.
 Only Tron's settings, Home profile, project and task-grant factories receive that
 port through `SessionContext`; no change capability is attached to extension UI.

@@ -23,9 +23,11 @@ sys.path.insert(0, str(ROOT / "tools" / "layers"))
 import swift_index  # noqa: E402  (the one authority on a fresh iOS index and build stamp)
 sys.path.insert(0, str(ROOT / "tools" / "verify"))
 import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vitest configs)
+import mini  # noqa: E402  (the test-host pool's one owner)
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
+MAC = "packages/mac-app"
 # A change here reaches everything above it, so it selects every lock.
 WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
@@ -40,7 +42,7 @@ IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppU
 # UIValidation journey classes that need a fixture only their harness provides; they run in its lane.
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
-NOT_DRIVEN = ("ios-lanes", "mac")
+NOT_DRIVEN = ("ios-lanes",)
 # The real-UI journeys run, by exact selector, through the harness that owns them (its
 # `ui_owned_journeys`), as `verify --batch`'s UI journey lane runs them all.
 JOURNEY_CLASS = "RealGatewayPairAndChatUITests"
@@ -74,6 +76,16 @@ def git(*args: str) -> str:
     if done.returncode:
         raise VerifyError(done.stderr.strip() or f"git {args[0]} failed")
     return done.stdout
+
+
+def signal_group(group: int, signum: int) -> None:
+    """Signal a process group this verifier started (same uid, no setuid lanes); a group that already
+    ended is no error. macOS answers EPERM while every member has exited but its leader is not yet
+    reaped, and ESRCH once it is; for an owned group no other EPERM cause applies."""
+    try:
+        os.killpg(group, signum)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def install_hint(package: str) -> str:
@@ -153,7 +165,7 @@ def nested_files() -> tuple[set, set]:
 
 def runner_of(path: str, nested: set, mac_terminal: set) -> str:
     if path.startswith(f"{GATEWAY}/src/"):
-        return "mac" if path in mac_terminal else ("gateway-nested" if path in nested else "gateway")
+        return "mac-terminal" if path in mac_terminal else ("gateway-nested" if path in nested else "gateway")
     if path.endswith(".test.mjs"):
         return "node-gateway" if path.startswith(f"{GATEWAY}/") else "node"
     if path.endswith(".py"):
@@ -165,7 +177,7 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
             return "ios-lanes"
         name = ios_class(path)
         return "ios-journeys" if name == JOURNEY_CLASS else "ios-lanes" if name in IOS_HARNESSED else "ios"
-    if path.startswith("packages/mac-app/"):
+    if path.startswith(f"{MAC}/") and path.endswith(".swift"):
         return "mac"
     if path.startswith(f"{RELAY}/"):
         return "relay"
@@ -426,6 +438,12 @@ def declared_files(command: str, tracked: list[str]) -> set[str]:
     elif prefix == ["scripts/tron", "test", "gateway"] and arguments:
         if all(path.endswith(".test.mjs") or (path.startswith("src/") and path.endswith(".test.ts")) for path in arguments):
             files = {f"{GATEWAY}/{path}" for path in arguments}
+    elif prefix == ["scripts/tron", "test", "mac"]:
+        classes = set(arguments)
+        files = {path for path in tracked if path.startswith(f"{MAC}/") and path.endswith(".swift") and is_test(path)
+                 and (not classes or Path(path).stem in classes)}
+        if classes - {Path(path).stem for path in files}:
+            raise VerifyError(f"unknown Mac test class in verify declaration: {command!r}")
     elif prefix == ["scripts/tron", "test", "ios"] and arguments[:1] == ["run"]:
         pairs = arguments[1:]
         if pairs and len(pairs) % 2 == 0 and all(flag == "--only-testing" for flag in pairs[::2]):
@@ -816,19 +834,13 @@ class Run:
     def stop(self, launched: list["Launched"]) -> None:
         """Stop and join the owned process groups (SIGTERM, then SIGKILL after 30 s); each is interrupted."""
         for item in launched:
-            try:
-                os.killpg(item.process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            signal_group(item.process.pid, signal.SIGTERM)
         deadline = time.time() + 30
         for item in launched:
             try:
                 item.process.wait(timeout=max(0.0, deadline - time.time()))
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(item.process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                signal_group(item.process.pid, signal.SIGKILL)
                 item.process.wait()
             self.settle(item, 130, None, (0,), interrupted=True)
 
@@ -957,6 +969,15 @@ def vitest_count(output_path: Path):
     return count
 
 
+def mac_count(output: str) -> int:
+    """Tests the run executed: its last XCTest summary plus its Swift Testing summary; zero when any was skipped."""
+    xctest = re.findall(r"Executed (\d+) tests?", output)
+    swift_testing = re.findall(r"Test run with (\d+) tests?", output)
+    if re.search(r"\d+ tests? skipped", output):
+        return 0
+    return int(xctest[-1] if xctest else 0) + int(swift_testing[-1] if swift_testing else 0)
+
+
 def tap_count(output: str) -> int:
     found = re.findall(r"^[#ℹ] pass (\d+)", output, re.M)
     return int(found[-1]) if found else 0
@@ -1014,6 +1035,14 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group == "ios-journeys":
         return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
+    if group == "mac-terminal":
+        # Its own Vitest config, on this Mac: the journey needs this host's tailnet sshd (vitest.mac-terminal.config.ts).
+        report = logs / f"{group}-vitest.json"
+        return (["python3", str(ROOT / "tools/verify/gateway.py"), "--config", "vitest.mac-terminal.config.ts", "--reporter=default",
+                 "--reporter=json", f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]], ROOT / GATEWAY, vitest_count(report))
+    if group == "mac":
+        # The Mac integration target, by test class, as `verify --batch`'s Mac integration lane runs all of it.
+        return (["python3", str(ROOT / "tools/verify/mac.py"), *sorted({Path(path).stem for path in files})], ROOT, mac_count)
     if group == "relay":
         # The relay's own Vitest (Workers pool), as `verify --batch`'s relay lane runs it.
         report = logs / f"{group}-vitest.json"
@@ -1130,11 +1159,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
-    parser.add_argument("--gateway-host", choices=("local", "mini"), default="local",
-                        help="where the Gateway Vitest lanes run: this Mac, or the Mac mini test host (tools/verify/mini.py)")
+    parser.add_argument("--gateway-host", choices=("pool", "local", "mini"), default="pool",
+                        help="where the Gateway Vitest lanes run: the test-host pool (the Mac mini when reachable and idle, "
+                             "else this Mac), this Mac, or the mini (tools/verify/mini.py)")
     args = parser.parse_args(argv)
     # Recorded goldens must land in this checkout, so recording runs here.
     gateway_host = "local" if args.update_locks else args.gateway_host
+    gateway_reason = "--update-locks records goldens here" if args.update_locks else f"--gateway-host {gateway_host}"
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
@@ -1192,8 +1223,13 @@ def main(argv: list[str]) -> int:
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     if any(group.startswith("gateway") and not skipped_group(group) for group in groups) or selection["deferredTests"]:
-        print(f"  gateway lanes: {'on the Mac mini (--gateway-host mini)' if gateway_host == 'mini' else 'on this Mac'}"
-              + (", because --update-locks records goldens here" if args.update_locks and args.gateway_host == "mini" else ""), flush=True)
+        if gateway_host == "pool":
+            gateway_host, gateway_reason = mini.choose_host()
+        print(f"  gateway lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
+    else:
+        gateway_host, gateway_reason = "local", "no Gateway lane selected"
+    if "mac-terminal" in groups and not skipped_group("mac-terminal"):
+        print("  mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
@@ -1243,6 +1279,7 @@ def main(argv: list[str]) -> int:
             command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha, gateway_host=gateway_host)
             deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
+                          "gatewayHost": {"host": gateway_host, "reason": gateway_reason},
                           "deferredCommands": deferred_commands,
                           # Planned iOS commands are each shard's form when it runs alone; beside others in
                           # flight a shard runs on another of these lanes with --host-slot-wait-seconds 0.
@@ -1288,6 +1325,7 @@ def main(argv: list[str]) -> int:
                   "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "delta": change, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
+                  "gatewayHostReason": gateway_reason,
                   # A selection, even --all, is not the complete post-land batch.
                   "checkpointEligible": False,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}

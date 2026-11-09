@@ -244,6 +244,187 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual(chips.count, 1)
     }
 
+    /// Selecting message text while the composer holds the keyboard keeps the
+    /// keyboard up and the transcript still, and quotes exactly what the same
+    /// gesture quotes with the keyboard down (the control, annotated first),
+    /// at the default size and at the largest accessibility size.
+    @MainActor func testSelectionWithKeyboardUpKeepsKeyboardAndQuotesSelection() {
+        continueAfterFailure = false
+        // A line that stays on screen with the keyboard down and up.
+        assertKeyboardUpSelectionQuotesSelection(launch(), block: "exponential backoff", line: 0.12)
+        assertKeyboardUpSelectionQuotesSelection(
+            launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]),
+            block: "reconnect notes for the full contract", line: 0.2
+        )
+    }
+
+    @MainActor private func assertKeyboardUpSelectionQuotesSelection(_ app: XCUIApplication, block: String, line: CGFloat) {
+        defer { app.terminate() }
+        let keyboard = app.keyboards.firstMatch
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        let chips = app.otherElements.matching(identifier: "composer.staged-chip")
+        let paragraph = assistantBlock(app, containing: block)
+        let composer = app.textViews["Message input"]
+
+        func selectLine() {
+            paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: line))
+                .press(forDuration: 1.0, thenDragTo: paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.83, dy: line)))
+        }
+        func annotate(_ comment: String) {
+            let annotate = menuAction(app, "Annotate")
+            XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+            annotate.tap()
+            XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+            dismissKeyboardTip(app)
+            app.typeText(comment)
+            app.buttons["Save annotation"].firstMatch.tap()
+            XCTAssertTrue(wait(for: bubble, exists: false))
+        }
+
+        // Control: the keyboard is down.
+        XCTAssertFalse(keyboard.exists)
+        selectLine()
+        annotate("control")
+
+        // Saving hands the keyboard to the composer (#1597).
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(composer.value(forKey: "hasKeyboardFocus") as? Bool, true)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        let restingFrame = paragraph.frame
+        selectLine()
+        XCTAssertTrue(menuAction(app, "Annotate").waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(app, "keyboard-up-selection")
+        XCTAssertTrue(keyboard.exists, "Selecting message text keeps the keyboard up")
+        XCTAssertEqual(paragraph.frame, restingFrame, "The transcript does not move under the selection")
+        annotate("keyboard up")
+        XCTAssertTrue(wait { chips.count == 2 }, app.debugDescription)
+
+        func stagedQuote(_ index: Int) -> String {
+            chips.element(boundBy: index).buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+            let quote = app.descendants(matching: .any)["chat.annotation.quote"]
+            XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
+            let label = quote.label
+            app.buttons["Save annotation"].tap()
+            XCTAssertTrue(wait(for: quote, exists: false))
+            return label
+        }
+        let control = stagedQuote(0)
+        let keyboardUp = stagedQuote(1)
+        XCTAssertTrue(control.count > 1 && paragraph.label.contains(control), control)
+        XCTAssertEqual(keyboardUp, control, "The keyboard-up selection quotes exactly the selected text")
+
+        // The keyboard-up menu keeps the system Copy, which copies the selection.
+        selectLine()
+        XCTAssertTrue(menuAction(app, "Annotate").waitForExistence(timeout: 5), app.debugDescription)
+        let copy = menuAction(app, "Copy")
+        // At accessibility sizes the menu pages after Annotate.
+        if !copy.exists { app.buttons["Next Page"].firstMatch.tap() }
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        copy.tap()
+        XCTAssertTrue(keyboard.exists)
+        composer.press(forDuration: 1)
+        let paste = menuAction(app, "Paste")
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
+        paste.tap()
+        XCTAssertTrue(wait { (composer.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == control },
+                      String(describing: composer.value))
+    }
+
+    /// Tapping the sheet's quote keeps the sheet open and scrolls the transcript
+    /// behind it to the selected range, even when it has scrolled off screen,
+    /// above the sheet, and flashes it; the revealed element clears with the
+    /// flash, plain or under Reduce Motion.
+    /// The sent sheet's comment uses the quote's text size (equal text, equal
+    /// height), at the default size in dark and light and at the largest
+    /// accessibility size.
+    @MainActor func testQuoteRevealsSourceAndCommentMatchesQuote() {
+        continueAfterFailure = false
+        let xxxl = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        for (name, extra) in [("dark", [String]()), ("light", ["-annotation-light"]), ("xxxl", xxxl),
+                              ("xxxl-reduce-motion", xxxl + ["-annotation-reduce-motion"])] {
+            assertQuoteRevealsSource(launch(extra), name: name)
+        }
+    }
+
+    @MainActor private func assertQuoteRevealsSource(_ app: XCUIApplication, name: String) {
+        defer { app.terminate() }
+        let heading = assistantBlock(app, containing: "Retry policy")
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        let navigationBottom = app.navigationBars.firstMatch.frame.maxY
+        // Bring the oldest text into view, annotate the heading with its own
+        // words as the comment, then scroll back to the newest end.
+        for _ in 0..<4 where heading.frame.minY < navigationBottom { app.swipeDown() }
+        heading.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
+            .press(forDuration: 1.0, thenDragTo: heading.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
+        let annotate = menuAction(app, "Annotate")
+        XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        annotate.tap()
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+        dismissKeyboardTip(app)
+        // The comment repeats the quote, so equal sizes give equal heights.
+        app.typeText(app.descendants(matching: .any)["chat.annotation.bubble.quote"].label)
+        app.buttons["Save annotation"].firstMatch.tap()
+        XCTAssertTrue(wait(for: bubble, exists: false))
+        let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
+        let catchUp = app.buttons["Catch up"]
+        if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
+        // The fixture fits the screen at the default size; at XXXL the source is off screen.
+        if name.hasPrefix("xxxl") {
+            XCTAssertTrue(wait { heading.frame.maxY < navigationBottom }, "The source scrolled away: \(heading.frame)")
+        }
+
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+        let quote = app.descendants(matching: .any)["chat.annotation.quote"]
+        let comment = commentField(in: app)
+        XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(comment.waitForExistence(timeout: 5), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        keepScreenshot(app, "quote-reveal-sheet-\(name)")
+
+        let quoted = quote.label
+        quote.tap()
+        // The highlight and its element last about a second, inside XCUITest's
+        // idle wait after the tap, so the fixture records each reveal's window
+        // frame and its clearing.
+        let reveals = app.staticTexts["fixture.reveals"]
+        XCTAssertTrue(wait { reveals.label.contains("cleared|") },
+                      "The quote reveals its source and clears it with the highlight: \(reveals.label)")
+        keepScreenshot(app, "quote-reveal-sheet-open-source-\(name)")
+        let shown = reveals.label.components(separatedBy: ";").first { $0.hasPrefix("shown|") }?
+            .components(separatedBy: "|") ?? []
+        XCTAssertEqual(shown.count, 4, reveals.label)
+        XCTAssertEqual(shown[1], quoted)
+        XCTAssertEqual(reveals.label, "shown|\(quoted)|\(shown[2])|\(shown[3]);exposed|\(quoted);cleared|\(quoted)",
+                       "One reveal whose element mounts, then clears once")
+        XCTAssertTrue(quote.exists, "The sheet stays open over the revealed source")
+        let flash = app.descendants(matching: .any)["chat.annotation.revealed-source"]
+        XCTAssertFalse(flash.exists, "The revealed source's element clears with its highlight")
+        let sheetTop = app.navigationBars.containing(NSPredicate(format: "label == 'Save annotation'")).firstMatch.frame.minY
+        let minY = CGFloat(Int(shown[2]) ?? -1), maxY = CGFloat(Int(shown[3]) ?? .max)
+        XCTAssertGreaterThanOrEqual(minY, navigationBottom, "Revealed below the navigation bar: \(shown)")
+        XCTAssertLessThanOrEqual(maxY, min(chip.frame.minY, sheetTop),
+                                 "Revealed above the sheet (\(sheetTop)) and the staged chip (\(chip.frame.minY)): \(shown)")
+        app.buttons["Save annotation"].tap()
+        XCTAssertTrue(wait(for: quote, exists: false))
+
+        // The sent annotation's read-only comment uses the quote's text size.
+        app.textViews["Message input"].tap()
+        app.typeText("Thanks")
+        app.buttons["Send message"].firstMatch.tap()
+        // The revealed source leaves the reader detached from the newest end.
+        if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
+        let sent = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 8), app.debugDescription)
+        sent.tap()
+        let sentComment = app.staticTexts["chat.annotation.comment"]
+        XCTAssertTrue(sentComment.waitForExistence(timeout: 5), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        keepScreenshot(app, "quote-reveal-sent-sheet-\(name)")
+        // Both are selectable Text, whose element frames carry the same inset.
+        XCTAssertEqual(sentComment.frame.height, quote.frame.height, accuracy: 1,
+                       "The sent comment uses the quote's text size: comment \(sentComment.frame), quote \(quote.frame)")
+    }
+
     /// On iPad, Return in the composer sends exactly like Send, and not while
     /// the composer is empty (uploads: TronComposerUploadUITests). Hardware
     /// Shift+Return and a pasted newline still edit. `typeKey("\n")` is a hardware Return
@@ -369,9 +550,9 @@ final class TronChatAnnotationUITests: XCTestCase {
         return bubble
     }
 
-    @MainActor private func launch() -> XCUIApplication {
+    @MainActor private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-chat-annotation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["-tron-chat-annotation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
         app.launch()
         XCTAssertTrue(assistantBlock(app, containing: "exponential backoff").waitForExistence(timeout: 20), app.debugDescription)
         return app

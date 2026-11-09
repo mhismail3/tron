@@ -1,0 +1,129 @@
+{
+  "block": "receipts/invocation-lifecycle",
+  "tier": "high-stakes",
+  "tierReason": "task and run lifecycle facts: which invocations are settled, refused or bound to a canonical message (LAW-WRITING: task and run lifecycles are high-stakes)",
+  "impl": "blocks/receipts/invocation-lifecycle/Block.dfy",
+  "symbols": [
+    "FindIndex",
+    "Legal",
+    "StepOf",
+    "RunAt",
+    "Project",
+    "ProjectFast"
+  ],
+  "excludeSymbols": {
+    "TerminalLife": "defined in the laws file (which lifecycles are settled), not implementation"
+  },
+  "verify": [
+    "blocks/receipts/invocation-lifecycle/Block.dfy"
+  ],
+  "laws": {
+    "L1 legal-moves": [
+      "ReceiptsInvocationLifecycle.L1LegalMoves"
+    ],
+    "H1 history": [
+      "ReceiptsInvocationLifecycle.H1History",
+      "ReceiptsInvocationLifecycle.RunAtRun"
+    ],
+    "S1 start": [
+      "ReceiptsInvocationLifecycle.S1Start",
+      "ReceiptsInvocationLifecycle.FindIndexSpec",
+      "ReceiptsInvocationLifecycle.FindIndexAppend"
+    ],
+    "S2 checks": [
+      "ReceiptsInvocationLifecycle.S2Checks",
+      "ReceiptsInvocationLifecycle.FindIndexAt"
+    ],
+    "S3 no-start": [
+      "ReceiptsInvocationLifecycle.S3NoStart"
+    ],
+    "S4 settle": [
+      "ReceiptsInvocationLifecycle.S4Settle"
+    ],
+    "S5 update": [
+      "ReceiptsInvocationLifecycle.S5Update",
+      "ReceiptsInvocationLifecycle.FindIndexUpdate"
+    ],
+    "P1 progress": [
+      "ReceiptsInvocationLifecycle.P1Progress"
+    ],
+    "I1 settled-stays-settled": [
+      "ReceiptsInvocationLifecycle.I1SettledStays",
+      "ReceiptsInvocationLifecycle.RunSettles",
+      "ReceiptsInvocationLifecycle.RunKeepsSettled",
+      "ReceiptsInvocationLifecycle.StepKeepsSettled",
+      "ReceiptsInvocationLifecycle.StepSettles"
+    ],
+    "I2 one-binding": [
+      "ReceiptsInvocationLifecycle.I2OneBinding",
+      "ReceiptsInvocationLifecycle.RunOneBinding",
+      "ReceiptsInvocationLifecycle.RunUnbound",
+      "ReceiptsInvocationLifecycle.BoundRefused",
+      "ReceiptsInvocationLifecycle.StepGrows"
+    ]
+  },
+  "helpers": [],
+  "translate": "blocks/receipts/invocation-lifecycle/Block.dfy",
+  "oracles": [
+    {
+      "name": "diff-vs-gateway-invocation-receipts.ts(1000)",
+      "cmd": [
+        "node",
+        "tools/proof/oracles/receipts-invocation-lifecycle.mjs",
+        "{dir}/out/core.js",
+        "1000"
+      ],
+      "jsonEq": [
+        "agree",
+        "requests"
+      ]
+    }
+  ],
+  "accepted": {},
+  "report": "blocks/receipts/invocation-lifecycle/MUTATION.json",
+  "shadow": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/receipts-invocation-lifecycle.mjs",
+      "{core}",
+      "5000"
+    ],
+    "source": "compiled core vs packages/gateway/src/kernel/receipts/invocation-receipts.ts (invocationProjection) on 5,000 generated receipt histories (not real traffic)"
+  },
+  "replay": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/receipts-invocation-lifecycle.mjs",
+      "{core}",
+      "--replay",
+      "{corpus}"
+    ],
+    "source": "compiled core vs the invocationProjection seam's recorded Debug-Gateway folds (packages/gateway/src/kernel/receipts/invocation-receipts.ts)"
+  },
+  "kinds": {
+    "safety": [
+      "S2 checks",
+      "I1 settled-stays-settled",
+      "I2 one-binding"
+    ],
+    "progress": [
+      "P1 progress"
+    ],
+    "recovery": [
+      "H1 history"
+    ],
+    "stale-inputs": [
+      "S1 start",
+      "S4 settle"
+    ],
+    "exact-results": [
+      "L1 legal-moves",
+      "S1 start",
+      "S3 no-start",
+      "S5 update"
+    ],
+    "uncertain-outcomes": [
+      "L1 legal-moves"
+    ]
+  }
+}

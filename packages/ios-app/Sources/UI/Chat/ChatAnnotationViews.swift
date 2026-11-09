@@ -44,7 +44,9 @@ struct ComposerAnnotationChip: View {
         }
         .tronManagedSheet(
             isPresented: $showsDetail,
-            identity: "composer.annotation.\(annotation.id)"
+            identity: "composer.annotation.\(annotation.id)",
+            // Its quote reveals the source in the chat behind the sheet.
+            keepsPresenterViewport: true
         ) {
             ChatAnnotationSheet(annotation: annotation, editing: .init(onSave: onSave, onDelete: onRemove))
         }
@@ -139,6 +141,7 @@ struct ChatAnnotationSheet: View {
     let annotation: ChatAnnotation
     let editing: Editing?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.chatAnnotationPresenter) private var presenter
     @PresentationState private var comment: String
 
     init(annotation: ChatAnnotation, editing: Editing?) {
@@ -157,13 +160,16 @@ struct ChatAnnotationSheet: View {
                         sectionHeader("Quote")
                         ChatQuoteBlock(rule: accent) {
                             Text(annotation.quote)
-                                .font(TronFont.body())
+                                .font(TronTypography.body)
                                 .foregroundStyle(Color.tronTextSecondary)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("chat.annotation.quote")
+                        .modifier(ChatAnnotationQuoteReveal(enabled: presenter != nil && annotation.anchor != nil) {
+                            presenter?.reveal(annotation)
+                        })
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         sectionHeader("Comment")
@@ -176,7 +182,7 @@ struct ChatAnnotationSheet: View {
                                 .accessibilityLabel("Annotation comment")
                         } else {
                             Text(annotation.comment.isEmpty ? "No comment" : annotation.comment)
-                                .font(TronTypography.bodySM)
+                                .font(TronTypography.body)
                                 .foregroundStyle(annotation.comment.isEmpty ? Color.tronTextMuted : Color.tronTextPrimary)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -220,6 +226,9 @@ struct ChatAnnotationSheet: View {
                 }
             }
         }
+        // The sheet's top bounds where a revealed source may land.
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { presenter?.sheetTop = $0 }
+        .onDisappear { presenter?.sheetTop = nil }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -232,6 +241,26 @@ struct ChatAnnotationSheet: View {
             .tronSectionHeading()
             .foregroundStyle(Color.tronTextPrimary)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A staged annotation's quote is a button that shows its source in the
+/// transcript. A quote without a source anchor (a sent annotation) stays text.
+private struct ChatAnnotationQuoteReveal: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .contentShape(Rectangle())
+                .onTapGesture(perform: action)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Shows the quote in the chat")
+                .accessibilityAction { action() }
+        } else {
+            content
+        }
     }
 }
 
@@ -417,22 +446,35 @@ struct ChatAnnotationBubbleHost: View {
     }
 }
 
-/// Whether the focused text input is taking dictation, read from the first
-/// responder that `sendAction` reaches.
+/// The focused text input, read from the first responder that `sendAction`
+/// reaches.
 @MainActor
-private enum ChatTextInputFocus {
-    static weak var responder: UIResponder?
+enum ChatTextInputFocus {
+    fileprivate static weak var reported: UIResponder?
+
+    static var firstResponder: UIResponder? {
+        reported = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.tronReportFirstResponder), to: nil, from: nil, for: nil)
+        defer { reported = nil }
+        return reported
+    }
 
     static var isDictating: Bool {
-        responder = nil
-        UIApplication.shared.sendAction(#selector(UIResponder.tronReportFirstResponder), to: nil, from: nil, for: nil)
-        defer { responder = nil }
-        return responder?.textInputMode?.primaryLanguage == "dictation"
+        firstResponder?.textInputMode?.primaryLanguage == "dictation"
+    }
+
+    /// Whether a text input other than `view` holds the keyboard (the composer
+    /// or a comment field).
+    static func keyboardIsOwned(byAnotherThan view: UIView) -> Bool {
+        guard let responder = firstResponder, responder !== view else { return false }
+        if let textView = responder as? UITextView { return textView.isEditable }
+        if let field = responder as? UITextField { return field.isEnabled }
+        return false
     }
 }
 
 private extension UIResponder {
-    @objc func tronReportFirstResponder() { ChatTextInputFocus.responder = self }
+    @objc func tronReportFirstResponder() { ChatTextInputFocus.reported = self }
 }
 
 enum ChatAnnotationBubbleLayout {

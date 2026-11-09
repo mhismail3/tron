@@ -889,10 +889,8 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   });
   if (index < 0) return payload;
   const blocks = (messages[index] as { content: unknown[] }).content;
-  // [header, ...groups, footer, nonce]: the last group is third from the end. A
-  // provider that composes its own request may put blocks before the header
-  // (CortexKit prepends its cached prompt block to the first user message), so
-  // the mark is found from the end.
+  // [header, ...groups, footer, nonce]: the last group is third from the end,
+  // so a block a provider places ahead of the header shifts the mark's index, not its block.
   let mark = blocks.length - 3;
   if (mark < 0) return payload;
   const lines = viewGroupLines(blocks[mark]);
@@ -912,8 +910,7 @@ function viewGroupLines(block: unknown): number | undefined {
  * one-hour TTL where the model supports it, OpenAI's longest retention. Home is
  * used on and off through a day, so a five-minute cache would expire between
  * most turns, and Home's view is a long prefix that is worth keeping. pi-ai maps
- * `long` per provider; a provider that composes its own requests, such as
- * CortexKit's, applies its own retention.
+ * `long` per provider.
  *
  * The override is a write on `runtime`, which must be the Home session's own
  * view of the shared runtime (`sessionRuntimeView`), never the shared runtime

@@ -1,0 +1,1 @@
+{"interface": ["laws/settings/Precedence.dfy"], "impl": ["blocks/settings/precedence/Block.dfy"], "deps": []}

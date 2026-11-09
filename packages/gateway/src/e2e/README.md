@@ -14,7 +14,7 @@ behaviour across modules, so they belong to no single module.
   `src/e2e/<path under src>/`. A red journey is filed against that module.
 - **When it runs.** `verify --batch` runs every journey in its Gateway lanes (the default
   pass, and the serial `vitest.nested.config.ts` pass); `mac-terminal.e2e.test.ts` needs a
-  tailnet host and runs only through `npm run test:mac-terminal`. `verify --changed` runs a
+  tailnet host: `npm run test:mac-terminal`, or `verify --changed` on this Mac. `verify --changed` runs a
   journey when the journey itself changes, or when a changed module's manifest declares it
   as that module's verification; a module with no test of its own declares the tests that
   prove it that way. A module's own tests stay in the module. Scenario locks live here at
