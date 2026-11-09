@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT / "tools" / "layers"))
 import swift_index  # noqa: E402  (the one authority on a fresh iOS index and build stamp)
 sys.path.insert(0, str(ROOT / "tools" / "verify"))
 import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vitest configs)
+import mini  # noqa: E402  (the test-host pool's one owner)
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
@@ -1154,11 +1155,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
-    parser.add_argument("--gateway-host", choices=("local", "mini"), default="local",
-                        help="where the Gateway Vitest lanes run: this Mac, or the Mac mini test host (tools/verify/mini.py)")
+    parser.add_argument("--gateway-host", choices=("pool", "local", "mini"), default="pool",
+                        help="where the Gateway Vitest lanes run: the test-host pool (the Mac mini when reachable and idle, "
+                             "else this Mac), this Mac, or the mini (tools/verify/mini.py)")
     args = parser.parse_args(argv)
     # Recorded goldens must land in this checkout, so recording runs here.
     gateway_host = "local" if args.update_locks else args.gateway_host
+    gateway_reason = "--update-locks records goldens here" if args.update_locks else f"--gateway-host {gateway_host}"
     skip = {item for item in args.skip.split(",") if item}
     if skip - set(SKIPPABLE):
         parser.error(f"--skip accepts only {', '.join(SKIPPABLE)}")
@@ -1216,8 +1219,11 @@ def main(argv: list[str]) -> int:
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     if any(group.startswith("gateway") and not skipped_group(group) for group in groups) or selection["deferredTests"]:
-        print(f"  gateway lanes: {'on the Mac mini (--gateway-host mini)' if gateway_host == 'mini' else 'on this Mac'}"
-              + (", because --update-locks records goldens here" if args.update_locks and args.gateway_host == "mini" else ""), flush=True)
+        if gateway_host == "pool":
+            gateway_host, gateway_reason = mini.choose_host()
+        print(f"  gateway lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
+    else:
+        gateway_host, gateway_reason = "local", "no Gateway lane selected"
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
@@ -1267,6 +1273,7 @@ def main(argv: list[str]) -> int:
             command, cwd, _ = test_spec("gateway-nested", selection["deferredTests"], [], ROOT / "test-results/verify" / sha, gateway_host=gateway_host)
             deferred_commands.append({"name": "tests: gateway-nested", "command": command, "cwd": str(cwd.relative_to(ROOT))})
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
+                          "gatewayHost": {"host": gateway_host, "reason": gateway_reason},
                           "deferredCommands": deferred_commands,
                           # Planned iOS commands are each shard's form when it runs alone; beside others in
                           # flight a shard runs on another of these lanes with --host-slot-wait-seconds 0.
@@ -1312,6 +1319,7 @@ def main(argv: list[str]) -> int:
                   "caseEvidenceComplete": bool(case_steps) and all(step.get('caseEvidenceComplete') for step in case_steps),
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "delta": change, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
+                  "gatewayHostReason": gateway_reason,
                   # A selection, even --all, is not the complete post-land batch.
                   "checkpointEligible": False,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}

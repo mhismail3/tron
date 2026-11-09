@@ -236,13 +236,26 @@ class ExternalVerificationTests(VerifyCase):
         groups = json.loads(planned.stdout[planned.stdout.index("{"):])["groups"]
         for group, path in zip(("gateway", "gateway-nested", "mac-terminal", "node-gateway"), files):
             self.assertEqual(groups[group], [f"packages/gateway/{path}"])
-        # The lanes' runner: gateway.py here by default (a configured mini host changes nothing), mini.py on request.
-        r.git("config", "tron.verify.mini", "mini.invalid")
-        for options, runner in (([], "gateway.py"), (["--gateway-host", "mini"], "mini.py"), (["--gateway-host", "local"], "gateway.py")):
+        # The lanes' runner (#2336): by default the test-host pool, the mini when reachable and idle (an `ssh` that answers
+        # the mini's status probe), else this Mac with the reason; an explicit host overrides the pool.
+        ssh = Path(self.temp.name) / "bin" / "ssh"
+        ssh.parent.mkdir()
+        ssh.write_text('#!/bin/bash\nfor word in "$@"; do [[ "$word" == mini.invalid ]] && { echo "ssh: Could not resolve hostname mini.invalid" >&2; exit 255; }; done\n'
+                       'echo \'{"busy": false, "load": 1.5}\'\n')
+        ssh.chmod(0o755)
+        r.env["PATH"] = f"{ssh.parent}{os.pathsep}{r.env['PATH']}"
+        for mini_host, options, runner, reason in (
+                ("mini.test", [], "mini.py", "reachable and idle, load 1.5"),
+                ("mini.invalid", [], "gateway.py", "the mini mini.invalid is unreachable: ssh: Could not resolve hostname mini.invalid"),
+                ("mini.invalid", ["--gateway-host", "mini"], "mini.py", "--gateway-host mini"),
+                ("mini.test", ["--gateway-host", "local"], "gateway.py", "--gateway-host local")):
+            r.git("config", "tron.verify.mini", mini_host)
             planned = r.verify("--module", "repo/alpha", "--plan", *options)
-            commands = json.loads(planned.stdout[planned.stdout.index("{"):])["commands"]
-            self.assertEqual({c["name"]: Path(c["command"][1]).name for c in commands if c["name"].startswith("tests: gateway")},
+            plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+            self.assertEqual({c["name"]: Path(c["command"][1]).name for c in plan["commands"] if c["name"].startswith("tests: gateway")},
                              {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
+            self.assertEqual(plan["gatewayHost"], {"host": runner.removesuffix(".py").replace("gateway", "local"), "reason": reason})
+            self.assertIn(f"gateway lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
         r.git("config", "--unset", "tron.verify.mini")
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")

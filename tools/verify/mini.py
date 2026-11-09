@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Run one Gateway Vitest lane (tools/verify/gateway.py) on the Mac mini test host and return its result as this run's.
 
+The test-host pool is {the mini, this Mac}: `choose_host` picks the mini when it is configured, reachable and idle,
+and otherwise this Mac, always with its reason; `mini.py pool [vitest args]` runs one lane on the chosen host.
+
 Local side: refuse a dirty tree, push the exact HEAD commit to the mini's bare repository, run this same file there
 (sent as source, so both halves are one version), stream its output live, and write the Vitest output files it
 returns where the caller asked, with the mini's checkout path rewritten to this checkout. The exit code is the
@@ -60,6 +63,40 @@ def ssh_command() -> list[str]:
     identity = config('tron.verify.miniIdentity')
     return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4',
             *(['-i', os.path.expanduser(identity)] if identity else []), destination]
+
+
+def choose_host() -> tuple[str, str]:
+    """('mini' or 'local', why). The mini is the default; this Mac runs the lane only when the mini cannot."""
+    if os.environ.get('TRON_UPDATE_LOCKS'):
+        return 'local', 'recording goldens writes this checkout'
+    if not config('tron.verify.mini'):
+        return 'local', 'no mini is configured'
+    if git('status', '--porcelain', '--untracked-files=normal'):
+        return 'local', 'uncommitted changes; the mini runs a commit'
+    ssh = ssh_command()
+    ssh[ssh.index('ConnectTimeout=10')] = 'ConnectTimeout=5'
+    try:
+        probe = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', Path(__file__).read_text(), 'status'])],
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        status = json.loads(probe.stdout.strip().splitlines()[-1]) if probe.returncode == 0 else None
+    except (subprocess.TimeoutExpired, ValueError, IndexError):
+        status, probe = None, None
+    if status is None:
+        detail = (probe.stderr.strip().splitlines() or [''])[-1] if probe else 'no answer within 30 s'
+        return 'local', f'the mini {ssh[-1]} is unreachable' + (f': {detail}' if detail else '')
+    if status['busy']:
+        return 'local', 'the mini is busy with another Gateway job'
+    return 'mini', f'reachable and idle, load {status["load"]:.1f}'
+
+
+def pool_main(args: list[str]) -> int:
+    host, reason = choose_host()
+    destination = config('tron.verify.mini')
+    print(f'gateway lane: on the Mac mini {destination} ({reason})' if host == 'mini' else f'gateway lane: on this Mac ({reason})',
+          file=sys.stderr, flush=True)
+    if host == 'mini':
+        return local_main(args)
+    return subprocess.run(['python3', str(ROOT / 'tools/verify/gateway.py'), *args]).returncode
 
 
 def outputs(args: list[str]) -> tuple[list[str], list[str]]:
@@ -158,6 +195,21 @@ def local_main(args: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------------- mini side
+
+def remote_status() -> int:
+    """Whether a Gateway job holds the mini's job lock, and its load: the pool's availability probe."""
+    lock_path = Path.home() / BASE / 'jobs/gateway.lock'
+    busy = False
+    if lock_path.is_file():
+        with open(lock_path, 'a+') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock, fcntl.LOCK_UN)
+            except BlockingIOError:
+                busy = True
+    print(json.dumps({'busy': busy, 'load': os.getloadavg()[0]}), flush=True)
+    return 0
+
 
 def remote_main(job: dict) -> int:
     nonce, sha = job['nonce'], job['sha']
@@ -312,8 +364,10 @@ def remote_main(job: dict) -> int:
 if __name__ == '__main__':
     if sys.argv[1:2] == ['remote']:
         sys.exit(remote_main(json.loads(sys.argv[2])))
+    if sys.argv[1:2] == ['status']:
+        sys.exit(remote_status())
     try:
-        sys.exit(local_main(sys.argv[1:]))
+        sys.exit(pool_main(sys.argv[2:]) if sys.argv[1:2] == ['pool'] else local_main(sys.argv[1:]))
     except KeyboardInterrupt:
         sys.exit(130)
     except (OSError, ValueError, subprocess.SubprocessError) as error:

@@ -159,6 +159,42 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertNotIn('pushing', dirty.stdout)
         self.assertFalse(report.exists())
 
+    def pool(self, *args: str) -> subprocess.CompletedProcess:
+        # The local lane is gateway.py here; its stand-in reads its working directory relative to HOME.
+        return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',
+                              env={**self.env, 'HOME': str(self.temporary)}, text=True, capture_output=True, timeout=300)
+
+    def test_the_pool_runs_on_the_mini_when_reachable_and_idle_and_names_this_mac_otherwise(self) -> None:
+        # #2336: the mini is the pool's default host; this Mac runs a lane only when the mini cannot,
+        # and every run names the host and why. No case skips the lane or reports a pass without one.
+        report, args = self.report_args()
+        mini = self.pool(*args)
+        self.assertEqual(mini.returncode, 0, mini.stdout + mini.stderr)
+        self.assertIn('gateway lane: on the Mac mini mini.test', mini.stderr)
+        self.assertIn('stand-in lane progress', mini.stdout)
+        self.assertEqual(json.loads(report.read_text())['cwd'], 'tron-ci/jobs/gateway/packages/gateway', 'the lane ran on the mini')
+
+        def here(reason: str, *extra: str) -> None:
+            report.unlink(missing_ok=True)
+            local = self.pool(*args, *extra)
+            self.assertEqual(local.returncode, 3 if 'fail' in extra else 0, local.stdout + local.stderr)
+            self.assertIn(f'gateway lane: on this Mac ({reason})', local.stderr)
+            self.assertNotIn('pushing', local.stdout)
+            self.assertNotIn('tron-ci', json.loads(report.read_text())['cwd'], 'the lane ran in this checkout')
+
+        with open(self.mini / 'tron-ci/jobs/gateway.lock', 'a+') as lock:
+            lock.write(json.dumps({'host': 'other', 'worktree': '/w', 'pid': 1}))
+            lock.flush()
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            here('the mini is busy with another Gateway job')
+        self.git('config', 'tron.verify.mini', 'unreachable.test')
+        here('the mini unreachable.test is unreachable: ssh: connect to host unreachable.test port 22: Connection refused', 'fail')  # a red lane here is still that lane's result
+        self.git('config', '--unset', 'tron.verify.mini')
+        here('no mini is configured')
+        self.git('config', 'tron.verify.mini', 'mini.test')
+        self.write('README', 'uncommitted\n')
+        here('uncommitted changes; the mini runs a commit')
+
     def test_an_unreachable_host_or_off_pin_toolchain_fails_without_a_result(self) -> None:
         report, args = self.report_args()
         self.git('config', 'tron.verify.mini', 'unreachable.test')
