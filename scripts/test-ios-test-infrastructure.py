@@ -2014,6 +2014,44 @@ class LockFixture(ContainedFixture, unittest.TestCase):
             ], self.root)
             self.assertEqual(third.returncode, 0)
 
+    def test_a_signal_while_the_command_awaits_reaping_stays_the_signal(self) -> None:
+        """#2401: macOS answers killpg on a group whose members all exited but whose leader is not
+        yet reaped with EPERM. A signal whose forwarder finds the command still running, and then
+        signals it after it exited, must still end the holder as that signal, never a traceback.
+        The spy calls the real poll and only holds the window open until the command is a zombie."""
+        driver = (
+            "import importlib.util, os, signal, subprocess, sys, time\n"
+            "spec = importlib.util.spec_from_file_location('lock', sys.argv[1])\n"
+            "lock = importlib.util.module_from_spec(spec); spec.loader.exec_module(lock)\n"
+            "real_poll, real_wait = subprocess.Popen.poll, subprocess.Popen.wait\n"
+            "def leased(process): return 'leased-command' in str(process.args)\n"
+            "def zombie(pid): return subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)],"
+            " capture_output=True, text=True).stdout.startswith('Z')\n"
+            "def poll(self):\n"
+            "    result = real_poll(self)\n"
+            "    if leased(self) and result is None:\n"
+            "        deadline = time.monotonic() + 60\n"
+            "        while not zombie(self.pid):\n"
+            "            assert time.monotonic() < deadline, 'the command never exited'\n"
+            "            time.sleep(0.02)\n"
+            "    return result\n"
+            "def wait(self, timeout=None):\n"
+            "    if leased(self):\n"
+            "        os.kill(os.getpid(), signal.SIGTERM)\n"
+            "    return real_wait(self, timeout)\n"
+            "subprocess.Popen.poll, subprocess.Popen.wait = poll, wait\n"
+            "sys.argv = [sys.argv[1], *sys.argv[2:]]\n"
+            "raise SystemExit(lock.main())\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            self.root = Path(temporary)
+            holder = self.run_script([
+                sys.executable, "-c", driver, str(LOCK), "--lock", str(self.root / "lease.lock"), "--",
+                sys.executable, "-c", "import time; time.sleep(1)  # leased-command",
+            ], self.root, stderr=subprocess.PIPE, text=True)
+            self.assertEqual(holder.returncode, 128 + signal.SIGTERM, holder.stderr)
+            self.assertNotIn("Traceback", holder.stderr)
+
 
 class HostSlotFixture(ContainedFixture, unittest.TestCase):
     """The host-wide cap on simulator-heavy jobs, through the real lease entry point.

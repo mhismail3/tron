@@ -42,7 +42,9 @@ def main():
             def stop(signum, _frame):
                 try:
                     os.killpg(child.pid, signum)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
+                    # The build already exited: macOS answers EPERM while it awaits
+                    # reaping (ESRCH once reaped); the group is ours, so no other cause.
                     pass
             previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
             try:
