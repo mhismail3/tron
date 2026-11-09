@@ -20,7 +20,6 @@ export const nestedTestFiles = [
   "src/e2e/kernel/delegation/managed-subagents-warm-process.e2e.test.ts",
   "src/e2e/admin/settings-process.e2e.test.ts",
   "src/e2e/admin/native-change-process.e2e.test.ts",
-  "src/machine/terminal-idle.e2e.test.ts",
   "src/e2e/kernel/delegation/home-managed-provider.integration.test.ts",
   "src/e2e/workspace/web-research-child.integration.test.ts",
   "src/e2e/workspace/web-research-resume.integration.test.ts",
