@@ -111,7 +111,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var observations: [String] = []
         let deadline = Date().addingTimeInterval(180)
         while Date() < deadline {
-            let element = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyPrefix)).firstMatch
+            let element = assistantReply(app, containing: replyPrefix)
             if element.exists, !element.label.isEmpty, element.label != observations.last {
                 observations.append(element.label)
             }
@@ -130,7 +130,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
         // Keep this route mounted: unlike navigating back to the dashboard,
         // retiring its transport must not retire the last installed transcript.
-        let sameRouteReply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+        let sameRouteReply = assistantReply(app, containing: replyCompletion)
         composer.tap()
         var unsentDraft = "Unsent recovery draft: keep every word and the keyboard."
         composer.typeText(unsentDraft)
@@ -375,7 +375,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             "the prompt left the transcript across background/foreground: \(app.debugDescription)"
         )
         XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+            assistantReply(app, containing: replyCompletion)
                 .waitForExistence(timeout: 90),
             "the reply left the transcript across background/foreground: \(app.debugDescription)"
         )
@@ -415,7 +415,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Navigation intentionally retired the old snapshot; this new route
         // cannot claim a retained transcript until it synchronizes.
         try setProxyMode(fixture, mode: "pass")
-        let retainedReply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+        let retainedReply = assistantReply(app, containing: replyCompletion)
         XCTAssertTrue(retainedReply.waitForExistence(timeout: 60),
                       "the waiting route did not resume without another tap: \(app.debugDescription)")
         XCTAssertFalse(app.staticTexts["Waiting for connection"].exists)
@@ -437,7 +437,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(waitForHittable(largeRow, timeout: 90), largeText.debugDescription)
         largeRow.tap()
-        let largeReply = largeText.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+        let largeReply = assistantReply(largeText, containing: replyCompletion)
         XCTAssertTrue(largeReply.waitForExistence(timeout: 60), largeText.debugDescription)
         try setProxyMode(fixture, mode: "blackhole")
         let largeStatus = recoveryStatus(largeText, "Waiting for connection")
@@ -491,7 +491,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(firstRun.debugDescription)")
         send.tap()
         XCTAssertTrue(
-            firstRun.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+            assistantReply(firstRun, containing: replyCompletion)
                 .waitForExistence(timeout: 120),
             "the first turn never completed: \(firstRun.debugDescription)"
         )
@@ -595,8 +595,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let otherSend = app.buttons["Send message"]
         XCTAssertTrue(waitForEnabled(otherSend, timeout: 60), app.debugDescription)
         otherSend.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion))
-            .firstMatch.waitForExistence(timeout: 120), app.debugDescription)
+        XCTAssertTrue(assistantReply(app, containing: replyCompletion).waitForExistence(timeout: 120), app.debugDescription)
         app.buttons["Back"].tap()
         let original = app.buttons[originalRowID]
         XCTAssertTrue(waitForHittable(original, timeout: 60), app.debugDescription)
@@ -793,7 +792,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), firstRun.debugDescription)
         send.tap()
         XCTAssertTrue(
-            firstRun.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+            assistantReply(firstRun, containing: replyCompletion)
                 .waitForExistence(timeout: 120),
             "the first turn never completed: \(firstRun.debugDescription)"
         )
@@ -2194,6 +2193,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let absent = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
         return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
+    }
+
+    /// The fixture's assistant reply: a static text while it streams, then the
+    /// message's one selectable text view once complete (#1112, #2384).
+    func assistantReply(_ app: XCUIApplication, containing text: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@ AND (elementType == %d OR identifier == %@)",
+            text, XCUIElement.ElementType.staticText.rawValue, "chat.assistant.selectable-text"
+        )).firstMatch
     }
 
     func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
