@@ -17,9 +17,10 @@ ARTIFACTS = ROOT / 'test-results/verify-batch'
 
 
 def shipped_runner(root, lock):
-    """The shipped Gateway runner and its host lock under `root`, pointed at this test's lock path, not the host's."""
+    """The shipped Gateway runner, its config reader and its host lock under `root`, pointed at this test's lock path, not the host's."""
     (root / 'tools/verify').mkdir(parents=True, exist_ok=True)
-    (root / 'tools/verify/gateway.py').write_text((ROOT / 'tools/verify/gateway.py').read_text())
+    for name in ('gateway.py', 'vitest_configs.py'):
+        (root / 'tools/verify' / name).write_text((ROOT / 'tools/verify' / name).read_text())
     source = (ROOT / 'tools/verify/host_lock.py').read_text()
     assert "'/tmp/tron-full-gateway.lock'" in source, 'the host lock path moved; point this fixture at its new spelling'
     (root / 'tools/verify/host_lock.py').write_text(source.replace("'/tmp/tron-full-gateway.lock'", repr(str(lock))))
@@ -103,7 +104,7 @@ class BatchTests(unittest.TestCase):
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.git('init', '-q', '-b', 'main')
-        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py'):
+        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.

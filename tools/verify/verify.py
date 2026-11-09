@@ -21,6 +21,8 @@ sys.path.insert(0, str(ROOT / "tools" / "ownership"))
 import ownership  # noqa: E402  (the one ownership authority)
 sys.path.insert(0, str(ROOT / "tools" / "layers"))
 import swift_index  # noqa: E402  (the one authority on a fresh iOS index and build stamp)
+sys.path.insert(0, str(ROOT / "tools" / "verify"))
+import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vitest configs)
 
 GATEWAY = "packages/gateway"
 # A change here reaches everything above it, so it selects every lock.
@@ -133,14 +135,8 @@ def is_golden(path: str) -> bool:
 
 
 def nested_files() -> tuple[set, set]:
-    def listed(config: str, name: str) -> set:
-        path = ROOT / GATEWAY / config
-        if not path.exists():
-            return set()
-        text = path.read_text()
-        block = re.search(name + r"\s*=\s*\[(.*?)\]", text, re.S)
-        return {f"{GATEWAY}/{entry}" for entry in re.findall(r'"([^"]+)"', block.group(1))} if block else set()
-    return listed("vitest.nested.config.ts", "nestedTestFiles"), listed("vitest.mac-terminal.config.ts", "macTerminalTestFiles")
+    listed = vitest_configs.listed_files(ROOT / GATEWAY)
+    return tuple({f"{GATEWAY}/{entry}" for entry in listed[config]} for config in vitest_configs.LISTS)
 
 
 def runner_of(path: str, nested: set, mac_terminal: set) -> str:

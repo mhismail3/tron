@@ -83,7 +83,8 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             base = Path(temporary).resolve()
             verify = base / "tools/verify"
             verify.mkdir(parents=True)
-            (verify / "gateway.py").write_text((ROOT / "tools/verify/gateway.py").read_text())
+            for name in ("gateway.py", "vitest_configs.py"):
+                (verify / name).write_text((ROOT / "tools/verify" / name).read_text())
             lock = (ROOT / "tools/verify/host_lock.py").read_text()
             self.assertIn("'/tmp/tron-full-gateway.lock'", lock)
             (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
