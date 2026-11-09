@@ -1,7 +1,7 @@
 import XCTest
 
 /// Sheets of every family tint their toolbar icons like their titles (#963):
-/// Settings and its indigo, cyan and emerald groups, the Automations and
+/// Settings and its groups, the Automations and
 /// Knowledge sheets, and Manage Home with a sub-sheet that takes its row's tint.
 /// The paired-device sheet, reachable only with a real Gateway, is covered by
 /// `RealGatewayPairAndChatUITests.testSettingsSourcesTextDoneAndRoutes`.
@@ -12,19 +12,34 @@ final class TronSheetTintUITests: XCTestCase {
     func testSettingsSheetToolbarsTakeTheirTitleTint() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-navigation-fixture"]
+        // Burgundy separates the primary theme from any fixed group colour (#2370).
+        app.launchArguments = ["-tron-settings-navigation-fixture", "-themeColor", "burgundy"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["settings-link-Connections"].waitForExistence(timeout: 10), app.debugDescription)
         assertToolbarTint(app, title: "Global Settings")
         for title in ["Connections", "MCP Servers", "Appearance"] {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<12 where !link.isHittable { app.swipeUp() }
+            // The group row's icon and the sheet it opens both take the theme.
+            let window = app.windows.firstMatch.frame.width
+            let icon = CGRect(x: link.frame.minX, y: link.frame.minY, width: 48, height: link.frame.height)
+            assertBurgundy(sheetInk(XCUIScreen.main.screenshot().image, icon, window: window), "\(title) row icon")
             link.tap()
             assertToolbarTint(app, title: title)
+            let sheetTitle = app.navigationBars.staticTexts.matching(identifier: title).allElementsBoundByIndex.last
+            assertBurgundy(sheetTitle.flatMap { sheetInk(XCUIScreen.main.screenshot().image, $0.frame, window: window) },
+                           "\(title) sheet title")
             app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].firstMatch.waitForExistence(timeout: 5))
             for _ in 0..<12 where !app.buttons["settings-link-Connections"].isHittable { app.swipeDown() }
         }
+    }
+
+    /// Burgundy ink keeps red over blue over green through glass and antialiasing.
+    private func assertBurgundy(_ ink: [Double]?, _ context: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let ink else { return XCTFail("\(context): no inked pixels", file: file, line: line) }
+        XCTAssertGreaterThan(ink[0], ink[2], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
+        XCTAssertGreaterThan(ink[2], ink[1], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
     }
 
     @MainActor

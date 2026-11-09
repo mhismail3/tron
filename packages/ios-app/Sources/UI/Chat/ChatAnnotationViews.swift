@@ -168,9 +168,11 @@ struct ChatAnnotationSheet: View {
                     VStack(alignment: .leading, spacing: 8) {
                         sectionHeader("Comment")
                         if editing != nil {
-                            TextEditor(text: $comment)
-                                .frame(minHeight: 120)
-                                .tronTextEditor()
+                            // Grows with the comment so the sheet, not an inner
+                            // box, scrolls a long one.
+                            TextField("Add a comment", text: $comment, axis: .vertical)
+                                .font(TronTypography.body)
+                                .foregroundStyle(Color.tronTextPrimary)
                                 .accessibilityLabel("Annotation comment")
                         } else {
                             Text(annotation.comment.isEmpty ? "No comment" : annotation.comment)

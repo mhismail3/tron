@@ -29,6 +29,9 @@ struct HostedForegroundSheetScenario {
     }
 
     private var queuedText: String {
+        if ProcessInfo.processInfo.arguments.contains("-foreground-queued-long") {
+            return (1...80).map { "Long steer line \($0) keeps going." }.joined(separator: "\n")
+        }
         guard ProcessInfo.processInfo.arguments.contains("-foreground-queued-annotation") else {
             return "Queued message 1607"
         }

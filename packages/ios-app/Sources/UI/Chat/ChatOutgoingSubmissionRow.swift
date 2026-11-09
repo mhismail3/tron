@@ -112,7 +112,8 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }
             if !body.isEmpty {
-                UserPromptText(text: body)
+                // The user bubble's cut; a manageable card opens its editor.
+                PromptTextPreview(text: body, onOpen: onActivate)
             }
         }
     }

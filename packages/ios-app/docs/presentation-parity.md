@@ -198,7 +198,7 @@ dismissal send nothing. Generic forms never authorize effects. The card shows Ga
 only and keeps exact values behind its disclosure. Global Changes remains the audit/Undo
 surface; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
 native change title use `tronPrimary`, not the generic question's amber accent. Agent & Tools
-and its inherited admin-sheet chrome keep their fixed Emerald identity; semantic statuses keep their colors.
+and its inherited admin-sheet chrome follow the selected primary theme; semantic statuses keep their colors.
 
 ## Shared lists and readers
 

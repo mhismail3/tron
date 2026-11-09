@@ -263,10 +263,13 @@ private struct ThemeColorPicker: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 76, maxHeight: .infinity, alignment: .topLeading)
+            // The selection ring is glass content, so it scales with the
+            // interactive press instead of staying inset under the grown glass.
+            // The glass draws its own rim; unselected tiles add no second one.
+            .overlay { if isSelected { shape.strokeBorder(color.ink, lineWidth: 2) } }
             .tronGlassSurface(accent: color.surfaceTint, cornerRadius: 16,
                               tintOpacity: isSelected ? 0.34 : 0.18, interactive: true,
                               respectsSettingsTheme: false)
-            .overlay { shape.strokeBorder(color.ink.opacity(isSelected ? 1 : 0.25), lineWidth: isSelected ? 2 : 0.5) }
         }
         .buttonStyle(.plain)
         .disabled(isApplying)

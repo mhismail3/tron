@@ -67,6 +67,39 @@ import XCTest
         }
     }
 
+    /// A long steer is cut like a user prompt bubble (#2370): the card stays
+    /// bounded and its editor still opens with the whole text.
+    func testLongSteerTruncatesLikeUserPrompt() {
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready",
+                    "-foreground-queued-editor", "-foreground-queued-steer", "-foreground-queued-long"]
+                    + (mode == "dark" ? ["-home-dark"] : [])
+                    + (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"] : [])
+                app.launch()
+                defer { app.terminate() }
+                let home = app.buttons["home-pinned-row"]
+                guard home.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
+                home.tap()
+                let text = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label BEGINSWITH %@", "Long steer line 1 ")).firstMatch
+                guard text.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
+                Thread.sleep(forTimeInterval: 0.6)
+                keep(app, "long-steer-\(mode)-\(large ? "large" : "standard")")
+                // 80 lines uncut are several screens tall; the prompt cut is 20 lines.
+                XCTAssertLessThan(text.frame.height, app.windows.firstMatch.frame.height * (large ? 1.6 : 0.75),
+                                  "The steer text must be cut like a user prompt: \(text.frame)")
+                text.tap()
+                let editor = app.textViews["Queued message"]
+                guard editor.waitForExistence(timeout: 8) else { XCTFail(app.debugDescription); return }
+                XCTAssertTrue((editor.value as? String ?? "").hasSuffix("Long steer line 80 keeps going."),
+                              "Opening the cut steer edits its whole text")
+                app.terminate()
+            }
+        }
+    }
+
     private func keep(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
