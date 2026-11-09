@@ -7,7 +7,8 @@
   ],
   "dependsOn": [
     "gateway/resources",
-    "gateway/pi"
+    "gateway/pi",
+    "gateway/proof"
   ],
   "verify": [
     "scripts/tron test gateway src/e2e/sessions/run.lock.integration.test.ts src/e2e/sessions/session-entries.lock.integration.test.ts src/modules/home/home-wake-inbox.integration.test.ts"

@@ -129,7 +129,11 @@ enter as tokens, equal values (as JSON) of one call sharing one and the default 
 recorded. The `settings/tool-selection` seams in `toolSelectionType()`'s `compose` and `encode`
 (`packages/gateway/src/kernel/settings/settings-types.ts`) record their facts as `toolSelectionFacts` builds them
 (tool names as tokens: the empty name 0, the rest numbered by first appearance) and the result; a selection below
-or current value that is not a list counts as none, and a list holding a non-string is not recorded. A composing
+or current value that is not a list counts as none, and a list holding a non-string is not recorded. The
+`receipts/invocation-lifecycle` seam in `invocationProjection` (`packages/gateway/src/kernel/receipts/invocation-receipts.ts`)
+records the receipts as `invocationLifecycleFacts` builds them (identities, names, origins, entries and times as
+tokens) and the projections or the refusal reason; a history of more than 64 receipts, or one this process already
+recorded, is not recorded, since snapshots fold whole branches again and again. A composing
 key's value is recorded as null (its composition is checked on generated inputs). A seam
 whose record costs work checks `seamsRecorded()` first.
 
@@ -181,7 +185,10 @@ counted as `tsRefused`, not compared, since a throw is never recorded. `oracles/
 `resolveSettings` and `composedBelow` over a synthetic schema (every combination of bindings, admission,
 per-model and composing keys) with random stores and targets; a composing key's `compose` builds a term, so the
 TypeScript's composition order is compared exactly. `oracles/settings-tool-selection.mjs` drives the real `compose`
-and `encode` with plain names, modifiers, repeats and the empty name over every kind of selection below. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
+and `encode` with plain names, modifiers, repeats and the empty name over every kind of selection below. `oracles/receipts-invocation-lifecycle.mjs`
+drives the real `invocationProjection` on generated histories (legal moves with duplicate and contradictory
+terminals, orphans, foreign owners, renamed resources, changed origins and repeated bindings) drawn from mulberry32,
+an exact 32-bit generator. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
 the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
@@ -284,7 +291,8 @@ its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays
 that resolving the real settings schema records every key instance's fold (layer and not-applied layer as
 resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, that
 tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
-and nothing for a value outside the block's domain, and
+and nothing for a value outside the block's domain, that invocation receipt folds record tokens and refusal
+reasons, once per history and not above the receipt bound, and
 that the daily cap and retention hold.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block

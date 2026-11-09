@@ -25,7 +25,9 @@ occurrences over a zone transition table from `packages/gateway/src/automations/
 `packages/gateway/src/automations/schedule.ts`; `settings/precedence` (which layer's value a setting resolves to,
 over value tokens; shell `packages/gateway/src/kernel/settings/settings-resolver.ts`); `settings/tool-selection` (how a
 tool selection's plain names and +name/-name modifiers compose and are stored, over name tokens; shell
-`packages/gateway/src/kernel/settings/settings-types.ts`).
+`packages/gateway/src/kernel/settings/settings-types.ts`); `receipts/invocation-lifecycle` (how a session's invocation
+receipts fold into each invocation's lifecycle, and which histories are refused; shell
+`packages/gateway/src/kernel/receipts/invocation-receipts.ts`).
 
 ## Block contract
 

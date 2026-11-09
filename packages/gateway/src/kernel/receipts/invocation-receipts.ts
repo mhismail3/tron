@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import type { SessionEntry } from "../pi/coding-agent.js";
 import { SETTINGS_OUTCOME_MESSAGE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "./delivery-tags.js";
 import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../../protocol/types.js";
 import { GatewayError } from "../../errors.js";
 import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../resources/resource-invocation.js";
 import { MAX_ID_BYTES, MAX_NAME_BYTES, validOrigin, validText, validTimestamp } from "./receipt-fields.js";
+import { recordSeam, seamsRecorded } from "../../proof/traffic-recorder.js";
 
 /** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {
@@ -266,6 +268,18 @@ function legalTransition(from: InvocationLifecycle, to: InvocationLifecycle, ter
 }
 
 export function invocationProjection(receipts: readonly InvocationReceiptData[]): InvocationProjection[] {
+  let projections: InvocationProjection[];
+  try {
+    projections = projectInvocations(receipts);
+  } catch (error) {
+    if (seamsRecorded()) recordInvocationLifecycle(receipts, { refused: invocationRefusalCode(error) });
+    throw error;
+  }
+  if (seamsRecorded()) recordInvocationLifecycle(receipts, { projections });
+  return projections;
+}
+
+function projectInvocations(receipts: readonly InvocationReceiptData[]): InvocationProjection[] {
   const grouped = new Map<string, InvocationProjection>();
   const terminal = new Set<string>();
   const boundEntries = new Set<string>();
@@ -339,3 +353,79 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
 export function receiptJSON(data: InvocationReceiptData): JsonValue {
   return data as unknown as JsonValue;
 }
+
+// The seam of proof block receipts/invocation-lifecycle (packages/core), recorded on an opted-in Debug Gateway for
+// its shadow. Identities, names, origins, entries and times enter as per-call tokens (equal values share one), so no
+// id or text is recorded. Snapshots fold whole branches again and again: a history of more than
+// MAXIMUM_RECORDED_RECEIPTS is not recorded, and a tokenized history this process already recorded (by digest,
+// since the set of up to RECORDED_HISTORIES digests was last cleared) is not recorded again.
+const MAXIMUM_RECORDED_RECEIPTS = 64;
+const RECORDED_HISTORIES = 1_024;
+const recordedHistories = new Set<string>();
+const REFUSALS: Record<string, string> = {
+  "invocation has more than one start receipt": "DuplicateStart",
+  "invocation receipt ownership changed": "OwnershipChanged",
+  "invocation receipt has no start receipt": "NoStart",
+  "canonical entry has more than one invocation binding": "EntryBound",
+  "invocation has more than one canonical binding": "InvocationBound",
+  "invocation receipt resource name changed": "NameChanged",
+  "invocation receipt origin changed": "OriginChanged",
+  "contradictory terminal invocation receipt": "ContradictoryTerminal",
+  "illegal terminal invocation transition": "IllegalTerminal",
+  "illegal invocation transition": "IllegalTransition",
+  "invocation changed after terminal receipt": "ChangedAfterTerminal",
+};
+
+/** The refusal a fold's error names, as proof block receipts/invocation-lifecycle names it. */
+export function invocationRefusalCode(error: unknown): string {
+  return error instanceof Error && Object.hasOwn(REFUSALS, error.message) ? REFUSALS[error.message]! : "Other";
+}
+
+/** The typed facts and result of one fold, as proof block receipts/invocation-lifecycle sees them. */
+export function invocationLifecycleFacts(receipts: readonly InvocationReceiptData[],
+  result: { refused: string } | { projections: readonly InvocationProjection[] }) {
+  const spaces = new Map<string, Map<string, number>>();
+  const token = (space: string, value: unknown): number | null => {
+    if (value === undefined) return null;
+    let tokens = spaces.get(space);
+    if (!tokens) spaces.set(space, tokens = new Map());
+    const key = space === "origin" ? canonicalJSON(value) : String(value);
+    let found = tokens.get(key);
+    if (found === undefined) tokens.set(key, found = tokens.size);
+    return found;
+  };
+  const input = receipts.map(receipt => ({
+    inv: token("id", receipt.invocationId), op: token("id", receipt.operationId), src: receipt.source, kind: receipt.receiptKind,
+    life: "lifecycle" in receipt ? receipt.lifecycle ?? null : null,
+    name: "name" in receipt ? token("name", receipt.name) : null,
+    origin: "origin" in receipt ? token("origin", receipt.origin) : null,
+    entry: "canonicalEntryId" in receipt ? token("entry", receipt.canonicalEntryId) : null,
+    retryable: "retryable" in receipt && receipt.retryable !== undefined ? receipt.retryable : null,
+    sequence: receipt.sequence, at: token("at", receipt.createdAt),
+  }));
+  const output = "refused" in result ? result : {
+    projections: result.projections.map(projection => ({
+      inv: token("id", projection.invocationId), op: token("id", projection.operationId), src: projection.source,
+      name: token("name", projection.name), origin: token("origin", projection.origin), life: projection.lifecycle,
+      entry: token("entry", projection.canonicalEntryId), retryable: projection.retryable ?? null,
+      sequence: projection.sequence, updated: token("at", projection.updatedAt),
+    })),
+  };
+  return { input, output };
+}
+
+function recordInvocationLifecycle(receipts: readonly InvocationReceiptData[],
+  result: { refused: string } | { projections: readonly InvocationProjection[] }): void {
+  try {
+    if (receipts.length > MAXIMUM_RECORDED_RECEIPTS) return;
+    const facts = invocationLifecycleFacts(receipts, result);
+    const digest = createHash("sha256").update(JSON.stringify(facts)).digest("hex");
+    if (recordedHistories.has(digest)) return;
+    if (recordedHistories.size >= RECORDED_HISTORIES) recordedHistories.clear();
+    recordedHistories.add(digest);
+    recordSeam("receipts/invocation-lifecycle", "project", facts.input, facts.output);
+  } catch {
+    // Recording is diagnostic: a history the record cannot be built from must not change the projection.
+  }
+}
+
