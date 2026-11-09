@@ -417,22 +417,35 @@ struct ChatAnnotationBubbleHost: View {
     }
 }
 
-/// Whether the focused text input is taking dictation, read from the first
-/// responder that `sendAction` reaches.
+/// The focused text input, read from the first responder that `sendAction`
+/// reaches.
 @MainActor
-private enum ChatTextInputFocus {
-    static weak var responder: UIResponder?
+enum ChatTextInputFocus {
+    fileprivate static weak var reported: UIResponder?
+
+    static var firstResponder: UIResponder? {
+        reported = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.tronReportFirstResponder), to: nil, from: nil, for: nil)
+        defer { reported = nil }
+        return reported
+    }
 
     static var isDictating: Bool {
-        responder = nil
-        UIApplication.shared.sendAction(#selector(UIResponder.tronReportFirstResponder), to: nil, from: nil, for: nil)
-        defer { responder = nil }
-        return responder?.textInputMode?.primaryLanguage == "dictation"
+        firstResponder?.textInputMode?.primaryLanguage == "dictation"
+    }
+
+    /// Whether a text input other than `view` holds the keyboard (the composer
+    /// or a comment field).
+    static func keyboardIsOwned(byAnotherThan view: UIView) -> Bool {
+        guard let responder = firstResponder, responder !== view else { return false }
+        if let textView = responder as? UITextView { return textView.isEditable }
+        if let field = responder as? UITextField { return field.isEnabled }
+        return false
     }
 }
 
 private extension UIResponder {
-    @objc func tronReportFirstResponder() { ChatTextInputFocus.responder = self }
+    @objc func tronReportFirstResponder() { ChatTextInputFocus.reported = self }
 }
 
 enum ChatAnnotationBubbleLayout {

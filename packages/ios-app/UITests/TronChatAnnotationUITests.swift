@@ -244,6 +244,76 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual(chips.count, 1)
     }
 
+    /// Selecting message text while the composer holds the keyboard keeps the
+    /// keyboard up and the transcript still, and quotes exactly what the same
+    /// gesture quotes with the keyboard down (the control, annotated first),
+    /// at the default size and at the largest accessibility size.
+    @MainActor func testSelectionWithKeyboardUpKeepsKeyboardAndQuotesSelection() {
+        continueAfterFailure = false
+        // A line that stays on screen with the keyboard down and up.
+        assertKeyboardUpSelectionQuotesSelection(launch(), block: "exponential backoff", line: 0.12)
+        assertKeyboardUpSelectionQuotesSelection(
+            launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]),
+            block: "reconnect notes for the full contract", line: 0.2
+        )
+    }
+
+    @MainActor private func assertKeyboardUpSelectionQuotesSelection(_ app: XCUIApplication, block: String, line: CGFloat) {
+        defer { app.terminate() }
+        let keyboard = app.keyboards.firstMatch
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        let chips = app.otherElements.matching(identifier: "composer.staged-chip")
+        let paragraph = assistantBlock(app, containing: block)
+        let composer = app.textViews["Message input"]
+
+        func selectLine() {
+            paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: line))
+                .press(forDuration: 1.0, thenDragTo: paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.83, dy: line)))
+        }
+        func annotate(_ comment: String) {
+            let annotate = menuAction(app, "Annotate")
+            XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+            annotate.tap()
+            XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+            dismissKeyboardTip(app)
+            app.typeText(comment)
+            app.buttons["Save annotation"].firstMatch.tap()
+            XCTAssertTrue(wait(for: bubble, exists: false))
+        }
+
+        // Control: the keyboard is down.
+        XCTAssertFalse(keyboard.exists)
+        selectLine()
+        annotate("control")
+
+        // Saving hands the keyboard to the composer (#1597).
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(composer.value(forKey: "hasKeyboardFocus") as? Bool, true)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        let restingFrame = paragraph.frame
+        selectLine()
+        XCTAssertTrue(menuAction(app, "Annotate").waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(app, "keyboard-up-selection")
+        XCTAssertTrue(keyboard.exists, "Selecting message text keeps the keyboard up")
+        XCTAssertEqual(paragraph.frame, restingFrame, "The transcript does not move under the selection")
+        annotate("keyboard up")
+        XCTAssertTrue(wait { chips.count == 2 }, app.debugDescription)
+
+        func stagedQuote(_ index: Int) -> String {
+            chips.element(boundBy: index).buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+            let quote = app.descendants(matching: .any)["chat.annotation.quote"]
+            XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
+            let label = quote.label
+            app.buttons["Save annotation"].tap()
+            XCTAssertTrue(wait(for: quote, exists: false))
+            return label
+        }
+        let control = stagedQuote(0)
+        let keyboardUp = stagedQuote(1)
+        XCTAssertTrue(control.count > 1 && paragraph.label.contains(control), control)
+        XCTAssertEqual(keyboardUp, control, "The keyboard-up selection quotes exactly the selected text")
+    }
+
     /// On iPad, Return in the composer sends exactly like Send, and not while
     /// the composer is empty (uploads: TronComposerUploadUITests). Hardware
     /// Shift+Return and a pasted newline still edit. `typeKey("\n")` is a hardware Return
@@ -369,9 +439,9 @@ final class TronChatAnnotationUITests: XCTestCase {
         return bubble
     }
 
-    @MainActor private func launch() -> XCUIApplication {
+    @MainActor private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-chat-annotation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["-tron-chat-annotation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
         app.launch()
         XCTAssertTrue(assistantBlock(app, containing: "exponential backoff").waitForExistence(timeout: 20), app.debugDescription)
         return app
