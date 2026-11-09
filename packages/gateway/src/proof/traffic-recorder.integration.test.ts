@@ -155,6 +155,7 @@ describe("proof traffic recorder", () => {
     ];
     // Outside the block's domain (a non-string below): the selection is unchanged and nothing is recorded.
     expect(type.compose!(["read", 5], ["+web"])).toEqual(["read", 5, "web"]);
+    expect(type.encode!(["read"], below, ["bash", 7])).toEqual(["read"]);
     const selection = corpus(dataDir, "settings/tool-selection");
     expect(selection.map((r) => r.seam)).toEqual(["compose", "compose", "compose", "encode", "encode", "encode"]);
     expect(selection.every((r) => r.schema === TRAFFIC_SCHEMA && r.block === "settings/tool-selection")).toBe(true);
@@ -162,6 +163,13 @@ describe("proof traffic recorder", () => {
     // (or the chosen list and the current entries), then the defaults.
     expect(selection[0]!.input).toEqual({ below: [1, 2, 3], entries: [{ kind: "plus", name: 4 }, { kind: "minus", name: 2 }], defaults: [1, 2, 5, 6] });
     expect(selection[0]!.output).toEqual([1, 3, 4]);
+    expect(selection[1]!.input).toEqual({ below: null, entries: [{ kind: "minus", name: 1 }], defaults: [1, 2, 3, 4] });
+    expect(selection[1]!.output).toEqual([2, 3, 4]);
+    expect(selection[3]!.input).toEqual({ chosen: [{ kind: "plain", name: 3 }, { kind: "plain", name: 1 }, { kind: "plain", name: 4 }],
+      below: [1, 2, 3], current: [], defaults: [1, 2, 5, 6] });
+    expect(selection[3]!.output).toEqual([{ kind: "plain", name: 3 }, { kind: "plain", name: 1 }, { kind: "plain", name: 4 }]);
+    expect(selection[4]!.input).toEqual({ chosen: [{ kind: "plain", name: 1 }, { kind: "plain", name: 2 }], below: [1, 2, 3],
+      current: [{ kind: "plain", name: 4 }], defaults: [1, 2, 5, 6] });
     expect(composed[0]).toEqual(["read", "sentinel_alpha", "sentinel_beta"]);
     expect(selection[4]!.output).toEqual([{ kind: "plain", name: 1 }, { kind: "plain", name: 2 }]);
     expect(encoded[1]).toEqual(["read", "bash"]);
@@ -176,6 +184,7 @@ describe("proof traffic recorder", () => {
     const resolved = corpus(dataDir, "settings/tool-selection").slice(selection.length);
     expect(resolved.length).toBeGreaterThan(0);
     expect(resolved.some((r) => r.seam === "compose" && JSON.stringify(r.input).includes("plus"))).toBe(true);
+    expect(JSON.stringify(resolved)).not.toMatch(/"(read|bash|edit|write|web)"/);
   });
 
   it("keeps at most the daily cap per block and the newest retained days", () => {

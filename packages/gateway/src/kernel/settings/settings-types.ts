@@ -343,7 +343,8 @@ const strings = (value: unknown): value is string[] => Array.isArray(value) && v
 
 /** The typed facts proof block settings/tool-selection (packages/core) decides from, for its shadow: tool names
  * enter as tokens (the empty name 0, every other name of one call numbered in order of appearance), entries as
- * plain/plus/minus. Undefined when a value is outside the block's domain (not a list of strings). */
+ * plain/plus/minus. A `below` or `current` that is not a list counts as none, as compose and encode treat it;
+ * undefined when a list holds a non-string (outside the block's domain). */
 export function toolSelectionFacts(seam: "compose" | "encode", input: { below: unknown; entries?: unknown; chosen?: unknown; current?: unknown }) {
   if (!strings(seam === "compose" ? input.entries : input.chosen) || (Array.isArray(input.below) && !strings(input.below))
     || (Array.isArray(input.current) && !strings(input.current))) return undefined;

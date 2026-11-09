@@ -13,8 +13,8 @@ setting and is not an approval queue.
   compaction limits and security validation without upward imports.
 - `settings-resolver.ts`: layer precedence, qualifiers, composition, clamping and
   state badges. Its precedence fold is shadowed by proof block `settings/precedence` (packages/core) through a
-  Debug-only seam (`precedenceFacts`; the fold before capability clamping), and the tool selection's compose and
-encode (`settings-types.ts`) by block `settings/tool-selection` (`toolSelectionFacts`); the TypeScript stays authoritative until that block's cut-over. `settings-project-diagnostics.ts` owns bounded Project diagnostics.
+  Debug-only seam (`precedenceFacts`; the fold before capability clamping); the TypeScript stays authoritative
+  until that block's cut-over. `settings-project-diagnostics.ts` owns bounded Project diagnostics.
 - `settings-model.ts`: target resolution and fixed-direction request pins.
 - `settings-change.ts`: planning, expected-before fences, target stripes, ordered
   store application/reverse rollback, outside-write brackets, Home companion effects,
@@ -27,7 +27,8 @@ encode (`settings-types.ts`) by block `settings/tool-selection` (`toolSelectionF
   a grouped Undo requires exactly its unique, consistently sized members.
 - `tool-contract.ts`: layer, qualifier, model-reference/queue and typed tool/result
   vocabulary. `settings-types.ts` owns value formatting/composition and immutable,
-  disclosed before/after reviews whose digest binds identity and every shown field.
+  disclosed before/after reviews whose digest binds identity and every shown field. The tool selection's compose
+  and encode are shadowed by proof block `settings/tool-selection` through Debug-only seams (`toolSelectionFacts`).
 - `scope-resolution.ts`: declared binding admission, canonical targets and sorted
   qualifier identities. `settings-admission.ts` owns operational model/thinking
   selection and synchronous compaction validation.
