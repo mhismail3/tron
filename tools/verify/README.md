@@ -207,8 +207,8 @@ Runners are the existing ones:
 | `ios-lanes` / `mac` / `relay` | not driven by verify |
 
 `ios-journeys` are the `RealGatewayPairAndChatUITests` files. A changed extension file selects
-the test methods it declares; the class's own file (the shared fixture and helpers) selects every
-journey. Each must be in the harness's `ui_owned_journeys`, else selection fails (exit 2). They run
+the test methods it declares; the class's own file or an extension declaring no test (shared
+fixture and helpers) selects every journey. Each must be in the harness's `ui_owned_journeys`, else selection fails (exit 2). They run
 through the harness, which takes its own host slots, on up to 3 lanes
 (`TRON_IOS_E2E_UI_LANES`), as `verify --batch`'s UI journey lane does. A journey passes only with a
 `report.json` whose `report.sha256` matches, `journey_status` is 0, `evidence_complete` is true and

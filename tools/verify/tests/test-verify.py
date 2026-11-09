@@ -927,6 +927,13 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(calls.read_text().splitlines(), [
             "run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"
             " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=2"])
+        # So does a helper-only extension file, which declares no journey of its own.
+        calls.write_text("")
+        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func reveal() {}\n}\n")
+        r.commit("shared extension helper")
+        helpers = r.verify("--changed")
+        self.assertEqual(helpers.returncode, 0, helpers.stdout + helpers.stderr)
+        self.assertEqual(calls.read_text().splitlines()[-1].rsplit(" ", 1)[-1], "lanes=2")
         # --skip ios still accepts not running them, explicitly.
         skipped = r.verify("--changed", "--skip", "ios")
         self.assertEqual(r.report()["steps"][-1]["status"], "skipped", skipped.stdout)

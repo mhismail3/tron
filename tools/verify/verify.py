@@ -170,16 +170,19 @@ def owned_journeys() -> list[str]:
 
 def journey_selectors(paths: list[str]) -> list[str]:
     """The owned journeys a change reaches: the test methods a changed extension file declares, or,
-    for the class's own file (the shared fixture and helpers), every owned journey."""
+    for the class's own file or an extension declaring no test (shared fixture and helpers), every
+    owned journey."""
     owned = owned_journeys() if paths else []
     selected: set[str] = set()
     for path in paths:
-        if Path(path).stem == JOURNEY_CLASS:
+        if path.split("/")[2] != "UITests":
+            raise VerifyError(f"{path}: {JOURNEY_CLASS} journeys live in {IOS}/UITests ({IOS_TARGETS['UITests']})")
+        methods = re.findall(r"func (test\w+)\s*\(", (ROOT / path).read_text())
+        if Path(path).stem == JOURNEY_CLASS or not methods:
             selected.update(owned)
             continue
-        target = IOS_TARGETS[path.split("/")[2]]
-        for method in re.findall(r"func (test\w+)\s*\(", (ROOT / path).read_text()):
-            selector = f"{target}/{JOURNEY_CLASS}/{method}"
+        for method in methods:
+            selector = f"{IOS_TARGETS['UITests']}/{JOURNEY_CLASS}/{method}"
             if selector not in owned:
                 raise VerifyError(f"{path}: {selector} is not a journey {JOURNEY_HARNESS} run-ui owns")
             selected.add(selector)
