@@ -239,8 +239,7 @@ extension RealGatewayPairAndChatUITests {
     func testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        guard let agentDirectory = fixture.agentDirectory else { throw XCTSkip("the harness provides the fixture agent directory") }
-        let goFile = URL(fileURLWithPath: agentDirectory).deletingLastPathComponent()
+        let goFile = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent()
             .appending(path: "restart-journey-\(UUID().uuidString).go")
         defer { try? FileManager.default.removeItem(at: goFile) }
         let app = launchApp()
