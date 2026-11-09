@@ -409,7 +409,7 @@ export class HomeTaskDispatcher {
   /** Settles a task whose admission was refused after its record exists, like
    * every terminal task with its one result wake. Accepted identity stays durable
    * and is never replayed. */
-  private async refuseAdmission(task: HomeTaskRecord, reason: "admission-cancelled" | "admission-timeout"): Promise<void> {
+  private async refuseAdmission(task: Pick<HomeTaskRecord, "taskId">, reason: "admission-cancelled" | "admission-timeout"): Promise<void> {
     const final = await this.store.update(task.taskId, current => current.lifecycle === "terminal" ? current : {
       ...current, lifecycle: "terminal", wake: this.inbox.event(current),
       terminalEvidence: { outcome: "unknown", sessionId: current.sessionId, entryIds: [], reason } });
