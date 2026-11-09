@@ -844,9 +844,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let sessionRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
         XCTAssertTrue(waitForHittable(sessionRow, timeout: 90), app.debugDescription)
         sessionRow.tap()
-        let reopenedReply = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "Steer journey saw the photo")
-        ).firstMatch
+        let reopenedReply = assistantReply(app, containing: "Steer journey saw the photo")
         XCTAssertTrue(reopenedReply.waitForExistence(timeout: 90),
                       "the reopened session does not show the delivered reply: \(app.debugDescription)")
         XCTAssertFalse(
