@@ -119,8 +119,8 @@ Shadows need real inputs. `packages/gateway/src/proof/traffic-recorder.ts` recor
 block will replace TypeScript logic, the exact typed inputs and the output the TypeScript returned:
 `recordSeam(block, seam, input, output)`, a no-op unless enabled. The first seams are
 `nextAutomationOccurrence`, `firstAutomationOccurrence` and `classifyDueOccurrence` in
-`packages/gateway/src/automations/schedule.ts`, for once and interval triggers (the block's domain); nested
-calls are not seams.
+`packages/gateway/src/automations/schedule.ts`: once and interval triggers record under block
+`schedule/occurrence`, calendar triggers under `schedule/calendar`; nested calls are not seams.
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
   `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
@@ -163,7 +163,10 @@ print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a 
 both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
 imports `packages/gateway/src/automations/schedule.ts` through `oracles/gateway-source.mjs` (module hooks
 that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript transform) and calls the core
-through the block's generated façade. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
+through the block's generated façade. `oracles/schedule-calendar.mjs` does the same for calendar triggers, giving the core
+the zone table `packages/gateway/src/automations/zone-table.ts` builds from Intl (also on replay, so a replay
+checks the table builder too); generated inputs the TypeScript throws on (a civil date the zone skips) are
+counted as `tsRefused`, not compared, since a throw is never recorded. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
 ## Façade
@@ -175,7 +178,7 @@ binds it to any compiled core (the checked-in one, or a mutant or fresh translat
 bound checked-in one. It exposes every compiled function and predicate of the laws (ghost and commented-out
 declarations are not compiled, so not exposed) and checks each stated precondition before calling, because
 compiled code does not check `requires`. Types: `int` -> `number` and `nat` -> `number >= 0` (safe integers, checked
-both ways), `bool` -> `boolean`, a datatype of nullary constructors -> a string union of their names, a
+both ways), `bool` -> `boolean`, `seq<T>` -> a readonly array of `T` (also nested and as a field), a datatype of nullary constructors -> a string union of their names, a
 one-constructor datatype named like its type -> a plain object, any other datatype -> an object tagged by `$`; an
 unknown constructor is a `TypeError` in either direction. Refused before anything compiles: Dafny 3 `function method`
 syntax, preconditions other than a call of a compiled predicate on parameters, generic functions, and any other
@@ -261,14 +264,14 @@ at the same path.
 
 `scripts/tron test gateway src/proof/traffic-recorder.integration.test.ts` proves the recorder is refused
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
-seeded schedule journey through the real seams writes one record per call (none for calendar triggers or
-nested calls) that replays through the same TypeScript to the recorded outputs, and that the daily cap and
+seeded schedule journey through the real seams writes one record per call (none for nested calls), each under
+its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs, and that the daily cap and
 retention hold.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block
 `demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
-full, an opaque function; no ghost or commented-out one), round trips values, refuses unknown constructors,
-non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
+full, an opaque function; no ghost or commented-out one), round trips values (sequences, nested and as fields),
+refuses unknown constructors, a non-array sequence, non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
 either file; and `function method`, an uncheckable precondition and an unsupported type are refused.
 
 `scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format

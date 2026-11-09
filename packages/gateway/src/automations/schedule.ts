@@ -120,46 +120,20 @@ function calendarOccurrenceAtOrBefore(
   throw new Error("Calendar trigger did not produce a bounded prior occurrence");
 }
 
-/** Returns the UTC boundaries of the local calendar day containing the instant. */
-export function automationLocalDayBounds(instantMs: number, timezone: string): { start: number; end: number } {
-  if (!Number.isFinite(instantMs)) throw new Error("Schedule boundary is invalid");
-  const local = localParts(instantMs, timezone);
-  const date = { year: local.year, month: local.month, day: local.day };
-  const start = localMinuteToInstant({ ...date, hour: 0, minute: 0 }, timezone);
-  // A timezone transition can skip an entire civil date. Advance to the next
-  // representable local day instead of treating a valid IANA window as an
-  // internal scheduling failure.
-  for (let offset = 1; offset <= 8; offset += 1) {
-    const next = addLocalDays(date, offset);
-    try {
-      const end = localMinuteToInstant({ ...next, hour: 0, minute: 0 }, timezone);
-      if (end > start) return { start, end };
-    } catch {
-      // Continue across a fully skipped civil date.
-    }
-  }
-  throw new Error("Schedule local-day boundary did not advance");
-}
-
-/** Returns the UTC instant at the start of the local calendar day containing the instant. */
-export function automationLocalDayStart(instantMs: number, timezone: string): string {
-  return new Date(automationLocalDayBounds(instantMs, timezone).start).toISOString();
-}
-
-// Seams of proof block schedule/occurrence (packages/core): once and interval calls are recorded on an
-// opted-in Debug Gateway for its shadow; calendar triggers are not in the block. Nested calls are not seams.
-const BLOCK = "schedule/occurrence";
-const inBlock = (trigger: AutomationTrigger): boolean => trigger.kind === "once" || trigger.kind === "interval";
+// Seams of the proof blocks (packages/core) that model these functions, recorded on an opted-in Debug Gateway
+// for their shadows: once and interval triggers are block schedule/occurrence, calendar triggers block
+// schedule/calendar. Nested calls are not seams.
+const blockOf = (trigger: AutomationTrigger): string => trigger.kind === "calendar" ? "schedule/calendar" : "schedule/occurrence";
 
 export function nextAutomationOccurrence(trigger: AutomationTrigger, afterMs: number): string | undefined {
   const output = nextOccurrence(trigger, afterMs);
-  if (inBlock(trigger)) recordSeam(BLOCK, "next", { trigger, afterMs }, output);
+  recordSeam(blockOf(trigger), "next", { trigger, afterMs }, output);
   return output;
 }
 
 export function firstAutomationOccurrence(trigger: AutomationTrigger, nowMs: number): string | undefined {
   const output = firstOccurrence(trigger, nowMs);
-  if (inBlock(trigger)) recordSeam(BLOCK, "first", { trigger, nowMs }, output);
+  recordSeam(blockOf(trigger), "first", { trigger, nowMs }, output);
   return output;
 }
 
@@ -170,7 +144,7 @@ export function classifyDueOccurrence(
   policy: AutomationMisfirePolicy,
 ): { dispatchAt?: string; nextOccurrenceAt?: string; skipped: string[] } {
   const output = classifyDue(trigger, nextOccurrenceAt, nowMs, policy);
-  if (inBlock(trigger)) recordSeam(BLOCK, "classify", { trigger, nextOccurrenceAt, nowMs, policy }, output);
+  recordSeam(blockOf(trigger), "classify", { trigger, nextOccurrenceAt, nowMs, policy }, output);
   return output;
 }
 
