@@ -539,18 +539,37 @@ async function ownedGatewayVerifier(initialPid, port) {
   const initial = await capture(pid, process.ppid);
   command = initial.command;
   birth = initial.birth;
+  // The full proof (birth, command line, listener) runs once per adopted
+  // Gateway, at its first request once it listens. Every later request checks
+  // only that the proven PID is still alive: spawning ps and lsof per request
+  // missed their deadline under host load and refused the app's own requests.
+  // A PID that dies is unproven from then on, so a process that later reuses it
+  // is never trusted without the full proof; adopting a respawn unproves too.
+  let proven = false;
+  const alive = () => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  };
   const verifyTarget = () => {
+    if (proven) {
+      if (alive()) return Promise.resolve();
+      proven = false;
+      return Promise.reject(new Error("Gateway process exited"));
+    }
     checking ??= (async () => {
-      if (await inspect(pid, "lstart") !== birth || await inspect(pid, "command") !== command) throw new Error("Gateway process ownership changed");
+      const target = pid;
+      if (await inspect(target, "lstart") !== birth || await inspect(target, "command") !== command) throw new Error("Gateway process ownership changed");
       const result = await execute(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
-        ["-nP", "-a", "-p", String(pid), `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], { timeout: 2_000, maxBuffer: 4_096 });
+        ["-nP", "-a", "-p", String(target), `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], { timeout: 2_000, maxBuffer: 4_096 });
       const fields = result.stdout.trim().split("\n");
-      if (!fields.includes(`p${pid}`) || !fields.includes(`n127.0.0.1:${port}`)) throw new Error("Gateway does not own the fixture listener");
+      if (!fields.includes(`p${target}`) || !fields.includes(`n127.0.0.1:${port}`)) throw new Error("Gateway does not own the fixture listener");
+      // A respawn adopted during this proof is not what was proven.
+      if (pid === target) proven = true;
     })().finally(() => { checking = undefined; });
     return checking;
   };
   verifyTarget.adopt = async target => {
     const next = await capture(target, process.pid);
+    proven = false;
     pid = target;
     command = next.command;
     birth = next.birth;
