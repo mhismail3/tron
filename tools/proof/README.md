@@ -120,7 +120,13 @@ block will replace TypeScript logic, the exact typed inputs and the output the T
 `recordSeam(block, seam, input, output)`, a no-op unless enabled. The first seams are
 `nextAutomationOccurrence`, `firstAutomationOccurrence` and `classifyDueOccurrence` in
 `packages/gateway/src/automations/schedule.ts`: once and interval triggers record under block
-`schedule/occurrence`, calendar triggers under `schedule/calendar`; nested calls are not seams.
+`schedule/occurrence`, calendar triggers under `schedule/calendar`; nested calls are not seams. The
+`settings/precedence` seam in `resolveInstance` (`packages/gateway/src/kernel/settings/settings-resolver.ts`)
+records each resolved key instance's facts as `precedenceFacts` builds them (per layer: in the target, bound,
+per-model and plain value, applied) and the fold's result (value, layer, not-applied layer, shown layers); values
+enter as tokens, equal values (as JSON) of one call sharing one and the default being 0, so no setting value is
+recorded. A composing key's value is recorded as null (its composition is checked on generated inputs). A seam
+whose record costs work checks `seamsRecorded()` first.
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
   `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
@@ -166,7 +172,11 @@ that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript tran
 through the block's generated façade. `oracles/schedule-calendar.mjs` does the same for calendar triggers, giving the core
 the zone table `packages/gateway/src/automations/zone-table.ts` builds from Intl (also on replay, so a replay
 checks the table builder too); generated inputs the TypeScript throws on (a civil date the zone skips) are
-counted as `tsRefused`, not compared, since a throw is never recorded. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
+counted as `tsRefused`, not compared, since a throw is never recorded. `oracles/settings-precedence.mjs` runs the real
+`resolveSettings` and `composedBelow` over a synthetic schema (every combination of bindings, admission,
+per-model and composing keys) with random stores and targets; a composing key's `compose` builds a term, so the
+TypeScript's composition order is compared exactly. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
+the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
 ## Façade
@@ -264,8 +274,10 @@ TypeScript rejects each at its path and Swift rejects or reads each as stated.
 `scripts/tron test gateway src/proof/traffic-recorder.integration.test.ts` proves the recorder is refused
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
 seeded schedule journey through the real seams writes one record per call (none for nested calls), each under
-its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs, and that the daily cap and
-retention hold.
+its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs,
+that resolving the real settings schema records every key instance's fold (layer and not-applied layer as
+resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, and
+that the daily cap and retention hold.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block
 `demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in

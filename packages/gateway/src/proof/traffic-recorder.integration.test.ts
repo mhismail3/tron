@@ -100,6 +100,44 @@ describe("proof traffic recorder", () => {
     expect(journey.map((r) => r.output)).toEqual(outputs.map((o) => JSON.parse(JSON.stringify(o ?? null))));
   });
 
+  it("records the settings precedence fold of every resolved key, with tokens instead of values", async () => {
+    const dataDir = home();
+    vi.stubEnv("TRON_PROOF_TRAFFIC", "1");
+    vi.stubEnv("TRON_GATEWAY_CHANNEL", "dev");
+    vi.stubEnv("TRON_DATA_DIR", dataDir);
+    vi.resetModules();
+    const { resolveSettings, targetLayers } = await import("../kernel/settings/settings-resolver.js");
+    const { scopeForStore } = await import("../kernel/settings/scope-resolution.js");
+    const { TEST_SETTINGS_SCHEMA } = await import("../../test-support/settings-schema.js");
+    const target = { kind: "session" as const, sessionId: "s" };
+    // An untrusted project whose per-model thinking value would beat the chat's own value.
+    const resolution = resolveSettings(TEST_SETTINGS_SCHEMA, target, {
+      layers: targetLayers(target, { project: true }), gateway: {}, trust: {}, macTerminal: {},
+      global: { defaultProvider: "anthropic", defaultModel: "sentinel-model-id", defaultThinkingLevel: "low" },
+      project: { root: "/sentinel-project", document: { modelThinkingLevels: { "anthropic/sentinel-model-id": "high" } }, applied: false },
+      session: { thinking: "minimal", settings: {} },
+    }, { format: { modelName: () => undefined }, options: { clamp: (_source, _dependency, value) => value } });
+
+    const records = corpus(dataDir, "settings/precedence");
+    expect(records.every((r) => r.schema === TRAFFIC_SCHEMA && r.block === "settings/precedence" && r.seam === "resolve")).toBe(true);
+    // Each resolved key instance has its record, in resolution order (a key's dependencies and the chat model
+    // resolve too, so other records lie between), with the fold's layer and not-applied layer.
+    let at = 0;
+    for (const row of resolution.keys) {
+      while (at < records.length && (records[at]!.input as { key: string }).key !== row.key) at++;
+      const record = records[at++]!;
+      expect(record, row.key).toBeDefined();
+      const output = record.output as { layer: string; notApplied: string | null };
+      expect(scopeForStore(output.layer as never)).toBe(row.layer);
+      expect(output.notApplied === null).toBe(row.applied);
+    }
+    const thinking = records.find((r) => (r.input as { key: string }).key === "model.thinking[role=chat]")!;
+    expect(thinking.output).toMatchObject({ layer: "session", notApplied: "project" });
+    // No setting value, model id or project path is recorded: values are tokens.
+    const text = JSON.stringify(records);
+    for (const secret of ["sentinel", "minimal", "high", "anthropic"]) expect(text).not.toContain(secret);
+  });
+
   it("keeps at most the daily cap per block and the newest retained days", () => {
     const dataDir = home();
     const dir = join(dataDir, "gateway/proof-traffic/schedule/occurrence");
