@@ -110,9 +110,14 @@ def main(argv: list[str]) -> int:
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     # A broken harness would otherwise count every mutant as killed.
+    started = time.monotonic()
     baseline = run_locks(args.timeout)
     if not isinstance(baseline, dict) or baseline.get("numFailedTests", 1) or baseline.get("numFailedTestSuites", 1) or not baseline.get("numPassedTests"):
-        print("mutate: the unmutated locks do not pass cleanly; no mutant was run", file=sys.stderr)
+        # Which refusal, and how long it took, separates a broken harness from a baseline past --timeout (#2400).
+        observed = (baseline if isinstance(baseline, str) else "no readable report" if baseline is None else
+                    {key: baseline.get(key) for key in ("numPassedTests", "numFailedTests", "numFailedTestSuites")})
+        print(f"mutate: the unmutated locks do not pass cleanly ({observed} after {time.monotonic() - started:.1f}s, "
+              f"--timeout {args.timeout}); no mutant was run", file=sys.stderr)
         return 1
     mutants, started = [], time.time()
     out = verify.ROOT / "test-results" / "mutate" / f"{args.file.replace('/', '__')}.json"

@@ -160,10 +160,7 @@ def stop_running(grace: float = 30) -> None:
     with RUNNING_LOCK:
         groups = list(RUNNING)
     for group in groups:
-        try:
-            os.killpg(group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        verify.signal_group(group, signal.SIGTERM)
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
         with RUNNING_LOCK:
@@ -173,10 +170,7 @@ def stop_running(grace: float = 30) -> None:
     with RUNNING_LOCK:
         groups = list(RUNNING & set(groups))
     for group in groups:
-        try:
-            os.killpg(group, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        verify.signal_group(group, signal.SIGKILL)
 
 
 def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
@@ -288,11 +282,11 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             try:
                 code = process.wait()
             except BaseException:
-                os.killpg(process.pid, signal.SIGTERM)
+                verify.signal_group(process.pid, signal.SIGTERM)
                 try:
                     process.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    verify.signal_group(process.pid, signal.SIGKILL)
                     process.wait()
                 raise
             finally:
@@ -774,6 +768,10 @@ def issue_write(key: str, title: str, body: str, directory: Path, state: Path, t
                ['scripts/tron', 'work', 'issue', 'create', '--title', title, '--body-file', str(directory / 'issue.md'),
                 '--kind', 'kind:bug', '--area', 'area:tooling'])
     outcome = execute(ROOT, {'name': 'issue write', 'command': command}, directory / 'issue')
+    if 'log' not in outcome:
+        # The batch stopped before dispatch: nothing reached GitHub, so the journal goes back to what it was.
+        save(journal, previous) if previous else journal.unlink()
+        return {**outcome, 'number': number}
     match = re.search(r'(?:/issues/|created issue #)(\d+)', Path(outcome['log']).read_text(errors='replace'))
     outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved', 'number': int(match[1]) if match else number}
     save(journal, outcome)

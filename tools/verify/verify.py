@@ -78,6 +78,16 @@ def git(*args: str) -> str:
     return done.stdout
 
 
+def signal_group(group: int, signum: int) -> None:
+    """Signal a process group this verifier started (same uid, no setuid lanes); a group that already
+    ended is no error. macOS answers EPERM while every member has exited but its leader is not yet
+    reaped, and ESRCH once it is; for an owned group no other EPERM cause applies."""
+    try:
+        os.killpg(group, signum)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def install_hint(package: str) -> str:
     return f"prepare this worktree with: scripts/tron-node exec npm --prefix {package} ci --include=dev"
 
@@ -824,19 +834,13 @@ class Run:
     def stop(self, launched: list["Launched"]) -> None:
         """Stop and join the owned process groups (SIGTERM, then SIGKILL after 30 s); each is interrupted."""
         for item in launched:
-            try:
-                os.killpg(item.process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            signal_group(item.process.pid, signal.SIGTERM)
         deadline = time.time() + 30
         for item in launched:
             try:
                 item.process.wait(timeout=max(0.0, deadline - time.time()))
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(item.process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                signal_group(item.process.pid, signal.SIGKILL)
                 item.process.wait()
             self.settle(item, 130, None, (0,), interrupted=True)
 
