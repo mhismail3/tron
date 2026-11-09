@@ -428,4 +428,3 @@ function recordInvocationLifecycle(receipts: readonly InvocationReceiptData[],
     // Recording is diagnostic: a history the record cannot be built from must not change the projection.
   }
 }
-
