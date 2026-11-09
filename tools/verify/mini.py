@@ -32,6 +32,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Sequence
 
 # The mini runs this source as `python3 -c`, where there is no file and no local checkout.
 ROOT = Path(__file__).resolve().parents[2] if '__file__' in globals() else None
@@ -65,18 +66,20 @@ def ssh_command() -> list[str]:
             *(['-i', os.path.expanduser(identity)] if identity else []), destination]
 
 
-def outside_paths(args: list[str]) -> list[str]:
-    """Absolute paths in the lane's arguments that are not under this checkout (or an output file): the mini cannot read them."""
+def outside_paths(args: Sequence[str]) -> list[str]:
+    """Arguments naming a path outside this checkout (output files aside): the mini cannot read them. A relative
+    word resolves against the Gateway package, the lane's working directory."""
     words = [word.split('=', 1)[1] if word.startswith('--') and '=' in word else word for word in args if not word.startswith(OUTPUT_OPTION)]
-    return [word for word in words if word.startswith('/') and not Path(word).resolve().is_relative_to(ROOT.resolve())]
+    package, root = ROOT / 'packages/gateway', ROOT.resolve()
+    return [word for word in words if not word.startswith('-') and not (package / word).resolve().is_relative_to(root)]
 
 
-def choose_host(args: list[str] = ()) -> tuple[str, str]:
+def choose_host(args: Sequence[str] = ()) -> tuple[str, str]:
     """('mini' or 'local', why). The mini is the default; this Mac runs the lane only when the mini cannot."""
     if os.environ.get('TRON_UPDATE_LOCKS'):
         return 'local', 'recording goldens writes this checkout'
-    if outside_paths(list(args)):
-        return 'local', f'an argument names {outside_paths(list(args))[0]}, outside this checkout'
+    if outside := outside_paths(args):
+        return 'local', f'an argument names {outside[0]}, outside this checkout'
     if not config('tron.verify.mini'):
         return 'local', 'no mini is configured'
     if git('status', '--porcelain', '--untracked-files=normal'):
