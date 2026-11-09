@@ -312,6 +312,22 @@ final class TronChatAnnotationUITests: XCTestCase {
         let keyboardUp = stagedQuote(1)
         XCTAssertTrue(control.count > 1 && paragraph.label.contains(control), control)
         XCTAssertEqual(keyboardUp, control, "The keyboard-up selection quotes exactly the selected text")
+
+        // The keyboard-up menu keeps the system Copy, which copies the selection.
+        selectLine()
+        XCTAssertTrue(menuAction(app, "Annotate").waitForExistence(timeout: 5), app.debugDescription)
+        let copy = menuAction(app, "Copy")
+        // At accessibility sizes the menu pages after Annotate.
+        if !copy.exists { app.buttons["Next Page"].firstMatch.tap() }
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        copy.tap()
+        XCTAssertTrue(keyboard.exists)
+        composer.press(forDuration: 1)
+        let paste = menuAction(app, "Paste")
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
+        paste.tap()
+        XCTAssertTrue(wait { (composer.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == control },
+                      String(describing: composer.value))
     }
 
     /// On iPad, Return in the composer sends exactly like Send, and not while

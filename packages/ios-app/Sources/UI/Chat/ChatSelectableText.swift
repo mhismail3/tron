@@ -309,6 +309,9 @@ class ChatSelectableTextView: UITextView {
     private var fixedHandleOffset: Int?
     /// Set while the menu is replaced, so its dismissal keeps the selection.
     private var isAdjustingSelection = false
+    /// Advances with each new or adjusted selection; a dismissed menu ends
+    /// only the selection it was shown for.
+    private var selectionGeneration = 0
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -378,8 +381,8 @@ class ChatSelectableTextView: UITextView {
     }
 
     fileprivate func keyboardSelection(_ recognizer: UIGestureRecognizer,
-                                       requiresFailureOf other: UIGestureRecognizer) -> Bool {
-        // A handle drag wins over the transcript's scroll.
+                                       makesWait other: UIGestureRecognizer) -> Bool {
+        // A handle drag wins over the transcript's scroll: the scroll waits for it.
         recognizer === handleDrag && other.view is UIScrollView && other.view !== self
     }
 
@@ -390,6 +393,7 @@ class ChatSelectableTextView: UITextView {
             guard let word = wordRange(at: point) else { return }
             Self.activeKeyboardSelection?.endKeyboardSelection()
             Self.activeKeyboardSelection = self
+            selectionGeneration += 1
             pressAnchor = word
             selectionDisplay.isActivated = true
             setKeyboardSelection(word)
@@ -412,6 +416,7 @@ class ChatSelectableTextView: UITextView {
             guard let moving = handleEnd(near: point) else { return }
             let range = selectedRange
             fixedHandleOffset = moving == range.location ? NSMaxRange(range) : range.location
+            selectionGeneration += 1
             isAdjustingSelection = true
             editMenu.dismissMenu()
             loupe = UITextLoupeSession.begin(at: point, fromSelectionWidgetView: nil, in: self)
@@ -504,15 +509,11 @@ class ChatSelectableTextView: UITextView {
 
     // MARK: Menu
 
-    fileprivate func keyboardSelectionMenu() -> UIMenu? {
+    /// Annotate ahead of the system actions, as the keyboard-down menu.
+    fileprivate func keyboardSelectionMenu(suggestedActions: [UIMenuElement]) -> UIMenu? {
         let range = selectedRange
         guard hasKeyboardSelection, range.length > 0, NSMaxRange(range) <= attributedText.length else { return nil }
-        let text = (attributedText.string as NSString).substring(with: range)
-        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-            UIPasteboard.general.string = text
-            self?.endKeyboardSelection()
-        }
-        return UIMenu(children: [annotateAction?(range)].compactMap { $0 } + [copy])
+        return UIMenu(children: [annotateAction?(range)].compactMap { $0 } + suggestedActions)
     }
 
     fileprivate var keyboardSelectionMenuTarget: CGRect {
@@ -523,8 +524,10 @@ class ChatSelectableTextView: UITextView {
         // A tap or scroll elsewhere dismisses the menu and ends the selection,
         // as it would resign UIKit's own.
         guard !isAdjustingSelection else { return }
+        let generation = selectionGeneration
         animator.addCompletion { [weak self] in
-            guard let self, !self.isAdjustingSelection, self.fixedHandleOffset == nil else { return }
+            guard let self, self.selectionGeneration == generation, !self.isAdjustingSelection,
+                  self.fixedHandleOffset == nil else { return }
             self.endKeyboardSelection()
         }
     }
@@ -548,12 +551,12 @@ private final class KeyboardSelectionDelegate: NSObject, @preconcurrency UIGestu
 
     func gestureRecognizer(_ recognizer: UIGestureRecognizer,
                            shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-        owner?.keyboardSelection(recognizer, requiresFailureOf: other) ?? false
+        owner?.keyboardSelection(recognizer, makesWait: other) ?? false
     }
 
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
                              suggestedActions: [UIMenuElement]) -> UIMenu? {
-        owner?.keyboardSelectionMenu()
+        owner?.keyboardSelectionMenu(suggestedActions: suggestedActions)
     }
 
     func editMenuInteraction(_ interaction: UIEditMenuInteraction,
