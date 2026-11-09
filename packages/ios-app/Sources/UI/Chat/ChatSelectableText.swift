@@ -364,7 +364,9 @@ class ChatSelectableTextView: UITextView {
             return ChatTextInputFocus.keyboardIsOwned(byAnotherThan: self)
         }
         if recognizer === handleDrag {
-            return hasKeyboardSelection && handleEnd(near: recognizer.location(in: self)) != nil
+            // The long press's own drag extends by words; a handle only moves after it.
+            let pressing = [.began, .changed].contains(selectionPress.state)
+            return !pressing && hasKeyboardSelection && handleEnd(near: recognizer.location(in: self)) != nil
         }
         return hasKeyboardSelection
     }
