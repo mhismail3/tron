@@ -15,7 +15,8 @@ it deletes.
 files (55,866 lines) booted the whole Gateway registry (#2316 baseline). Under that coupling the full
 suite (about 16 minutes) became the gate, and load-sensitive reds blocked unrelated work: 21 flake
 issues were open.
-**Enforced by** `scripts/tron verify --changed`, which runs the changed modules' owned tests.
+**Enforced by** `scripts/tron verify --changed`, which runs the changed modules' owned tests and those of
+modules whose untyped code imports a changed file.
 **Not yet enforced:** the public-interface rule and the deleted-behaviour E2E proof. The
 boundary check in #2316 T2.9 adds them.
 

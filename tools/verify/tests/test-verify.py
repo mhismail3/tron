@@ -473,6 +473,37 @@ class SelectionTests(VerifyCase):
         self.assertEqual((change["addedTestFiles"], change["deletedTestFiles"], change["testLines"]["removed"]),
                          (["mods/alpha/test-alpha.edge.py"], ["mods/beta/test-beta.py"], PASSING.count("\n")))
 
+    def test_a_source_change_also_runs_the_tests_of_modules_that_import_it(self) -> None:
+        """#2364: 39cc6a39f changed a tools/ownership return shape; the importing modules' tests went red
+        on main because the change's selection ran only the owner's tests."""
+        r = self.repo
+        r.write("mods/alpha/alpha.py", "def pair():\n    return ('a', 'b')\n")
+        r.write("mods/beta/beta.py", "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parents[1] / 'alpha'))\n"
+                "from alpha import pair  # noqa: E402\n\ndef first():\n    left, _ = pair()\n    return left\n")
+        r.write("mods/beta/test-beta.py", "import sys, unittest\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parent))\n"
+                "import beta\nclass T(unittest.TestCase):\n    def test_first(self):\n        self.assertEqual(beta.first(), 'a')\nunittest.main()\n")
+        r.write("mods/untested/reader.mjs", "import { VALUE } from '../core/core.mjs';\nexport const seen = VALUE;\n")
+        r.write("mods/core/core.mjs", "export const VALUE = 1;\n")
+        r.commit("beta imports alpha")
+        r.git("branch", "-f", "base")
+        r.write("mods/alpha/alpha.py", "def pair():\n    return ('a', 'b', 'c')\n")
+        r.commit("alpha widens its tuple")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertIn("too many values to unpack", failed.stdout, failed.stderr)
+        selection = r.report()["selection"]
+        self.assertEqual(selection["tests"], ["mods/alpha/test-alpha.py", "mods/beta/test-beta.py"])
+        self.assertIn("repo/beta: imports changed mods/alpha/alpha.py; its 1 owned test file(s)", selection["reasons"])
+        # A relative JavaScript import is a consumer too; a change to only the producer's tests selects no importer.
+        r.git("branch", "-f", "base")
+        r.write("mods/core/core.mjs", "export const VALUE = 2;\n")
+        r.write("mods/alpha/test-alpha.py", PASSING.replace("test_ok", "test_still_ok"))
+        r.commit("core and alpha's test change")
+        planned = r.verify("--changed", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        self.assertIn("repo/untested: imports changed mods/core/core.mjs", planned.stdout)
+        self.assertNotIn("repo/beta", planned.stdout)
+
     def test_ignored_residue_with_no_named_writer_fails_the_run(self) -> None:
         r = self.repo
         r.write(".gitignore", "test-results/\n*.log\n")
