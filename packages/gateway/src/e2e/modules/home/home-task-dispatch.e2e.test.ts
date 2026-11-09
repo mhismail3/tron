@@ -3,6 +3,7 @@ import * as fileSystem from "node:fs/promises";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
+import { performance } from "node:perf_hooks";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -917,16 +918,13 @@ describe("Home task cold reconciliation", () => {
     const barrier = vi.spyOn(SessionCatalog.prototype, "whenReconciled").mockImplementation(async function(this: SessionCatalog) {
       await gate; await ready.call(this);
     });
-    let blockedTimer: NodeJS.Timeout | undefined;
     const startup = f.restartToReadiness();
-    const readiness = await Promise.race([
-      startup.then(() => "ready" as const),
-      new Promise<"blocked">(resolve => { blockedTimer = setTimeout(() => resolve("blocked"), 2_000); }),
-    ]);
-    clearTimeout(blockedTimer);
-    release();
-    const cold = await startup;
-    expect(readiness).toBe("ready");
+    let cold: Awaited<typeof startup>;
+    try {
+      // Readiness itself is the handshake. Keep the original 2 s failure bound,
+      // and always release/join startup if the held catalog blocks it.
+      cold = await awaitsWithin(startup, "readiness while catalog recovery is held", 2_000);
+    } finally { release(); await startup; }
     expect(await homeOwnerOf(cold).status()).toMatchObject({ taskRecovery: { available: false, reason: "not-started" } });
     await homeOwnerOf(cold).recoverTasks();
     expect(barrier).toHaveBeenCalled();
@@ -1027,10 +1025,13 @@ describe("Home task cold reconciliation", () => {
 
 // Host pressure is observational; it never admits or queues Home workers.
 describe("Home workers without a cap", () => {
-  it("labels pressure from CPU busy ticks, never load average, and starts a worker at once under real busy CPU", async () => {
-    // The sampler reads kernel CPU ticks from `os.cpus()`, so the fake host is installed before the
-    // fixture builds the sampler: its first window starts from these counters. A 4x-per-CPU load
-    // average stands in for a host whose run queue reads high while its CPUs idle.
+  it("labels pressure from CPU busy ticks, never load average, and starts a worker under injected busy CPU", async () => {
+    // Inject all sampler inputs before fixture construction: real event-loop
+    // utilization must not turn an idle-CPU case critical on a loaded host.
+    let sampleTime = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => sampleTime);
+    vi.spyOn(performance, "eventLoopUtilization").mockReturnValue({ idle: 2_100, active: 0, utilization: 0 });
+    // A 4x-per-CPU load average stands in for an idle host with a high run queue.
     const FAKE_CPUS = 4;
     const kernelCpus = Array.from({ length: FAKE_CPUS }, () => ({ model: "fixture", speed: 0, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }));
     vi.spyOn(os, "cpus").mockImplementation(() => structuredClone(kernelCpus));
@@ -1041,14 +1042,14 @@ describe("Home workers without a cap", () => {
     const advanceTicks = (busy: number, idle: number, cpus = kernelCpus) => {
       for (const cpu of cpus) { cpu.times.user += busy; cpu.times.idle += idle; }
     };
-    // A measured window is at least 2 s of real time (host-pressure.ts); the wait keeps the event loop idle.
+    // Close the actual sampler's 2 s window without waiting for host time.
     const readAfterWindow = async () => {
-      await new Promise(resolve => setTimeout(resolve, 2_100));
+      sampleTime += 2_100;
       return (await owner.status()).hostPressure;
     };
     // Startup: no window has closed, so nothing is measured yet and load alone labels nothing.
     expect((await owner.status()).hostPressure).toMatchObject({ level: "normal", load1PerCpu: 4 });
-    // The first measured window also absorbs the fixture's own setup; its event-loop share is not under test.
+    // Establish the first measured window; event-loop pressure is not under test.
     await readAfterWindow();
     // Idle CPUs under a 4x load average are not pressure.
     advanceTicks(0, 2_100);
@@ -1069,7 +1070,7 @@ describe("Home workers without a cap", () => {
     const persisted = JSON.parse((await readFile(logPath, "utf8")).trim().split("\n").at(-1)!);
     expect(persisted).toMatchObject({ event: "host.pressure", level: "warning", state: "critical", transition: "normal" });
     expect(persisted.counts).toMatchObject({ cpuBusyPercent: 100, loadPerCpuPercent: 400 });
-    // Settle the dispatch's own window (its event-loop share is not under test), then idle again.
+    // Start a fresh CPU window after dispatch, then idle again.
     await readAfterWindow();
     // Busy share between the elevated and critical bands.
     advanceTicks(1_680, 420);
@@ -1106,7 +1107,8 @@ describe("Home task list RPC", () => {
         grantRef: null, scopeRef: null, lifecycle: "pending",
         sessionId: null, operationId: null, stopIntent: null, spend: null,
         reportRef: null, terminalEvidence: null, wake: null }, null);
-      await new Promise(resolve => setTimeout(resolve, 2));
+      // HomeTaskStore owns monotonic creation ordering even in one clock tick;
+      // awaiting put is the durable publication handshake, not a clock delay.
     }
     const first = await service.invoke(client, "home.taskList", { limit: 2 }) as any;
     expect(first.items.map((row: any) => row.taskId)).toEqual(["list-4", "list-3"]);
