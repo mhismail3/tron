@@ -414,6 +414,13 @@ describe("settings renderer contract", () => {
     const singular = await resolve();
     expect(row(singular, queue)).toMatchObject({ display: "1 model", value: [second] });
     expect(row(singular, "tools.active")).toMatchObject({ display: "1 tool", value: ["read"] });
+    // A chosen order is the user's, even when Global holds no list of its own and the choice only reorders and
+    // extends the default tools: that layer stores `+name`/`-name` entries relative to the default.
+    await f.service.invoke(subscribed(), "settings.change", {
+      commandId: "tools-unset", target, changes: [{ key: "tools.active", layer: "global", op: "unset" }],
+    });
+    await change("tools-reordered", "tools.active", ["bash", "read", "web"]);
+    expect(row(await resolve(), "tools.active")).toMatchObject({ display: "3 tools", value: ["bash", "read", "web"] });
     await f.service.invoke(subscribed(), "settings.change", {
       commandId: "queue-unset", target, changes: [{ key: queue, layer: "global", op: "unset" }],
     });

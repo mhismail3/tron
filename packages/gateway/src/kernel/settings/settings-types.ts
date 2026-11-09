@@ -309,6 +309,8 @@ export function toolSelectionType(): ValueType {
     // A chosen selection keeps the layer's form: a layer of `+name`/`-name`
     // entries (or one holding nothing) stays relative to the layers below it, so
     // a later Mac change still flows through; a plain list stays a plain list.
+    // A chosen order that modifiers cannot reproduce over the base is stored as
+    // a plain list, since the user's order outranks following later changes.
     encode: (value, below, current) => {
       const chosen = value as string[];
       if (chosen.some(isToolModifier)) return chosen;
@@ -317,6 +319,8 @@ export function toolSelectionType(): ValueType {
       const base = Array.isArray(below) ? below as string[] : DEFAULT_TOOL_NAMES;
       const entries = [...chosen.filter(name => !base.includes(name)).map(name => `+${name}`),
         ...base.filter(name => !chosen.includes(name)).map(name => `-${name}`)];
+      const composed = applyToolModifiers([...base], entries);
+      if (composed.length !== chosen.length || composed.some((name, index) => name !== chosen[index])) return chosen;
       return entries.length > 0 ? entries : undefined;
     },
   };
