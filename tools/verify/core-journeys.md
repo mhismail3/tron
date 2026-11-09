@@ -102,7 +102,7 @@ only when the whole trace equals its golden, so these goldens gate the assertion
 |---|---|---|---|
 | Prompt/reply | `test-fixtures/pi-sdk/session-shapes.golden.json` (`session-shapes.lock`); the transcript, messages and responses are inline checks in `e2e/sessions/run.lock.integration.test.ts` | prompt hash + section headings + system entry | #2189 |
 | Delegate | `e2e/kernel/delegation/locks/delegation-subagent.golden.json` (narrowed: system entries and Tron entries); the rest inline in `e2e/kernel/delegation/delegation.lock.integration.test.ts` | tool parameter schemas | #2189 |
-| Home wake | `e2e/modules/home/locks/home-activation-wake.golden.json` | prompt hashes + full tool schemas | #2189 |
+| Home wake | `e2e/modules/home/locks/home-activation-wake.golden.json` (narrowed: provider requests and system entries); the rest inline in `e2e/modules/home/home.lock.integration.test.ts` | prompt hashes + full tool schemas | #2189 |
 | Home restart | `e2e/modules/home/locks/home-contention-restart.golden.json` (narrowed: Home's system entry and Tron entries); the rest inline in `e2e/modules/home/home-restart.lock.integration.test.ts` | full tool descriptions/schemas | #2236 |
 | Settings | `e2e/admin/admin.lock.integration.test.ts` (named checks) | whole exchange/file trace | #2236 |
 | Reconnect | `e2e/transport/transport.lock.integration.test.ts` (named checks); the reconnect, lifecycle and cold-load prompt hashes are in `test-fixtures/pi-sdk/session-shapes.golden.json` | prompt hash | #2189 |

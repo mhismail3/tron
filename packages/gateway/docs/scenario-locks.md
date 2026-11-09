@@ -13,8 +13,9 @@ its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock` scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`, `run-extension-ui`), `run-queue-control`, `project-root-trust`, `project-root-resources`, `run-lifecycle-rpcs`, `transport-reconnect-snapshot`, `admin-settings-change`, `automation-owned-run`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers` and the store mutation-path tests in the paragraph after the table
 assert named effects only. `delegation-subagent` and `home-contention-restart` keep a
 narrowed golden of the entries no other lock covers, plus an `inlineTrace` in
-the same golden for the remaining ordered trace. The other scenario locks in the
-table below compare whole-scenario goldens.
+the same golden for the remaining ordered trace. `home-activation-wake` asserts its
+trace inline and keeps a narrowed golden of its model-visible text: every provider
+request and both system entries.
 
 ## Framework
 
@@ -88,7 +89,7 @@ Scenario lock files live in `gateway/e2e`, at the path of the module they lock
 | `gateway/notifications` | `notifications-queued-restart` | inline checks: with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
 | `gateway/notifications` | `notifications-queued-cancel` | inline checks: removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged. Named checks: each run's admission and durable terminal (record, history and reads agree), its completion and receipts bound to the owned prompt with Automation attribution, both sessions' entry types, the chat's transcript rows, each provider request's messages, `chatWithAutomations` shapes, every command receipt (result equal to the response) and run markers (none left); the owners validate the record and receipt formats, and `store-automations`/`store-command-receipts` pin a record envelope and receipt projections |
-| `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
+| `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes. Named checks: every client answer, both chapter snapshots and transcript rows, undroppable events, each caller's requests and stream options, both canonical files (entry order, receipts, messages, the result notice and its delivery, task binding and report, settings provenance and values), loaded extensions, the relay pushes and the Home store. Golden (narrowed): every provider request and both system entries with full tool declarations; each runtime's request tools must equal its declarations |
 | `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result. Golden: callers, both Gateways' exchanges and Home requests, publication and ledger, task records and other Home entries in exact `inlineTrace` order, plus Home's system entry, recovered task result, settings, chat-invocation and context-delivery entries in the narrowed canonical trace |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child. Golden: the parent's provider requests, both sessions' other entries and the subagent's process activity in exact `inlineTrace` order, plus both sessions' system entries and the parent's settings, context-window and extension-activity entries in the narrowed canonical trace |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
@@ -256,7 +257,8 @@ Human before/after approval is for new design or intended visible changes, not
 unchanged behavior or repeated schema metadata. A refactor never rewrites one.
 
 `home-activation-wake` is the canonical real Home/worker shared tool-schema
-check. Other traces retain declaration names, ordering and constrained sampling,
+check: its narrowed golden keeps both runtimes' system entries with full
+declarations. Other traces retain declaration names, ordering and constrained sampling,
 not duplicated descriptions/parameters or their wire-shape subtrees. Tools absent
 from that canonical capture retain their full schema with their owning scenario. Only schema blocks are
 projected away; lifecycle fields, tool visibility, receipts and validation remain.
