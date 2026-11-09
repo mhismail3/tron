@@ -1056,9 +1056,9 @@ export class GatewayService {
         }
         let ownsSchedule = false;
         try {
-          return await this.mutation(client, method, params, async () => {
+          return await this.mutation(client, method, params, async (workToken) => {
             await this.requireNoActiveIosDeviceInstall();
-            const currentDrain = this.dependencies.sessions.administrativeDrainSnapshot();
+            const currentDrain = this.dependencies.sessions.administrativeDrainSnapshot(workToken);
             const currentDrainInProgress = this.dependencies.sessions.isAdministrativeDrainStarted
               && (currentDrain.phase === "preparing" || currentDrain.phase === "waiting");
             if (currentDrainInProgress && !restartNow) {
@@ -1071,7 +1071,7 @@ export class GatewayService {
             await this.admitAdministrativeDrain();
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
-            const drain = this.dependencies.sessions.beginAdministrativeDrain();
+            const drain = this.dependencies.sessions.beginAdministrativeDrain(workToken);
             // Restart retains its established cancellation policy; intentional stop does not.
             this.dependencies.auth.cancelWaitingForRestart();
             this.dependencies.logger?.log(
@@ -1106,9 +1106,9 @@ export class GatewayService {
         }
         let ownsSchedule = false;
         try {
-          return await this.mutation(client, method, params, async () => {
+          return await this.mutation(client, method, params, async (workToken) => {
             await this.requireNoActiveIosDeviceInstall();
-            const currentDrain = this.dependencies.sessions.administrativeDrainSnapshot();
+            const currentDrain = this.dependencies.sessions.administrativeDrainSnapshot(workToken);
             if (this.dependencies.sessions.isAdministrativeDrainStarted
               && (currentDrain.phase === "preparing" || currentDrain.phase === "waiting")) {
               throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
@@ -1116,7 +1116,7 @@ export class GatewayService {
             await this.admitAdministrativeDrain();
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
-            const drain = this.dependencies.sessions.beginAdministrativeDrain();
+            const drain = this.dependencies.sessions.beginAdministrativeDrain(workToken);
             this.dependencies.logger?.log(
               "info",
               `Gateway stop requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,

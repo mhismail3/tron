@@ -4177,8 +4177,9 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   /** Close every Gateway work admission in the same synchronous turn as the
-   * accepted restart RPC and return its initial bounded identity. */
-  beginAdministrativeDrain(): AdministrativeDrainSnapshot {
+   * accepted restart RPC and return its initial bounded identity, answered
+   * without the requesting RPC's own work (`answeringWorkToken`). */
+  beginAdministrativeDrain(answeringWorkToken?: string): AdministrativeDrainSnapshot {
     if (!this.administrativeDrainStarted) {
       this.administrativeDrainStarted = true;
       this.workRegistry.beginDrain();
@@ -4190,7 +4191,7 @@ export class RuntimeRegistry implements SessionOperations {
       this.drainFingerprint = "";
       this.drainRevision += 1;
     }
-    return this.administrativeDrainSnapshot();
+    return this.administrativeDrainSnapshot(answeringWorkToken);
   }
 
   private setDrainPhase(phase: AdministrativeDrainPhase): void {
@@ -4200,7 +4201,10 @@ export class RuntimeRegistry implements SessionOperations {
     this.drainFingerprint = "";
   }
 
-  administrativeDrainSnapshot(): AdministrativeDrainSnapshot {
+  /** The drain's blockers. A lifecycle RPC answers it without its own work
+   * (`answeringWorkToken`), which only settles after that answer; the revision
+   * still follows every fact, so the drain itself waits on that work. */
+  administrativeDrainSnapshot(answeringWorkToken?: string): AdministrativeDrainSnapshot {
     const now = Date.now();
     const facts: Array<{
       key: string;
@@ -4239,9 +4243,10 @@ export class RuntimeRegistry implements SessionOperations {
     }
     facts.sort((left, right) => (left.admittedAt ?? "").localeCompare(right.admittedAt ?? "")
       || left.category.localeCompare(right.category) || left.key.localeCompare(right.key));
+    const answered = answeringWorkToken === undefined ? facts : facts.filter((fact) => fact.key !== `work:${answeringWorkToken}`);
     const counts: Partial<Record<AdministrativeDrainBlockerCategory, number>> = {};
-    for (const fact of facts) counts[fact.category] = (counts[fact.category] ?? 0) + 1;
-    const summaries = facts.slice(0, 64).map((fact) => {
+    for (const fact of answered) counts[fact.category] = (counts[fact.category] ?? 0) + 1;
+    const summaries = answered.slice(0, 64).map((fact) => {
       const admittedMilliseconds = fact.admittedAt ? Date.parse(fact.admittedAt) : Number.NaN;
       return {
         id: `blocker-${createHash("sha256").update(`${this.drainId}\0${fact.key}`).digest("hex").slice(0, 20)}`,
@@ -4268,11 +4273,11 @@ export class RuntimeRegistry implements SessionOperations {
       drainId: this.drainId,
       revision: this.drainRevision,
       phase: this.drainPhase,
-      blockerCount: facts.length,
+      blockerCount: answered.length,
       blockerCounts: counts,
       blockers: summaries,
-      omittedCount: Math.max(0, facts.length - summaries.length),
-      suspectProjectionCount: facts.filter((fact) => fact.state === "suspect").length,
+      omittedCount: Math.max(0, answered.length - summaries.length),
+      suspectProjectionCount: answered.filter((fact) => fact.state === "suspect").length,
     };
   }
 
