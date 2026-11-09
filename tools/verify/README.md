@@ -212,8 +212,7 @@ Runners are the existing ones:
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
 | `relay` | the relay's Vitest: `npm test` in `packages/push-relay`, as `verify --batch`'s relay lane |
-| `mac` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`): builds and runs those `TronMacIntegrationTests` classes under a temporary HOME, as `verify --batch`'s Mac integration lane runs all of them; the Mac Swift source modules declare it |
-| `mac-terminal` | the Gateway's `vitest.mac-terminal.config.ts`, always on this Mac (it needs this host's tailnet sshd) |
+| `mac` / `mac-terminal` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`, also the batch's Mac integration lane; Mac Swift sources declare it) / `vitest.mac-terminal.config.ts`, on this Mac |
 | `ios-lanes` | not driven by verify |
 
 `ios-journeys` are the `RealGatewayPairAndChatUITests` files. A changed extension file selects
@@ -227,8 +226,7 @@ status and revision. `--skip ios` skips them.
 
 When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
 journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) are selected,
-the run is `incomplete` (exit 1) unless `--skip ios` names them; they need their own lanes.
-`--skip mac` skips `mac` and `mac-terminal`. A `relay` run needs the relay's installed
+the run is `incomplete` (exit 1) unless `--skip ios` names them. `--skip mac` covers `mac-terminal`. A `relay` run needs the relay's installed
 lockfile, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
 
 ## Manifest `verify` declarations
