@@ -16,12 +16,12 @@
     "scripts/test-push-product-config.sh"
   ],
   "directories": {
-    "Sources/MenuBar": {"name": "menu-bar", "layer": "L4"},
-    "Sources/NativeHost": {"name": "native-host", "layer": "L3"},
-    "Sources/Search": {"name": "search", "layer": "L3"},
-    "Sources/Server": {"name": "server", "layer": "L3"},
-    "Sources/Support": {"name": "support", "layer": "L0"},
-    "Sources/Wizard": {"name": "wizard", "layer": "L4"},
+    "Sources/MenuBar": {"name": "menu-bar", "layer": "L4", "verify": ["scripts/tron test mac"]},
+    "Sources/NativeHost": {"name": "native-host", "layer": "L3", "verify": ["scripts/tron test mac"]},
+    "Sources/Search": {"name": "search", "layer": "L3", "verify": ["scripts/tron test mac"]},
+    "Sources/Server": {"name": "server", "layer": "L3", "verify": ["scripts/tron test mac"]},
+    "Sources/Support": {"name": "support", "layer": "L0", "verify": ["scripts/tron test mac"]},
+    "Sources/Wizard": {"name": "wizard", "layer": "L4", "verify": ["scripts/tron test mac"]},
     "Tests": {"name": "integration-tests", "layer": "L5"},
     "docs": {"name": "docs", "layer": "L5"},
     "native-computer-control": {"name": "native-computer-control", "layer": "L3"},

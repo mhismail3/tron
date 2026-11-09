@@ -26,6 +26,7 @@ import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vi
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
+MAC = "packages/mac-app"
 # A change here reaches everything above it, so it selects every lock.
 WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
@@ -40,7 +41,7 @@ IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppU
 # UIValidation journey classes that need a fixture only their harness provides; they run in its lane.
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
-NOT_DRIVEN = ("ios-lanes", "mac")
+NOT_DRIVEN = ("ios-lanes",)
 # The real-UI journeys run, by exact selector, through the harness that owns them (its
 # `ui_owned_journeys`), as `verify --batch`'s UI journey lane runs them all.
 JOURNEY_CLASS = "RealGatewayPairAndChatUITests"
@@ -153,7 +154,7 @@ def nested_files() -> tuple[set, set]:
 
 def runner_of(path: str, nested: set, mac_terminal: set) -> str:
     if path.startswith(f"{GATEWAY}/src/"):
-        return "mac" if path in mac_terminal else ("gateway-nested" if path in nested else "gateway")
+        return "mac-terminal" if path in mac_terminal else ("gateway-nested" if path in nested else "gateway")
     if path.endswith(".test.mjs"):
         return "node-gateway" if path.startswith(f"{GATEWAY}/") else "node"
     if path.endswith(".py"):
@@ -165,7 +166,7 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
             return "ios-lanes"
         name = ios_class(path)
         return "ios-journeys" if name == JOURNEY_CLASS else "ios-lanes" if name in IOS_HARNESSED else "ios"
-    if path.startswith("packages/mac-app/"):
+    if path.startswith(f"{MAC}/") and path.endswith(".swift"):
         return "mac"
     if path.startswith(f"{RELAY}/"):
         return "relay"
@@ -426,6 +427,12 @@ def declared_files(command: str, tracked: list[str]) -> set[str]:
     elif prefix == ["scripts/tron", "test", "gateway"] and arguments:
         if all(path.endswith(".test.mjs") or (path.startswith("src/") and path.endswith(".test.ts")) for path in arguments):
             files = {f"{GATEWAY}/{path}" for path in arguments}
+    elif prefix == ["scripts/tron", "test", "mac"]:
+        classes = set(arguments)
+        files = {path for path in tracked if path.startswith(f"{MAC}/") and path.endswith(".swift") and is_test(path)
+                 and (not classes or Path(path).stem in classes)}
+        if classes - {Path(path).stem for path in files}:
+            raise VerifyError(f"unknown Mac test class in verify declaration: {command!r}")
     elif prefix == ["scripts/tron", "test", "ios"] and arguments[:1] == ["run"]:
         pairs = arguments[1:]
         if pairs and len(pairs) % 2 == 0 and all(flag == "--only-testing" for flag in pairs[::2]):
@@ -957,6 +964,15 @@ def vitest_count(output_path: Path):
     return count
 
 
+def mac_count(output: str) -> int:
+    """Tests the run executed: its last XCTest summary plus its Swift Testing summary; zero when any was skipped."""
+    xctest = re.findall(r"Executed (\d+) tests?", output)
+    swift_testing = re.findall(r"Test run with (\d+) tests?", output)
+    if re.search(r"\d+ tests? skipped", output):
+        return 0
+    return int(xctest[-1] if xctest else 0) + int(swift_testing[-1] if swift_testing else 0)
+
+
 def tap_count(output: str) -> int:
     found = re.findall(r"^[#ℹ] pass (\d+)", output, re.M)
     return int(found[-1]) if found else 0
@@ -1014,6 +1030,14 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group == "ios-journeys":
         return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
+    if group == "mac-terminal":
+        # Its own Vitest config, on this Mac: the journey needs this host's tailnet sshd (vitest.mac-terminal.config.ts).
+        report = logs / f"{group}-vitest.json"
+        return (["python3", str(ROOT / "tools/verify/gateway.py"), "--config", "vitest.mac-terminal.config.ts", "--reporter=default",
+                 "--reporter=json", f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]], ROOT / GATEWAY, vitest_count(report))
+    if group == "mac":
+        # The Mac integration target, by test class, as `verify --batch`'s Mac integration lane runs all of it.
+        return (["python3", str(ROOT / "tools/verify/mac.py"), *sorted({Path(path).stem for path in files})], ROOT, mac_count)
     if group == "relay":
         # The relay's own Vitest (Workers pool), as `verify --batch`'s relay lane runs it.
         report = logs / f"{group}-vitest.json"
