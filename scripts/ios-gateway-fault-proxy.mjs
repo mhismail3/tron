@@ -542,8 +542,15 @@ async function ownedGatewayVerifier(initialPid, port) {
   // check only that the proven PID is alive. A watcher re-proves the adopted
   // Gateway every second, so a PID that died and was reused, or a zombie, is
   // unproven within a second even when no request saw it die; a helper killed at
-  // its deadline proves nothing either way and leaves the state as it was.
+  // its deadline proves nothing either way, but five such misses in a row
+  // unprove the Gateway too: a reuse is accepted for at most about five seconds
+  // of sustained helper timeouts, at the cost of refusals while they last.
+  // Residual: a PID reused and serving the port inside that window is trusted.
   let proven = false;
+  // Bumped by every adopt and exit, so a proof that started before either
+  // cannot prove what replaced it.
+  let generation = 0;
+  let missedProofs = 0;
   const prove = async target => {
     if (await inspect(target, "lstart") !== birth || await inspect(target, "command") !== command) throw new Error("Gateway process ownership changed");
     const result = await execute(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
@@ -561,30 +568,34 @@ async function ownedGatewayVerifier(initialPid, port) {
       return Promise.reject(new Error("Gateway process exited"));
     }
     checking ??= (async () => {
-      const target = pid;
-      await prove(target);
-      // A respawn adopted during this proof is not what was proven.
-      if (pid === target) proven = true;
+      const started = generation;
+      await prove(pid);
+      if (generation === started) { proven = true; missedProofs = 0; }
     })().finally(() => { checking = undefined; });
     return checking;
   };
   let watching;
   setInterval(() => {
     if (!proven || watching) return;
-    const target = pid;
-    watching = prove(target)
-      .catch(error => { if (!error?.killed && pid === target) proven = false; })
+    const started = generation;
+    watching = prove(pid)
+      .then(() => { if (generation === started) missedProofs = 0; })
+      .catch(error => {
+        if (generation !== started) return;
+        if (!error?.killed || ++missedProofs >= 5) proven = false;
+      })
       .finally(() => { watching = undefined; });
   }, 1_000).unref();
   verifyTarget.adopt = async target => {
     const next = await capture(target, process.pid);
+    generation += 1;
     proven = false;
     pid = target;
     command = next.command;
     birth = next.birth;
   };
   // A respawned child is the proxy's own: its exit is known exactly.
-  verifyTarget.exited = target => { if (pid === target) proven = false; };
+  verifyTarget.exited = target => { if (pid === target) { generation += 1; proven = false; } };
   verifyTarget.pid = () => pid;
   return verifyTarget;
 }
