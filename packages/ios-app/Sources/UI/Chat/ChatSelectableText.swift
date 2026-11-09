@@ -109,9 +109,10 @@ final class ChatAnnotationPresenter {
     private(set) var revealed: RevealedSource?
 
     #if HOSTED_TEST
-    /// Hosted journeys read each revealed source (its window frame) and its
-    /// clearing (nil): both fall inside XCUITest's idle wait after the tap.
-    static var hostedReveals: (@MainActor (_ quote: String, _ windowFrame: CGRect?) -> Void)?
+    /// Hosted journeys read each revealed source ("shown" with its window
+    /// frame), its element mounting ("exposed") and its clearing ("cleared"):
+    /// all fall inside XCUITest's idle wait after the tap.
+    static var hostedReveals: (@MainActor (_ event: String, _ quote: String, _ windowFrame: CGRect?) -> Void)?
     #endif
 
     func revealed(itemID: String, blockKey: String) -> RevealedSource? {
@@ -177,9 +178,9 @@ final class ChatAnnotationPresenter {
         return view.convert(view.bounds(of: reveal.anchor.range), to: window)
     }
 
-    /// Measures the mounted source: flashes it when it is in the band (or no
-    /// scroll can improve it), otherwise asks for the measured scroll. False
-    /// when the source is not mounted.
+    /// Measures the mounted source: flashes it when it is in the band (or
+    /// after `maximumRevealScrolls` measured scrolls), otherwise asks for the
+    /// measured scroll. False when the source is not mounted.
     private func placeReveal() -> Bool {
         guard var reveal,
               let view = sources[SourceKey(itemID: reveal.anchor.itemID, blockKey: reveal.anchor.blockKey)]?.view,
@@ -201,14 +202,14 @@ final class ChatAnnotationPresenter {
             )
             revealed = source
             #if HOSTED_TEST
-            Self.hostedReveals?(source.quote, rect)
+            Self.hostedReveals?("shown", source.quote, rect)
             #endif
             // The element lives as long as the highlight it describes.
             view.flash(reveal.anchor.range, reduceMotion: reduceMotion) { [weak self] in
                 guard let self, self.revealed?.id == source.id else { return }
                 self.revealed = nil
                 #if HOSTED_TEST
-                Self.hostedReveals?(source.quote, nil)
+                Self.hostedReveals?("cleared", source.quote, nil)
                 #endif
             }
             endReveal()
@@ -253,6 +254,9 @@ extension View {
                     .accessibilityLabel(revealed.quote)
                     .accessibilityAddTraits(.isStaticText)
                     .accessibilityIdentifier("chat.annotation.revealed-source")
+                    #if HOSTED_TEST
+                    .onAppear { ChatAnnotationPresenter.hostedReveals?("exposed", revealed.quote, nil) }
+                    #endif
             }
         }
     }

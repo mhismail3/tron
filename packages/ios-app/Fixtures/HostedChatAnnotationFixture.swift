@@ -75,16 +75,18 @@ struct HostedChatAnnotationFixture: View {
                 .font(.system(size: 1)).opacity(0.01)
                 .accessibilityIdentifier("fixture.last-prompt")
                 .allowsHitTesting(false)
-            // Each revealed source ("shown|quote|minY|maxY") and its clearing.
+            // Each revealed source ("shown|quote|minY|maxY"), its element
+            // mounting ("exposed|quote") and its clearing ("cleared|quote").
             Text(reveals.isEmpty ? "none" : reveals.joined(separator: ";"))
                 .font(.system(size: 1)).opacity(0.01)
                 .accessibilityIdentifier("fixture.reveals")
                 .allowsHitTesting(false)
         }
         .task {
-            ChatAnnotationPresenter.hostedReveals = { quote, frame in
-                reveals.append(frame.map { "shown|\(quote)|\(Int($0.minY.rounded(.down)))|\(Int($0.maxY.rounded(.up)))" }
-                    ?? "cleared|\(quote)")
+            ChatAnnotationPresenter.hostedReveals = { event, quote, frame in
+                reveals.append(([event, quote] + (frame.map {
+                    ["\(Int($0.minY.rounded(.down)))", "\(Int($0.maxY.rounded(.up)))"]
+                } ?? [])).joined(separator: "|"))
             }
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")

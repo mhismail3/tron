@@ -265,7 +265,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         ManagedSheetPresentationSignal.neverAppeared(transition.neverAppeared, site: site)
         if let retired = transition.retired { coordinator?.retire(retired) }
         if let registered = transition.registered {
-            coordinator?.register(registered, parent: parent, dependencies: dependencies)
+            coordinator?.register(registered, parent: parent, dependencies: dependencies,
+                                  keepsParentViewport: keepsPresenterViewport)
         }
     }
 

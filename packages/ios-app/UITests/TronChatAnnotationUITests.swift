@@ -394,7 +394,8 @@ final class TronChatAnnotationUITests: XCTestCase {
             .components(separatedBy: "|") ?? []
         XCTAssertEqual(shown.count, 4, reveals.label)
         XCTAssertEqual(shown[1], quoted)
-        XCTAssertEqual(reveals.label, "shown|\(quoted)|\(shown[2])|\(shown[3]);cleared|\(quoted)", "One reveal, cleared once")
+        XCTAssertEqual(reveals.label, "shown|\(quoted)|\(shown[2])|\(shown[3]);exposed|\(quoted);cleared|\(quoted)",
+                       "One reveal whose element mounts, then clears once")
         XCTAssertTrue(quote.exists, "The sheet stays open over the revealed source")
         let flash = app.descendants(matching: .any)["chat.annotation.revealed-source"]
         XCTAssertFalse(flash.exists, "The revealed source's element clears with its highlight")
