@@ -168,7 +168,8 @@ means each command keeps its existing default sequence; foreign, class, suite an
 removed native vendor-setup selectors refuse before any build, fixture or lease.
 
 `run-ui` pairs the production scene against a fresh fixture per journey, leaving
-`results/<utc>-ui.*`. `TRON_IOS_E2E_UI_LANES=N` (1 to the 3 host slots) runs the
+`results/<utc>-ui.*`; its `app-log/` holds the hosted app's own `app.jsonl`,
+cleared before the journey and copied after it (absent when the app wrote none). `TRON_IOS_E2E_UI_LANES=N` (1 to the 3 host slots) runs the
 journeys on N lanes at once: the command's own lane plus `<lane>-uiK` lanes, each
 with its own lease, host slot, simulator and fixture (`laneK/results/`), taking
 journeys from one queue, longest first by `TRON_IOS_E2E_UI_JOURNEY_SECONDS` (JSON
