@@ -75,18 +75,23 @@ def choose_host() -> tuple[str, str]:
         return 'local', 'uncommitted changes; the mini runs a commit'
     ssh = ssh_command()
     ssh[ssh.index('ConnectTimeout=10')] = 'ConnectTimeout=5'
+    # A bounded probe (5 s to connect, 30 s in all) that ships this file, so both halves are one version.
     try:
         probe = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', Path(__file__).read_text(), 'status'])],
                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return 'local', f'the mini {ssh[-1]} is unreachable: no answer within 30 s'
+    try:
         status = json.loads(probe.stdout.strip().splitlines()[-1]) if probe.returncode == 0 else None
-    except (subprocess.TimeoutExpired, ValueError, IndexError):
-        status, probe = None, None
-    if status is None:
-        detail = (probe.stderr.strip().splitlines() or [''])[-1] if probe else 'no answer within 30 s'
-        return 'local', f'the mini {ssh[-1]} is unreachable' + (f': {detail}' if detail else '')
-    if status['busy']:
+        busy, ready, load = bool(status['busy']), bool(status['ready']), float(status['load'])
+    except (ValueError, IndexError, KeyError, TypeError):
+        detail = ((probe.stderr if probe.returncode else probe.stdout).strip().splitlines() or ['no output'])[-1]
+        return 'local', f'the mini {ssh[-1]} is unreachable: {detail}' if probe.returncode else f'the mini {ssh[-1]} answered no status: {detail}'
+    if not ready:
+        return 'local', f'the mini is not set up: no ~/{BASE}/tron.git'
+    if busy:
         return 'local', 'the mini is busy with another Gateway job'
-    return 'mini', f'reachable and idle, load {status["load"]:.1f}'
+    return 'mini', f'reachable and idle, load {load:.1f}'
 
 
 def pool_main(args: list[str]) -> int:
@@ -96,7 +101,8 @@ def pool_main(args: list[str]) -> int:
           file=sys.stderr, flush=True)
     if host == 'mini':
         return local_main(args)
-    return subprocess.run(['python3', str(ROOT / 'tools/verify/gateway.py'), *args]).returncode
+    # This process becomes the lane, so a stop reaches gateway.py's own signal forwarding and cleanup.
+    os.execvp('python3', ['python3', str(ROOT / 'tools/verify/gateway.py'), *args])
 
 
 def outputs(args: list[str]) -> tuple[list[str], list[str]]:
@@ -197,7 +203,7 @@ def local_main(args: list[str]) -> int:
 # ---------------------------------------------------------------------------- mini side
 
 def remote_status() -> int:
-    """Whether a Gateway job holds the mini's job lock, and its load: the pool's availability probe."""
+    """Whether the mini is set up, whether a Gateway job holds its job lock, and its load: the pool's availability probe."""
     lock_path = Path.home() / BASE / 'jobs/gateway.lock'
     busy = False
     if lock_path.is_file():
@@ -207,7 +213,7 @@ def remote_status() -> int:
                 fcntl.flock(lock, fcntl.LOCK_UN)
             except BlockingIOError:
                 busy = True
-    print(json.dumps({'busy': busy, 'load': os.getloadavg()[0]}), flush=True)
+    print(json.dumps({'busy': busy, 'ready': (Path.home() / BASE / 'tron.git/HEAD').is_file(), 'load': os.getloadavg()[0]}), flush=True)
     return 0
 
 

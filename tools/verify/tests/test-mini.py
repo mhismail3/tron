@@ -9,7 +9,8 @@ mini.py's session both go through it. The cases check that a lane runs at the ex
 report and exit code come back with the mini checkout path rewritten; that a dirty tree, an
 unreachable host, an off-pin toolchain and a HEAD other than verify's commit fail with exit 2 and no
 result; that a push whose job never started leaves no ref once the next job ends; and that stopping the local runner, or killing its
-whole process group, stops the mini lane and releases the mini job lock.
+whole process group, stops the mini lane and releases the mini job lock. The pool (#2336) runs on the mini when
+reachable, set up and idle, and otherwise here with its reason; a stopped local pool lane is stopped itself.
 """
 from __future__ import annotations
 
@@ -192,8 +193,28 @@ class MiniGatewayLane(unittest.TestCase):
         self.git('config', '--unset', 'tron.verify.mini')
         here('no mini is configured')
         self.git('config', 'tron.verify.mini', 'mini.test')
+        bare = self.mini / 'tron-ci/tron.git'
+        bare.rename(bare.with_name('moved.git'))
+        here('the mini is not set up: no ~/tron-ci/tron.git')
+        bare.with_name('moved.git').rename(bare)
         self.write('README', 'uncommitted\n')
         here('uncommitted changes; the mini runs a commit')
+
+    def test_stopping_a_pool_lane_on_this_mac_stops_the_lane_itself(self) -> None:
+        # The pool's local lane is gateway.py in the runner's own process, so a stop reaches its signal
+        # forwarding and cleanup instead of orphaning it (and the host's full-Gateway lock) (#2336 review).
+        self.git('config', 'tron.verify.mini', 'unreachable.test')
+        runner = subprocess.Popen(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', 'hang'], cwd=self.local / 'packages/gateway',
+                                  env={**self.env, 'HOME': str(self.temporary)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        started = self.temporary / 'lane-started'
+        for _ in range(300):
+            if started.exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(started.exists(), 'the local lane started')
+        runner.send_signal(signal.SIGTERM)
+        self.assertEqual(runner.wait(timeout=30), 143)
+        self.assertEqual((self.temporary / 'lane-terminated').read_text(), 'SIGTERM', 'the lane itself received the stop')
 
     def test_an_unreachable_host_or_off_pin_toolchain_fails_without_a_result(self) -> None:
         report, args = self.report_args()

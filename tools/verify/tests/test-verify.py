@@ -241,7 +241,7 @@ class ExternalVerificationTests(VerifyCase):
         ssh = Path(self.temp.name) / "bin" / "ssh"
         ssh.parent.mkdir()
         ssh.write_text('#!/bin/bash\nfor word in "$@"; do [[ "$word" == mini.invalid ]] && { echo "ssh: Could not resolve hostname mini.invalid" >&2; exit 255; }; done\n'
-                       'echo \'{"busy": false, "load": 1.5}\'\n')
+                       'echo \'{"busy": false, "ready": true, "load": 1.5}\'\n')
         ssh.chmod(0o755)
         r.env["PATH"] = f"{ssh.parent}{os.pathsep}{r.env['PATH']}"
         for mini_host, options, runner, reason in (

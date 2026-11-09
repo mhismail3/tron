@@ -1224,6 +1224,8 @@ def main(argv: list[str]) -> int:
         print(f"  gateway lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     else:
         gateway_host, gateway_reason = "local", "no Gateway lane selected"
+    if "mac-terminal" in groups and not skipped_group("mac-terminal"):
+        print("  mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
