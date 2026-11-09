@@ -175,7 +175,9 @@ def main() -> int:
             interrupted_signal = signum
             try:
                 os.killpg(process.pid, signum)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
+                # The command already exited: macOS answers EPERM while it awaits
+                # reaping (ESRCH once reaped); the group is ours, so no other cause.
                 pass
 
         previous_handlers = {
