@@ -256,6 +256,7 @@ class ExternalVerificationTests(VerifyCase):
                              {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
             self.assertEqual(plan["gatewayHost"], {"host": runner.removesuffix(".py").replace("gateway", "local"), "reason": reason})
             self.assertIn(f"gateway lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
+            self.assertIn("mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", planned.stdout)
         r.git("config", "--unset", "tron.verify.mini")
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")
@@ -1308,6 +1309,26 @@ failed = 0 if "1 === 1" in source else 1
 pathlib.Path(out).write_text(json.dumps({"numFailedTests": failed, "numFailedTestSuites": 0, "numPassedTests": 1 - failed}))
 """
 SOURCE = "export const kill = 1 === 1;\nexport const hang = true;\n"
+
+
+class StepStopTests(unittest.TestCase):
+    def test_stopping_a_step_that_exited_before_it_was_reaped_settles_it_interrupted(self) -> None:
+        """#2389: macOS answers killpg on a group whose members all exited but are not yet reaped
+        with EPERM; an interrupt in that window still settles the step instead of crashing verify."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("shipped_verify", ROOT / "tools/verify/verify.py")
+        shipped = importlib.util.module_from_spec(spec); spec.loader.exec_module(shipped)
+        run = shipped.Run(f"step-stop-{os.getpid()}-{time.time_ns()}", 1)
+        self.addCleanup(shutil.rmtree, run.logs, ignore_errors=True)
+        launched = run.launch(1, "exits", ["true"])
+        self.addCleanup(launched.process.wait)
+        deadline = time.monotonic() + 30
+        while not subprocess.run(["ps", "-o", "stat=", "-p", str(launched.process.pid)], capture_output=True,
+                                 text=True).stdout.startswith("Z"):
+            self.assertLess(time.monotonic(), deadline, "the step never exited")
+            time.sleep(0.05)
+        run.stop([launched])
+        self.assertEqual(launched.result["status"], "interrupted")
 
 
 class MutateTests(VerifyCase):

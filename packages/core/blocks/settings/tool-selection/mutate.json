@@ -1,0 +1,129 @@
+{
+  "block": "settings/tool-selection",
+  "tier": "high-stakes",
+  "tierReason": "decides which tools the model may call (bash, write, edit: authority over the Mac); \"when unsure, high-stakes\"",
+  "impl": "blocks/settings/tool-selection/Block.dfy",
+  "symbols": [
+    "Without",
+    "Mods",
+    "PlainNames",
+    "AllModifiers",
+    "Compose",
+    "Missing",
+    "Encode"
+  ],
+  "excludeSymbols": {
+    "IsModifier": "defined in the laws file (what a modifier is), not implementation"
+  },
+  "verify": [
+    "blocks/settings/tool-selection/Block.dfy"
+  ],
+  "laws": {
+    "M1 modifier-steps": [
+      "SettingsToolSelection.M1ModifierSteps",
+      "SettingsToolSelection.WithoutSpec"
+    ],
+    "M2 modifier-sequence": [
+      "SettingsToolSelection.M2ModifierSequence",
+      "SettingsToolSelection.ModsAppend"
+    ],
+    "C1 modifiers-over-below": [
+      "SettingsToolSelection.C1ModifiersOverBelow"
+    ],
+    "C2 plain-list": [
+      "SettingsToolSelection.C2PlainList",
+      "SettingsToolSelection.PlainNamesEmpty",
+      "SettingsToolSelection.PlainNamesSpec"
+    ],
+    "C3 modifiers-over-defaults": [
+      "SettingsToolSelection.C3ModifiersOverDefaults"
+    ],
+    "C4 empty-is-no-tools": [
+      "SettingsToolSelection.C4EmptyIsNoTools"
+    ],
+    "B1 no-duplicates": [
+      "SettingsToolSelection.B1NoDuplicates",
+      "SettingsToolSelection.ModsNodup",
+      "SettingsToolSelection.WithoutSubset"
+    ],
+    "E1 modifiers-kept": [
+      "SettingsToolSelection.E1ModifiersKept"
+    ],
+    "E2 plain-layer-stays-plain": [
+      "SettingsToolSelection.E2PlainStaysPlain"
+    ],
+    "E3 round-trip": [
+      "SettingsToolSelection.E3RoundTrip",
+      "SettingsToolSelection.ComposeChosen",
+      "SettingsToolSelection.ModsPlainId",
+      "SettingsToolSelection.EncodeEntries",
+      "SettingsToolSelection.MissingSpec"
+    ],
+    "E4 relative-when-reproducible": [
+      "SettingsToolSelection.E4RelativeWhenReproducible"
+    ],
+    "E5 plain-when-order-differs": [
+      "SettingsToolSelection.E5PlainWhenOrderDiffers"
+    ]
+  },
+  "helpers": [],
+  "translate": "blocks/settings/tool-selection/Block.dfy",
+  "oracles": [
+    {
+      "name": "diff-vs-gateway-settings-types.ts(3000)",
+      "cmd": [
+        "node",
+        "tools/proof/oracles/settings-tool-selection.mjs",
+        "{dir}/out/core.js",
+        "3000"
+      ],
+      "jsonEq": [
+        "agree",
+        "requests"
+      ]
+    }
+  ],
+  "accepted": {},
+  "report": "blocks/settings/tool-selection/MUTATION.json",
+  "shadow": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/settings-tool-selection.mjs",
+      "{core}",
+      "20000"
+    ],
+    "source": "compiled core vs packages/gateway/src/kernel/settings/settings-types.ts (toolSelectionType().compose and .encode) on 20,000 generated inputs (not real traffic)"
+  },
+  "replay": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/settings-tool-selection.mjs",
+      "{core}",
+      "--replay",
+      "{corpus}"
+    ],
+    "source": "compiled core vs the compose and encode seams' recorded Debug-Gateway calls (packages/gateway/src/kernel/settings/settings-types.ts)"
+  },
+  "kinds": {
+    "safety": [
+      "B1 no-duplicates",
+      "E3 round-trip"
+    ],
+    "progress": "n/a: pure functions, no workflow",
+    "recovery": "n/a: stateless",
+    "stale-inputs": "n/a: encode is given what the layer holds now and the selection below now (the change path's fence owns staleness)",
+    "exact-results": [
+      "M1 modifier-steps",
+      "M2 modifier-sequence",
+      "C1 modifiers-over-below",
+      "C2 plain-list",
+      "C3 modifiers-over-defaults",
+      "C4 empty-is-no-tools",
+      "E1 modifiers-kept",
+      "E2 plain-layer-stays-plain",
+      "E4 relative-when-reproducible",
+      "E5 plain-when-order-differs"
+    ],
+    "uncertain-outcomes": "n/a: no effects"
+  }
+}

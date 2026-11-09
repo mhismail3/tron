@@ -268,7 +268,7 @@ Commands:
   run-ui    Build the UI-validation products in this worktree's DerivedData, then
             run the real-UI journeys, each against its own fresh fixture, and leave
             one evidence directory per journey (xcresult, Gateway log, proxy link
-            stats, XCTest summary, report.json with every artifact's path, sha256,
+            stats, XCTest summary, the hosted app's log, report.json with every verdict artifact's path, sha256,
             the final status and the source revision). The journeys pair the hosted
             app for real, so the command stops the fixture it renewed and returns
             that app to its unpaired state on success, failure, deadline and signal
@@ -783,10 +783,12 @@ report_result_bundle_failures() {
 
 # One directory per journey: the result bundle, the fixture Gateway's canonical
 # runtime log, the fault proxy's link statistics, the XCTest summary and
-# report.json, which names every artifact with the sha256 of its bytes (or, for
+# report.json, which names every verdict artifact with the sha256 of its bytes (or, for
 # the result bundle, of its whole file tree) and records what the journey
 # asserted. A reviewer can therefore re-derive each artifact without trusting
 # this run.
+# The hosted app's `app-log/` sits beside them as diagnosis only: it is no
+# artifact of the journey's verdict, so the report neither hashes nor requires it.
 #
 # The two halves are separate because the report must carry the journey's FINAL
 # status: when an artifact cannot be captured, an otherwise passing journey has
@@ -995,6 +997,7 @@ run_ui_journey() {
   attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-ui.XXXXXX")"
   attempt_id="$(basename "$attempt_dir")"
   result_bundle="$attempt_dir/Journeys.xcresult"
+  hosted_app_log clear
   if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS:-900}" \
     "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-300}" "$result_bundle" \
     xcodebuild test-without-building \
@@ -1009,6 +1012,7 @@ run_ui_journey() {
     status=$?
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest-ui"
+  hosted_app_log export "$attempt_dir"
   # One report path for every journey of a lane: the consumer that asked for one
   # journey on one lane reads `results/latest-ui/report.json` as soon as the
   # command returns, before the next journey's run moves this link. A parallel
@@ -1370,6 +1374,29 @@ run_test() {
 
 # The built hosted app's bundle identifier, read from the product the lane just
 # built rather than hardcoded, for the two commands that own its persisted state.
+# The hosted app's own log (`AppLog`, Library/Caches/Logs/app.jsonl in its data
+# container), one per journey: cleared before the journey and copied into its
+# evidence after, so a red shows what the app did as well as what the Gateway
+# saw. An app that is not installed yet has no log; a missing log is not a status.
+hosted_app_log() {
+  local action="$1" attempt_dir="${2:-}" bundle_id container
+  bundle_id="$(hosted_app_bundle_id)" || return 0
+  container="$(xcrun simctl get_app_container "$ui_simulator_id" "$bundle_id" data 2>/dev/null)" || return 0
+  case "$action" in
+    clear) rm -f "$container/Library/Caches/Logs/app.jsonl" "$container/Library/Caches/Logs/app.jsonl.1" ;;
+    export)
+      if compgen -G "$container/Library/Caches/Logs/app.jsonl*" >/dev/null; then
+        mkdir -p "$attempt_dir/app-log"
+        cp "$container"/Library/Caches/Logs/app.jsonl* "$attempt_dir/app-log/" \
+          || echo "warning: could not copy the hosted app's log" >&2
+      else
+        echo "warning: the hosted app wrote no log for this journey" >&2
+      fi
+      ;;
+  esac
+  return 0
+}
+
 hosted_app_bundle_id() {
   local app_plist
   app_plist="$(ls "$derived_data"/Build/Products/*/TronMobile.app/Info.plist 2>/dev/null | head -1)"

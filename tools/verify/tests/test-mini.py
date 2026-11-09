@@ -10,7 +10,8 @@ report and exit code come back with the mini checkout path rewritten; that a dir
 unreachable host, an off-pin toolchain and a HEAD other than verify's commit fail with exit 2 and no
 result; that a push whose job never started leaves no ref once the next job ends; and that stopping the local runner, or killing its
 whole process group, stops the mini lane and releases the mini job lock. The pool (#2336) runs on the mini when
-reachable, set up and idle, and otherwise here with its reason; a stopped local pool lane is stopped itself.
+reachable, set up and idle, and otherwise here with its reason (including an argument naming a path outside
+the checkout and a probe with no or malformed status); a stopped local pool lane is stopped itself.
 """
 from __future__ import annotations
 
@@ -37,6 +38,8 @@ while (($#)); do
 done
 destination="$1"; shift
 [[ "$destination" != unreachable* ]] || { echo "ssh: connect to host $destination port 22: Connection refused" >&2; exit 255; }
+[[ "$destination" != silent* ]] || exit 0
+[[ "$destination" != garbled* ]] || { echo 'mini status: not json'; exit 0; }
 [[ "$destination" != nojob* || "$*" != *" remote "* ]] || { echo "ssh: connection to $destination closed" >&2; exit 255; }
 # sshd runs the command in its own session: killing this client's process group leaves it running, with its
 # input closed once no client holds the pipe.
@@ -190,8 +193,15 @@ class MiniGatewayLane(unittest.TestCase):
             here('the mini is busy with another Gateway job')
         outside = self.temporary / 'outside.config.ts'
         here(f'an argument names {outside}, outside this checkout', '--config', str(outside))
+        # A relative argument resolves against the Gateway package, as the lane reads it.
+        here('an argument names ../../../outside.config.ts, outside this checkout', '--config=../../../outside.config.ts')
+        here('an argument names ../../../outside.test.ts, outside this checkout', '../../../outside.test.ts')
         self.git('config', 'tron.verify.mini', 'unreachable.test')
         here('the mini unreachable.test is unreachable: ssh: connect to host unreachable.test port 22: Connection refused', 'fail')  # a red lane here is still that lane's result
+        self.git('config', 'tron.verify.mini', 'silent.test')
+        here('the mini silent.test answered no status: no output')
+        self.git('config', 'tron.verify.mini', 'garbled.test')
+        here('the mini garbled.test answered no status: mini status: not json')
         self.git('config', '--unset', 'tron.verify.mini')
         here('no mini is configured')
         self.git('config', 'tron.verify.mini', 'mini.test')
@@ -208,6 +218,7 @@ class MiniGatewayLane(unittest.TestCase):
         self.git('config', 'tron.verify.mini', 'unreachable.test')
         runner = subprocess.Popen(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', 'hang'], cwd=self.local / 'packages/gateway',
                                   env={**self.env, 'HOME': str(self.temporary)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: runner.poll() is None and runner.kill())
         started = self.temporary / 'lane-started'
         for _ in range(300):
             if started.exists():
