@@ -142,7 +142,7 @@ struct ChatAnnotationSheet: View {
     @Environment(\.chatAnnotationPresenter) private var presenter
     @PresentationState private var comment: String
     /// Set by tapping the quote: the source is revealed once the sheet is gone.
-    @State private var revealsSource = false
+    @State private var revealsSource = false // view-local: set only between the quote tap and this sheet's disappearance
 
     init(annotation: ChatAnnotation, editing: Editing?) {
         self.annotation = annotation
