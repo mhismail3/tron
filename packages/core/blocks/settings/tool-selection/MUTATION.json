@@ -4,7 +4,7 @@
   "tier": "high-stakes",
   "laws": "blocks/settings/tool-selection/Block.dfy",
   "oracle": true,
-  "toolHash": "a36fd30c10c2fc06",
+  "toolHash": "ee15458abb801a8b",
   "mutants": 137,
   "stillborn": 27,
   "valid": 110,
@@ -12,7 +12,7 @@
   "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 557,
+  "seconds": 784,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.197,
@@ -69,17 +69,17 @@
   },
   {
    "law": "E3 round-trip",
-   "killed": 25,
+   "killed": 26,
    "only": 4
   },
   {
    "law": "E4 relative-when-reproducible",
    "killed": 32,
-   "only": 10
+   "only": 9
   },
   {
    "law": "E5 plain-when-order-differs",
-   "killed": 10,
+   "killed": 9,
    "only": 2
   }
  ],
@@ -2177,10 +2177,12 @@
    "note": "drop right operand",
    "status": "killed",
    "killedBy": [
-    "E4 relative-when-reproducible"
+    "E3 round-trip",
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs"
    ],
    "unmapped": [],
-   "timeouts": 2,
+   "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
@@ -2262,11 +2264,10 @@
    "status": "killed",
    "killedBy": [
     "E4 relative-when-reproducible",
-    "E5 plain-when-order-differs",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 1,
+   "timeouts": 2,
    "error": null,
    "oracleFailed": []
   },
@@ -2299,11 +2300,10 @@
    "status": "killed",
    "killedBy": [
     "E4 relative-when-reproducible",
-    "E5 plain-when-order-differs",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 1,
+   "timeouts": 2,
    "error": null,
    "oracleFailed": []
   },
