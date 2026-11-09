@@ -1458,15 +1458,22 @@ class ChainInterruptTests(unittest.TestCase):
         import sys
         sys.path.insert(0, str(ROOT / 'tools/verify'))
         import batch
-        with tempfile.TemporaryDirectory(prefix='tron-batch-issue-') as temporary:
-            state = Path(temporary) / 'state'
-            batch.CANCELLED.set()
-            try:
-                outcome = batch.issue_write('key', 'title', 'body', Path(temporary) / 'failure', state)
-            finally:
-                batch.CANCELLED.clear()
-            self.assertIsNone(outcome['exit'], outcome)
-            self.assertFalse((state / 'issue-writes/key.json').exists())
+        completed = {'status': 'completed', 'exit': 0, 'number': 7}
+        for previous in (None, completed):
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory(prefix='tron-batch-issue-') as temporary:
+                state = Path(temporary) / 'state'
+                journal = state / 'issue-writes/key.json'
+                if previous:
+                    journal.parent.mkdir(parents=True)
+                    journal.write_text(json.dumps(previous))
+                batch.CANCELLED.set()
+                try:
+                    outcome = batch.issue_write('key', 'title', 'body', Path(temporary) / 'failure', state)
+                finally:
+                    batch.CANCELLED.clear()
+                self.assertIsNone(outcome['exit'], outcome)
+                # A filed issue keeps its number, so the next red comments on it instead of filing again.
+                self.assertEqual(json.loads(journal.read_text()) if journal.exists() else None, previous)
 
 class ShardedIosProbeTests(unittest.TestCase):
     """#2173: verify names a sharded iOS step `tests: ios k/N`; its bisect probe is still the iOS
