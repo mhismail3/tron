@@ -9,7 +9,8 @@ import { join } from "node:path";
  * stops it. A request containing `ASK-SUPERVISOR` is held the same way, then answers
  * with a `contact_supervisor` call that blocks until the parent replies. A request
  * containing `CALL-TOOL` is answered with a `read` call once it is released, so the
- * child takes a second request that carries whatever was steered into it meanwhile.
+ * child takes a second request that carries whatever was steered into it meanwhile; with
+ * `HOLD-AFTER-TOOL` that second request is held too, so the run stays live after progressing.
  * Every other request answers `CHILD-DONE` at once. The server counts client disconnects
  * of held requests: that is the proof a child was cut off. It counts requests carrying
  * `STEER-PROBE`: that is the proof a steer reached the child's model. */
@@ -47,7 +48,7 @@ async function startChildModelServer(): Promise<ChildModelServer> {
     const answeredByTool = Array.isArray(messages) && messages.some(message => (message as { role?: unknown }).role === "tool");
     const asksSupervisor = !answeredByTool && text.includes("ASK-SUPERVISOR");
     const callsRead = !answeredByTool && text.includes("CALL-TOOL");
-    const holds = !answeredByTool && (text.includes("HOLD-CHILD") || asksSupervisor);
+    const holds = answeredByTool ? text.includes("HOLD-AFTER-TOOL") : text.includes("HOLD-CHILD") || asksSupervisor;
     if (holds) {
       held += 1;
       // The response closes early only when the client disconnects (an abort).

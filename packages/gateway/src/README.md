@@ -100,7 +100,7 @@ Also the rows of `src/` modules that have no README yet: process lifecycle
 | `gateway.exit-stalled` | warning | A non-zero exit after a completed shutdown had not ended the process within `EXIT_STALL_GRACE_MS` (5,000 ms); the detached watcher (`lifecycle/exit-after-shutdown.ts`) then SIGKILLs that PID: `pid`, `code`, `durationMs` |
 | `gateway.restart-drain` | info | The restart was scheduled and the drain began |
 | `gateway.restart-drain.waiting` | info | Every 15 s while draining, at each stall decision and at an immediate restart: the blockers (`sessionId`, `category`, `method`, `state`, `ageMs`, `progressAt`) in the message |
-| `gateway.restart-drain.stalled` | warning | The oldest blocker made no progress for `DRAIN_STALL_LIMIT_MS` (180 s), or an immediate restart was requested: its category, method and age |
+| `gateway.restart-drain.stalled` | warning | The oldest blocker, and every blocker on its session, made no progress for `DRAIN_STALL_LIMIT_MS` (180 s), or an immediate restart was requested: its category, method and age |
 | `gateway.restart-drain.unresolved-owner` | error | Every remaining blocker is a suspect `terminal-receipt-persistence` owner, so the restart proceeds; one record per owner with `sessionId` |
 | `gateway.restart-drain.completed` | info | The drain reached zero blockers |
 | `gateway.restart-drain-failed` | error | The drain promise rejected: `error` |

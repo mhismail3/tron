@@ -129,7 +129,8 @@ not the worker session being resumed.
   never IDs, prompts or paths). `gateway.restart` accepts `restartNow: true` to
   escalate; `gateway.stop` uses the same drain, exits only after a zero-blocker proof
   and records `failed` otherwise. The restart drain stalls after the oldest blocker makes
-  no progress for 180 s (then exact cancellation and grace); only-suspect
+  no progress for 180 s, counting progress by any blocker on its session (a Home task held
+  between turns progresses through its live async runs), then exact cancellation and grace; only-suspect
   `terminal-receipt-persistence` blockers proceed at once. The stop drain has no stall
   bound: a stop exits 0 and nothing relaunches to recover cut work, so it waits for
   every accepted owner; a caller needing a deadline stops waiting itself (Mac Quit waits

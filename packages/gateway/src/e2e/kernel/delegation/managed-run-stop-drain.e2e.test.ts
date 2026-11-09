@@ -7,7 +7,7 @@ import { dispatch, fixture } from "../../../../test-support/home-task-fixture.js
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { closeSubagentFixtures, bound, childModel, holdingAsyncLaunch, waitBetweenTurns } from "../../../../test-support/home-task-subagents-support.js";
 import { GatewayLogger } from "../../../transport/logger.js";
-import { waitForStopDrain } from "../../../sessions/restart-drain.js";
+import { RestartDrainProgress, waitForStopDrain } from "../../../sessions/restart-drain.js";
 
 // #2256: liveness comes from the installed delegated provider, not result shape. A
 // real managed async run must still hold the intentional stop until it settles, and
@@ -105,5 +105,40 @@ describe("Managed subagents: intentional stop drain", () => {
     await mkdir("test-results/2259", { recursive: true });
     await writeFile("test-results/2259/home-task-stop-drain.json", JSON.stringify({ waiting, final }, null, 2));
     expect(final).toMatchObject({ phase: "complete", blockerCount: 0 });
+  }, 60_000);
+
+  it("a restart drain judges a held Home task by its live async run's progress, not by the task's last transition (#2363)", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch", "HOLD-CHILD CALL-TOOL HOLD-AFTER-TOOL background search"),
+      fauxAssistantMessage("Launched the background check."),
+    ]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+    await waitBetweenTurns(slot);
+    const blocker = (category: string) => f.registry.administrativeDrainSnapshot().blockers
+      .find(entry => entry.sessionId === run.sessionId && entry.category === category);
+    const heldAt = blocker("foreground-agent-operation")!.progressAt!;
+    // The run's ISO progress time must be strictly later than the task's (same-millisecond times compare equal).
+    await new Promise(resolve => setTimeout(resolve, 20));
+    // The run takes a tool step after the task's last transition, then holds again: live and progressing.
+    child.releaseHeld();
+    await waitFor(() => child.heldRequests() === 2, "the run progressed and is live again", bound);
+    await waitFor(() => (blocker("detached-extension-run")?.progressAt ?? "") > heldAt, "the run's progress reaches the drain", bound);
+    const snapshot = f.registry.administrativeDrainSnapshot();
+    const task = snapshot.blockers.find(entry => entry.sessionId === run.sessionId && entry.category === "foreground-agent-operation")!;
+    const runProgress = snapshot.blockers.find(entry => entry.sessionId === run.sessionId && entry.category === "detached-extension-run")!.progressAt!;
+    expect(task.progressAt).toBe(heldAt);
+    const limit = 180_000;
+    // Past the limit from the task's own last transition, but not from its run's progress: waiting.
+    expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(heldAt) + limit, limit)).toEqual({ outcome: "waiting" });
+    // The bound still holds: no progress from either for the limit is a stall, named at the held task.
+    expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(runProgress) + limit, limit))
+      .toMatchObject({ outcome: "stalled", blocker: { sessionId: run.sessionId }, ageMs: limit });
+    // Cleanup only: the task's settlement is the stop-drain cases' concern, not this one's.
+    child.releaseHeld();
+    await run.completion.catch(() => {});
   }, 60_000);
 });
