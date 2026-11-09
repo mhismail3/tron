@@ -61,6 +61,41 @@
       "description": "Documentation only"
     },
     {
+      "name": "lane:next",
+      "color": "0e8a16",
+      "description": "Ready; Home lane picks the top-ranked"
+    },
+    {
+      "name": "lane:blocked-you",
+      "color": "d93f0b",
+      "description": "Waits on a maintainer decision (in the digest)"
+    },
+    {
+      "name": "lane:blocked-dep",
+      "color": "fbca04",
+      "description": "Waits on another lane item or external dependency"
+    },
+    {
+      "name": "lane:parked",
+      "color": "cccccc",
+      "description": "Kept but deliberately not scheduled"
+    },
+    {
+      "name": "lane:meta",
+      "color": "c5def5",
+      "description": "About the Home lane loop itself (rules, briefs, tooling, flow)"
+    },
+    {
+      "name": "slot:gateway",
+      "color": "1d76db",
+      "description": "Lane slot: Gateway/TS/tools work"
+    },
+    {
+      "name": "slot:ios",
+      "color": "5319e7",
+      "description": "Lane slot: iOS/Swift/simulator work"
+    },
+    {
       "name": "restructure",
       "color": "0e8a16",
       "description": "Multi-agent-native restructure epic tree"
