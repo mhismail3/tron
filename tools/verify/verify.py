@@ -79,8 +79,9 @@ def git(*args: str) -> str:
 
 
 def signal_group(group: int, signum: int) -> None:
-    """Signal an owned process group; a group that already ended is no error. macOS answers EPERM
-    while every member has exited but its leader is not yet reaped, and ESRCH once it is."""
+    """Signal a process group this verifier started (same uid, no setuid lanes); a group that already
+    ended is no error. macOS answers EPERM while every member has exited but its leader is not yet
+    reaped, and ESRCH once it is; for an owned group no other EPERM cause applies."""
     try:
         os.killpg(group, signum)
     except (ProcessLookupError, PermissionError):

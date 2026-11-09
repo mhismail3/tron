@@ -768,6 +768,10 @@ def issue_write(key: str, title: str, body: str, directory: Path, state: Path, t
                ['scripts/tron', 'work', 'issue', 'create', '--title', title, '--body-file', str(directory / 'issue.md'),
                 '--kind', 'kind:bug', '--area', 'area:tooling'])
     outcome = execute(ROOT, {'name': 'issue write', 'command': command}, directory / 'issue')
+    if 'log' not in outcome:
+        # The batch stopped before dispatch: nothing reached GitHub, so no uncertain write to retain.
+        journal.unlink()
+        return {**outcome, 'number': number}
     match = re.search(r'(?:/issues/|created issue #)(\d+)', Path(outcome['log']).read_text(errors='replace'))
     outcome = {**outcome, 'status': 'completed' if outcome['exit'] == 0 else 'unresolved', 'number': int(match[1]) if match else number}
     save(journal, outcome)

@@ -1452,6 +1452,22 @@ class ChainInterruptTests(unittest.TestCase):
         self.assertFalse(batch.CANCELLED.is_set())
 
 
+    def test_an_issue_write_the_stopped_batch_never_dispatched_leaves_no_uncertain_journal(self):
+        """#2389: a stopped batch never starts its issue write; that is no dispatch, so the filing
+        neither crashes nor leaves an `attempting` journal that a rerun would retain instead of filing."""
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        with tempfile.TemporaryDirectory(prefix='tron-batch-issue-') as temporary:
+            state = Path(temporary) / 'state'
+            batch.CANCELLED.set()
+            try:
+                outcome = batch.issue_write('key', 'title', 'body', Path(temporary) / 'failure', state)
+            finally:
+                batch.CANCELLED.clear()
+            self.assertIsNone(outcome['exit'], outcome)
+            self.assertFalse((state / 'issue-writes/key.json').exists())
+
 class ShardedIosProbeTests(unittest.TestCase):
     """#2173: verify names a sharded iOS step `tests: ios k/N`; its bisect probe is still the iOS
     group, so a passing shard probe counts its XCTest summary instead of reading as empty."""
