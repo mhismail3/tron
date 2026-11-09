@@ -125,8 +125,15 @@ struct MacQuitGatewayTests {
             #expect(fixture.isRunning)
             #expect(!nativeRetired)
             #expect(!FileManager.default.fileExists(atPath: fixture.receipt.path))
-            let drain = try await GatewayStopClient.drain(host: "127.0.0.1", port: port, token: token)
-            #expect(drain.phase == "waiting")
+            let asked = ContinuousClock.now
+            do {
+                let drain = try await GatewayStopClient.drain(host: "127.0.0.1", port: port, token: token)
+                #expect(drain.phase == "waiting")
+            } catch {
+                // The 2 s drain read shares the create's `.timeout` text: name which call failed.
+                Issue.record("gateway.drain.status during the held work failed after \(ContinuousClock.now - asked): \(error)")
+                throw error
+            }
             try Data().write(to: fixture.root.appendingPathComponent("release-model"))
         }
         let deadline = ContinuousClock.now.advanced(by: .seconds(60))
@@ -346,8 +353,9 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             if logContains(event: event, step: step) { return }
             try await Task.sleep(for: .milliseconds(100))
         }
+        let warnings = ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").filter { $0.contains("\"level\":\"warning\"") || $0.contains("\"level\":\"error\"") }
         throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey:
-            "Gateway fixture never logged \(event) \(step ?? ""): \((try? String(contentsOf: root.appendingPathComponent("process.log"), encoding: .utf8)) ?? "no output")"])
+            "Gateway fixture did not log \(event) \(step ?? "") within 30 s; Gateway warnings:\n\(warnings.joined(separator: "\n"))\nprocess output: \((try? String(contentsOf: root.appendingPathComponent("process.log"), encoding: .utf8)) ?? "none")"])
     }
 
     func logContains(event: String, step: String? = nil) -> Bool {
@@ -379,7 +387,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
                       ["gateway.startup-step", "runtime.loaded", "rpc.completed"].contains(record["event"] as? String ?? "") else { return nil }
                 return "\(record["timestamp"] ?? "") \(record["message"] ?? "") \(record["stages"] ?? "")"
             }
-            Issue.record("\(method) failed \(ContinuousClock.now - started) into accepted work: \(error)\n\(timing.joined(separator: "\n"))")
+            Issue.record("\(method) failed \(ContinuousClock.now - started) into starting the accepted work: \(error)\n\(timing.joined(separator: "\n"))")
             throw error
         }
         let deadline = ContinuousClock.now.advanced(by: .seconds(15))
