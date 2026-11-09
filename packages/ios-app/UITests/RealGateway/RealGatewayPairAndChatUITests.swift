@@ -2194,6 +2194,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     /// A completed assistant reply: its paragraph inside the message's one
     /// selectable text view (#1112), typed TextView on iOS 27 (#2321, #2384).
+    @MainActor
     func assistantReply(_ app: XCUIApplication, containing text: String) -> XCUIElement {
         app.textViews.matching(identifier: "chat.assistant.selectable-text")
             .descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
