@@ -215,6 +215,16 @@ struct ChatView: View {
         .onChange(of: composerScope, initial: true) { _, scope in
             annotationPresenter.bind(drafts: model.composerDrafts, scope: scope)
         }
+        .onChange(of: annotationPresenter.revealScroll) { _, scroll in
+            guard let scroll else { return }
+            let issued = switch scroll.target {
+            case .row(let itemID):
+                scrollCoordinator.requestAnnotationReveal(row: itemID, reduceMotion: reduceMotion)
+            case .visualOffset(let offset):
+                scrollCoordinator.requestAnnotationReveal(visualOffset: offset, reduceMotion: reduceMotion)
+            }
+            if !issued { annotationPresenter.endReveal() }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -2586,7 +2596,7 @@ struct ChatView: View {
             switch command.destination {
             case .row(let renderedID):
                 var target = ScrollPosition(idType: String.self)
-                target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
+                target.scrollTo(id: renderedID, anchor: .center)
                 transcriptScrollPosition = target
             case .oldestHistory:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
@@ -2607,19 +2617,18 @@ struct ChatView: View {
                 ))
             }
         }
+        // An annotation reveal measures its source once the scroll has landed.
+        let landed: () -> Void = command.origin == .annotationReveal
+            ? { [annotationPresenter] in annotationPresenter.revealScrollLanded() }
+            : {}
         switch command.animation {
-        case .disabled:
+        case .smooth(let duration) where !reduceMotion:
+            withAnimation(ChatMotion.smooth(duration: duration), completionCriteria: .logicallyComplete, update, completion: landed)
+        case .disabled, .smooth:
             var transaction = Transaction()
             transaction.disablesAnimations = true
+            transaction.addAnimationCompletion(criteria: .logicallyComplete, landed)
             withTransaction(transaction, update)
-        case .smooth(let duration):
-            if reduceMotion {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction, update)
-            } else {
-                withAnimation(ChatMotion.smooth(duration: duration), update)
-            }
         }
         // The coordinator keeps this exact token installed through its native
         // opening/catch-up/semantic settlement, then publishes a leased release.

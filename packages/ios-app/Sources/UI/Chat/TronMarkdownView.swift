@@ -62,6 +62,7 @@ struct TronMarkdownView: View {
                                 itemID: annotationSource.itemID,
                                 blockKey: blockKey
                             ),
+                            revealSource: (annotationPresenter, annotationSource.itemID, blockKey),
                             onAnnotate: { quote, selectedRange, rect in
                                 annotationPresenter.begin(ChatAnnotationRequest(
                                     quote: quote,
@@ -184,6 +185,7 @@ struct TronMarkdownView: View {
                 inline: value,
                 style: style,
                 highlights: annotationPresenter.highlights(itemID: annotationSource.itemID, blockKey: blockKey),
+                revealSource: (annotationPresenter, annotationSource.itemID, blockKey),
                 onAnnotate: { quote, range, rect in
                     annotationPresenter.begin(ChatAnnotationRequest(
                         quote: quote,

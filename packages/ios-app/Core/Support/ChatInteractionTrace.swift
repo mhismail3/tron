@@ -660,6 +660,7 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case .layout: "layout"
         case .prepend: "prepend"
         case .oldestHistory: "oldest-history"
+        case .annotationReveal: "annotation-reveal"
         }
     }
     private static func destination(_ destination: ChatScrollCommand.Destination) -> String {

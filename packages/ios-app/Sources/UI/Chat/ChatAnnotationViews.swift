@@ -139,7 +139,10 @@ struct ChatAnnotationSheet: View {
     let annotation: ChatAnnotation
     let editing: Editing?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.chatAnnotationPresenter) private var presenter
     @PresentationState private var comment: String
+    /// Set by tapping the quote: the source is revealed once the sheet is gone.
+    @State private var revealsSource = false
 
     init(annotation: ChatAnnotation, editing: Editing?) {
         self.annotation = annotation
@@ -157,13 +160,19 @@ struct ChatAnnotationSheet: View {
                         sectionHeader("Quote")
                         ChatQuoteBlock(rule: accent) {
                             Text(annotation.quote)
-                                .font(TronFont.body())
+                                .font(TronTypography.body)
                                 .foregroundStyle(Color.tronTextSecondary)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("chat.annotation.quote")
+                        .modifier(ChatAnnotationQuoteReveal(enabled: presenter != nil && annotation.anchor != nil) {
+                            // Like Save: keep the edited comment, then show the source.
+                            editing?.onSave(comment.trimmingCharacters(in: .whitespacesAndNewlines))
+                            revealsSource = true
+                            dismiss()
+                        })
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         sectionHeader("Comment")
@@ -176,7 +185,7 @@ struct ChatAnnotationSheet: View {
                                 .accessibilityLabel("Annotation comment")
                         } else {
                             Text(annotation.comment.isEmpty ? "No comment" : annotation.comment)
-                                .font(TronTypography.bodySM)
+                                .font(TronTypography.body)
                                 .foregroundStyle(annotation.comment.isEmpty ? Color.tronTextMuted : Color.tronTextPrimary)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -220,6 +229,9 @@ struct ChatAnnotationSheet: View {
                 }
             }
         }
+        .onDisappear {
+            if revealsSource { presenter?.reveal(annotation) }
+        }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -232,6 +244,26 @@ struct ChatAnnotationSheet: View {
             .tronSectionHeading()
             .foregroundStyle(Color.tronTextPrimary)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A staged annotation's quote is a button that shows its source in the
+/// transcript. A quote without a source anchor (a sent annotation) stays text.
+private struct ChatAnnotationQuoteReveal: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .contentShape(Rectangle())
+                .onTapGesture(perform: action)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Shows the quote in the chat")
+                .accessibilityAction { action() }
+        } else {
+            content
+        }
     }
 }
 

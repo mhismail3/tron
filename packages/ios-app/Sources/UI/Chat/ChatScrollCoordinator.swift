@@ -567,6 +567,29 @@ extension ChatScrollCoordinator {
         publish(.oldestHistory, animation: ChatMotion.historyScroll(reduceMotion: reduceMotion), origin: .oldestHistory)
     }
 
+    /// Reader intent from an annotation's quote. It detaches like a direct
+    /// scroll, so streaming rows stay frozen, then centers the source row.
+    /// False when that row is not installed (trimmed history): nothing moves.
+    func requestAnnotationReveal(row physicalID: String, reduceMotion: Bool) -> Bool {
+        guard installedPhysicalRowPositions[physicalID] != nil else { return false }
+        beginDirectInteraction(allowsBottomRubberBand: false)
+        publish(.row(physicalID), animation: ChatMotion.historyScroll(reduceMotion: reduceMotion), origin: .annotationReveal)
+        return command?.origin == .annotationReveal
+    }
+
+    /// Moves the detached transcript so content `visualOffset` points below
+    /// its measured place lands there instead (negative moves older content down).
+    func requestAnnotationReveal(visualOffset: CGFloat, reduceMotion: Bool) -> Bool {
+        guard geometry.isValid else { return false }
+        beginDirectInteraction(allowsBottomRubberBand: false)
+        publish(
+            .offsetY(geometry.offsetY + visualOffset),
+            animation: ChatMotion.historyScroll(reduceMotion: reduceMotion),
+            origin: .annotationReveal
+        )
+        return command?.origin == .annotationReveal
+    }
+
     func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
         guard var restore = layoutRestore else { return }
         guard let installed else { return }
@@ -734,7 +757,7 @@ extension ChatScrollCoordinator {
         targetReleaseToken = nil
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
-        if applied.origin == .oldestHistory {
+        if applied.origin == .oldestHistory || applied.origin == .annotationReveal {
             // The status-bar jump to the oldest edge needs no marker proof: the
             // oldest end is legal as soon as the command lands. Release through
             // the bounded lease so native anchoring owns the viewport again from
