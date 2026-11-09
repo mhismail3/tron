@@ -67,10 +67,33 @@ def git(*args: str) -> str:
     return done.stdout
 
 
+GATEWAY_INSTALL_HINT = f"prepare this worktree with: scripts/tron-node exec npm --prefix {GATEWAY} ci --include=dev"
+
+
+def require_gateway_install() -> None:
+    """The installed Gateway packages are exactly its lockfile's, by npm's own record of the install.
+
+    Tests well beyond the Gateway import them (scripts/, tools/docs, tools/layers, tools/proof,
+    tools/verify), so any test step needs them. A platform-optional package may be absent."""
+    gateway = ROOT / GATEWAY
+    try:
+        wanted = json.loads((gateway / "package-lock.json").read_text())["packages"]
+        installed = json.loads((gateway / "node_modules/.package-lock.json").read_text())["packages"]
+    except (OSError, ValueError, KeyError) as error:
+        raise VerifyError(f"Gateway dependencies are not installed; {GATEWAY_INSTALL_HINT}") from error
+    pinned = lambda entry: (entry.get("version"), entry.get("integrity"))  # noqa: E731
+    differ = sorted(path for path in set(wanted) | set(installed) if path and (
+        pinned(wanted[path]) != pinned(installed[path]) if path in wanted and path in installed
+        else path in installed or not wanted[path].get("optional")))
+    if differ:
+        shown = ", ".join(differ[:5]) + (f" and {len(differ) - 5} more" if len(differ) > 5 else "")
+        raise VerifyError(f"Gateway dependencies differ from package-lock.json ({shown}); {GATEWAY_INSTALL_HINT}")
+
+
 def require_gateway_compiler() -> None:
     """npm must resolve this checkout's pinned compiler, never a global tsc."""
     gateway = ROOT / GATEWAY
-    hint = f"prepare this worktree with: scripts/tron-node exec npm --prefix {GATEWAY} ci --include=dev"
+    hint = GATEWAY_INSTALL_HINT
     try:
         pinned = json.loads((gateway / "package.json").read_text())["devDependencies"]["typescript"]
         installed = json.loads((gateway / "node_modules/typescript/package.json").read_text())["version"]
@@ -1146,9 +1169,14 @@ def main(argv: list[str]) -> int:
 
     # Worktree creation deliberately does not install dependencies. Refuse before
     # any checks (including generated docs) can use an absent/stale install or PATH tsc.
-    if gateway_touched:
+    # A checkout without a Gateway lockfile (a verify fixture) has no install to compare.
+    runs_tests = any(group not in NOT_DRIVEN and not skipped_group(group) for group in groups) or bool(selection["deferredTests"])
+    if gateway_touched or runs_tests:
         try:
-            require_gateway_compiler()
+            if gateway_touched:
+                require_gateway_compiler()
+            if (ROOT / GATEWAY / "package-lock.json").is_file():
+                require_gateway_install()
         except VerifyError as error:
             print(f"verify: {error}", file=sys.stderr)
             return 2

@@ -23,20 +23,23 @@ scripts/tron verify ... --gateway-host mini     # run the Gateway Vitest lanes o
 
 ## Worktree dependencies
 
-Worktree creation does not install dependencies. Before running a selection that
-uses the Gateway, prepare **that worktree**, including development dependencies:
+Worktree creation does not install dependencies. Before running any test step or a
+selection that uses the Gateway, prepare **that worktree**, including development
+dependencies (tests in `scripts/` and `tools/` import the Gateway's packages too):
 
 ```bash
 scripts/tron-node exec npm --prefix packages/gateway ci --include=dev
 ```
 
 Verify never installs dependencies automatically or borrows another checkout's
-`node_modules`. Before running checks it requires the installed TypeScript version
+`node_modules`. Before step 1 of a run with any test step it requires npm's record of
+the install (`node_modules/.package-lock.json`) to match `package-lock.json`, apart
+from absent platform-optional packages. For a Gateway selection it also requires the installed TypeScript version
 to match `packages/gateway/package.json` and npm's local `.bin/tsc` to resolve to
 that package's executable. A missing, stale or broken install fails early (exit 2)
 with the preparation command; a global `tsc` on PATH cannot satisfy it. `tron-node`
 resolves the pinned Node independently of interactive shell setup. `--plan` and
-selections that do not use the Gateway need no Gateway compiler.
+selections with no test step and no Gateway path need no Gateway install.
 
 ## Gateway test isolation
 
