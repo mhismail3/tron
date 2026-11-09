@@ -243,11 +243,19 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
 
     private func tap(_ app: XCUIApplication, _ id: String) {
         let button = app.buttons[id].firstMatch
+        let window = app.windows.firstMatch.frame
+        var previous: CGRect?
         for _ in 0..<12 {
-            if button.exists && button.isHittable,
-               button.frame.minY > 140, button.frame.maxY < app.windows.firstMatch.frame.height - 70 {
+            let frame = button.exists ? button.frame : nil
+            // The band keeps the tap clear of the navigation bar and bottom edge. A
+            // sheet's last row cannot scroll into it: once a drag no longer moves a
+            // fully visible, hittable row, it is as far in as the sheet allows.
+            let settled = frame.map { $0 == previous && window.contains($0) } ?? false
+            if let frame, button.isHittable,
+               settled || (frame.minY > 140 && frame.maxY < window.height - 70) {
                 button.tap(); return
             }
+            previous = frame
             let upward = !(button.exists && button.frame.minY < 140)
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.7 : 0.45))
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.45 : 0.7)))
