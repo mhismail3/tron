@@ -58,18 +58,23 @@ def vitest_selection(args: list[str]) -> tuple[str | None, list[tuple[str, str]]
     return config, filters
 
 
+def filter_selects(relative: str, path: str) -> bool:
+    """Whether a file filter selects the test file at `path`: Vitest's rule, the path contains the filter ignoring case."""
+    return relative.lower() in path.lower()
+
+
 def selects_browser_fork(args: list[str]) -> bool:
     """Whether this Vitest selection can include the browser receipt test: the default config, and no file filter or one it matches."""
     config, filters = vitest_selection(args)
     if config is not None and Path(config).name != 'vitest.config.ts':
         return False
-    return not filters or any(relative in BROWSER_FORK_TEST for _, relative in filters)
+    return not filters or any(filter_selects(relative, BROWSER_FORK_TEST) for _, relative in filters)
 
 
 def with_own_config(args: list[str]) -> list[str]:
     """`args` under the one config that runs every file its filters select: a listing config when that is it.
 
-    A filter selects each test file whose path contains it, ignoring case, as Vitest matches. Filters selecting files of
+    A filter selects each test file `filter_selects` matches. Filters selecting files of
     more than one config are refused with each config's command, since any one config would skip the rest."""
     config, filters = vitest_selection(args)
     if config is not None or not filters:
@@ -80,7 +85,7 @@ def with_own_config(args: list[str]) -> list[str]:
     owners.update({path: name for name, paths in listed.items() for path in paths})
     selected: dict[str | None, list[str]] = {}
     for word, relative in filters:
-        for name in {owner for path, owner in owners.items() if relative.lower() in path.lower()} or {None}:
+        for name in {owner for path, owner in owners.items() if filter_selects(relative, path)} or {None}:
             selected.setdefault(name, []).append(word)
     if len(selected) == 1:
         name = next(iter(selected))
