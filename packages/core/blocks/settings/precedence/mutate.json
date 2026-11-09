@@ -1,0 +1,122 @@
+{
+  "block": "settings/precedence",
+  "tier": "high-stakes",
+  "tierReason": "decides which settings value applies, including authority-relevant ones (tools, model, project trust gating of untrusted project values); \"when unsure, high-stakes\"",
+  "impl": "blocks/settings/precedence/Block.dfy",
+  "symbols": [
+    "Admitted",
+    "ShownAt",
+    "Fold",
+    "Resolve",
+    "PlainBelow",
+    "FoldTokens",
+    "Below"
+  ],
+  "excludeSymbols": {
+    "Rank": "the precedence order is stated in the laws file (the H1 law itself), not implementation",
+    "At": "field selection stated in the laws file, not implementation"
+  },
+  "verify": [
+    "blocks/settings/precedence/Block.dfy"
+  ],
+  "laws": {
+    "S1 admission": [
+      "SettingsPrecedence.S1Admission"
+    ],
+    "R1 winner": [
+      "SettingsPrecedence.R1Winner",
+      "SettingsPrecedence.ResolveSteps",
+      "SettingsPrecedence.FoldOne",
+      "SettingsPrecedence.FoldAppend",
+      "SettingsPrecedence.ShownAtSpec"
+    ],
+    "R2 default": [
+      "SettingsPrecedence.R2Default"
+    ],
+    "R3 compose": [
+      "SettingsPrecedence.R3Compose"
+    ],
+    "R4 untrusted-inert": [
+      "SettingsPrecedence.R4UntrustedInert"
+    ],
+    "R5 higher-scope-wins": [
+      "SettingsPrecedence.R5HigherScopeWins"
+    ],
+    "R6 shown": [
+      "SettingsPrecedence.R6Shown",
+      "SettingsPrecedence.AllShownFacts",
+      "SettingsPrecedence.AllShownSorted",
+      "SettingsPrecedence.AllShownSpec",
+      "SettingsPrecedence.AllShownHas",
+      "SettingsPrecedence.SortedAppend"
+    ],
+    "R7 not-applied": [
+      "SettingsPrecedence.R7NotApplied"
+    ],
+    "R8 below": [
+      "SettingsPrecedence.R8Below",
+      "SettingsPrecedence.FoldTokensFolded"
+    ]
+  },
+  "helpers": [
+    "FoldedAppend",
+    "FoldedLayer",
+    "OriginLive"
+  ],
+  "translate": "blocks/settings/precedence/Block.dfy",
+  "oracles": [
+    {
+      "name": "diff-vs-gateway-settings-resolver.ts(300)",
+      "cmd": [
+        "node",
+        "tools/proof/oracles/settings-precedence.mjs",
+        "{dir}/out/core.js",
+        "300"
+      ],
+      "jsonEq": [
+        "agree",
+        "requests"
+      ]
+    }
+  ],
+  "accepted": {},
+  "report": "blocks/settings/precedence/MUTATION.json",
+  "shadow": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/settings-precedence.mjs",
+      "{core}",
+      "2000"
+    ],
+    "source": "compiled core vs packages/gateway/src/kernel/settings/settings-resolver.ts (resolveSettings and composedBelow over a synthetic schema, random stores and targets) on 2,000 generated resolutions (not real traffic)"
+  },
+  "replay": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/settings-precedence.mjs",
+      "{core}",
+      "--replay",
+      "{corpus}"
+    ],
+    "source": "compiled core vs the resolveInstance seam's recorded Debug-Gateway folds (packages/gateway/src/kernel/settings/settings-resolver.ts)"
+  },
+  "kinds": {
+    "safety": [
+      "S1 admission",
+      "R4 untrusted-inert",
+      "R5 higher-scope-wins"
+    ],
+    "progress": "n/a: pure function, no workflow",
+    "recovery": "n/a: stateless; resolution reads canonical stores each call",
+    "stale-inputs": "n/a: no stored decision; each call resolves from the current stores",
+    "exact-results": [
+      "R1 winner",
+      "R2 default",
+      "R3 compose",
+      "R6 shown",
+      "R7 not-applied",
+      "R8 below"
+    ],
+    "uncertain-outcomes": "n/a: no effects"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "packetHash": "c9232182f7d5762a",
+  "tier": "high-stakes",
+  "date": "2026-11-09",
+  "writer": {
+    "agent": "parent",
+    "model": "anthropic/claude-opus-5-5"
+  },
+  "reviewer": {
+    "agent": "law-reviewer (run 1a6b88c7, round 38ac5ae0)",
+    "model": "openai/gpt-6-luna",
+    "session": "2026-11-09T09-25-13-804Z_01a1bfa0-43cb-7473-beb1-ed93d992bcce/40ecc1e9-fc1c-4f43-b041-31039955a856/run-0/session.jsonl"
+  },
+  "laws": {
+    "S1 admission": {
+      "verdict": "ACCEPT",
+      "notes": "The four equations exactly specify scopeAdmitted/Admitted; for example Key(false, true, false) admits Global, Home, and Session but not Project. Its one killed mutant directly guards admission."
+    },
+    "R1 winner": {
+      "verdict": "ACCEPT",
+      "notes": "The premise and conclusions match the winner semantics, including the qualification that the simple-value equality applies only to non-composing keys; e.g. a live Session entry with no live Project entry witnesses it. ShownAt prefers the qualified value within each layer, then the bottom-up fold makes scope outrank specificity; 46 kills (33 unique) are strong evidence."
+    },
+    "R2 default": {
+      "verdict": "ACCEPT",
+      "notes": "This exactly states the empty-live-set result; a Key(false,false,false) with all four entries out of target is a concrete satisfying input. It kills no mutants, but preserves an explicit default/origin result contract complementary to winner and compose laws."
+    },
+    "R3 compose": {
+      "verdict": "ACCEPT",
+      "notes": "This matches the composing fold over live shown tokens in ascending rank; a composing key with all entries out of target satisfies the premise and yields Default. It kills no mutants, but records the composition contract; A1 correctly delegates actual composition to the setting type."
+    },
+    "R4 untrusted-inert": {
+      "verdict": "ACCEPT",
+      "notes": "The equality premise preserves target, binding, and applied status while permitting only value-field changes, exactly what the conclusion requires; e.g. an out-of-target Project entry with applied=false and changed tokens is a witness. This captures inert untrusted-project values; zero unique kills is acceptable as a relational invariant also guarded by other resolution laws."
+    },
+    "R5 higher-scope-wins": {
+      "verdict": "ACCEPT",
+      "notes": "For a non-composing key, keeping layer l and every higher-ranked entry fixed while changing lower entries cannot affect the winner; a live Project entry with all other entries absent is a witness. It correctly includes per-model values below l as irrelevant, matching scope-over-specificity; no unique kills, but it states that product invariant explicitly."
+    },
+    "R6 shown": {
+      "verdict": "ACCEPT",
+      "notes": "The Dafny clauses exactly characterize Resolve.shown as sorted visible layers with each chosen Token, qualified marker, and applied flag; an empty Layers value is a concrete witness. ShownAt's qualified-first behavior matches the TS shown list; zero kills is understandable because other laws constrain shared implementation paths, but this law directly specifies reporting."
+    },
+    "R7 not-applied": {
+      "verdict": "ACCEPT",
+      "notes": "The biconditional and lower-origin consequence match the TS highest shown entry behavior; a visible, unapplied Project value with every higher-ranked layer absent witnesses it. It properly allows lower applied layers or default beneath the untrusted value; 12 kills (4 unique) provide direct evidence."
+    },
+    "R8 below": {
+      "verdict": "ACCEPT",
+      "notes": "The statement matches composedBelow's strict-below, applied, admitted plain-value fold; a composing key with layer l=Project and no lower entries satisfies it with Default. The implementation explicitly uses unqualified values only, unlike the qualified-first resolution fold; 33 kills (25 unique) are strong evidence."
+    }
+  },
+  "acceptedMutants": {},
+  "general": "High-stakes is correct because settings precedence includes model/tools and trust-gated project values. A1 now matches precedenceFacts: the default is tokenized first (token 0), and values are keyed by JSON.stringify output (with undefined represented as the empty string), so objects with equal mappings but different property order may receive distinct tokens; the block receives only tokens and never compares values, so this distinction does not change which entries participate or their order. A1 also correctly assigns Compose evaluation to the setting type. A2 matches the intended store facts but its 'applied=false only for untrusted Project' invariant must be checked at the seam. The laws cover admission, exact resolution, reporting, inert untrusted values, winner stability, and composedBelow; progress/recovery/stale-input/uncertain-outcome laws are inapplicable to this pure per-call resolver, while diagnostics, clamping, and formatting remain outside scope. Mutation reports 92/92 valid killed, 0 accepted, and 61 stillborn; shadow is generated lab traffic only (22,710 comparisons), not the required seven-day real-traffic evidence. The law model relies on the shell to select the target/model-qualified value and default correctly; replay/real traffic must test this seam."
+}

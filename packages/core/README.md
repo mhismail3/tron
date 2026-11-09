@@ -20,8 +20,10 @@ wire/Protocol.dfy                the Gateway protocol's value types (protocol v8
                                  packages/gateway/src/protocol/types.ts (scripts/tron proof wire --protocol)
 ```
 
-Blocks: `schedule/occurrence` (Automation once/interval occurrences; shell
-`packages/gateway/src/automations/schedule.ts`).
+Blocks: `schedule/occurrence` (Automation once/interval occurrences) and `schedule/calendar` (calendar
+occurrences over a zone transition table from `packages/gateway/src/automations/zone-table.ts`); shell
+`packages/gateway/src/automations/schedule.ts`; `settings/precedence` (which layer's value a setting resolves to,
+over value tokens; shell `packages/gateway/src/kernel/settings/settings-resolver.ts`).
 
 ## Block contract
 

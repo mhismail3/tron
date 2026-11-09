@@ -4,6 +4,7 @@ import { keyForHome, keyDefault, type SettingsSchema, type Binding, type KeyDecl
 import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "./scope-resolution.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
+import { recordSeam, seamsRecorded } from "../../proof/traffic-recorder.js";
 
 
 
@@ -107,6 +108,34 @@ export function composedBelow(stores: SettingsStores, key: KeyDeclaration, quali
 function layerApplied(stores: SettingsStores, layer: StoreLayer): { applied: boolean; reason?: "untrusted" } {
   if (layer === "project" && stores.project && !stores.project.applied) return { applied: false, reason: "untrusted" };
   return { applied: true };
+}
+
+/** The typed facts proof block settings/precedence (packages/core) decides from, for its shadow: each layer's
+ * presence, binding, values and whether it applies, for one key instance. Values enter as tokens: equal values
+ * (as JSON) of one call share a token, the instance's default is token 0, so no setting value is recorded. */
+export function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers) {
+  const classes = new Map<string, number>();
+  const token = (value: unknown): number => {
+    const identity = value === undefined ? "" : JSON.stringify(value);
+    let found = classes.get(identity);
+    if (found === undefined) classes.set(identity, found = classes.size);
+    return found;
+  };
+  token(keyDefault(key, qualifiers));
+  const entry = (layer: Exclude<StoreLayer, "default">) => {
+    const binding = key.layers[layer];
+    const inTarget = stores.layers.includes(layer);
+    const read = (qualifiedOnly: boolean) => {
+      const value = binding && inTarget ? readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id) : undefined;
+      return value === undefined ? null : token(value);
+    };
+    return { inTarget, bound: binding !== undefined, qualified: read(true), unqualified: read(false), applied: layerApplied(stores, layer).applied };
+  };
+  return {
+    input: { key: key.id, projectSettable: key.projectSettable, sessionOverridable: key.sessionOverridable, composes: key.type.compose !== undefined,
+      layers: { global: entry("global"), home: entry("home"), session: entry("session"), project: entry("project") } },
+    token,
+  };
 }
 
 /** Resolve every key (or the requested ones) for a target. */
@@ -218,6 +247,17 @@ function resolveInstance(
   }
   const top = shown[shown.length - 1];
   const notApplied = top && !top.applied ? top : undefined;
+  if (seamsRecorded()) {
+    try {
+      const facts = precedenceFacts(stores, key, qualifiers);
+      recordSeam("settings/precedence", "resolve", facts.input, {
+        value: key.type.compose ? null : facts.token(value), layer, notApplied: notApplied?.layer ?? null,
+        shown: shown.map(entry => ({ layer: entry.layer, qualified: qualified.includes(entry), token: facts.token(entry.value), applied: entry.applied })),
+      });
+    } catch {
+      // Recording is diagnostic: a value the record cannot be built from must not change resolution.
+    }
+  }
 
   for (const layerId of [...BOTTOM_UP].reverse()) {
     if (!stores.layers.includes(layerId) && layerId !== "default") continue;

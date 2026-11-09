@@ -23,12 +23,13 @@ export interface Core {
 // Loads a compiled core (the checked-in ./core.js, or a freshly translated one) and binds the façade to it.
 export function load(corePath: string): Core {
   const require = createRequire(new URL("../../../package.json", import.meta.url));
-  // The compiled file is a script that declares its modules; evaluate it and take ScheduleOccurrence and BigNumber.
-  const { M, BigNumber } = new Function("require", readFileSync(corePath, "utf8") + "\nreturn { M: ScheduleOccurrence, BigNumber };")(require);
+  // The compiled file is a script that declares its modules; evaluate it and take ScheduleOccurrence, its runtime and BigNumber.
+  const { M, _dafny, BigNumber } = new Function("require", readFileSync(corePath, "utf8") + "\nreturn { M: ScheduleOccurrence, _dafny, BigNumber };")(require);
   const int = (n: number): unknown => { if (!Number.isSafeInteger(n)) throw new RangeError(`not a safe integer: ${n}`); return new BigNumber(n); };
   const nat = (n: number): unknown => { if (!Number.isSafeInteger(n) || n < 0) throw new RangeError(`not a natural number: ${n}`); return new BigNumber(n); };
   const bool = (b: boolean): boolean => { if (typeof b !== "boolean") throw new TypeError(`not a boolean: ${String(b)}`); return b; };
   const num = (b: { isInteger(): boolean; toNumber(): number }): number => { const n = b.toNumber(); if (!b.isInteger() || !Number.isSafeInteger(n)) throw new RangeError("core returned an integer outside the safe range"); return n; };
+  const seq = <T>(v: readonly T[], each: (x: T) => unknown): unknown => { if (!Array.isArray(v)) throw new TypeError(`not an array: ${JSON.stringify(v)}`); return _dafny.Seq.of(...v.map(each)); };
   const natNum = (b: { isInteger(): boolean; toNumber(): number }): number => { const n = num(b); if (n < 0) throw new RangeError("core returned a negative natural number"); return n; };
   const toOpt = (v: Opt): unknown => { switch (v?.$) { case "None": return M.Opt.create_None(); case "Some": return M.Opt.create_Some(int(v.v)); default: return unknown("Opt", v); } };
   const fromOpt = (v: any): Opt => v.is_None ? { $: "None" } : v.is_Some ? { $: "Some", v: num(v.dtor_v) } : bad("Opt");

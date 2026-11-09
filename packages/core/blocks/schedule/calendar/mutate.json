@@ -1,0 +1,154 @@
+{
+  "block": "schedule/calendar",
+  "tier": "high-stakes",
+  "tierReason": "decides when calendar automation runs dispatch or skip (feeds the automation-run lifecycle); \"when unsure, high-stakes\"",
+  "impl": "blocks/schedule/calendar/Block.dfy",
+  "symbols": [
+    "AtLeast",
+    "Better",
+    "ResFrom",
+    "Resolve",
+    "Candidate",
+    "Least",
+    "Most",
+    "ScanMin",
+    "ScanMax",
+    "Next",
+    "Prior",
+    "First",
+    "Classify"
+  ],
+  "verify": [
+    "blocks/schedule/calendar/Block.dfy"
+  ],
+  "laws": {
+    "N1 next-sound": [
+      "ScheduleCalendar.N1NextSound",
+      "ScheduleCalendar.CandidateOcc",
+      "ScheduleCalendar.ResolveSpec",
+      "ScheduleCalendar.ResFromSpec",
+      "ScheduleCalendar.ScanMinSpec",
+      "ScheduleCalendar.DateOf"
+    ],
+    "N2 next-least": [
+      "ScheduleCalendar.N2NextLeast",
+      "ScheduleCalendar.OccCandidate",
+      "ScheduleCalendar.OccResolve",
+      "ScheduleCalendar.NextRange"
+    ],
+    "N3 next-complete": [
+      "ScheduleCalendar.N3NextComplete"
+    ],
+    "N4 next-progress": [
+      "ScheduleCalendar.N4NextProgress",
+      "ScheduleCalendar.WeekdayWithin"
+    ],
+    "P1 prior-sound": [
+      "ScheduleCalendar.P1PriorSound",
+      "ScheduleCalendar.ScanMaxSpec"
+    ],
+    "P2 prior-greatest": [
+      "ScheduleCalendar.P2PriorGreatest",
+      "ScheduleCalendar.PriorRange"
+    ],
+    "P3 prior-complete": [
+      "ScheduleCalendar.P3PriorComplete"
+    ],
+    "F1 first": [
+      "ScheduleCalendar.F1First"
+    ],
+    "C1 classify-not-due": [
+      "ScheduleCalendar.C1ClassifyNotDue"
+    ],
+    "C2 classify-due": [
+      "ScheduleCalendar.C2ClassifyDue"
+    ]
+  },
+  "helpers": [
+    "LDateBounds",
+    "OffBound",
+    "LocalBound",
+    "ModMultiple"
+  ],
+  "translate": "blocks/schedule/calendar/Block.dfy",
+  "oracles": [
+    {
+      "name": "diff-vs-gateway-schedule.ts-calendar(3000)",
+      "cmd": [
+        "node",
+        "tools/proof/oracles/schedule-calendar.mjs",
+        "{dir}/out/core.js",
+        "3000"
+      ],
+      "jsonEq": [
+        "agree",
+        "requests"
+      ]
+    }
+  ],
+  "accepted": {
+    "AtLeast/boundary/>=->>#1": {
+      "kind": "equivalent",
+      "reason": "AtLeast(lo, x) = max(lo.v, x): where the mutation changes the branch taken (equal values) both branches return the same value",
+      "reviewer": "the independent law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "AtLeast/off-by-one/x->(x + 1)#1": {
+      "kind": "equivalent",
+      "reason": "AtLeast(lo, x) = max(lo.v, x): on integers lo.v >= x + 1 is lo.v > x, and at lo.v == x both branches return x",
+      "reviewer": "the independent law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Least/boundary/<=-><#1": {
+      "kind": "equivalent",
+      "reason": "Least keeps the lesser of two optional instants: where the mutation changes the branch taken (equal values) both branches return the same value",
+      "reviewer": "the independent law reviewer (REVIEW.json acceptedMutants)"
+    },
+    "Most/boundary/>=->>#1": {
+      "kind": "equivalent",
+      "reason": "Most keeps the greater of two optional instants: where the mutation changes the branch taken (equal values) both branches return the same value",
+      "reviewer": "the independent law reviewer (REVIEW.json acceptedMutants)"
+    }
+  },
+  "report": "blocks/schedule/calendar/MUTATION.json",
+  "shadow": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/schedule-calendar.mjs",
+      "{core}",
+      "20000"
+    ],
+    "source": "compiled core over zone-table.ts tables vs the calendar code of packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic; inputs the TypeScript throws on are counted apart, not compared)"
+  },
+  "replay": {
+    "cmd": [
+      "node",
+      "tools/proof/oracles/schedule-calendar.mjs",
+      "{core}",
+      "--replay",
+      "{corpus}"
+    ],
+    "source": "compiled core over zone-table.ts tables vs the schedule seams' recorded Debug-Gateway calendar calls (packages/gateway/src/automations/schedule.ts)"
+  },
+  "kinds": {
+    "safety": [
+      "N1 next-sound",
+      "N2 next-least",
+      "P1 prior-sound",
+      "P2 prior-greatest"
+    ],
+    "progress": [
+      "N4 next-progress"
+    ],
+    "recovery": "n/a: stateless; the scheduler's restart behaviour is the automation-run lifecycle block (P4)",
+    "stale-inputs": [
+      "C2 classify-due"
+    ],
+    "exact-results": [
+      "N3 next-complete",
+      "P3 prior-complete",
+      "F1 first",
+      "C1 classify-not-due",
+      "C2 classify-due"
+    ],
+    "uncertain-outcomes": "n/a: no effects"
+  }
+}

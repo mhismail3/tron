@@ -93,10 +93,19 @@ function prune(directory: string): void {
 
 let shared: TrafficRecorder | null | undefined;
 
-/** Records one seam call through the process's recorder; a no-op unless the recorder is enabled. */
-export function recordSeam(block: string, seam: string, input: unknown, output: unknown): void {
+function processRecorder(): TrafficRecorder | null {
   if (shared === undefined) {
     try { shared = openTrafficRecorder(); } catch { shared = null; }
   }
-  shared?.record(block, seam, input, output);
+  return shared;
+}
+
+/** Whether this process records seams: a seam whose record costs work to build checks it first. */
+export function seamsRecorded(): boolean {
+  return processRecorder() !== null;
+}
+
+/** Records one seam call through the process's recorder; a no-op unless the recorder is enabled. */
+export function recordSeam(block: string, seam: string, input: unknown, output: unknown): void {
+  processRecorder()?.record(block, seam, input, output);
 }
