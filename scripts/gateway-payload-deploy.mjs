@@ -2190,9 +2190,10 @@ function productionReplacementDependencies({ channel, host, port, token, timeout
     readAuthenticatedHealth: async () => requireAuthenticatedRuntimeInfo(await authenticatedRequest({
       host, port, token, timeoutMs, method: "system.info",
     }), channel),
-    // launchd owns the Stable relaunch. The live Debug supervisor
-    // (scripts/tron dev) relaunches the current selection after its child
-    // exits, so Debug recovery only waits for it and never reaches launchd.
+    // launchd owns the Stable relaunch. The Debug supervisor (scripts/tron dev)
+    // relaunches whatever is selected after each exit 75, including the
+    // restored selection once recovery publishes it, so Debug recovery only
+    // waits for it and never reaches launchd.
     launchSupervisor: channel === "dev" ? async () => {} : () => kickstartStableSupervisor(channel),
   };
 }
@@ -3052,6 +3053,7 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId, replac
             ? caughtRestore
             : new Error(String(caughtRestore));
           error.message += `; rollback compensation failed: ${restoreError.message}`;
+          if (paths.channel === "dev") error.message += "; Debug recovery belongs to its supervisor: scripts/tron dev start brings Debug back";
           const selectedManifest = currentManifest ?? target;
           await writeState(paths, {
             state: "failed",

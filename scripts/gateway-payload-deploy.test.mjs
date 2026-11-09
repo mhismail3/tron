@@ -482,15 +482,17 @@ test("a crash inside the rollback keeps a startable selection (#2316 F8)", async
   }
 });
 
-// #699: a Debug promotion whose candidate never relaunches must recover through
-// the Debug supervisor only. The real promote CLI drives an owned stand-in
-// Gateway process on a private port: it drains and exits 75 like the Gateway,
-// the candidate never listens, and the "supervisor" relaunches only what
-// current.json selects. Failure modes:
+// #699: a Debug promotion whose candidate never relaunches must recover without
+// the Stable path. The real promote CLI drives an owned stand-in Gateway process
+// on a private port: it drains and exits 75 like the Gateway, and the candidate
+// never listens. The relaunching owner is a model of scripts/tron-dev's
+// supervisor, which relaunches the current selection after each exit 75 (also
+// when it stops a candidate that never got ready), but exits `failed` when a
+// candidate crashes. Failure modes:
 // 1. dev recovery reaches the Stable launchd kickstart (Stable error text);
 // 2. the prior selection is not restored;
-// 3. a supervisor that relaunches the restored selection is not accepted as
-//    the recovery, or a down supervisor is not named with its recovery command.
+// 3. with no supervisor left, the failure does not name its recovery command,
+//    or a relaunch of the restored selection is not accepted as the recovery.
 const FAKE_GATEWAY = `
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -528,7 +530,7 @@ async function makeDevPromotionPayload(root, name) {
   return payload;
 }
 
-test("a Debug promotion whose candidate never relaunches recovers only through the Debug supervisor (#699)", { timeout: 180_000 }, async () => {
+test("a failed Debug promotion restores the prior selection and never takes the Stable recovery path (#699)", { timeout: 180_000 }, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-dev-promote-")));
   const children = new Set();
   try {
@@ -580,14 +582,20 @@ test("a Debug promotion whose candidate never relaunches recovers only through t
       // prior selection ever listens; the candidate never produces a listener.
       first.once("exit", async (code) => {
         if (!supervisorLive || code !== 75) return;
-        while (await currentVersion() !== "prior") await new Promise((done) => setTimeout(done, 100));
-        await new Promise((done) => setTimeout(done, 1_000));
-        launch(port, staged.prior);
+        // Bounded: if the selection is never restored, nothing relaunches and the case fails.
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          if (await currentVersion().catch(() => undefined) === "prior") {
+            await new Promise((done) => setTimeout(done, 500));
+            launch(port, staged.prior);
+            return;
+          }
+          await new Promise((done) => setTimeout(done, 100));
+        }
       });
       const result = await new Promise((done) => execFile(process.execPath, [
         fileURLToPath(new URL("./gateway-payload-deploy.mjs", import.meta.url)), "promote", "--channel", "dev", "--home", home,
         "--version", "candidate", "--fingerprint", staged.candidate.payloadFingerprint,
-        "--host", "127.0.0.1", "--port", String(port), "--timeout-ms", "3000", "--command-id", `debug-update-699-${supervisorLive}`,
+        "--host", "127.0.0.1", "--port", String(port), "--timeout-ms", "5000", "--command-id", `debug-update-699-${supervisorLive}`,
       ], { env: { PATH: process.env.PATH, HOME: home, TMPDIR: root, TRON_GATEWAY_CHANNEL: "dev", TRON_GATEWAY_SUPERVISED: "1" }, timeout: 120_000 },
       (error, stdout, stderr) => done({ error, stdout, stderr })));
       const label = supervisorLive ? "live supervisor" : "supervisor down";
