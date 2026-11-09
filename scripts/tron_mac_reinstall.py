@@ -389,7 +389,8 @@ def command(argv, category, timeout=1200, env=None, accepted=(0,)):
             # service. Do not escalate to SIGKILL when cooperative exit fails.
             try:
                 os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
+                # Already exited: macOS answers EPERM while it awaits reaping (ESRCH once reaped).
                 pass
             try:
                 child.wait(timeout=5)

@@ -1984,6 +1984,39 @@ class ProcessFixture(ContainedFixture, unittest.TestCase):
                                    text=True, stdout=subprocess.PIPE).stdout.strip()
             self.assertTrue(stat.startswith("Z") or not stat, f"descendant still alive: {pid} {stat}")
 
+    def test_a_signal_after_the_command_exited_unreaped_stays_the_signal(self) -> None:
+        """#2401: the owner forwards a signal to the command's group without polling first, so a
+        signal after the command exited but before the owner reaps it meets macOS's EPERM for a
+        zombie-only group. It must still end the owner as that signal, never a traceback. The spy
+        delivers the signal once the command is a zombie, then runs the real select."""
+        driver = (
+            "import importlib.util, os, selectors, signal, subprocess, sys, time\n"
+            "spec = importlib.util.spec_from_file_location('owner', sys.argv[1])\n"
+            "owner = importlib.util.module_from_spec(spec); spec.loader.exec_module(owner)\n"
+            "started, real_init = [], subprocess.Popen.__init__\n"
+            "def init(self, *args, **keywords):\n"
+            "    real_init(self, *args, **keywords); started.append(self)\n"
+            "class Selector(selectors.DefaultSelector):\n"
+            "    def select(self, timeout=None):\n"
+            "        if started:\n"
+            "            command = started.pop()\n"
+            "            deadline = time.monotonic() + 60\n"
+            "            while not subprocess.run(['ps', '-o', 'stat=', '-p', str(command.pid)], capture_output=True,"
+            " text=True).stdout.startswith('Z'):\n"
+            "                assert time.monotonic() < deadline, 'the command never exited'\n"
+            "                time.sleep(0.02)\n"
+            "            print('race-window', file=sys.stderr, flush=True)\n"
+            "            os.kill(os.getpid(), signal.SIGTERM)\n"
+            "        return super().select(timeout)\n"
+            "subprocess.Popen.__init__, selectors.DefaultSelector = init, Selector\n"
+            "sys.argv = sys.argv[1:]\n"
+            "raise SystemExit(owner.main())\n"
+        )
+        result = self.run_script([sys.executable, "-c", driver, *self.command(
+            [sys.executable, "-c", "pass"], overall=60, no_output=60)[1:]],
+            self.root, stderr=subprocess.PIPE, text=True, timeout=120)
+        self.assertEqual((result.returncode, result.stderr), (128 + signal.SIGTERM, "race-window\n"))
+
 
 class LockFixture(ContainedFixture, unittest.TestCase):
     def test_concurrent_owner_fails_and_release_allows_next_owner(self) -> None:
@@ -2013,6 +2046,46 @@ class LockFixture(ContainedFixture, unittest.TestCase):
                 sys.executable, "-c", "pass",
             ], self.root)
             self.assertEqual(third.returncode, 0)
+
+    def test_a_signal_while_the_command_awaits_reaping_stays_the_signal(self) -> None:
+        """#2401: macOS answers killpg on a group whose members all exited but whose leader is not
+        yet reaped with EPERM. A signal whose forwarder finds the command still running, and then
+        signals it after it exited, must still end the holder as that signal, never a traceback.
+        The spy calls the real poll, then ends the command and holds the window open until it is a
+        zombie, so the race is taken on every run."""
+        driver = (
+            "import importlib.util, os, signal, subprocess, sys, time\n"
+            "spec = importlib.util.spec_from_file_location('lock', sys.argv[1])\n"
+            "lock = importlib.util.module_from_spec(spec); spec.loader.exec_module(lock)\n"
+            "real_poll, real_wait = subprocess.Popen.poll, subprocess.Popen.wait\n"
+            "def leased(process): return 'leased-command' in str(process.args)\n"
+            "def zombie(pid): return subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)],"
+            " capture_output=True, text=True).stdout.startswith('Z')\n"
+            "def poll(self):\n"
+            "    result = real_poll(self)\n"
+            "    if leased(self) and result is None:\n"
+            "        os.kill(self.pid, signal.SIGKILL)\n"
+            "        print('race-window', file=sys.stderr, flush=True)\n"
+            "        deadline = time.monotonic() + 60\n"
+            "        while not zombie(self.pid):\n"
+            "            assert time.monotonic() < deadline, 'the command never exited'\n"
+            "            time.sleep(0.02)\n"
+            "    return result\n"
+            "def wait(self, timeout=None):\n"
+            "    if leased(self):\n"
+            "        os.kill(os.getpid(), signal.SIGTERM)\n"
+            "    return real_wait(self, timeout)\n"
+            "subprocess.Popen.poll, subprocess.Popen.wait = poll, wait\n"
+            "sys.argv = [sys.argv[1], *sys.argv[2:]]\n"
+            "raise SystemExit(lock.main())\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            self.root = Path(temporary)
+            holder = self.run_script([
+                sys.executable, "-c", driver, str(LOCK), "--lock", str(self.root / "lease.lock"), "--",
+                sys.executable, "-c", "import time; time.sleep(60)  # leased-command",
+            ], self.root, stderr=subprocess.PIPE, text=True, timeout=120)
+            self.assertEqual((holder.returncode, holder.stderr), (128 + signal.SIGTERM, "race-window\n"))
 
 
 class HostSlotFixture(ContainedFixture, unittest.TestCase):
