@@ -957,6 +957,34 @@ describe("Home task cold reconciliation", () => {
     expect(await store.read("task-one")).toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "admission-refused" } });
   }, 20_000);
 
+  // #2319: the create's rename lands but its directory sync fails. The visible pending record is
+  // settled live, and only that rewrite lifts the store's fence, so the next task admits.
+  it("settles a task whose create publication is uncertain, without a restart (#2319)", async () => {
+    const f = await fixture();
+    const tasks = (homeOwnerOf(f.registry) as any).tasks;
+    const store = tasks.store as HomeTaskStore;
+    await store.initialize();
+    const epoch = await store.restoreEpoch();
+    for (const intent of ["Finite work", "Next work"]) await issueGrant(tasks.authorization, { intentDigest: taskIntentDigest(intent),
+      target: f.cwd, authorizationScope: "full-work", restoreEpoch: epoch },
+      { decisionId: `single-use-${intent.length}`, expiresAt: Date.now() + 60_000 });
+    const directory = join(f.tronHome, "gateway/home/tasks");
+    let renamed = false, failed = false;
+    (store as any).options.fileSystem = { mkdir, rm,
+      rename: async (from: string, to: string) => { await rename(from, to); renamed ||= to.endsWith("-task-one.json"); },
+      open: async (...args: Parameters<typeof fileSystem.open>) => {
+        if (renamed && !failed && args[0] === directory) { failed = true; throw new Error("injected directory synchronization failure"); }
+        return fileSystem.open(...args);
+      } };
+    const calls = vi.fn(() => fauxAssistantMessage("Never prompted")); f.faux.setResponses([calls]);
+    await expect(dispatch(f)).rejects.toMatchObject({ code: "publication-uncertain" });
+    expect(failed).toBe(true);
+    expect(calls).not.toHaveBeenCalled();
+    expect(await store.read("task-one")).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "admission-refused" } });
+    const next = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "task-two", intent: "Next work", target: f.cwd });
+    expect(next.taskId).toBe("task-two");
+  }, 20_000);
+
   it.each(["pending", "grant-consumed", "worker-created", "operation-bound"])("retires the %s admission cut without replay or renewing grants", async cut => {
     const f = await fixture();
     const tasks = (homeOwnerOf(f.registry) as any).tasks;
