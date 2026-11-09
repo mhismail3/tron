@@ -168,46 +168,40 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            guard range.length > 0, onAnnotate != nil else { return nil }
-            let annotate = UIAction(
+            guard let textView = textView as? ChatSelectableTextView,
+                  let annotate = annotateAction(textView, range: range) else { return nil }
+            return UIMenu(children: [annotate] + suggestedActions)
+        }
+
+        /// Annotate for `range`. The quote and its range are fixed when the
+        /// menu is built, so a later re-render or layout shift cannot change
+        /// what is quoted.
+        func annotateAction(_ textView: ChatSelectableTextView, range: NSRange) -> UIAction? {
+            let source = textView.attributedText.string as NSString
+            guard onAnnotate != nil, range.length > 0, NSMaxRange(range) <= source.length else { return nil }
+            let trimmed = ChatSelectableTextLayout.trimmedRange(range, in: source)
+            guard trimmed.length > 0 else { return nil }
+            let quote = source.substring(with: trimmed)
+            return UIAction(
                 title: "Annotate",
                 image: UIImage(systemName: "text.quote")
             ) { [weak self, weak textView] _ in
                 guard let self, let textView else { return }
-                self.annotate(textView, range: range)
+                let windowRect = textView.convert(textView.bounds(of: trimmed), to: nil)
+                textView.endChatSelection()
+                self.onAnnotate?(quote, trimmed, windowRect)
             }
-            return UIMenu(children: [annotate] + suggestedActions)
-        }
-
-        private func annotate(_ textView: UITextView, range: NSRange) {
-            let source = textView.attributedText.string as NSString
-            guard NSMaxRange(range) <= source.length else { return }
-            let trimmed = ChatSelectableTextLayout.trimmedRange(range, in: source)
-            guard trimmed.length > 0 else { return }
-            var rect = CGRect.null
-            if let start = textView.position(from: textView.beginningOfDocument, offset: trimmed.location),
-               let end = textView.position(from: start, offset: trimmed.length),
-               let textRange = textView.textRange(from: start, to: end) {
-                for selection in textView.selectionRects(for: textRange) where !selection.rect.isEmpty {
-                    rect = rect.union(selection.rect)
-                }
-            }
-            if rect.isNull { rect = textView.bounds }
-            let windowRect = textView.convert(rect, to: nil)
-            textView.selectedRange = NSRange(location: 0, length: 0)
-            textView.resignFirstResponder()
-            onAnnotate?(source.substring(with: trimmed), trimmed, windowRect)
         }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> UITextView {
-        // The subclass uses its designated initializer, which runs its stored
-        // property initializers; `init(usingTextLayoutManager:)` does not on
-        // iOS 27. A nil container selects TextKit 2.
-        let view: UITextView = messageBlocks == nil
-            ? UITextView(usingTextLayoutManager: true)
+    func makeUIView(context: Context) -> ChatSelectableTextView {
+        // The subclasses use their designated initializer, which runs their
+        // stored property initializers; `init(usingTextLayoutManager:)` does
+        // not on iOS 27. A nil container selects TextKit 2.
+        let view: ChatSelectableTextView = messageBlocks == nil
+            ? ChatSelectableTextView(frame: .zero, textContainer: nil)
             : ChatSelectableMessageTextView(frame: .zero, textContainer: nil)
         view.isEditable = false
         view.isSelectable = true
@@ -222,14 +216,18 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         view.setContentHuggingPriority(.defaultLow, for: .horizontal)
         view.accessibilityIdentifier = Self.accessibilityIdentifier
         view.delegate = context.coordinator
+        view.annotateAction = { [weak coordinator = context.coordinator, weak view] range in
+            guard let coordinator, let view else { return nil }
+            return coordinator.annotateAction(view, range: range)
+        }
         return view
     }
 
-    func updateUIView(_ view: UITextView, context: Context) {
+    func updateUIView(_ view: ChatSelectableTextView, context: Context) {
         configure(view, coordinator: context.coordinator)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: ChatSelectableTextView, context: Context) -> CGSize? {
         configure(uiView, coordinator: context.coordinator)
         let width = proposal.width ?? 10_000
         guard width > 0, width.isFinite else { return nil }
@@ -237,7 +235,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         return CGSize(width: proposal.width ?? ceil(size.width), height: ceil(size.height))
     }
 
-    private func configure(_ view: UITextView, coordinator: Coordinator) {
+    private func configure(_ view: ChatSelectableTextView, coordinator: Coordinator) {
         coordinator.onAnnotate = onAnnotate
         let family = fontSettings.selectedFamily
         let key = RenderKey(
@@ -252,6 +250,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         )
         guard coordinator.key != key else { return }
         coordinator.key = key
+        view.endKeyboardSelection()
         view.dataDetectorTypes = detectsLinks ? [.link] : []
         let traits = UITraitCollection(traitsFrom: [
             view.traitCollection,
@@ -280,6 +279,297 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     }
 }
 
+/// Selectable chat text. UIKit's own range selection makes this view first
+/// responder, which takes the keyboard from the focused composer; the
+/// transcript then re-lays out under the finger and the drag extends onto
+/// other text. So while another text input owns the keyboard this view
+/// refuses first responder and selects with UIKit's public selection pieces
+/// instead: the same word-granular long-press drag, handles, loupe and menu,
+/// leaving the keyboard and the transcript where they are.
+@MainActor
+class ChatSelectableTextView: UITextView {
+    /// Annotate for a selected range; nil when the surface does not annotate.
+    var annotateAction: ((NSRange) -> UIAction?)?
+
+    /// The one keyboard-up selection on screen.
+    private static weak var activeKeyboardSelection: ChatSelectableTextView?
+
+    /// UIScrollView is its own gesture delegate; these recognizers and the
+    /// interactions use a separate one.
+    private lazy var delegateProxy = KeyboardSelectionDelegate(owner: self)
+    private lazy var selectionDisplay = UITextSelectionDisplayInteraction(textInput: self, delegate: delegateProxy)
+    private lazy var editMenu = UIEditMenuInteraction(delegate: delegateProxy)
+    private lazy var selectionPress = UILongPressGestureRecognizer(target: self, action: #selector(selectWithPress(_:)))
+    private lazy var handleDrag = UIPanGestureRecognizer(target: self, action: #selector(dragHandle(_:)))
+    private lazy var clearingTap = UITapGestureRecognizer(target: self, action: #selector(clearWithTap))
+    private var loupe: UITextLoupeSession?
+    /// The long press's first word; the selection always contains it.
+    private var pressAnchor: NSRange?
+    /// The selection end a handle drag keeps fixed.
+    private var fixedHandleOffset: Int?
+    /// Set while the menu is replaced, so its dismissal keeps the selection.
+    private var isAdjustingSelection = false
+    /// Advances with each new or adjusted selection; a dismissed menu ends
+    /// only the selection it was shown for.
+    private var selectionGeneration = 0
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        addInteraction(selectionDisplay)
+        addInteraction(editMenu)
+        for recognizer in [selectionPress, handleDrag, clearingTap] as [UIGestureRecognizer] {
+            recognizer.delegate = delegateProxy
+            addGestureRecognizer(recognizer)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var canBecomeFirstResponder: Bool {
+        !ChatTextInputFocus.keyboardIsOwned(byAnotherThan: self) && super.canBecomeFirstResponder
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        // UIKit's own selection press still asks while it is refused.
+        guard super.becomeFirstResponder() else { return false }
+        endKeyboardSelection()
+        return true
+    }
+
+    private var hasKeyboardSelection: Bool { Self.activeKeyboardSelection === self }
+
+    /// Ends this view's selection in either mode.
+    func endChatSelection() {
+        endKeyboardSelection()
+        if isFirstResponder {
+            selectedRange = NSRange(location: 0, length: 0)
+            resignFirstResponder()
+        }
+    }
+
+    func endKeyboardSelection() {
+        guard hasKeyboardSelection else { return }
+        Self.activeKeyboardSelection = nil
+        pressAnchor = nil
+        fixedHandleOffset = nil
+        loupe?.invalidate()
+        loupe = nil
+        selectedRange = NSRange(location: 0, length: 0)
+        selectionDisplay.isActivated = false
+        editMenu.dismissMenu()
+    }
+
+    // MARK: Gestures
+
+    fileprivate func keyboardSelectionShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        if recognizer === selectionPress {
+            return ChatTextInputFocus.keyboardIsOwned(byAnotherThan: self)
+        }
+        if recognizer === handleDrag {
+            // The long press's own drag extends by words; a handle only moves after it.
+            let pressing = [.began, .changed].contains(selectionPress.state)
+            return !pressing && hasKeyboardSelection && handleEnd(near: recognizer.location(in: self)) != nil
+        }
+        return hasKeyboardSelection
+    }
+
+    fileprivate func keyboardSelection(_ recognizer: UIGestureRecognizer,
+                                       recognizesSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // UIKit's own selection press fails quietly without first responder.
+        recognizer === selectionPress && other.view === self
+    }
+
+    fileprivate func keyboardSelection(_ recognizer: UIGestureRecognizer,
+                                       makesWait other: UIGestureRecognizer) -> Bool {
+        // A handle drag wins over the transcript's scroll: the scroll waits for it.
+        recognizer === handleDrag && other.view is UIScrollView && other.view !== self
+    }
+
+    @objc private func selectWithPress(_ press: UILongPressGestureRecognizer) {
+        let point = press.location(in: self)
+        switch press.state {
+        case .began:
+            guard let word = wordRange(at: point) else { return }
+            Self.activeKeyboardSelection?.endKeyboardSelection()
+            Self.activeKeyboardSelection = self
+            selectionGeneration += 1
+            pressAnchor = word
+            selectionDisplay.isActivated = true
+            setKeyboardSelection(word)
+            loupe = UITextLoupeSession.begin(at: point, fromSelectionWidgetView: nil, in: self)
+        case .changed:
+            guard let anchor = pressAnchor, let word = wordRange(at: point) else { return }
+            setKeyboardSelection(NSUnionRange(anchor, word))
+            loupe?.move(to: point, withCaretRect: caretRect(atOffset: offset(at: point)), trackingCaret: false)
+        case .ended:
+            finishAdjusting()
+        default:
+            endKeyboardSelection()
+        }
+    }
+
+    @objc private func dragHandle(_ pan: UIPanGestureRecognizer) {
+        let point = pan.location(in: self)
+        switch pan.state {
+        case .began:
+            guard let moving = handleEnd(near: point) else { return }
+            let range = selectedRange
+            fixedHandleOffset = moving == range.location ? NSMaxRange(range) : range.location
+            selectionGeneration += 1
+            isAdjustingSelection = true
+            editMenu.dismissMenu()
+            loupe = UITextLoupeSession.begin(at: point, fromSelectionWidgetView: nil, in: self)
+        case .changed:
+            guard let fixed = fixedHandleOffset else { return }
+            let moving = offset(at: point)
+            let lower = min(fixed, moving), upper = max(fixed, moving)
+            guard upper > lower else { return }
+            setKeyboardSelection(NSRange(location: lower, length: upper - lower))
+            loupe?.move(to: point, withCaretRect: caretRect(atOffset: moving), trackingCaret: true)
+        default:
+            fixedHandleOffset = nil
+            finishAdjusting()
+        }
+    }
+
+    @objc private func clearWithTap() { endKeyboardSelection() }
+
+    private func setKeyboardSelection(_ range: NSRange) {
+        selectedRange = range
+        selectionDisplay.setNeedsSelectionUpdate()
+    }
+
+    private func finishAdjusting() {
+        loupe?.invalidate()
+        loupe = nil
+        guard hasKeyboardSelection, selectedRange.length > 0 else {
+            endKeyboardSelection()
+            return
+        }
+        isAdjustingSelection = true
+        let bounds = bounds(of: selectedRange)
+        editMenu.presentEditMenu(with: UIEditMenuConfiguration(
+            identifier: nil,
+            sourcePoint: CGPoint(x: bounds.midX, y: bounds.minY)
+        ))
+        isAdjustingSelection = false
+    }
+
+    // MARK: Geometry
+
+    private func offset(at point: CGPoint) -> Int {
+        guard let position = closestPosition(to: point) else { return 0 }
+        return offset(from: beginningOfDocument, to: position)
+    }
+
+    private func caretRect(atOffset offset: Int) -> CGRect {
+        guard let position = position(from: beginningOfDocument, offset: offset) else { return .null }
+        return caretRect(for: position)
+    }
+
+    /// The word at `point`, or the character there when it is not in a word.
+    private func wordRange(at point: CGPoint) -> NSRange? {
+        guard let position = closestPosition(to: point) else { return nil }
+        let word = tokenizer.rangeEnclosingPosition(position, with: .word, inDirection: .storage(.forward))
+            ?? tokenizer.rangeEnclosingPosition(position, with: .word, inDirection: .storage(.backward))
+        if let word {
+            let location = offset(from: beginningOfDocument, to: word.start)
+            return NSRange(location: location, length: offset(from: word.start, to: word.end))
+        }
+        let length = attributedText.length
+        guard length > 0 else { return nil }
+        return NSRange(location: min(offset(from: beginningOfDocument, to: position), length - 1), length: 1)
+    }
+
+    /// The selection end whose handle is under `point`.
+    private func handleEnd(near point: CGPoint) -> Int? {
+        let range = selectedRange
+        guard range.length > 0 else { return nil }
+        let slop: CGFloat = 22
+        for end in [range.location, NSMaxRange(range)] {
+            let caret = caretRect(atOffset: end)
+            if !caret.isNull, caret.insetBy(dx: -slop, dy: -slop).contains(point) { return end }
+        }
+        return nil
+    }
+
+    /// The union of the selection rects for `range`, in this view.
+    func bounds(of range: NSRange) -> CGRect {
+        var rect = CGRect.null
+        if let start = position(from: beginningOfDocument, offset: range.location),
+           let end = position(from: start, offset: range.length),
+           let textRange = textRange(from: start, to: end) {
+            for selection in selectionRects(for: textRange) where !selection.rect.isEmpty {
+                rect = rect.union(selection.rect)
+            }
+        }
+        return rect.isNull ? bounds : rect
+    }
+
+    // MARK: Menu
+
+    /// Annotate ahead of the system actions, as the keyboard-down menu.
+    fileprivate func keyboardSelectionMenu(suggestedActions: [UIMenuElement]) -> UIMenu? {
+        let range = selectedRange
+        guard hasKeyboardSelection, range.length > 0, NSMaxRange(range) <= attributedText.length else { return nil }
+        return UIMenu(children: [annotateAction?(range)].compactMap { $0 } + suggestedActions)
+    }
+
+    fileprivate var keyboardSelectionMenuTarget: CGRect {
+        hasKeyboardSelection ? bounds(of: selectedRange) : .null
+    }
+
+    fileprivate func keyboardSelectionMenuWillDismiss(_ animator: any UIEditMenuInteractionAnimating) {
+        // A tap or scroll elsewhere dismisses the menu and ends the selection,
+        // as it would resign UIKit's own.
+        guard !isAdjustingSelection else { return }
+        let generation = selectionGeneration
+        animator.addCompletion { [weak self] in
+            guard let self, self.selectionGeneration == generation, !self.isAdjustingSelection,
+                  self.fixedHandleOffset == nil else { return }
+            self.endKeyboardSelection()
+        }
+    }
+}
+
+@MainActor
+private final class KeyboardSelectionDelegate: NSObject, @preconcurrency UIGestureRecognizerDelegate,
+    @preconcurrency UIEditMenuInteractionDelegate, @preconcurrency UITextSelectionDisplayInteractionDelegate {
+    weak var owner: ChatSelectableTextView?
+
+    init(owner: ChatSelectableTextView) { self.owner = owner }
+
+    func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        owner?.keyboardSelectionShouldBegin(recognizer) ?? false
+    }
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        owner?.keyboardSelection(recognizer, recognizesSimultaneouslyWith: other) ?? false
+    }
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                           shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+        owner?.keyboardSelection(recognizer, makesWait: other) ?? false
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
+                             suggestedActions: [UIMenuElement]) -> UIMenu? {
+        owner?.keyboardSelectionMenu(suggestedActions: suggestedActions)
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction,
+                             targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
+        owner?.keyboardSelectionMenuTarget ?? .null
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, willDismissMenuFor configuration: UIEditMenuConfiguration,
+                             animator: any UIEditMenuInteractionAnimating) {
+        owner?.keyboardSelectionMenuWillDismiss(animator)
+    }
+}
+
 @MainActor
 private struct ChatSelectableAccessibilitySegment: Equatable {
     let label: String
@@ -287,7 +577,7 @@ private struct ChatSelectableAccessibilitySegment: Equatable {
 }
 
 @MainActor
-private final class ChatSelectableMessageTextView: UITextView {
+private final class ChatSelectableMessageTextView: ChatSelectableTextView {
     private var segments: [ChatSelectableAccessibilitySegment] = []
     private var segmentElements: [UIAccessibilityElement] = []
 
