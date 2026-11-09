@@ -129,7 +129,8 @@ enter as tokens, equal values (as JSON) of one call sharing one and the default 
 recorded. The `settings/tool-selection` seams in `toolSelectionType()`'s `compose` and `encode`
 (`packages/gateway/src/kernel/settings/settings-types.ts`) record their facts as `toolSelectionFacts` builds them
 (tool names as tokens: the empty name 0, the rest numbered by first appearance) and the result; a selection below
-or current value that is not a list counts as none, and a list holding a non-string is not recorded. A composing key's value is recorded as null (its composition is checked on generated inputs). A seam
+or current value that is not a list counts as none, and a list holding a non-string is not recorded. A composing
+key's value is recorded as null (its composition is checked on generated inputs). A seam
 whose record costs work checks `seamsRecorded()` first.
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
