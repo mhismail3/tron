@@ -4152,8 +4152,8 @@ final class TronSmokeUITests: XCTestCase {
         let staging = app.buttons["Staging, A pre-release environment for validation."]
         XCTAssertTrue(staging.waitForExistence(timeout: 5), app.debugDescription)
         staging.tap()
-        app.textViews["Which environments should receive the change?"].swipeLeft()
-        XCTAssertTrue(app.textViews["When should the change happen?"].waitForExistence(timeout: 3), app.debugDescription)
+        askUserQuestion("Which environments should receive the change?", in: app).swipeLeft()
+        XCTAssertTrue(askUserQuestion("When should the change happen?", in: app).waitForExistence(timeout: 3), app.debugDescription)
         let other = app.buttons.matching(NSPredicate(format: "label == %@", "Other"))
             .allElementsBoundByIndex.first { $0.isHittable }
         XCTAssertNotNil(other, app.debugDescription)
@@ -4303,7 +4303,7 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testAskUserInstructionAndSeparateToolbarLayout() {
         let app = launchAskUser(styled: true)
-        let question = app.textViews["Which environments should receive the change?"]
+        let question = askUserQuestion("Which environments should receive the change?", in: app)
         XCTAssertTrue(question.waitForExistence(timeout: 5))
         let instruction = app.staticTexts["Select one. Question 1 of 1"]
         let option = app.buttons["Staging, A pre-release environment for validation."]
@@ -4399,7 +4399,7 @@ final class TronSmokeUITests: XCTestCase {
         drag(dx: -240, dy: 30)
         XCTAssertTrue(secondPage.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(firstPage.exists, "The previous page stays mounted after the turn")
-        let timing = app.textViews["When should the change happen?"]
+        let timing = askUserQuestion("When should the change happen?", in: app)
         XCTAssertEqual(timing.frame.minX, restX, accuracy: 1, "The new page did not settle in place")
         XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A page drag resized or dismissed the sheet")
         keepScreenshot(named: "ask-user-page-2-after-drag")
@@ -4463,6 +4463,15 @@ final class TronSmokeUITests: XCTestCase {
         }
         expectation(for: visible, evaluatedWith: editor)
         waitForExpectations(timeout: 5)
+    }
+
+    /// The question's selectable text view. iOS 27 also exposes its paragraph
+    /// as a child the label query types TextView, so match the view itself.
+    @MainActor
+    private func askUserQuestion(_ text: String, in app: XCUIApplication) -> XCUIElement {
+        app.textViews.matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", "chat.assistant.selectable-text", text
+        )).element
     }
 
     @MainActor
