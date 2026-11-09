@@ -298,9 +298,12 @@ final class TronAccessibilityUITests: XCTestCase {
         }
     }
 
-    /// Device pixels per point, read from the screen's own raster.
+    /// Device pixels per point: the screen raster's width over the full-screen
+    /// app's width in points.
     private func devicePixelScale(_ app: XCUIApplication) -> CGFloat {
-        CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.frame.width
+        let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.frame.width
+        XCTAssertGreaterThan(scale, 0, "No screen raster to measure device pixels")
+        return scale
     }
 
     /// A frame in whole device pixels. UIKit's coordinate conversion carries
