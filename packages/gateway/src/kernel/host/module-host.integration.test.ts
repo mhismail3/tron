@@ -1,31 +1,18 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { TrustService } from "../resources/trust-service.js";
-import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
-import { DisplayOwner } from "../../display/display-modules.js";
-import { DisplayArtifactStore } from "../../display/display-artifact-store.js";
-import { RuntimeRegistry } from "../session/runtime-registry.js";
-import { workspaceModule } from "../../workspace/workspace-module.js";
-import { OpenAIModelEligibility } from "../../providers/openai-model-eligibility.js";
-import { createProviderModelRuntime } from "../../providers/provider-runtime.js";
-import { gatewayModules } from "../../main/modules.js";
+import { describe, expect, it } from "vitest";
 import { ORDINARY_SESSION_PROFILE } from "./session-profile.js";
 import { ModuleHost, type KernelHooks, type ModuleDescriptor, type ModuleInstance } from "./module-host.js";
 
 /**
  * Kernel contract for K3's module host (kernel.md §2.1, §3): the real
- * `ModuleHost` with faux descriptors, and the production composition with a real
- * `RuntimeRegistry`. Invariants: modules start in composition order and stop in
- * reverse; a module reads only the contracts it declares; composition errors
- * (a second policy implementer, an unknown hook, a doubly served RPC) fail at
- * start and stop what already started; hooks are resolved at each dispatch.
+ * `ModuleHost` with faux descriptors. Invariants: modules start in composition
+ * order and stop in reverse; a module reads only the contracts it declares;
+ * composition errors (a second policy implementer, an unknown hook, a doubly
+ * served RPC) fail at start and stop what already started; hooks are resolved
+ * at each dispatch. The production composition is a system journey
+ * (src/e2e/kernel/host/module-composition.integration.test.ts).
  */
 
 const log = { log: () => {} };
-const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 function descriptor<C = void>(name: string, start: ModuleDescriptor<C>["start"], dependsOn?: ModuleDescriptor<unknown>[]): ModuleDescriptor<C> {
   return { name, purpose: name, tools: [], commands: [], ...(dependsOn ? { dependsOn } : {}), start };
@@ -116,31 +103,5 @@ describe("kernel/host module host", () => {
     instances[0]!.hooks = { sessionRetired: () => "first, replaced", modelUsed: () => "late" } as Partial<KernelHooks>;
     expect(retired()).toEqual(["first, replaced", "second"]);
     expect((host.policy("modelUsed") as () => string)()).toBe("late");
-  });
-
-  it("composes the production modules into a registry with one workspace authority", async () => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), "tron-module-host-")));
-    roots.push(root);
-    const tronHome = join(root, "tron");
-    const trust = new TrustService(join(root, "agent"));
-    const openAIModelEligibility = new OpenAIModelEligibility();
-    const display = new DisplayOwner(new DisplayArtifactStore(tronHome), undefined, () => registry);
-    const composition = gatewayModules(() => ({ registry, display, openAIModelEligibility, home: { tronHome, agentDir: join(root, "agent"), trust, knowledge: () => undefined, settings: () => undefined } }));
-    const modules = await ModuleHost.start(composition.modules, { tronHome, log }, composition.runtimeOrder);
-    const registry = new RuntimeRegistry({
-      settingsSchema: TEST_SETTINGS_SCHEMA,
-      modules, agentDir: join(root, "agent"), tronHome, idleRuntimeMs: 60_000, trust,
-      beforeSessionRekey: (previousId, nextId, runtime) => display.grantReferences(previousId, nextId, runtime),
-      createModelRuntime: () => createProviderModelRuntime(join(root, "agent")),
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    });
-    try {
-      const workspace = modules.policy("resourceRoot")!();
-      expect(workspace).toBe(modules.contract(workspaceModule));
-      expect((await workspace.describe()).root).toBe(join(tronHome, "workspace"));
-    } finally {
-      await registry.dispose();
-      await modules.stop();
-    }
   });
 });
