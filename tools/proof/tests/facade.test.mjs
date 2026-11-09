@@ -1,7 +1,8 @@
 // Integration test for `scripts/tron proof facade` (tools/proof/README.md "Façade") on a copy of the fixture
 // block demo/counter (tests/fixtures/facade; test input, not a core block): the generated façade exposes
 // exactly the compiled declarations of the laws (a multi-line datatype in full, an opaque function, not a
-// ghost function or a commented-out one), marshals values both ways, refuses unknown constructors,
+// ghost function or a commented-out one), marshals values both ways (sequences as arrays, also nested and as
+// datatype fields), refuses unknown constructors,
 // non-integers, negative naturals and a broken precondition before calling the core, and a result outside
 // the safe integers after it; --check fails on a
 // hand edit of either file; and laws the façade cannot translate faithfully are refused.
@@ -27,7 +28,8 @@ test("the generated façade is complete, faithful and refuses what it cannot car
   assert.equal(facade().status, 0);
   const source = readFileSync(join(root, "dist/demo/counter/facade.ts"), "utf8");
   assert.match(source, /export type Color = "Red" \| "Green" \| "Blue";/);
-  assert.match(source, /^export interface Core \{\n  Valid\(b: Box\): boolean;\n  Apply\(b: Box, s: Step\): Box;\n  Shade\(c: Color\): Color;\n  Delta\(a: number, b: number\): number;\n\}$/m);
+  assert.match(source, /^export interface Core \{\n  Valid\(b: Box\): boolean;\n  Apply\(b: Box, s: Step\): Box;\n  Shade\(c: Color\): Color;\n  Delta\(a: number, b: number\): number;\n  Counts\(bs: readonly Box\[\]\): readonly number\[\];\n  Echo\(r: Run\): Run;\n\}$/m);
+  assert.match(source, /^export interface Run \{ readonly steps: readonly Step\[\]; readonly marks: readonly \(readonly number\[\]\)\[\] \}$/m);
   const { core } = await import(pathToFileURL(join(root, "dist/demo/counter/facade.ts")).href);
   assert.deepEqual(core.Apply({ count: 3, color: "Blue" }, { $: "Inc", amount: 4 }), { count: 7, color: "Blue" });
   assert.deepEqual(core.Apply({ count: 3, color: "Red" }, { $: "Reset" }), { count: 0, color: "Red" });
@@ -35,6 +37,13 @@ test("the generated façade is complete, faithful and refuses what it cannot car
   assert.equal(core.Delta(-(2 ** 52), 2 ** 52 - 1), -(2 ** 53) + 1);
   assert.throws(() => core.Delta(-(2 ** 52), 2 ** 52), { name: "RangeError", message: "core returned an integer outside the safe range" });
   assert.equal(core.Valid({ count: 101, color: "Red" }), false);
+  assert.deepEqual(core.Counts([{ count: 3, color: "Red" }, { count: 0, color: "Blue" }]), [3, 0]);
+  assert.deepEqual(core.Counts([]), []);
+  const run = { steps: [{ $: "Inc", amount: 2 }, { $: "Reset" }], marks: [[1, -2], [], [2 ** 53 - 1]] };
+  assert.deepEqual(core.Echo(run), run);
+  assert.throws(() => core.Counts({ count: 1, color: "Red" }), { name: "TypeError", message: 'not an array: {"count":1,"color":"Red"}' });
+  assert.throws(() => core.Echo({ steps: [], marks: [[1.5]] }), { name: "RangeError", message: "not a safe integer: 1.5" });
+  assert.throws(() => core.Counts([{ count: -1, color: "Red" }]), { name: "RangeError", message: "not a natural number: -1" });
   assert.throws(() => core.Shade("Purple"), { name: "TypeError", message: 'not a Color: "Purple"' });
   assert.throws(() => core.Apply({ count: 1, color: "Red" }, { $: "Double" }), { name: "TypeError", message: 'not a Step: {"$":"Double"}' });
   assert.throws(() => core.Apply({ count: -1, color: "Red" }, { $: "Reset" }), { name: "RangeError", message: "not a natural number: -1" });

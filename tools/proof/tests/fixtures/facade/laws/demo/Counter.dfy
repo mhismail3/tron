@@ -7,6 +7,7 @@ abstract module CounterLaws {
     | Blue
   datatype Box = Box(count: nat, color: Color)
   datatype Step = Inc(amount: nat) | Reset
+  datatype Run = Run(steps: seq<Step>, marks: seq<seq<int>>)
 
   /* function Old(x: int): int */
 
@@ -21,4 +22,8 @@ abstract module CounterLaws {
   function Shade(c: Color): Color
 
   function Delta(a: int, b: int): int
+
+  function Counts(bs: seq<Box>): seq<nat>
+
+  function Echo(r: Run): Run
 }

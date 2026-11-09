@@ -13,4 +13,6 @@ module Counter refines CounterLaws {
     case Blue => Red
   }
   function Delta(a: int, b: int): int { a - b }
+  function Counts(bs: seq<Box>): seq<nat> { seq(|bs|, i requires 0 <= i < |bs| => bs[i].count) }
+  function Echo(r: Run): Run { r }
 }
