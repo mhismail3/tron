@@ -329,8 +329,8 @@ export class HomeTaskStore {
     });
   }
 
-  /** `signal` withdraws a read still queued for the mutex (a caller that went away). */
-  /** `repairs` names the one uncertain task this operation may rewrite while the store is fenced. */
+  /** `signal` withdraws a read still queued for the mutex (a caller that went away); `repairs`
+   * names the one uncertain task this operation may rewrite while the store is fenced. */
   private async run<T>(operation: () => Promise<T>, signal?: AbortSignal, repairs?: string): Promise<T> {
     return this.mutex.run(async () => {
       try {
