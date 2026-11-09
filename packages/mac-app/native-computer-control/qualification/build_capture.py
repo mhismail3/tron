@@ -104,6 +104,15 @@ def output_path(value, repository=REPO):
     return resolved
 
 
+def signal_group(process, number):
+    """Signal only this command's own group. Once every member exited, macOS answers EPERM, not
+    ESRCH, while the leader is unreaped; either way the group has nothing left to signal."""
+    try:
+        os.killpg(process.pid, number)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def run(arguments, log, timeout=60):
     """Own only this build command's process group, with finite execution."""
     with log.open("wb") as output:
@@ -113,11 +122,11 @@ def run(arguments, log, timeout=60):
             code = process.wait(timeout=timeout)
         finally:
             if process.poll() is None:
-                os.killpg(process.pid, signal.SIGTERM)
+                signal_group(process, signal.SIGTERM)
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    signal_group(process, signal.SIGKILL)
                     process.wait(timeout=5)
     if code:
         raise RuntimeError("Command failed; retained log: " + str(log))
