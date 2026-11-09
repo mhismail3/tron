@@ -25,12 +25,12 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 ## Contract
 
 - **Layout.** The gear opens one sheet: This iPhone (primary: Appearance, one sheet: Dashboard, Subagent Activity, Color Mode, Theme color, Text Font and Code Font),
-  Accounts (indigo: Connections, Model Providers),
-  Agent & Tools (the fixed Emerald identity ink: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
+  Accounts (primary: Connections, Model Providers),
+  Agent & Tools (primary: Agent Behavior first, Tools, MCP Servers, Extensions, Hooks),
   System (steel blue: Mac Terminal, Push Notifications, Setup, Logs). Every category destination
   inherits its group tint for chrome, containers and icons; semantic statuses retain their colors.
-  Emerald uses `ThemeColor.emerald.ink`; System uses `tronSteel`, not the neutral `tronSlate` role.
-  Agent Behavior opens one emerald-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects
+  Primary groups use the selected theme's `tronPrimary`; System uses `tronSteel`, not the neutral `tronSlate` role.
+  Agent Behavior opens one primary-accent sheet with the Model, Workers & delegation, Compaction, Trusted Projects
   and Connection groups in place, not another level of section links. Each
   group keeps its shared section heading, without section-description text. Trusted Projects
   uses the shared settings row so its icon inherits the same sheet tint; known settings use

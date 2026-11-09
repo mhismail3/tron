@@ -45,7 +45,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `tronScrollSurface`; shorter ones keep glass with identical padding and typography. Prompt text
   keeps about `promptVisibleLines` lines and masks only the text's bottom ink on overflow; the
   parent glass is never inset-filtered or painted. Only an overflowing prompt opens the full
-  shared Markdown reader, routed by the transcript so lazy row retirement cannot dismiss it.
+  shared Markdown reader, routed by the transcript so lazy row retirement cannot dismiss it;
+  an overflowing editable queue card opens its editor instead.
 - **Typography.** `TronFontLoader` builds descriptor fonts (custom weights, Recursive `MONO`/`CASL`,
   Source Serif optical sizing) from the bundled catalog and the `fontFamily`, `monoFontFamily` and
   `fontAxisValues` preferences, falling back to the matching system role. Created fonts are reused,
@@ -198,7 +199,7 @@ dismissal send nothing. Generic forms never authorize effects. The card shows Ga
 only and keeps exact values behind its disclosure. Global Changes remains the audit/Undo
 surface; owner actions have no generic Undo. The card surface, Approve/Cancel/Undo actions and
 native change title use `tronPrimary`, not the generic question's amber accent. Agent & Tools
-and its inherited admin-sheet chrome keep their fixed Emerald identity; semantic statuses keep their colors.
+and its inherited admin-sheet chrome follow the selected primary theme; semantic statuses keep their colors.
 
 ## Shared lists and readers
 

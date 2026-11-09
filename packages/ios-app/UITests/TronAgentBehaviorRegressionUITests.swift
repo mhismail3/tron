@@ -172,8 +172,8 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         }
     }
 
-    /// Agent Behavior is an Emerald sheet; under a Burgundy primary theme its Trusted Projects
-    /// sub-sheet must still be Emerald, not the app's primary.
+    /// Agent Behavior follows the primary theme (#2370); under Burgundy its Trusted Projects
+    /// sub-sheet shares that tint.
     func testTrustedProjectsInheritsAgentBehaviorTheme() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -193,6 +193,9 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
             guard let parentInk = sheetInk(XCUIScreen.main.screenshot().image, parentTitle.frame, window: window) else {
                 XCTFail("No ink in the Agent Behavior title"); return
             }
+            // Burgundy ink keeps red over blue over green through glass and antialiasing.
+            XCTAssertGreaterThan(parentInk[0], parentInk[2], "\(mode): Agent Behavior \(parentInk) must be the Burgundy theme")
+            XCTAssertGreaterThan(parentInk[2], parentInk[1], "\(mode): Agent Behavior \(parentInk) must be the Burgundy theme")
             tap(app, "Trusted Projects")
             XCTAssertTrue(app.buttons["Example"].waitForExistence(timeout: 15), app.debugDescription)
             capture(app, "burgundy-trusted-\(mode)")

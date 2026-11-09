@@ -138,7 +138,7 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         // The chip opens the standard sheet: quote, editable comment, save.
         first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
-        let editor = app.textViews["Annotation comment"]
+        let editor = commentField(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.otherElements["chat.annotation.quote"].exists || app.staticTexts["chat.annotation.quote"].exists)
         XCTAssertTrue(app.buttons["Delete annotation"].exists)
@@ -170,6 +170,36 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["chat.annotation.comment"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Delete annotation"].exists, "Sent annotations are read-only")
         keepScreenshot(app, "899-6-sent-sheet")
+    }
+
+    /// A long staged comment flows in the sheet itself (#2370): no fixed-height
+    /// inner box that scrolls on its own while the sheet below stays empty.
+    @MainActor func testLongStagedCommentFlowsInTheSheet() {
+        continueAfterFailure = false
+        let app = launch(); defer { app.terminate() }
+        let paragraph = assistantBlock(app, containing: "exponential backoff")
+        paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.12))
+            .press(forDuration: 1.0, thenDragTo: paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.83, dy: 0.12)))
+        let annotate = menuAction(app, "Annotate")
+        XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        annotate.tap()
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+        dismissKeyboardTip(app)
+        let comment = Array(repeating: "Retry with jitter so reconnecting clients do not stampede the Gateway.", count: 8)
+            .joined(separator: " ")
+        app.typeText(comment)
+        app.buttons["Save annotation"].firstMatch.tap()
+        XCTAssertTrue(wait(for: bubble, exists: false))
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+        let editor = commentField(in: app)
+        XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(editor.value as? String, comment)
+        Thread.sleep(forTimeInterval: 0.6)
+        keepScreenshot(app, "2370-long-comment-sheet")
+        // Eight sentences wrap to over ten lines; the old 120-point box (115 at
+        // this sheet's scale) showed five and scrolled the rest inside itself.
+        XCTAssertGreaterThan(editor.frame.height, 180, "The comment must take its full height in the sheet: \(editor.frame)")
     }
 
     /// Saving the bubble hands the keyboard straight to the composer input
@@ -267,7 +297,7 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         let bubble = openAnnotationBubble(app)
         app.typeText("Note\nmore")
-        XCTAssertEqual(bubbleComment(bubble).value as? String, "Note\nmore", app.debugDescription)
+        XCTAssertEqual(commentField(in: bubble).value as? String, "Note\nmore", app.debugDescription)
         XCTAssertTrue(bubble.exists, "Return does not save on iPhone")
     }
 
@@ -303,7 +333,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.typeKey("\n", modifierFlags: .shift)
         app.typeKey("x", modifierFlags: [])
         XCTAssertTrue(bubble.exists, "Shift+Return does not save")
-        XCTAssertEqual((bubbleComment(bubble).value as? String)?.lowercased(), "u\nxp", "Shift+Return inserts a newline at the caret")
+        XCTAssertEqual((commentField(in: bubble).value as? String)?.lowercased(), "u\nxp", "Shift+Return inserts a newline at the caret")
         app.typeKey("\n", modifierFlags: [])
         XCTAssertTrue(wait(for: bubble, exists: false), "Hardware Return saves the annotation")
         XCTAssertTrue(wait { chips.count == 1 }, app.debugDescription)
@@ -313,13 +343,14 @@ final class TronChatAnnotationUITests: XCTestCase {
     @MainActor private func assertStagedComment(_ app: XCUIApplication, _ chip: XCUIElement, _ expected: String,
                                                 _ message: String, line: UInt = #line) {
         chip.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
-        let editor = app.textViews["Annotation comment"]
+        let editor = commentField(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription, line: line)
         XCTAssertEqual((editor.value as? String)?.lowercased(), expected, message, line: line)
     }
 
-    @MainActor private func bubbleComment(_ bubble: XCUIElement) -> XCUIElement {
-        bubble.descendants(matching: .any)
+    /// The comment field, in the bubble or the sheet; XCUITest types it TextField or TextView.
+    @MainActor private func commentField(in container: XCUIElement) -> XCUIElement {
+        container.descendants(matching: .any)
             .matching(NSPredicate(format: "label == 'Annotation comment' AND (elementType == %d OR elementType == %d)",
                                   XCUIElement.ElementType.textView.rawValue, XCUIElement.ElementType.textField.rawValue))
             .firstMatch
