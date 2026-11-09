@@ -535,9 +535,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(submit, timeout: 30), "the form never admitted the answer: \(app.debugDescription)")
         submit.tap()
         XCTAssertTrue(waitForAbsence(submit, timeout: 60), "the answered form did not dismiss: \(app.debugDescription)")
-        let reply = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "Ask journey answered")
-        ).firstMatch
+        let reply = assistantReply(app, containing: "Ask journey answered")
         XCTAssertTrue(reply.waitForExistence(timeout: 90),
                       "the agent's reply to the answer never reached the transcript: \(app.debugDescription)")
         // Still pinned to the newest content, without any user scroll.
@@ -831,9 +829,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(queuedSteer.waitForExistence(timeout: 30),
                       "the photo was not queued as a steer: \(firstRun.debugDescription)")
         keepScreenshot(firstRun, name: "974-image-only-steer-queued")
-        let delivered = firstRun.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "Steer journey saw the photo")
-        ).firstMatch
+        let delivered = assistantReply(firstRun, containing: "Steer journey saw the photo")
         XCTAssertTrue(delivered.waitForExistence(timeout: 120),
                       "the model never received the steered photo: \(firstRun.debugDescription)")
         XCTAssertTrue(waitForAbsence(queuedSteer, timeout: 30),
