@@ -137,7 +137,7 @@ lemma NoOccBetween(a: int, e: int, j: nat, k: nat, q: int, now: int)
   ensures false
 ```
 
-**Mutation results.** kills 83 of 113 valid mutants; 57 killed by this law alone.
+**Mutation results.** kills 82 of 113 valid mutants; 57 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: English = Dafny at this hash: the English says a new stored next occurrence is strictly after now, and the ensures (d.next.Some? ==> d.next.v > now) states it. Proof via L1NextSound(t, now) in the interval case; Once gives None. Non-vacuous (Interval(0,1000), nxt=1000, now=2500). Matches the TS for both policies and both trigger kinds. Kills 82, 57 alone. L6IntervalResult is a verified named-term helper listed under L6.
 

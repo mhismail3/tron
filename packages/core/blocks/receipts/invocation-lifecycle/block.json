@@ -1,0 +1,1 @@
+{"interface": ["laws/receipts/InvocationLifecycle.dfy"], "impl": ["blocks/receipts/invocation-lifecycle/Block.dfy"], "deps": []}

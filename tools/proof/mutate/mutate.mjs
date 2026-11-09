@@ -342,7 +342,8 @@ for (const s of cfg.setup ?? []) { const r = await sh(s.map((c) => fill(c, { rep
 // Every implementation function the build compiles must be mutated or excluded with a reason.
 {
   const t = tokenize(implSrc); const compiled = [];
-  for (let k = 0; k < t.length - 1; k++) if (["function", "predicate", "method"].includes(t[k].text) && t[k - 1]?.text !== "ghost" && t[k - 1]?.text !== "lemma") compiled.push(t[k + 1].text);
+  for (let k = 0; k < t.length - 1; k++) if (["function", "predicate", "method"].includes(t[k].text) && t[k - 1]?.text !== "ghost" && t[k - 1]?.text !== "lemma"
+    && t[k - 1]?.text !== "by") compiled.push(t[k + 1].text); // `by method` is a function's compiled body, not a declaration
   const missing = compiled.filter((n) => !cfg.symbols.includes(n) && !(cfg.excludeSymbols ?? {})[n]);
   if (missing.length) { console.error(`compiled impl functions neither mutated nor excluded (mutate.json excludeSymbols {name: reason}): ${missing.join(", ")}`); process.exit(2); }
 }

@@ -117,21 +117,16 @@ unaccounted law kind (high-stakes) or a report acceptance not in mutate.json.
 
 Shadows need real inputs. `packages/gateway/src/proof/traffic-recorder.ts` records, at each seam where a
 block will replace TypeScript logic, the exact typed inputs and the output the TypeScript returned:
-`recordSeam(block, seam, input, output)`, a no-op unless enabled. The first seams are
-`nextAutomationOccurrence`, `firstAutomationOccurrence` and `classifyDueOccurrence` in
-`packages/gateway/src/automations/schedule.ts`: once and interval triggers record under block
-`schedule/occurrence`, calendar triggers under `schedule/calendar`; nested calls are not seams. The
-`settings/precedence` seam in `resolveInstance` (`packages/gateway/src/kernel/settings/settings-resolver.ts`)
-records each resolved key instance's facts as `precedenceFacts` builds them (per layer: in the target, bound,
-per-model and plain value, applied) and the fold's result (value, layer, not-applied layer, shown layers; capability clamping comes after it and
-is not part of the record); values
-enter as tokens, equal values (as JSON) of one call sharing one and the default being 0, so no setting value is
-recorded. The `settings/tool-selection` seams in `toolSelectionType()`'s `compose` and `encode`
-(`packages/gateway/src/kernel/settings/settings-types.ts`) record their facts as `toolSelectionFacts` builds them
-(tool names as tokens: the empty name 0, the rest numbered by first appearance) and the result; a selection below
-or current value that is not a list counts as none, and a list holding a non-string is not recorded. A composing
-key's value is recorded as null (its composition is checked on generated inputs). A seam
-whose record costs work checks `seamsRecorded()` first.
+`recordSeam(block, seam, input, output)`, a no-op unless enabled; a seam whose record costs work checks
+`seamsRecorded()` first, and none records an identity or text: values enter as per-call tokens (equal values share
+one). Seams (shell files under `packages/gateway/src/`), with the oracle each block's shadow runs (below):
+
+| Block | Seam | Recorded | Oracle's generated inputs |
+|---|---|---|---|
+| `schedule/occurrence`, `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | once and interval triggers under the first, calendar triggers under the second; nested calls are not seams | calendar: core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
+| `settings/precedence` | `resolveInstance` (`kernel/settings/settings-resolver.ts`) | `precedenceFacts` (per layer: in target, bound, per-model and plain value, applied; default token 0) and the fold before clamping; a composing value as null | real `resolveSettings`/`composedBelow` over a synthetic schema; compose builds a term, so its order is exact |
+| `settings/tool-selection` | `toolSelectionType().compose/encode` (`kernel/settings/settings-types.ts`) | `toolSelectionFacts` (empty name 0); a non-list below/current is none; a list holding a non-string is not recorded | plain names, modifiers, repeats and the empty name over every kind of selection below |
+| `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds (mulberry32); 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
   `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
@@ -174,14 +169,7 @@ print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a 
 both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
 imports `packages/gateway/src/automations/schedule.ts` through `oracles/gateway-source.mjs` (module hooks
 that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript transform) and calls the core
-through the block's generated façade. `oracles/schedule-calendar.mjs` does the same for calendar triggers, giving the core
-the zone table `packages/gateway/src/automations/zone-table.ts` builds from Intl (also on replay, so a replay
-checks the table builder too); generated inputs the TypeScript throws on (a civil date the zone skips) are
-counted as `tsRefused`, not compared, since a throw is never recorded. `oracles/settings-precedence.mjs` runs the real
-`resolveSettings` and `composedBelow` over a synthetic schema (every combination of bindings, admission,
-per-model and composing keys) with random stores and targets; a composing key's `compose` builds a term, so the
-TypeScript's composition order is compared exactly. `oracles/settings-tool-selection.mjs` drives the real `compose`
-and `encode` with plain names, modifiers, repeats and the empty name over every kind of selection below. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
+through the block's generated façade; the other oracles do the same for their blocks (table above). Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
 the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
@@ -284,7 +272,8 @@ its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays
 that resolving the real settings schema records every key instance's fold (layer and not-applied layer as
 resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, that
 tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
-and nothing for a value outside the block's domain, and
+and nothing for a value outside the block's domain, that invocation receipt folds record tokens and refusal
+reasons, once per history and not above the receipt bound, and
 that the daily cap and retention hold.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block
