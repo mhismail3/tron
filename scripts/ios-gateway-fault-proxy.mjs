@@ -515,9 +515,10 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   };
 }
 
-async function ownedGatewayVerifier(initialPid, port) {
+// Exported for its owner test (scripts/ios-gateway-fault-proxy.test.mjs), which
+// substitutes the ps/lsof runner to produce timeouts and PID reuse on demand.
+export async function ownedGatewayVerifier(initialPid, port, { execute = promisify(execFile), proofIntervalMs = 1_000 } = {}) {
   if (!Number.isSafeInteger(initialPid) || initialPid <= 1 || process.ppid <= 1) throw new Error("Fixture owner PID is required");
-  const execute = promisify(execFile);
   const entrypoint = realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)));
   let pid = initialPid;
   let birth;
@@ -585,7 +586,7 @@ async function ownedGatewayVerifier(initialPid, port) {
         if (!error?.killed || ++missedProofs >= 5) proven = false;
       })
       .finally(() => { watching = undefined; });
-  }, 1_000).unref();
+  }, proofIntervalMs).unref();
   verifyTarget.adopt = async target => {
     const next = await capture(target, process.pid);
     generation += 1;
