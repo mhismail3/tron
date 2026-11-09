@@ -211,7 +211,8 @@ Runners are the existing ones:
 | `python` / `shell` | `python3` / `bash` per file |
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
-| `ios-lanes` / `mac` / `relay` | not driven by verify |
+| `relay` | the relay's Vitest: `npm test` in `packages/push-relay`, as `verify --batch`'s relay lane |
+| `ios-lanes` / `mac` | not driven by verify |
 
 `ios-journeys` are the `RealGatewayPairAndChatUITests` files. A changed extension file selects
 the test methods it declares; the class's own file or an extension declaring no test (shared
@@ -223,10 +224,11 @@ through the harness, which takes its own host slots, on up to 3 lanes
 status and revision. `--skip ios` skips them.
 
 When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
-journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`), `mac` or `relay` tests
+journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) or `mac` tests
 are selected, the run is `incomplete` (exit 1) unless `--skip` names them
-(`--skip ios` covers `ios-lanes`); they need their own lanes or the relay's own
-dependencies. A selection that runs zero passing tests fails: an empty run is not
+(`--skip ios` covers `ios-lanes`); they need their own lanes. Selected `relay` tests run only on the
+relay's installed lockfile; verify refuses before step 1 with its `npm ci` command otherwise.
+A selection that runs zero passing tests fails: an empty run is not
 evidence.
 
 ## Manifest `verify` declarations

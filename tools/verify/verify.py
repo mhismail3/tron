@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "tools" / "verify"))
 import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vitest configs)
 
 GATEWAY = "packages/gateway"
+RELAY = "packages/push-relay"
 # A change here reaches everything above it, so it selects every lock.
 WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
@@ -39,7 +40,7 @@ IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppU
 # UIValidation journey classes that need a fixture only their harness provides; they run in its lane.
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
-NOT_DRIVEN = ("ios-lanes", "mac", "relay")
+NOT_DRIVEN = ("ios-lanes", "mac")
 # The real-UI journeys run, by exact selector, through the harness that owns them (its
 # `ui_owned_journeys`), as `verify --batch`'s UI journey lane runs them all.
 JOURNEY_CLASS = "RealGatewayPairAndChatUITests"
@@ -75,27 +76,32 @@ def git(*args: str) -> str:
     return done.stdout
 
 
-GATEWAY_INSTALL_HINT = f"prepare this worktree with: scripts/tron-node exec npm --prefix {GATEWAY} ci --include=dev"
+def install_hint(package: str) -> str:
+    return f"prepare this worktree with: scripts/tron-node exec npm --prefix {package} ci --include=dev"
 
 
-def require_gateway_install() -> None:
-    """The installed Gateway packages are exactly its lockfile's, by npm's own record of the install.
+GATEWAY_INSTALL_HINT = install_hint(GATEWAY)
 
-    Tests well beyond the Gateway import them (scripts/, tools/docs, tools/layers, tools/proof,
-    tools/verify), so any test step needs them. A platform-optional package may be absent."""
-    gateway = ROOT / GATEWAY
+
+def require_install(package: str = GATEWAY) -> None:
+    """A package's installed dependencies are exactly its lockfile's, by npm's own record of the install.
+
+    Tests well beyond the Gateway import its packages (scripts/, tools/docs, tools/layers, tools/proof,
+    tools/verify), so any test step needs them; the relay's own lane needs the relay's. A
+    platform-optional package may be absent."""
+    root, name, hint = ROOT / package, "Gateway" if package == GATEWAY else "Relay", install_hint(package)
     try:
-        wanted = json.loads((gateway / "package-lock.json").read_text())["packages"]
-        installed = json.loads((gateway / "node_modules/.package-lock.json").read_text())["packages"]
+        wanted = json.loads((root / "package-lock.json").read_text())["packages"]
+        installed = json.loads((root / "node_modules/.package-lock.json").read_text())["packages"]
     except (OSError, ValueError, KeyError) as error:
-        raise VerifyError(f"Gateway dependencies are not installed; {GATEWAY_INSTALL_HINT}") from error
+        raise VerifyError(f"{name} dependencies are not installed; {hint}") from error
     pinned = lambda entry: (entry.get("version"), entry.get("integrity"))  # noqa: E731
     differ = sorted(path for path in set(wanted) | set(installed) if path and (
         pinned(wanted[path]) != pinned(installed[path]) if path in wanted and path in installed
         else path in installed or not wanted[path].get("optional")))
     if differ:
         shown = ", ".join(differ[:5]) + (f" and {len(differ) - 5} more" if len(differ) > 5 else "")
-        raise VerifyError(f"Gateway dependencies differ from package-lock.json ({shown}); {GATEWAY_INSTALL_HINT}")
+        raise VerifyError(f"{name} dependencies differ from package-lock.json ({shown}); {hint}")
 
 
 def require_gateway_compiler() -> None:
@@ -161,7 +167,7 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
         return "ios-journeys" if name == JOURNEY_CLASS else "ios-lanes" if name in IOS_HARNESSED else "ios"
     if path.startswith("packages/mac-app/"):
         return "mac"
-    if path.startswith("packages/push-relay/"):
+    if path.startswith(f"{RELAY}/"):
         return "relay"
     raise VerifyError(f"no runner for test {path}")
 
@@ -1008,6 +1014,11 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group == "ios-journeys":
         return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
+    if group == "relay":
+        # The relay's own Vitest (Workers pool), as `verify --batch`'s relay lane runs it.
+        report = logs / f"{group}-vitest.json"
+        return (node + ["npm", "test", "--", "--reporter=default", "--reporter=json", f"--outputFile.json={report}",
+                        *[path[len(RELAY) + 1:] for path in files]], ROOT / RELAY, vitest_count(report))
     if group == "node-gateway":
         return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
     if group == "node":
@@ -1248,7 +1259,9 @@ def main(argv: list[str]) -> int:
             if gateway_touched:
                 require_gateway_compiler()
             if (ROOT / GATEWAY / "package-lock.json").is_file():
-                require_gateway_install()
+                require_install(GATEWAY)
+            if "relay" in groups and not skipped_group("relay"):
+                require_install(RELAY)
         except VerifyError as error:
             print(f"verify: {error}", file=sys.stderr)
             return 2
