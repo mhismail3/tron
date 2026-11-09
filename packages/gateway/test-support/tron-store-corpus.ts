@@ -86,7 +86,7 @@ export async function stageCorpus(): Promise<{ home: string; normalization: Trac
  * bytes, so its ids, timestamps and counters are fixed: unlike a live scenario,
  * a store lock keeps them, because reading them back exactly is the contract.
  */
-export function normalizeStoreValue(value: unknown, normalization: TraceNormalization): TraceValue {
+function normalizeStoreValue(value: unknown, normalization: TraceNormalization): TraceValue {
   const roots = [...normalization.roots].sort((left, right) => right.length - left.length);
   return JSON.parse(JSON.stringify(value ?? null, (_key, item: unknown) => {
     if (typeof item !== "string") return item;
