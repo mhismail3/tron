@@ -268,7 +268,7 @@ Commands:
   run-ui    Build the UI-validation products in this worktree's DerivedData, then
             run the real-UI journeys, each against its own fresh fixture, and leave
             one evidence directory per journey (xcresult, Gateway log, proxy link
-            stats, XCTest summary, report.json with every artifact's path, sha256,
+            stats, XCTest summary, the hosted app's log, report.json with every verdict artifact's path, sha256,
             the final status and the source revision). The journeys pair the hosted
             app for real, so the command stops the fixture it renewed and returns
             that app to its unpaired state on success, failure, deadline and signal
@@ -783,7 +783,7 @@ report_result_bundle_failures() {
 
 # One directory per journey: the result bundle, the fixture Gateway's canonical
 # runtime log, the fault proxy's link statistics, the XCTest summary and
-# report.json, which names every artifact with the sha256 of its bytes (or, for
+# report.json, which names every verdict artifact with the sha256 of its bytes (or, for
 # the result bundle, of its whole file tree) and records what the journey
 # asserted. A reviewer can therefore re-derive each artifact without trusting
 # this run.
@@ -1387,7 +1387,8 @@ hosted_app_log() {
     export)
       if compgen -G "$container/Library/Caches/Logs/app.jsonl*" >/dev/null; then
         mkdir -p "$attempt_dir/app-log"
-        cp "$container"/Library/Caches/Logs/app.jsonl* "$attempt_dir/app-log/"
+        cp "$container"/Library/Caches/Logs/app.jsonl* "$attempt_dir/app-log/" \
+          || echo "warning: could not copy the hosted app's log" >&2
       else
         echo "warning: the hosted app wrote no log for this journey" >&2
       fi

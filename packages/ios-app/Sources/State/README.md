@@ -134,7 +134,7 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 | `scene.foreground` | info | The scene left the background (a resume's inactive phase): `sceneAt`, `from=background` |
 | `scene.background` | info | The scene entered the background and the buffer flushed; recovery parks here |
 | `scene.active` | info | The scene became active, including at launch: `sceneAt`, `from` |
-| `pairing.link` | info when received; warning when cancelled or unparsed | An invitation link reached the scene: `received` before pairing starts, `cancelled` when that pairing was cancelled, `unparsed` for a pair link that did not parse. No record means the link never reached the app. |
+| `pairing.link` | info when received; warning when cancelled or unparsed | An invitation link reached the scene: `received` before pairing starts, `cancelled` when that pairing was cancelled, `unparsed` for a pair link that did not parse. No record means the link never reached the app, or the app ended within the 5 s flush window. |
 | `pairing.result` | info on success; warning on failure | A pairing attempt settled: `outcome`, failure `code` |
 | `session.open.failure` | warning | Opening a session failed: `code` (`transport` only when the Gateway was never reached), `gatewayCode` (the Gateway's own code, `none` when minted locally), `profileID`, `connectionID`, `lifecycleGeneration` |
 | `session.sync.failure` | warning | A mounted projection could not resynchronize: `code`, `profileID`, `connectionID`, `lifecycleGeneration` |
