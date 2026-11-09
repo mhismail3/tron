@@ -50,7 +50,7 @@ extension Color {
     static let tronAutomationText = Color(lightHex: "#1F6675", darkHex: "#8BD8E4")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
     /// Blue steel: the System settings identity and the chat Worker chip, distinct
-    /// from Accounts indigo, Automation teal and neutral slate.
+    /// from the primary theme, Automation teal and neutral slate.
     static let tronSteel = Color(lightHex: "#36566F", darkHex: "#9BBAD0")
 
     static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#0D0E0F")

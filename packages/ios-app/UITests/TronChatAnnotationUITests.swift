@@ -138,7 +138,7 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         // The chip opens the standard sheet: quote, editable comment, save.
         first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
-        let editor = sheetComment(app)
+        let editor = commentField(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.otherElements["chat.annotation.quote"].exists || app.staticTexts["chat.annotation.quote"].exists)
         XCTAssertTrue(app.buttons["Delete annotation"].exists)
@@ -192,7 +192,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.buttons["Save annotation"].firstMatch.tap()
         XCTAssertTrue(wait(for: bubble, exists: false))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
-        let editor = sheetComment(app)
+        let editor = commentField(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(editor.value as? String, comment)
         Thread.sleep(forTimeInterval: 0.6)
@@ -297,7 +297,7 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         let bubble = openAnnotationBubble(app)
         app.typeText("Note\nmore")
-        XCTAssertEqual(bubbleComment(bubble).value as? String, "Note\nmore", app.debugDescription)
+        XCTAssertEqual(commentField(in: bubble).value as? String, "Note\nmore", app.debugDescription)
         XCTAssertTrue(bubble.exists, "Return does not save on iPhone")
     }
 
@@ -333,7 +333,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.typeKey("\n", modifierFlags: .shift)
         app.typeKey("x", modifierFlags: [])
         XCTAssertTrue(bubble.exists, "Shift+Return does not save")
-        XCTAssertEqual((bubbleComment(bubble).value as? String)?.lowercased(), "u\nxp", "Shift+Return inserts a newline at the caret")
+        XCTAssertEqual((commentField(in: bubble).value as? String)?.lowercased(), "u\nxp", "Shift+Return inserts a newline at the caret")
         app.typeKey("\n", modifierFlags: [])
         XCTAssertTrue(wait(for: bubble, exists: false), "Hardware Return saves the annotation")
         XCTAssertTrue(wait { chips.count == 1 }, app.debugDescription)
@@ -343,21 +343,14 @@ final class TronChatAnnotationUITests: XCTestCase {
     @MainActor private func assertStagedComment(_ app: XCUIApplication, _ chip: XCUIElement, _ expected: String,
                                                 _ message: String, line: UInt = #line) {
         chip.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
-        let editor = sheetComment(app)
+        let editor = commentField(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription, line: line)
         XCTAssertEqual((editor.value as? String)?.lowercased(), expected, message, line: line)
     }
 
-    /// The sheet's growing comment field; XCUITest types it TextField or TextView.
-    @MainActor private func sheetComment(_ app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == 'Annotation comment' AND (elementType == %d OR elementType == %d)",
-                                  XCUIElement.ElementType.textView.rawValue, XCUIElement.ElementType.textField.rawValue))
-            .firstMatch
-    }
-
-    @MainActor private func bubbleComment(_ bubble: XCUIElement) -> XCUIElement {
-        bubble.descendants(matching: .any)
+    /// The comment field, in the bubble or the sheet; XCUITest types it TextField or TextView.
+    @MainActor private func commentField(in container: XCUIElement) -> XCUIElement {
+        container.descendants(matching: .any)
             .matching(NSPredicate(format: "label == 'Annotation comment' AND (elementType == %d OR elementType == %d)",
                                   XCUIElement.ElementType.textView.rawValue, XCUIElement.ElementType.textField.rawValue))
             .firstMatch

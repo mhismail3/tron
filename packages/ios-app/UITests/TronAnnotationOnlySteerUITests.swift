@@ -87,7 +87,8 @@ import XCTest
                 guard text.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
                 Thread.sleep(forTimeInterval: 0.6)
                 keep(app, "long-steer-\(mode)-\(large ? "large" : "standard")")
-                // 80 lines uncut are several screens tall; the prompt cut is 20 lines.
+                // Uncut, 80 lines are several screens tall (1852 points); the prompt cut
+                // keeps 20 lines, well under these bounds at both sizes.
                 XCTAssertLessThan(text.frame.height, app.windows.firstMatch.frame.height * (large ? 1.6 : 0.75),
                                   "The steer text must be cut like a user prompt: \(text.frame)")
                 text.tap()

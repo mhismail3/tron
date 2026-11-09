@@ -45,7 +45,8 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `tronScrollSurface`; shorter ones keep glass with identical padding and typography. Prompt text
   keeps about `promptVisibleLines` lines and masks only the text's bottom ink on overflow; the
   parent glass is never inset-filtered or painted. Only an overflowing prompt opens the full
-  shared Markdown reader, routed by the transcript so lazy row retirement cannot dismiss it.
+  shared Markdown reader, routed by the transcript so lazy row retirement cannot dismiss it;
+  an overflowing editable queue card opens its editor instead.
 - **Typography.** `TronFontLoader` builds descriptor fonts (custom weights, Recursive `MONO`/`CASL`,
   Source Serif optical sizing) from the bundled catalog and the `fontFamily`, `monoFontFamily` and
   `fontAxisValues` preferences, falling back to the matching system role. Created fonts are reused,

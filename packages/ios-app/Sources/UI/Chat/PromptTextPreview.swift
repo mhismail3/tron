@@ -44,6 +44,6 @@ struct PromptTextPreview: View {
                 else { sheetRoutes?.present(.prompt(HomeTextReading(id: UUID().uuidString, title: "Prompt", text: text))) }
             }, including: canOpen ? .all : .none)
             .accessibilityAddTraits(canOpen ? .isButton : [])
-            .accessibilityHint(canOpen ? "Shows the full prompt" : "")
+            .accessibilityHint(canOpen ? (onOpen == nil ? "Shows the full prompt" : "Opens the full text") : "")
     }
 }
