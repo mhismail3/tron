@@ -1108,12 +1108,16 @@ def main(argv: list[str]) -> int:
                 for index, outcome in red:
                     cases = failure_cases(outcome)
                     if not cases:
-                        outcome.update(status='uncovered', reason='owner provided no exact-case attribution selector')
+                        # Nothing exact to bisect: the red is filed unresolved and the suite is never rerun.
+                        reason = 'owner provided no exact-case attribution selector'
+                        outcome.update(status='uncovered', reason=reason)
                     for case_index, failed in enumerate(cases or [outcome]):
-                        report['activeLane'] = f"attribution: {failed['name']}"
-                        attribution_directory = directory / f'attribution-{index}-{case_index}'
-                        attribution, journal = investigate(base, head, failed, attribution_directory, state,
-                                                           {'redReport': str(directory / 'first-report.json'), 'evidence': str(manifest)})
+                        if cases:
+                            report['activeLane'] = f"attribution: {failed['name']}"
+                            attribution, journal = investigate(base, head, failed, directory / f'attribution-{index}-{case_index}', state,
+                                                               {'redReport': str(directory / 'first-report.json'), 'evidence': str(manifest)})
+                        else:
+                            attribution, journal = {'status': 'unresolved', 'reason': reason, 'candidates': commits}, None
                         report['attributionHostSeconds'] += attribution.get('hostSeconds', 0) if not attribution.get('reused') else 0
                         item = {'failed': failed, 'attribution': attribution, 'repair': journal}
                         item['issue'] = file_issue({**report, **item}, directory / f'failure-{index}-{case_index}', state)
