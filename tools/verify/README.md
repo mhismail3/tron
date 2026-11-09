@@ -226,10 +226,8 @@ status and revision. `--skip ios` skips them.
 When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
 journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) or `mac` tests
 are selected, the run is `incomplete` (exit 1) unless `--skip` names them
-(`--skip ios` covers `ios-lanes`); they need their own lanes. Selected `relay` tests run only on the
-relay's installed lockfile; verify refuses before step 1 with its `npm ci` command otherwise.
-A selection that runs zero passing tests fails: an empty run is not
-evidence.
+(`--skip ios` covers `ios-lanes`); they need their own lanes. A `relay` run needs the relay's installed
+lockfile, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
 
 ## Manifest `verify` declarations
 
