@@ -855,7 +855,7 @@ import hashlib, json, os
 from pathlib import Path
 
 report_dir = Path(os.environ["TRON_E2E_REPORT_DIR"])
-artifacts = ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "summary.json"]
+artifacts = ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "summary.json", "app-log"]
 
 
 def file_sha256(path):
@@ -1383,9 +1383,12 @@ hosted_app_log() {
   case "$action" in
     clear) rm -f "$container/Library/Caches/Logs/app.jsonl" "$container/Library/Caches/Logs/app.jsonl.1" ;;
     export)
-      mkdir -p "$attempt_dir/app-log"
-      cp "$container"/Library/Caches/Logs/app.jsonl* "$attempt_dir/app-log/" 2>/dev/null \
-        || echo "warning: the hosted app wrote no log for this journey" >&2
+      if compgen -G "$container/Library/Caches/Logs/app.jsonl*" >/dev/null; then
+        mkdir -p "$attempt_dir/app-log"
+        cp "$container"/Library/Caches/Logs/app.jsonl* "$attempt_dir/app-log/"
+      else
+        echo "warning: the hosted app wrote no log for this journey" >&2
+      fi
       ;;
   esac
   return 0

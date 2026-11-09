@@ -185,6 +185,9 @@ struct ProductionSceneRoot: View {
                         }
                         catch { owner.model.presentError(error) }
                     }
+                } else if url.scheme == "tron", url.host == "pair" {
+                    // Never the URL itself: it carries the one-use invitation.
+                    Task { await owner.model.appLog.recordCausal(name: "pairing.link", outcome: "unparsed", level: "warning") }
                 } else if url.host == "share",
                           let shared = owner.pendingShares.load()?.buildSharePrompt(),
                           let target = owner.model.mountedPresentationTarget {
