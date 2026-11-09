@@ -936,7 +936,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "929-codemode-ask-user-opened-from-row")
         app.buttons["Approve it"].tap()
         submit.tap()
-        let answered = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Codemode question answered")).firstMatch
+        let answered = assistantReply(app, containing: "Codemode question answered")
         XCTAssertTrue(answered.waitForExistence(timeout: 90), "the answer never reached the codemode script: \(app.debugDescription)")
         XCTAssertTrue(answered.label.contains("Approve it"), "the codemode script read another answer: \(answered.label)")
         keepScreenshot(app, name: "929-codemode-ask-user-answered")
