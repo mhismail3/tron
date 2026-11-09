@@ -25,7 +25,9 @@ occurrences over a zone transition table from `packages/gateway/src/automations/
 `packages/gateway/src/automations/schedule.ts`; `settings/precedence` (which layer's value a setting resolves to,
 over value tokens; shell `packages/gateway/src/kernel/settings/settings-resolver.ts`); `settings/tool-selection` (how a
 tool selection's plain names and +name/-name modifiers compose and are stored, over name tokens; shell
-`packages/gateway/src/kernel/settings/settings-types.ts`).
+`packages/gateway/src/kernel/settings/settings-types.ts`); `receipts/invocation-lifecycle` (how a session's invocation
+receipts fold into each invocation's lifecycle, and which histories are refused; shell
+`packages/gateway/src/kernel/receipts/invocation-receipts.ts`).
 
 ## Block contract
 
@@ -38,6 +40,10 @@ tool selection's plain names and +name/-name modifiers compose and are stored, o
   behind a comment), because the cache key would not cover what the block depends on.
 - Law statements are what review guards; definitions and proofs are what the checker guards. Edit a
   law only with an independent review of that law.
+- A fast compiled body is a `function ... { spec } by method { ... }` proven equal to its spec. Put it on a function
+  of the block's own (the laws' function calls it): Dafny 4.11 drops a `by method` on a function that refines a laws
+  declaration, neither verifying nor compiling it. The mutation tool mutates only the functional body; the method is
+  held to it by the proof.
 - Escape hatches (`assume`, `{:axiom}`, `{:verify false}`, `{:extern}`) are trusted code and need a
   maintainer decision.
 

@@ -246,7 +246,7 @@ lemma MissingSpec(a: seq<int>, b: seq<int>)
   ensures Missing(a, b) == Adds(a, b)
 ```
 
-**Mutation results.** kills 25 of 110 valid mutants; 4 killed by this law alone.
+**Mutation results.** kills 26 of 110 valid mutants; 4 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: The case split states the exact round trip for every all-plain choice, including no stored value preserving below or defaults; chosen=[] with NoBelow is a witness. Empty chosen correctly composes to no tools (not defaults), while a Nothing result occurs only when the selected names already equal the base; 25 mutants, 4 uniquely, are killed.
 
@@ -263,7 +263,7 @@ lemma E4RelativeWhenReproducible(chosen: seq<Entry>, below: Below, current: seq<
     Mods(base, d) == Plains(chosen) ==> Encode(chosen, below, current, defaults) == (if |d| == 0 then Nothing else Holds(d))
 ```
 
-**Mutation results.** kills 32 of 110 valid mutants; 10 killed by this law alone.
+**Mutation results.** kills 32 of 110 valid mutants; 9 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: Under all-plain chosen/current-modifier premises, the conditional conclusion is precisely the relative encoding branch, including Nothing for empty Delta; chosen=[Plain(1)], current=[], NoBelow, defaults=[1] witnesses the empty-Delta case. This matches adds-then-removes and encode's branch order, killing 32 mutants, 10 uniquely.
 
@@ -278,7 +278,7 @@ lemma E5PlainWhenOrderDiffers(chosen: seq<Entry>, below: Below, current: seq<Ent
     Mods(base, Delta(Plains(chosen), base)) != Plains(chosen) ==> Encode(chosen, below, current, defaults) == Holds(chosen)
 ```
 
-**Mutation results.** kills 10 of 110 valid mutants; 2 killed by this law alone.
+**Mutation results.** kills 9 of 110 valid mutants; 2 killed by this law alone.
 
 **Reviewer notes.** ACCEPT: For an all-plain choice, when Delta does not reproduce its order, Encode holds the plain choice as stated; chosen=[Plain(2),Plain(1)], NoBelow, defaults=[1] witnesses it. The law correctly reflects the landed product decision that user order outranks later changes below and kills 10 mutants, 2 uniquely.
 
