@@ -29,12 +29,8 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     throw new Error("Fault proxy requires an owned loopback target and control token");
   }
   await verifyTarget();
-  let verifyingConnections = 0;
-  const checkTarget = async () => {
-    if (verifyingConnections >= 12) throw new Error("Fixture verification capacity reached");
-    verifyingConnections++;
-    try { await verifyTarget(); } finally { verifyingConnections--; }
-  };
+  // Proofs are coalesced by the verifier, so waiting requests cost no spawns.
+  const checkTarget = () => verifyTarget();
   const bridges = new Set();
   const sockets = new Set();
   const waiters = new Set();
@@ -539,13 +535,22 @@ async function ownedGatewayVerifier(initialPid, port) {
   const initial = await capture(pid, process.ppid);
   command = initial.command;
   birth = initial.birth;
-  // The full proof (birth, command line, listener) runs once per adopted
-  // Gateway, at its first request once it listens. Every later request checks
-  // only that the proven PID is still alive: spawning ps and lsof per request
-  // missed their deadline under host load and refused the app's own requests.
-  // A PID that dies is unproven from then on, so a process that later reuses it
-  // is never trusted without the full proof; adopting a respawn unproves too.
+  // The full proof (birth, command line, listener) is off the request path:
+  // spawning ps and lsof per request missed their deadline under host load and
+  // refused the app's own requests (#2386). A Gateway is proven once (at proxy
+  // start, or at the first request after a respawn is adopted); requests then
+  // check only that the proven PID is alive. A watcher re-proves the adopted
+  // Gateway every second, so a PID that died and was reused, or a zombie, is
+  // unproven within a second even when no request saw it die; a helper killed at
+  // its deadline proves nothing either way and leaves the state as it was.
   let proven = false;
+  const prove = async target => {
+    if (await inspect(target, "lstart") !== birth || await inspect(target, "command") !== command) throw new Error("Gateway process ownership changed");
+    const result = await execute(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
+      ["-nP", "-a", "-p", String(target), `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], { timeout: 2_000, maxBuffer: 4_096 });
+    const fields = result.stdout.trim().split("\n");
+    if (!fields.includes(`p${target}`) || !fields.includes(`n127.0.0.1:${port}`)) throw new Error("Gateway does not own the fixture listener");
+  };
   const alive = () => {
     try { process.kill(pid, 0); return true; } catch { return false; }
   };
@@ -557,16 +562,20 @@ async function ownedGatewayVerifier(initialPid, port) {
     }
     checking ??= (async () => {
       const target = pid;
-      if (await inspect(target, "lstart") !== birth || await inspect(target, "command") !== command) throw new Error("Gateway process ownership changed");
-      const result = await execute(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
-        ["-nP", "-a", "-p", String(target), `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], { timeout: 2_000, maxBuffer: 4_096 });
-      const fields = result.stdout.trim().split("\n");
-      if (!fields.includes(`p${target}`) || !fields.includes(`n127.0.0.1:${port}`)) throw new Error("Gateway does not own the fixture listener");
+      await prove(target);
       // A respawn adopted during this proof is not what was proven.
       if (pid === target) proven = true;
     })().finally(() => { checking = undefined; });
     return checking;
   };
+  let watching;
+  setInterval(() => {
+    if (!proven || watching) return;
+    const target = pid;
+    watching = prove(target)
+      .catch(error => { if (!error?.killed && pid === target) proven = false; })
+      .finally(() => { watching = undefined; });
+  }, 1_000).unref();
   verifyTarget.adopt = async target => {
     const next = await capture(target, process.pid);
     proven = false;
@@ -574,6 +583,8 @@ async function ownedGatewayVerifier(initialPid, port) {
     command = next.command;
     birth = next.birth;
   };
+  // A respawned child is the proxy's own: its exit is known exactly.
+  verifyTarget.exited = target => { if (pid === target) proven = false; };
   verifyTarget.pid = () => pid;
   return verifyTarget;
 }
@@ -619,6 +630,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     try {
       await writeFile(process.env.TRON_E2E_GATEWAY_PID_FILE, `${child.pid}\n`, { mode: 0o600 });
       await verifyTarget.adopt(child.pid);
+      child.once("exit", () => verifyTarget.exited(child.pid));
     } catch (error) {
       child.kill("SIGTERM");
       throw error;
