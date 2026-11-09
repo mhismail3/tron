@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockClient, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
-import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
+import { expectRequestShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { NotificationGrantStore } from "../../notifications/grant-store.js";
 import { NotificationService } from "../../notifications/notification-service.js";
@@ -30,8 +30,9 @@ import { PushRelayClient } from "../../notifications/relay-client.js";
  * Plain integration regressions additionally cover overlapping waiting admissions
  * and controlled admission rejection.
  *
- * `notifications-waiting` keeps a golden for its provider requests only: the
- * model-visible tool list and prompt for a session with an extension tool.
+ * `notifications-waiting` checks its provider requests' `session-shapes` shape
+ * (`chatWithNotificationsBackground`: the tool list and prompt of a session with
+ * notifications and an extension tool) and their messages.
  *
  * Each check asserts the relay requests (method, path, status and the exact
  * envelope the relay reads) and the store's receipts, queue, revocations and inbox.
@@ -267,18 +268,16 @@ describe("gateway/notifications delivery locks", () => {
       receipts: [waiting.receipt, finished.receipt], pending: [], revocations: [], inbox: [waiting.inbox, finished.inbox] });
     expect(sessionKey).toEqual(DIGEST);
     dedupeKeysJoin(document);
-    // The turns ran as scripted: four provider requests, the user's three prompts in order.
+    // The turns ran as scripted: four provider requests, each the conversation so far, with this session's shape.
     const providerRequests = gateway.record().providerRequests;
-    expect(providerRequests.map((request) => request.messages.filter((message) => message.role === "user").map((message) => message.text)),
-      "the scripted turns").toEqual([[title], [title], [title, "is it still running"], [title, "is it still running", "and now"]]);
-    // What the model receives (tool names, prompt sections and hash, messages) is
-    // model-visible text; this session's tool list, with its extension tool, is pinned
-    // only here, so it stays a golden.
-    await compareWithGolden({
-      module: "gateway/e2e", ...lockPaths(import.meta.url, "notifications-waiting"), update: lockUpdateRequested("gateway/e2e"),
-      trace: { lock: "notifications-waiting", providerRequests: providerRequests as unknown as TraceValue[] },
-      validate: () => { expect(providerRequests).toHaveLength(4); },
-    });
+    expectRequestShapes(providerRequests, Array.from({ length: 4 }, () => "chatWithNotificationsBackground"));
+    const conversation = [
+      { role: "user", text: title }, { role: "assistant", text: "", toolCalls: ["lock_background"] },
+      { role: "toolResult", text: "Background run started.", toolName: "lock_background" },
+      { role: "assistant", text: "The background run is under way." }, { role: "user", text: "is it still running" },
+      { role: "assistant", text: "Still waiting on the background run." }, { role: "user", text: "and now" },
+    ];
+    expect(providerRequests.map((request) => request.messages), "the scripted turns' messages").toEqual([1, 3, 5, 7].map((count) => conversation.slice(0, count)));
   }, 60_000);
 
   it("overlapping terminal admissions send one waiting push per live background episode", async () => {
