@@ -111,7 +111,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var observations: [String] = []
         let deadline = Date().addingTimeInterval(180)
         while Date() < deadline {
-            let element = assistantReply(app, containing: replyPrefix)
+            // A streaming reply is a static text until it completes.
+            let completed = assistantReply(app, containing: replyPrefix)
+            let element = completed.exists ? completed
+                : app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyPrefix)).firstMatch
             if element.exists, !element.label.isEmpty, element.label != observations.last {
                 observations.append(element.label)
             }
@@ -2195,13 +2198,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
     }
 
-    /// The fixture's assistant reply: a static text while it streams, then the
-    /// message's one selectable text view once complete (#1112, #2384).
+    /// A completed assistant reply: its paragraph inside the message's one
+    /// selectable text view (#1112), typed TextView on iOS 27 (#2321, #2384).
     func assistantReply(_ app: XCUIApplication, containing text: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@ AND (elementType == %d OR identifier == %@)",
-            text, XCUIElement.ElementType.staticText.rawValue, "chat.assistant.selectable-text"
-        )).firstMatch
+        app.textViews.matching(identifier: "chat.assistant.selectable-text")
+            .descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
     func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
