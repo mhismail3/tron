@@ -691,13 +691,21 @@ final class TronSmokeUITests: XCTestCase {
         // Sample beyond the entire action cluster, not just this target. A reset
         // now precedes its value: target.maxX + 6 falls inside the neighboring pill.
         let background = strip(CGRect(x: backgroundX * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
+        // The extent is the widest surface. iOS 27 glass paints its rim just
+        // outside its shape, so the next control's rim reaches into this frame;
+        // light glass fades to the row's color up to ~2.5pt inside its edge, and
+        // its faint shadow begins ~7pt below it. A background gap of 4pt or more
+        // separates surfaces and is measured as spacing; a smaller gap merges
+        // into the neighbor and reads as ~0. Both fail the 16pt check below.
         func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
             let samples = strip(rect)
-            let ink = samples.indices.filter { index in
-                let differences = zip(samples[index], background).map { abs($0.0 - $0.1) }
-                return (differences.max() ?? 0) > 4
+            let isInk = samples.map { sample in (zip(sample, background).map { abs($0.0 - $0.1) }.max() ?? 0) > 4 }
+            var runs = [ClosedRange<Int>]()
+            for index in isInk.indices where isInk[index] {
+                if let run = runs.last, CGFloat(index - run.upperBound) <= 4 * scale { runs[runs.count - 1] = run.lowerBound...index } else { runs.append(index...index) }
             }
-            guard let first = ink.first, let last = ink.last else { XCTFail("No visible control surface: \(target.label)"); return 0...0 }
+            guard let run = runs.max(by: { $0.count < $1.count }) else { XCTFail("No visible control surface: \(target.label)"); return 0...0 }
+            let (first, last) = (run.lowerBound, run.upperBound)
             let start = reversed ? samples.count - 1 - last : first
             let end = reversed ? samples.count - first : last + 1
             return CGFloat(start) / scale...CGFloat(end) / scale
