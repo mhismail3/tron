@@ -188,6 +188,8 @@ class MiniGatewayLane(unittest.TestCase):
             lock.flush()
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             here('the mini is busy with another Gateway job')
+        outside = self.temporary / 'outside.config.ts'
+        here(f'an argument names {outside}, outside this checkout', '--config', str(outside))
         self.git('config', 'tron.verify.mini', 'unreachable.test')
         here('the mini unreachable.test is unreachable: ssh: connect to host unreachable.test port 22: Connection refused', 'fail')  # a red lane here is still that lane's result
         self.git('config', '--unset', 'tron.verify.mini')

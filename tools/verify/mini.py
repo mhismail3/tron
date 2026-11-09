@@ -65,10 +65,18 @@ def ssh_command() -> list[str]:
             *(['-i', os.path.expanduser(identity)] if identity else []), destination]
 
 
-def choose_host() -> tuple[str, str]:
+def outside_paths(args: list[str]) -> list[str]:
+    """Absolute paths in the lane's arguments that are not under this checkout (or an output file): the mini cannot read them."""
+    words = [word.split('=', 1)[1] if word.startswith('--') and '=' in word else word for word in args if not word.startswith(OUTPUT_OPTION)]
+    return [word for word in words if word.startswith('/') and not Path(word).resolve().is_relative_to(ROOT.resolve())]
+
+
+def choose_host(args: list[str] = ()) -> tuple[str, str]:
     """('mini' or 'local', why). The mini is the default; this Mac runs the lane only when the mini cannot."""
     if os.environ.get('TRON_UPDATE_LOCKS'):
         return 'local', 'recording goldens writes this checkout'
+    if outside_paths(list(args)):
+        return 'local', f'an argument names {outside_paths(list(args))[0]}, outside this checkout'
     if not config('tron.verify.mini'):
         return 'local', 'no mini is configured'
     if git('status', '--porcelain', '--untracked-files=normal'):
@@ -95,7 +103,7 @@ def choose_host() -> tuple[str, str]:
 
 
 def pool_main(args: list[str]) -> int:
-    host, reason = choose_host()
+    host, reason = choose_host(args)
     destination = config('tron.verify.mini')
     print(f'gateway lane: on the Mac mini {destination} ({reason})' if host == 'mini' else f'gateway lane: on this Mac ({reason})',
           file=sys.stderr, flush=True)
