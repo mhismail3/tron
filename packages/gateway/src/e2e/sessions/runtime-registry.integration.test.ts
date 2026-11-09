@@ -6453,8 +6453,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
     await mkdir(extensionDir, { recursive: true });
-    // CortexKit 2.x's /claude menu shape: each section option carries its status
-    // lines, which Pi's terminal select renders and the app shows as one row.
+    // A sectioned extension menu: each option carries its status lines, which
+    // Pi's terminal select renders and the app shows as one row.
     await writeFile(join(extensionDir, "sectioned-menu.ts"), `export default function (pi) {
       pi.registerCommand("sectioned-menu", { handler: async (_args, ctx) => {
         const answer = await ctx.ui.select("Claude", [

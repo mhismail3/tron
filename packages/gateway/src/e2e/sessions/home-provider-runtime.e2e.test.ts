@@ -18,8 +18,8 @@ import { waitFor } from "../../../test-support/wait-for.js";
 
 import { OpenAIModelEligibility, openAIModelEligibility } from "../../providers/openai-model-eligibility.js";
 
-// #480 A1-A4, found live: Home's chat reached Pi's built-in Anthropic provider
-// instead of the user's CortexKit package. A user package registers its provider
+// #480 A1-A4, found live: Home's chat reached Pi's built-in provider instead of
+// the one a user package registered over it. A user package registers its provider
 // into the Gateway-wide runtime (GlobalProviderResources); here a faux provider
 // registered only there stands in for it, and every per-session runtime the
 // registry builds lacks it, as a session that loads no packages would.

@@ -173,7 +173,7 @@ startupCheckpoint("notifications");
 
 const openAIModelEligibility = new OpenAIModelEligibility();
 // One usage owner: Providers usage and the model queues' 95% skip share its cache.
-const providerUsage = new ProviderUsageOwner({ agentDir: config.agentDir });
+const providerUsage = new ProviderUsageOwner();
 const modelRuntime = await createProviderModelRuntime(config.agentDir);
 openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");

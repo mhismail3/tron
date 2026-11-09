@@ -403,8 +403,8 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     // Before the first whole group the header is marked: the empty first view, then
     // a two-line partial group; the first whole group takes the mark from there.
     expect(homeRequests.slice(0, 3).map(viewMarks)).toEqual([[".messages[0].content[0]"], [".messages[0].content[0]"], [".messages[0].content[1]"]]);
-    // A provider that prepends its own block to the memory message (CortexKit's
-    // cached prompt block) moves the mark with the view, found from the end.
+    // A block a provider places ahead of the memory view moves the mark with the
+    // view: the mark is found from the end.
     const prepended = structuredClone(last!.body) as { messages: Array<{ content: Block[] }> };
     for (const block of prepended.messages[0]!.content) delete block.cache_control;
     prepended.messages[0]!.content.unshift({ type: "text", text: "provider prompt block", cache_control: { type: "ephemeral", ttl: "1h" } });
