@@ -233,11 +233,38 @@ class ReinstallWindow(unittest.TestCase):
         self.assertTrue((retired / 'current.json').is_file())
 
 
+class OwnedCommand(unittest.TestCase):
+    def test_an_interrupt_after_the_command_exited_unreaped_stays_a_stop(self):
+        """#2401: macOS answers killpg on a group whose members all exited but whose leader is not
+        yet reaped with EPERM. A Ctrl-C in that window must still end as the interrupted-command
+        Stop, never a PermissionError. The spy holds the window open, then the real wait runs."""
+        sys.path.insert(0, str(HERE))
+        import tron_mac_reinstall as reinstall
+        from unittest import mock
+        real_wait, interrupted = subprocess.Popen.wait, []
+
+        def wait(process, timeout=None):
+            if not interrupted:
+                interrupted.append(process.pid)
+                deadline = time.monotonic() + 60
+                while not subprocess.run(['ps', '-o', 'stat=', '-p', str(process.pid)], capture_output=True,
+                                         text=True).stdout.startswith('Z'):
+                    self.assertLess(time.monotonic(), deadline, 'the command never exited')
+                    time.sleep(0.02)
+                raise KeyboardInterrupt
+            return real_wait(process, timeout)
+
+        with mock.patch.object(subprocess.Popen, 'wait', wait), \
+                self.assertRaisesRegex(reinstall.Stop, 'owned: command interrupted or timed out'):
+            reinstall.command([sys.executable, '-c', 'pass'], 'owned')
+        self.assertEqual(len(interrupted), 1)
+
+
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--fixture':
         sys.exit(fixture_main(Path(sys.argv[2]), sys.argv[3:]))
     started = time.monotonic()
-    suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (CheckpointPlan, ReinstallWindow))
+    suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (CheckpointPlan, ReinstallWindow, OwnedCommand))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     report = REPO / 'test-results/mac-reinstall/report.json'
     report.parent.mkdir(parents=True, exist_ok=True)
