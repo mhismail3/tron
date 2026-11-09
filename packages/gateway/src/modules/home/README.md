@@ -211,7 +211,7 @@ changes keep its store, cursors and spend.
 ### RPCs and clients
 
 - Capabilities `home.v1`, `home-memory-view.v1`, `home-chapter-list.v1`, `home-profile-list.v1`,
-  `home-profile-edit.v1` (profile ones need the Profile owner); shapes in `src/protocol/types.ts`.
+  `home-profile-edit.v1` (profile ones need the Profile owner); shapes in `packages/core/wire/Protocol.dfy` (generated into `src/protocol/types.ts`), capability strings in `src/protocol/capabilities.ts`.
 - Reads: `home.status` (phase, readiness, recovery, chapter, `openSessionId`, `live`, `waitingForUser`,
   `taskRecovery`, memory counters; derived, never stored), `home.context`, `home.open`, `home.chapterList`
   (ledger, metrics, derived `contents`), `home.profileList`, `home.taskList`, `home.taskStatus`, `home.taskHistory`,

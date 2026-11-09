@@ -7,6 +7,7 @@
     "gateway/display-contract"
   ],
   "verify": [
-    "scripts/tron test gateway src/e2e/protocol/protocol.wire.lock.integration.test.ts src/e2e/protocol/client-event-schemas.lock.integration.test.ts"
+    "scripts/tron test gateway src/e2e/protocol/protocol.wire.lock.integration.test.ts src/e2e/protocol/client-event-schemas.lock.integration.test.ts",
+    "scripts/tron test tooling tools/proof/tests/wire.test.mjs"
   ]
 }

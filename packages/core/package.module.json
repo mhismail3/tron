@@ -5,6 +5,7 @@
     "**"
   ],
   "verify": [
-    "scripts/tron test tooling tools/proof/tests/test-core.py"
+    "scripts/tron test tooling tools/proof/tests/test-core.py",
+    "scripts/tron test tooling tools/proof/tests/wire.test.mjs"
   ]
 }
